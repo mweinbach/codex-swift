@@ -315,7 +315,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cloud-tasks/src/exec_command.rs` task creation path
   - `codex cloud exec` prompt/stdin loading, `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path
-  - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, Rust-shaped assistant/reasoning/web-search completed items, and `--output-last-message` writes
+  - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, Rust-shaped assistant/reasoning/web-search completed items and turn usage, and `--output-last-message` writes
 - Initial `codex-rs/core/src/unified_exec` tool-session behavior
   - non-interactive `exec_command` can now keep long-running commands alive, return a session ID, and continue them through `write_stdin` with Rust-shaped unified exec output sections
 - Initial `codex-rs/exec/src/lib.rs` review operation dispatch

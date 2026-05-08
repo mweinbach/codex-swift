@@ -346,7 +346,7 @@ public enum NonInteractiveExec {
 
         if outputMode == .jsonLines {
             if errors.isEmpty {
-                jsonLines.append(encodeJSONLine(TurnCompletedEvent(usage: tokenUsage.map(JSONUsage.init)), using: jsonEncoder))
+                jsonLines.append(encodeJSONLine(TurnCompletedEvent(usage: JSONUsage(tokenUsage)), using: jsonEncoder))
             } else {
                 jsonLines.append(encodeJSONLine(TurnFailedEvent(error: errors.last ?? "unknown error"), using: jsonEncoder))
             }
@@ -1366,7 +1366,7 @@ private struct ExecJSONItemCompletedEvent: Encodable {
 
 private struct TurnCompletedEvent: Encodable {
     let type = "turn.completed"
-    let usage: JSONUsage?
+    let usage: JSONUsage
 }
 
 private struct TurnFailedEvent: Encodable {
@@ -1383,22 +1383,16 @@ private struct JSONUsage: Encodable, Equatable, Sendable {
     let inputTokens: Int64
     let cachedInputTokens: Int64
     let outputTokens: Int64
-    let reasoningOutputTokens: Int64
-    let totalTokens: Int64
 
-    init(_ usage: TokenUsage) {
-        inputTokens = usage.inputTokens
-        cachedInputTokens = usage.cachedInputTokens
-        outputTokens = usage.outputTokens
-        reasoningOutputTokens = usage.reasoningOutputTokens
-        totalTokens = usage.totalTokens
+    init(_ usage: TokenUsage?) {
+        inputTokens = usage?.inputTokens ?? 0
+        cachedInputTokens = usage?.cachedInputTokens ?? 0
+        outputTokens = usage?.outputTokens ?? 0
     }
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case cachedInputTokens = "cached_input_tokens"
         case outputTokens = "output_tokens"
-        case reasoningOutputTokens = "reasoning_output_tokens"
-        case totalTokens = "total_tokens"
     }
 }

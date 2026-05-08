@@ -548,8 +548,8 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(usage["input_tokens"], .integer(3))
         XCTAssertEqual(usage["cached_input_tokens"], .integer(1))
         XCTAssertEqual(usage["output_tokens"], .integer(5))
-        XCTAssertEqual(usage["reasoning_output_tokens"], .integer(2))
-        XCTAssertEqual(usage["total_tokens"], .integer(8))
+        XCTAssertNil(usage["reasoning_output_tokens"])
+        XCTAssertNil(usage["total_tokens"])
     }
 
     func testJSONLinesOutputEmitsWebSearchCompletedItem() throws {
@@ -579,6 +579,12 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(item["id"], .string("item_0"))
         XCTAssertEqual(item["type"], .string("web_search"))
         XCTAssertEqual(item["query"], .string("rust async await"))
+        guard case let .object(usage)? = objects[3]["usage"] else {
+            return XCTFail("expected default usage")
+        }
+        XCTAssertEqual(usage["input_tokens"], .integer(0))
+        XCTAssertEqual(usage["cached_input_tokens"], .integer(0))
+        XCTAssertEqual(usage["output_tokens"], .integer(0))
         XCTAssertNil(result.lastAgentMessage)
     }
 
