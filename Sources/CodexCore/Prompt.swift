@@ -30,7 +30,7 @@ public struct Prompt: Equatable, Sendable {
                 return function.name == "apply_patch"
             case let .freeform(freeform):
                 return freeform.name == "apply_patch"
-            case .localShell, .webSearch:
+            case .namespace, .localShell, .webSearch:
                 return false
             }
         }

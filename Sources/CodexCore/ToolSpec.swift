@@ -207,13 +207,89 @@ public struct ResponsesAPITool: Equatable, Codable, Sendable {
     public let name: String
     public let description: String
     public let strict: Bool
+    public let deferLoading: Bool?
     public let parameters: JSONSchema
 
-    public init(name: String, description: String, strict: Bool = false, parameters: JSONSchema) {
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case strict
+        case deferLoading = "defer_loading"
+        case parameters
+    }
+
+    public init(
+        name: String,
+        description: String,
+        strict: Bool = false,
+        deferLoading: Bool? = nil,
+        parameters: JSONSchema
+    ) {
         self.name = name
         self.description = description
         self.strict = strict
+        self.deferLoading = deferLoading
         self.parameters = parameters
+    }
+}
+
+public enum ResponsesAPINamespaceTool: Equatable, Codable, Sendable {
+    case function(ResponsesAPITool)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case name
+        case description
+        case strict
+        case deferLoading = "defer_loading"
+        case parameters
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .type) {
+        case "function":
+            self = .function(
+                ResponsesAPITool(
+                    name: try container.decode(String.self, forKey: .name),
+                    description: try container.decode(String.self, forKey: .description),
+                    strict: try container.decode(Bool.self, forKey: .strict),
+                    deferLoading: try container.decodeIfPresent(Bool.self, forKey: .deferLoading),
+                    parameters: try container.decode(JSONSchema.self, forKey: .parameters)
+                )
+            )
+        case let type:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unsupported namespace tool type: \(type)"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .function(tool):
+            try container.encode("function", forKey: .type)
+            try container.encode(tool.name, forKey: .name)
+            try container.encode(tool.description, forKey: .description)
+            try container.encode(tool.strict, forKey: .strict)
+            try container.encodeIfPresent(tool.deferLoading, forKey: .deferLoading)
+            try container.encode(tool.parameters, forKey: .parameters)
+        }
+    }
+}
+
+public struct ResponsesAPINamespace: Equatable, Codable, Sendable {
+    public let name: String
+    public let description: String
+    public let tools: [ResponsesAPINamespaceTool]
+
+    public init(name: String, description: String, tools: [ResponsesAPINamespaceTool]) {
+        self.name = name
+        self.description = description
+        self.tools = tools
     }
 }
 
@@ -243,6 +319,7 @@ public struct FreeformTool: Equatable, Codable, Sendable {
 
 public enum ToolSpec: Equatable, Codable, Sendable {
     case function(ResponsesAPITool)
+    case namespace(ResponsesAPINamespace)
     case localShell
     case webSearch
     case freeform(FreeformTool)
@@ -252,7 +329,9 @@ public enum ToolSpec: Equatable, Codable, Sendable {
         case name
         case description
         case strict
+        case deferLoading = "defer_loading"
         case parameters
+        case tools
         case format
     }
 
@@ -260,6 +339,8 @@ public enum ToolSpec: Equatable, Codable, Sendable {
         switch self {
         case let .function(tool):
             return tool.name
+        case let .namespace(namespace):
+            return namespace.name
         case .localShell:
             return "local_shell"
         case .webSearch:
@@ -278,7 +359,16 @@ public enum ToolSpec: Equatable, Codable, Sendable {
                     name: try container.decode(String.self, forKey: .name),
                     description: try container.decode(String.self, forKey: .description),
                     strict: try container.decode(Bool.self, forKey: .strict),
+                    deferLoading: try container.decodeIfPresent(Bool.self, forKey: .deferLoading),
                     parameters: try container.decode(JSONSchema.self, forKey: .parameters)
+                )
+            )
+        case "namespace":
+            self = .namespace(
+                ResponsesAPINamespace(
+                    name: try container.decode(String.self, forKey: .name),
+                    description: try container.decode(String.self, forKey: .description),
+                    tools: try container.decode([ResponsesAPINamespaceTool].self, forKey: .tools)
                 )
             )
         case "local_shell":
@@ -310,7 +400,13 @@ public enum ToolSpec: Equatable, Codable, Sendable {
             try container.encode(tool.name, forKey: .name)
             try container.encode(tool.description, forKey: .description)
             try container.encode(tool.strict, forKey: .strict)
+            try container.encodeIfPresent(tool.deferLoading, forKey: .deferLoading)
             try container.encode(tool.parameters, forKey: .parameters)
+        case let .namespace(namespace):
+            try container.encode("namespace", forKey: .type)
+            try container.encode(namespace.name, forKey: .name)
+            try container.encode(namespace.description, forKey: .description)
+            try container.encode(namespace.tools, forKey: .tools)
         case .localShell:
             try container.encode("local_shell", forKey: .type)
         case .webSearch:
@@ -341,6 +437,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let includeViewImageTool: Bool
     public let includeComputerUseTools: Bool
     public let experimentalSupportedTools: [String]
+    public let namespaceTools: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -348,7 +445,8 @@ public struct ToolsConfig: Equatable, Sendable {
         webSearchRequest: Bool = false,
         includeViewImageTool: Bool = true,
         includeComputerUseTools: Bool = false,
-        experimentalSupportedTools: [String] = []
+        experimentalSupportedTools: [String] = [],
+        namespaceTools: Bool = true
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -356,6 +454,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.includeViewImageTool = includeViewImageTool
         self.includeComputerUseTools = includeComputerUseTools
         self.experimentalSupportedTools = experimentalSupportedTools
+        self.namespaceTools = namespaceTools
     }
 }
 
@@ -421,15 +520,9 @@ public enum ToolSpecFactory {
             specs.append(ConfiguredToolSpec(spec: createComputerKeyTool(), supportsParallelToolCalls: true))
         }
 
-        if let mcpTools {
-            for name in mcpTools.keys.sorted() {
-                guard let tool = mcpTools[name] else {
-                    continue
-                }
-                specs.append(ConfiguredToolSpec(
-                    spec: createMCPTool(fullyQualifiedName: name, tool: tool),
-                    supportsParallelToolCalls: false
-                ))
+        if let mcpTools, config.namespaceTools {
+            for namespace in createMCPNamespaces(from: mcpTools) {
+                specs.append(ConfiguredToolSpec(spec: .namespace(namespace), supportsParallelToolCalls: false))
             }
         }
 
@@ -461,6 +554,47 @@ public enum ToolSpecFactory {
     }
 
     public static func createMCPTool(fullyQualifiedName: String, tool: McpTool) -> ToolSpec {
+        .function(createMCPResponsesAPITool(name: fullyQualifiedName, tool: tool))
+    }
+
+    public static func defaultNamespaceDescription(_ namespaceName: String) -> String {
+        "Tools in the \(namespaceName) namespace."
+    }
+
+    private static func createMCPNamespaces(from mcpTools: [String: McpTool]) -> [ResponsesAPINamespace] {
+        var groupedTools: [String: [(name: String, tool: McpTool)]] = [:]
+
+        for qualifiedName in mcpTools.keys.sorted() {
+            guard let tool = mcpTools[qualifiedName],
+                  let split = McpToolName.splitQualifiedToolName(qualifiedName)
+            else {
+                continue
+            }
+
+            let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(split.serverName)\(McpToolName.delimiter)"
+            groupedTools[namespace, default: []].append((name: split.toolName, tool: tool))
+        }
+
+        return groupedTools.keys.sorted().compactMap { namespace in
+            let tools = (groupedTools[namespace] ?? [])
+                .sorted { $0.name < $1.name }
+                .map { entry in
+                    ResponsesAPINamespaceTool.function(createMCPResponsesAPITool(name: entry.name, tool: entry.tool))
+                }
+
+            guard !tools.isEmpty else {
+                return nil
+            }
+
+            return ResponsesAPINamespace(
+                name: namespace,
+                description: defaultNamespaceDescription(namespace),
+                tools: tools
+            )
+        }
+    }
+
+    private static func createMCPResponsesAPITool(name: String, tool: McpTool) -> ResponsesAPITool {
         var inputSchema: [String: Any] = ["type": tool.inputSchema.type]
         if let properties = tool.inputSchema.properties {
             inputSchema["properties"] = jsonCompatibleValue(properties)
@@ -471,13 +605,11 @@ public enum ToolSpecFactory {
             inputSchema["required"] = required
         }
 
-        return .function(
-            ResponsesAPITool(
-                name: fullyQualifiedName,
-                description: tool.description ?? "",
-                strict: false,
-                parameters: JSONSchema.sanitized(from: inputSchema)
-            )
+        return ResponsesAPITool(
+            name: name,
+            description: tool.description ?? "",
+            strict: false,
+            parameters: JSONSchema.sanitized(from: inputSchema)
         )
     }
 

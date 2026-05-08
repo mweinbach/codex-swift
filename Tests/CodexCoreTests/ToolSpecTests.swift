@@ -92,6 +92,51 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parameters["additionalProperties"] as? Bool, false)
     }
 
+    func testNamespaceToolSpecSerializesExpectedWireShape() throws {
+        let spec = ToolSpec.namespace(
+            ResponsesAPINamespace(
+                name: "mcp__demo__",
+                description: "Demo tools",
+                tools: [
+                    .function(
+                        ResponsesAPITool(
+                            name: "lookup_order",
+                            description: "Look up an order",
+                            strict: false,
+                            parameters: .object(
+                                properties: [
+                                    "order_id": .string(description: nil)
+                                ],
+                                required: nil,
+                                additionalProperties: nil
+                            )
+                        )
+                    )
+                ]
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(spec, [
+            "type": "namespace",
+            "name": "mcp__demo__",
+            "description": "Demo tools",
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "lookup_order",
+                    "description": "Look up an order",
+                    "strict": false,
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "order_id": ["type": "string"]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+    }
+
     func testFreeformApplyPatchToolShapeIncludesGrammar() throws {
         let tool = ToolSpecFactory.createApplyPatchFreeformTool()
         let object = try JSONObject(tool)
@@ -146,7 +191,7 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
-    func testBuildSpecsAppendsMCPToolsSortedLikeRust() {
+    func testBuildSpecsAppendsMCPToolsAsSortedNamespaceLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
@@ -160,13 +205,36 @@ final class ToolSpecTests: XCTestCase {
             ]
         )
 
-        let mcpSpecs = specs.filter { $0.spec.name.hasPrefix("mcp__test_server__") }
-        XCTAssertEqual(mcpSpecs.map { $0.spec.name }, [
-            "mcp__test_server__cool",
-            "mcp__test_server__do",
-            "mcp__test_server__something"
+        let mcpSpec = try XCTUnwrap(specs.first { $0.spec.name == "mcp__test_server__" })
+        XCTAssertFalse(mcpSpec.supportsParallelToolCalls)
+
+        guard case let .namespace(namespace) = mcpSpec.spec else {
+            return XCTFail("Expected MCP tools to be exposed as a namespace")
+        }
+
+        XCTAssertEqual(namespace.name, "mcp__test_server__")
+        XCTAssertEqual(namespace.description, "Tools in the mcp__test_server__ namespace.")
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), [
+            "cool",
+            "do",
+            "something"
         ])
-        XCTAssertTrue(mcpSpecs.allSatisfy { !$0.supportsParallelToolCalls })
+    }
+
+    func testBuildSpecsHidesMCPNamespaceSpecsWhenNamespaceToolsDisabled() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false,
+                namespaceTools: false
+            ),
+            mcpTools: [
+                "mcp__test_server__do": makeMcpTool(name: "do")
+            ]
+        )
+
+        XCTAssertFalse(specs.contains { $0.spec.name == "mcp__test_server__" })
     }
 
     func testChatCompletionsJSONWrapsFunctionToolsOnly() throws {
@@ -249,5 +317,12 @@ final class ToolSpecTests: XCTestCase {
 
     private func makeMcpTool(name: String) -> McpTool {
         McpTool(name: name, inputSchema: McpToolInputSchema())
+    }
+
+    private func namespaceToolName(_ tool: ResponsesAPINamespaceTool) -> String {
+        switch tool {
+        case let .function(function):
+            return function.name
+        }
     }
 }
