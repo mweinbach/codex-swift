@@ -392,6 +392,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginCancelReturnsNotFoundForUnknownLoginID() throws {
+        let temp = try TemporaryDirectory()
+        let loginID = "11111111-1111-1111-1111-111111111111"
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "notFound")
+    }
+
+    func testAccountLoginCancelRejectsInvalidLoginID() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/login/cancel","params":{"loginId":"not-a-uuid"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid login id: not-a-uuid")
+    }
+
     func testAccountLogoutRemovesAuthAndEmitsV2Notification() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")

@@ -433,6 +433,18 @@ public enum CodexAppServer {
         return ["type": "apiKey"]
     }
 
+    fileprivate static func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let loginID = stringParam(params?["loginId"]) else {
+            throw AppServerError.invalidRequest("missing loginId")
+        }
+        guard UUID(uuidString: loginID) != nil else {
+            throw AppServerError.invalidRequest("invalid login id: \(loginID)")
+        }
+        return [
+            "status": "notFound"
+        ]
+    }
+
     fileprivate static func logoutResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         do {
             _ = try CodexAuthStorage.logout(
@@ -1952,6 +1964,11 @@ final class CodexAppServerMessageProcessor {
                     )
                     notifications.append(CodexAppServer.accountLoginCompletedNotification())
                     notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                case "account/login/cancel":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.cancelLoginAccountResult(params: params)
+                    )
                 case "account/logout":
                     response = CodexAppServer.responseObject(
                         id: id,
