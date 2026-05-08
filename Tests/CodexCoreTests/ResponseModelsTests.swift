@@ -288,7 +288,22 @@ final class ResponseModelsTests: XCTestCase {
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "reasoning")
         XCTAssertEqual(object["id"] as? String, "reasoning_1")
+        XCTAssertNil(object["content"])
         XCTAssertEqual(object["encrypted_content"] as? String, "encrypted")
+    }
+
+    func testReasoningPayloadEncodesNonRawContentLikeRust() throws {
+        let item = ResponseItem.reasoning(
+            id: "reasoning_1",
+            summary: [.summaryText(text: "Step 1")],
+            content: [.text("visible thought")]
+        )
+
+        let object = try JSONObject(item)
+        let content = try XCTUnwrap(object["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 1)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "visible thought")
     }
 
     func testRoundTripsCallPairResponseItems() throws {

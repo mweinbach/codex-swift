@@ -101,7 +101,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/account.rs`
   - lowercase ChatGPT plan wire values with unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
-  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, ghost snapshot response items, and compaction alias decoding
+  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, ghost snapshot response items, reasoning content encode filtering, and compaction alias decoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
   - turn item wire tags, user/agent/reasoning/web-search item models, item IDs, legacy message/reasoning/web-search events, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models

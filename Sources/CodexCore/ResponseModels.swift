@@ -794,7 +794,9 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode("reasoning", forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(summary, forKey: .summary)
-            try container.encodeIfPresent(content, forKey: .content)
+            if Self.shouldSerializeReasoningContent(content) {
+                try container.encode(content, forKey: .content)
+            }
             try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
         case let .localShellCall(id, callID, status, action):
             try container.encode("local_shell_call", forKey: .type)
@@ -838,6 +840,18 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(type, forKey: .type)
         case .other:
             try container.encode("other", forKey: .type)
+        }
+    }
+
+    private static func shouldSerializeReasoningContent(_ content: [ReasoningItemContent]?) -> Bool {
+        guard let content else {
+            return false
+        }
+        return !content.contains { item in
+            if case .reasoningText = item {
+                return true
+            }
+            return false
         }
     }
 }
