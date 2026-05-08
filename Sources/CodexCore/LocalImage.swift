@@ -47,7 +47,7 @@ public enum ImageProcessingError: Error, CustomStringConvertible, Sendable {
 
 public enum LocalImageProcessor {
     public static let maxWidth = 2_048
-    public static let maxHeight = 768
+    public static let maxHeight = 2_048
 
     private static let imageCache = BlockingLruCache<Data, EncodedImage>(capacity: 32)
 

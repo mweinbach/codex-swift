@@ -191,6 +191,8 @@ final class ResponseModelsTests: XCTestCase {
 
         XCTAssertLessThanOrEqual(processed.width, LocalImageProcessor.maxWidth)
         XCTAssertLessThanOrEqual(processed.height, LocalImageProcessor.maxHeight)
+        XCTAssertEqual(processed.width, 2_048)
+        XCTAssertEqual(processed.height, 1_024)
         XCTAssertEqual(dimensions.width, processed.width)
         XCTAssertEqual(dimensions.height, processed.height)
         XCTAssertEqual(processed.mime, "image/png")
