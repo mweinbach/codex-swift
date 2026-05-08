@@ -575,7 +575,7 @@ public enum CodexAppServer {
 
     fileprivate static func threadUnsubscribeResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration,
+        isLoaded: (String) -> Bool,
         unsubscribe: (String) -> Bool
     ) throws -> [String: Any] {
         guard let threadID = stringParam(params?["threadId"]) else {
@@ -589,12 +589,15 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
 
+        guard isLoaded(conversationID.description) else {
+            return ["status": "notLoaded"]
+        }
+
         if unsubscribe(conversationID.description) {
             return ["status": "unsubscribed"]
         }
 
-        let rolloutPath = try? rolloutPathForConversation(conversationID, configuration: configuration)
-        return ["status": rolloutPath == nil ? "notLoaded" : "notSubscribed"]
+        return ["status": "notSubscribed"]
     }
 
     fileprivate static func resumeConversationResult(
@@ -3246,6 +3249,13 @@ final class CodexAppServerMessageProcessor {
         }) ?? false
     }
 
+    private func isThreadLoaded(_ threadID: String) -> Bool {
+        let manager = threadStateManager
+        return (try? CodexAppServer.runAsyncBlocking {
+            await manager.isThreadLoaded(threadID)
+        }) ?? false
+    }
+
     private func receiveClientResponseIfPresent(_ object: [String: Any]) -> Bool {
         guard let rawID = object["id"],
               let requestID = AppServerRequestIDCodec.requestID(from: rawID)
@@ -3428,7 +3438,7 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadUnsubscribeResult(
                             params: params,
-                            configuration: configuration,
+                            isLoaded: { isThreadLoaded($0) },
                             unsubscribe: { unsubscribeCurrentConnection(fromThreadID: $0) }
                         )
                     )

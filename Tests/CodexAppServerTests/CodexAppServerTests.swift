@@ -718,7 +718,20 @@ final class CodexAppServerTests: XCTestCase {
 
     func testThreadUnsubscribeReportsNotLoadedAndRejectsInvalidThreadID() throws {
         let temp = try TemporaryDirectory()
+        let persistedThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Persisted but not loaded",
+            provider: "mock_provider"
+        )
         let missingThreadID = UUID().uuidString.lowercased()
+
+        let persistedNotLoaded = try appServerResponse(
+            #"{"id":0,"method":"thread/unsubscribe","params":{"threadId":"\#(persistedThreadID)"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((persistedNotLoaded["result"] as? [String: Any])?["status"] as? String, "notLoaded")
 
         let notLoaded = try appServerResponse(
             #"{"id":1,"method":"thread/unsubscribe","params":{"threadId":"\#(missingThreadID)"}}"#,

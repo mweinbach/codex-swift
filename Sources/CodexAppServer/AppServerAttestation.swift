@@ -11,6 +11,7 @@ actor AppServerThreadStateManager {
     private var liveConnections: [AppServerConnectionID: AppServerConnectionCapabilities] = [:]
     private var threadConnectionIDs: [String: Set<AppServerConnectionID>] = [:]
     private var threadIDsByConnection: [AppServerConnectionID: Set<String>] = [:]
+    private var loadedThreadIDs: Set<String> = []
 
     func connectionInitialized(
         _ connectionID: AppServerConnectionID,
@@ -31,6 +32,10 @@ actor AppServerThreadStateManager {
         Array(threadConnectionIDs[threadID] ?? []).sorted()
     }
 
+    func isThreadLoaded(_ threadID: String) -> Bool {
+        loadedThreadIDs.contains(threadID)
+    }
+
     @discardableResult
     func tryAddConnectionToThread(
         threadID: String,
@@ -39,6 +44,7 @@ actor AppServerThreadStateManager {
         guard liveConnections[connectionID] != nil else {
             return false
         }
+        loadedThreadIDs.insert(threadID)
         threadConnectionIDs[threadID, default: []].insert(connectionID)
         threadIDsByConnection[connectionID, default: []].insert(threadID)
         return true
