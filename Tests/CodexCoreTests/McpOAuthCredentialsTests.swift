@@ -39,6 +39,37 @@ final class McpOAuthCredentialsTests: XCTestCase {
         ))
     }
 
+    func testLoadOAuthTokensReadsFallbackFileAndRestoresExpiresIn() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        try writeFallbackStore(
+            codexHome: temp.url,
+            entries: [
+                "stub": fallbackEntry(
+                    serverName: "github",
+                    serverURL: "https://example.com/mcp",
+                    expiresAt: 4_600_000
+                )
+            ]
+        )
+
+        let tokens = try McpOAuthCredentialStore.loadOAuthTokens(
+            serverName: "github",
+            url: "https://example.com/mcp",
+            codexHome: temp.url,
+            mode: .file,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(tokens?.serverName, "github")
+        XCTAssertEqual(tokens?.url, "https://example.com/mcp")
+        XCTAssertEqual(tokens?.clientID, "client-id")
+        XCTAssertEqual(tokens?.tokenResponse.accessToken, "access-token")
+        XCTAssertEqual(tokens?.tokenResponse.refreshToken, "refresh-token")
+        XCTAssertEqual(tokens?.tokenResponse.scopes, ["profile"])
+        XCTAssertEqual(tokens?.tokenResponse.expiresIn, 3_600)
+        XCTAssertEqual(tokens?.expiresAt, 4_600_000)
+    }
+
     func testAuthStatusResolverReportsStoredOAuthTokens() throws {
         let temp = try McpOAuthTemporaryDirectory()
         try writeFallbackStore(
@@ -69,6 +100,108 @@ final class McpOAuthCredentialsTests: XCTestCase {
             ),
             ["linear": .oauth]
         )
+    }
+
+    func testSaveOAuthTokensWritesFallbackFileShapeAndPermissions() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        let tokens = sampleStoredTokens(expiresAt: nil)
+
+        try McpOAuthCredentialStore.saveOAuthTokens(
+            tokens,
+            codexHome: temp.url,
+            mode: .file,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let key = try McpOAuthCredentialStore.storeKey(serverName: tokens.serverName, url: tokens.url)
+        let fallbackURL = temp.url.appendingPathComponent(McpOAuthCredentialStore.fallbackFilename)
+        let data = try Data(contentsOf: fallbackURL)
+        let store = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: [String: Any]])
+        let entry = try XCTUnwrap(store[key])
+        XCTAssertEqual(entry["server_name"] as? String, tokens.serverName)
+        XCTAssertEqual(entry["server_url"] as? String, tokens.url)
+        XCTAssertEqual(entry["client_id"] as? String, tokens.clientID)
+        XCTAssertEqual(entry["access_token"] as? String, tokens.tokenResponse.accessToken)
+        XCTAssertEqual(entry["refresh_token"] as? String, tokens.tokenResponse.refreshToken)
+        XCTAssertEqual(entry["scopes"] as? [String], tokens.tokenResponse.scopes)
+        XCTAssertEqual((entry["expires_at"] as? NSNumber)?.uint64Value, 4_600_000)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: fallbackURL.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testSaveOAuthTokensPrefersKeyringAndRemovesFallbackFile() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        let keyringStore = InMemoryMcpKeyringStore()
+        let tokens = sampleStoredTokens()
+        let key = try McpOAuthCredentialStore.storeKey(serverName: tokens.serverName, url: tokens.url)
+        try writeFallbackStore(
+            codexHome: temp.url,
+            entries: [
+                key: fallbackEntry(serverName: tokens.serverName, serverURL: tokens.url)
+            ]
+        )
+
+        try McpOAuthCredentialStore.saveOAuthTokens(
+            tokens,
+            codexHome: temp.url,
+            mode: .auto,
+            keyringStore: keyringStore
+        )
+
+        let serialized = try XCTUnwrap(keyringStore.value(service: McpOAuthCredentialStore.keyringService, account: key))
+        XCTAssertEqual(try JSONDecoder().decode(McpOAuthStoredTokens.self, from: Data(serialized.utf8)), tokens)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent(McpOAuthCredentialStore.fallbackFilename).path
+        ))
+    }
+
+    func testSaveOAuthTokensFallsBackToFileWhenKeyringFailsInAutoMode() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        let keyringStore = InMemoryMcpKeyringStore()
+        keyringStore.saveError = McpOAuthTestError("boom")
+        let tokens = sampleStoredTokens()
+
+        try McpOAuthCredentialStore.saveOAuthTokens(
+            tokens,
+            codexHome: temp.url,
+            mode: .auto,
+            keyringStore: keyringStore
+        )
+
+        let key = try McpOAuthCredentialStore.storeKey(serverName: tokens.serverName, url: tokens.url)
+        XCTAssertNil(keyringStore.value(service: McpOAuthCredentialStore.keyringService, account: key))
+        XCTAssertTrue(try McpOAuthCredentialStore.hasOAuthTokens(
+            serverName: tokens.serverName,
+            url: tokens.url,
+            codexHome: temp.url,
+            mode: .file
+        ))
+    }
+
+    func testLoadOAuthTokensReadsKeyringAndRestoresExpiresIn() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        let keyringStore = InMemoryMcpKeyringStore()
+        var tokens = sampleStoredTokens(tokenExpiresIn: nil)
+        let key = try McpOAuthCredentialStore.storeKey(serverName: tokens.serverName, url: tokens.url)
+        let data = try JSONEncoder().encode(tokens)
+        try keyringStore.save(
+            service: McpOAuthCredentialStore.keyringService,
+            account: key,
+            value: String(decoding: data, as: UTF8.self)
+        )
+
+        tokens.tokenResponse.expiresIn = 3_600
+        let loaded = try McpOAuthCredentialStore.loadOAuthTokens(
+            serverName: tokens.serverName,
+            url: tokens.url,
+            codexHome: temp.url,
+            mode: .keyring,
+            keyringStore: keyringStore,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(loaded, tokens)
     }
 
     func testDeleteOAuthTokensRemovesKeyringAndFallbackFile() throws {
@@ -153,8 +286,8 @@ private final class McpOAuthTemporaryDirectory {
     }
 }
 
-private func fallbackEntry(serverName: String, serverURL: String) -> [String: Any] {
-    [
+private func fallbackEntry(serverName: String, serverURL: String, expiresAt: UInt64? = nil) -> [String: Any] {
+    var entry: [String: Any] = [
         "server_name": serverName,
         "server_url": serverURL,
         "client_id": "client-id",
@@ -162,6 +295,28 @@ private func fallbackEntry(serverName: String, serverURL: String) -> [String: An
         "refresh_token": "refresh-token",
         "scopes": ["profile"]
     ]
+    if let expiresAt {
+        entry["expires_at"] = expiresAt
+    }
+    return entry
+}
+
+private func sampleStoredTokens(
+    expiresAt: UInt64? = 4_600_000,
+    tokenExpiresIn: UInt64? = 3_600
+) -> McpOAuthStoredTokens {
+    McpOAuthStoredTokens(
+        serverName: "test-server",
+        url: "https://example.test",
+        clientID: "client-id",
+        tokenResponse: McpOAuthTokenResponse(
+            accessToken: "access-token",
+            expiresIn: tokenExpiresIn,
+            refreshToken: "refresh-token",
+            scopes: ["scope-a", "scope-b"]
+        ),
+        expiresAt: expiresAt
+    )
 }
 
 private func writeFallbackStore(codexHome: URL, entries: [String: [String: Any]]) throws {
