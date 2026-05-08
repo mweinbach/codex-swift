@@ -85,6 +85,106 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
     ) -> RateLimitSnapshot {
         snapshot.mergingMissingFields(from: previous)
     }
+
+    public static func parseRateLimit(headers: [String: String]) -> RateLimitSnapshot? {
+        RateLimitSnapshot(
+            primary: parseRateLimitWindow(
+                headers: headers,
+                usedPercentHeader: "x-codex-primary-used-percent",
+                windowMinutesHeader: "x-codex-primary-window-minutes",
+                resetsAtHeader: "x-codex-primary-reset-at"
+            ),
+            secondary: parseRateLimitWindow(
+                headers: headers,
+                usedPercentHeader: "x-codex-secondary-used-percent",
+                windowMinutesHeader: "x-codex-secondary-window-minutes",
+                resetsAtHeader: "x-codex-secondary-reset-at"
+            ),
+            credits: parseCreditsSnapshot(headers: headers),
+            planType: nil
+        )
+    }
+
+    private static func parseRateLimitWindow(
+        headers: [String: String],
+        usedPercentHeader: String,
+        windowMinutesHeader: String,
+        resetsAtHeader: String
+    ) -> RateLimitWindow? {
+        guard let usedPercent = parseHeaderDouble(headers, usedPercentHeader) else {
+            return nil
+        }
+
+        let windowMinutes = parseHeaderInt64(headers, windowMinutesHeader)
+        let resetsAt = parseHeaderInt64(headers, resetsAtHeader)
+        let hasData = usedPercent != 0.0
+            || windowMinutes.map { $0 != 0 } == true
+            || resetsAt != nil
+
+        guard hasData else {
+            return nil
+        }
+
+        return RateLimitWindow(
+            usedPercent: usedPercent,
+            windowMinutes: windowMinutes,
+            resetsAt: resetsAt
+        )
+    }
+
+    private static func parseCreditsSnapshot(headers: [String: String]) -> CreditsSnapshot? {
+        guard let hasCredits = parseHeaderBool(headers, "x-codex-credits-has-credits"),
+              let unlimited = parseHeaderBool(headers, "x-codex-credits-unlimited")
+        else {
+            return nil
+        }
+
+        let balance = parseHeaderString(headers, "x-codex-credits-balance")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return CreditsSnapshot(
+            hasCredits: hasCredits,
+            unlimited: unlimited,
+            balance: balance?.isEmpty == false ? balance : nil
+        )
+    }
+
+    private static func parseHeaderDouble(_ headers: [String: String], _ name: String) -> Double? {
+        guard let value = parseHeaderString(headers, name),
+              let parsed = Double(value),
+              parsed.isFinite
+        else {
+            return nil
+        }
+        return parsed
+    }
+
+    private static func parseHeaderInt64(_ headers: [String: String], _ name: String) -> Int64? {
+        guard let value = parseHeaderString(headers, name) else {
+            return nil
+        }
+        return Int64(value)
+    }
+
+    private static func parseHeaderBool(_ headers: [String: String], _ name: String) -> Bool? {
+        guard let value = parseHeaderString(headers, name) else {
+            return nil
+        }
+        if value.caseInsensitiveCompare("true") == .orderedSame || value == "1" {
+            return true
+        }
+        if value.caseInsensitiveCompare("false") == .orderedSame || value == "0" {
+            return false
+        }
+        return nil
+    }
+
+    private static func parseHeaderString(_ headers: [String: String], _ name: String) -> String? {
+        for (headerName, value) in headers where headerName.caseInsensitiveCompare(name) == .orderedSame {
+            return value
+        }
+        return nil
+    }
 }
 
 public struct RateLimitWindow: Equatable, Codable, Sendable {
