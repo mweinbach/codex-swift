@@ -2,6 +2,7 @@ import Foundation
 
 public enum Attestation {
     public static let headerName = "x-oai-attestation"
+    public static let generateMethod = "attestation/generate"
 
     public struct Context: Equatable, Sendable {
         public let threadID: String

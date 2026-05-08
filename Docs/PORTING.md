@@ -274,6 +274,8 @@ Source baseline inspected for this scaffold:
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
 - `codex-rs/hooks/src/legacy_notify.rs`
   - agent-turn-complete notification payload wire shape, optional client omission, nullable last assistant message, notifier command argument construction, and fire-and-forget process invocation
+- `codex-rs/app-server-protocol/src/protocol/common.rs` and `codex-rs/app-server-protocol/src/protocol/v2/attestation.rs`
+  - server-initiated `attestation/generate` request and response protocol envelopes, empty params shape, token response shape, request id preservation, method-tag validation, and request-payload-to-request helper behavior
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
   - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
@@ -370,7 +372,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Linux Landlock/Windows debug sandbox helper execution and Rust-complete config-layer fidelity for sandbox runtime setup
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
-- app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
+- app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, protocol generators, and live `attestation/generate` request routing to capable initialized clients
 - Rust-complete apply-patch approval caching, subprocess self-invocation, sandbox retry/escalation, and diff event plumbing
 - cloud tasks TUI list/browse runtime
 - full Rust command parser parity for complex Bash/Powershell AST cases
