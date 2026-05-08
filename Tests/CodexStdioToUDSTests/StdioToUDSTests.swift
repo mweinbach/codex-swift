@@ -25,7 +25,8 @@ final class StdioToUDSTests: XCTestCase {
                 }
                 defer { close(connection) }
 
-                let received = try readAll(from: connection)
+                let received = try readExactly(Data("request".utf8).count, from: connection)
+                try expectEOF(from: connection)
                 try writeAll(Data("response".utf8), to: connection)
                 server.set(.success(received))
             } catch {
@@ -144,18 +145,63 @@ private func unixSocketAddress(path: String) throws -> sockaddr_un {
     return address
 }
 
-private func readAll(from fileDescriptor: Int32) throws -> Data {
+private func readExactly(_ byteCount: Int, from fileDescriptor: Int32) throws -> Data {
     var data = Data()
     var buffer = [UInt8](repeating: 0, count: 4096)
-    while true {
-        let count = Darwin.read(fileDescriptor, &buffer, buffer.count)
-        if count == 0 {
-            return data
+    while data.count < byteCount {
+        try waitForReadable(fileDescriptor)
+
+        let remaining = min(buffer.count, byteCount - data.count)
+        let count = Darwin.read(fileDescriptor, &buffer, remaining)
+        guard count != 0 else {
+            throw TestSocketError("test socket closed after \(data.count) of \(byteCount) request bytes")
         }
         guard count > 0 else {
+            if errno == EINTR {
+                continue
+            }
             throw TestSocketError("failed to read from test socket: \(posixErrorMessage())")
         }
         data.append(buffer, count: count)
+    }
+    return data
+}
+
+private func expectEOF(from fileDescriptor: Int32) throws {
+    try waitForReadable(fileDescriptor)
+
+    var byte: UInt8 = 0
+    let count = Darwin.read(fileDescriptor, &byte, 1)
+    if count == 0 {
+        return
+    }
+    guard count > 0 else {
+        throw TestSocketError("failed to read client shutdown from test socket: \(posixErrorMessage())")
+    }
+    throw TestSocketError("expected client write side to close after request")
+}
+
+private func waitForReadable(_ fileDescriptor: Int32) throws {
+    var descriptor = pollfd(
+        fd: fileDescriptor,
+        events: Int16(POLLIN) | Int16(POLLHUP) | Int16(POLLERR),
+        revents: 0
+    )
+    while true {
+        let result = Darwin.poll(&descriptor, 1, 1_000)
+        if result > 0 {
+            if descriptor.revents & Int16(POLLERR) != 0 {
+                throw TestSocketError("test socket reported poll error")
+            }
+            return
+        }
+        if result == 0 {
+            throw TestSocketError("timed out waiting for test socket data")
+        }
+        if errno == EINTR {
+            continue
+        }
+        throw TestSocketError("failed to poll test socket: \(posixErrorMessage())")
     }
 }
 
