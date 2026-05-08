@@ -10,6 +10,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
+        XCTAssertNil(config.forcedChatGPTWorkspaceID)
         XCTAssertTrue(config.features.isEnabled(.parallel))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertNil(config.activeProfile)
@@ -24,6 +25,7 @@ final class ConfigLoaderTests: XCTestCase {
         chatgpt_base_url = "https://example.test/backend-api/"
         cli_auth_credentials_store = "auto"
         forced_login_method = "api"
+        forced_chatgpt_workspace_id = "org_workspace"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -31,6 +33,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
+        XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
     }
 
     func testProfileChatGPTBaseURLOverridesTopLevelValue() throws {
@@ -68,7 +71,8 @@ final class ConfigLoaderTests: XCTestCase {
                 "profile=\"work\"",
                 "profiles.work.chatgpt_base_url=\"https://override.example/backend-api/\"",
                 "cli_auth_credentials_store=\"keyring\"",
-                "forced_login_method=\"chatgpt\""
+                "forced_login_method=\"chatgpt\"",
+                "forced_chatgpt_workspace_id=\"org_override\""
             ]),
             systemConfigFile: nil
         )
@@ -77,6 +81,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://override.example/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .keyring)
         XCTAssertEqual(config.forcedLoginMethod, .chatgpt)
+        XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_override")
     }
 
     func testInvalidForcedLoginMethodMatchesRustConfigErrorShape() throws {

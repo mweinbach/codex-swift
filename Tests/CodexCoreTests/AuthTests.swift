@@ -317,6 +317,108 @@ final class AuthTests: XCTestCase {
         XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url, mode: .auto, keyringStore: keyringStore))
     }
 
+    func testEnforceLoginRestrictionsLogsOutForMethodMismatch() async throws {
+        let dir = try AuthTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-test")
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .chatgpt),
+            environment: [:]
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthRestrictionError)?.description,
+                "ChatGPT login is required, but an API key is currently being used. Logging out."
+            )
+        }
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+    }
+
+    func testEnforceLoginRestrictionsAllowsMatchingMethod() async throws {
+        let dir = try AuthTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-test")
+
+        try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .api),
+            environment: [:]
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .apiKey("sk-test"))
+    }
+
+    func testEnforceLoginRestrictionsLogsOutForWorkspaceMismatch() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            lastRefresh: Self.isoString(now),
+            jwtAccountID: "org_other"
+        )
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedChatGPTWorkspaceID: "org_mine"),
+            environment: [:]
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthRestrictionError)?.description,
+                "Login is restricted to workspace org_mine, but current credentials belong to org_other. Logging out."
+            )
+        }
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+    }
+
+    func testEnforceLoginRestrictionsAllowsMatchingWorkspace() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            lastRefresh: Self.isoString(now),
+            jwtAccountID: "org_mine"
+        )
+
+        try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedChatGPTWorkspaceID: "org_mine"),
+            environment: [:]
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .chatGPT)
+    }
+
+    func testEnforceLoginRestrictionsAllowsAPIKeyWhenOnlyWorkspaceIsForced() async throws {
+        let dir = try AuthTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-test")
+
+        try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedChatGPTWorkspaceID: "org_mine"),
+            environment: [:]
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .apiKey("sk-test"))
+    }
+
+    func testEnforceLoginRestrictionsBlocksEnvironmentAPIKeyWhenChatGPTRequired() async throws {
+        let dir = try AuthTemporaryDirectory()
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .chatgpt),
+            environment: [CodexAuthStorage.codexAPIKeyEnvironmentVariable: " sk-env\n"]
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthRestrictionError)?.description,
+                "ChatGPT login is required, but an API key is currently being used. Logging out."
+            )
+        }
+    }
+
     func testParsesIDTokenEmailPlanAndAccountID() throws {
         let jwt = Self.fakeJWT(plan: "pro", accountID: "acct-123")
 
@@ -366,13 +468,14 @@ final class AuthTests: XCTestCase {
         to codexHome: URL,
         accessToken: String,
         refreshToken: String,
-        lastRefresh: String
+        lastRefresh: String,
+        jwtAccountID: String? = "jwt-account-id"
     ) throws {
         let auth = """
         {
           "OPENAI_API_KEY": null,
           "tokens": {
-            "id_token": "\(Self.fakeJWT())",
+            "id_token": "\(Self.fakeJWT(accountID: jwtAccountID))",
             "access_token": "\(accessToken)",
             "refresh_token": "\(refreshToken)",
             "account_id": "account-id"

@@ -229,6 +229,17 @@ public enum CodexAuthStatus: Equatable, Sendable {
     case notLoggedIn
 }
 
+public enum CodexAuthRestrictionError: Error, Equatable, CustomStringConvertible, Sendable {
+    case violation(String)
+
+    public var description: String {
+        switch self {
+        case let .violation(message):
+            return message
+        }
+    }
+}
+
 public protocol AuthKeyringStore: Sendable {
     func load(service: String, account: String) throws -> String?
     func save(service: String, account: String, value: String) throws
@@ -399,8 +410,15 @@ public enum CodexAuthStorage {
     public static let refreshClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     public static let tokenRefreshIntervalDays = 8
     public static let keyringService = "Codex Auth"
+    public static let openAIAPIKeyEnvironmentVariable = "OPENAI_API_KEY"
+    public static let codexAPIKeyEnvironmentVariable = "CODEX_API_KEY"
 
     public typealias RefreshTransport = (URLRequest) async throws -> AuthRefreshHTTPResponse
+
+    private enum CurrentAuthMode: Equatable {
+        case apiKey
+        case chatGPT
+    }
 
     public static func loadAuthDotJSON(
         codexHome: URL,
@@ -513,6 +531,18 @@ public enum CodexAuthStorage {
         return .notLoggedIn
     }
 
+    public static func readOpenAIAPIKeyFromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        trimmedEnvironmentValue(environment[openAIAPIKeyEnvironmentVariable])
+    }
+
+    public static func readCodexAPIKeyFromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        trimmedEnvironmentValue(environment[codexAPIKeyEnvironmentVariable])
+    }
+
     public static func loadFreshTokenData(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
@@ -563,6 +593,91 @@ public enum CodexAuthStorage {
             throw CodexAuthStorageError.tokenDataNotAvailableAfterRefresh
         }
         return updatedTokens
+    }
+
+    public static func enforceLoginRestrictions(
+        codexHome: URL,
+        config: CodexRuntimeConfig,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        refreshTransport: RefreshTransport? = nil,
+        decoder: JSONDecoder = JSONDecoder(),
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) async throws {
+        guard let authMode = try currentAuthMode(
+            codexHome: codexHome,
+            mode: config.cliAuthCredentialsStoreMode,
+            environment: environment,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ) else {
+            return
+        }
+
+        if let requiredMethod = config.forcedLoginMethod {
+            let violation: String? = switch (requiredMethod, authMode) {
+            case (.api, .apiKey), (.chatgpt, .chatGPT):
+                nil
+            case (.api, .chatGPT):
+                "API key login is required, but ChatGPT is currently being used. Logging out."
+            case (.chatgpt, .apiKey):
+                "ChatGPT login is required, but an API key is currently being used. Logging out."
+            }
+
+            if let violation {
+                throw restrictionErrorAfterLogout(
+                    message: violation,
+                    codexHome: codexHome,
+                    mode: config.cliAuthCredentialsStoreMode,
+                    keyringStore: keyringStore
+                )
+            }
+        }
+
+        guard let expectedAccountID = config.forcedChatGPTWorkspaceID,
+              authMode == .chatGPT
+        else {
+            return
+        }
+
+        let tokenData: AuthTokenData
+        do {
+            guard let loaded = try await loadFreshTokenData(
+                codexHome: codexHome,
+                mode: config.cliAuthCredentialsStoreMode,
+                environment: environment,
+                refreshTransport: refreshTransport,
+                decoder: decoder,
+                encoder: encoder,
+                keyringStore: keyringStore
+            ) else {
+                throw CodexAuthStorageError.tokenDataNotAvailable
+            }
+            tokenData = loaded
+        } catch {
+            throw restrictionErrorAfterLogout(
+                message: "Failed to load ChatGPT credentials while enforcing workspace restrictions: \(String(describing: error)). Logging out.",
+                codexHome: codexHome,
+                mode: config.cliAuthCredentialsStoreMode,
+                keyringStore: keyringStore
+            )
+        }
+
+        let actualAccountID = tokenData.idToken.chatGPTAccountID
+        guard actualAccountID == expectedAccountID else {
+            let message: String
+            if let actualAccountID {
+                message = "Login is restricted to workspace \(expectedAccountID), but current credentials belong to \(actualAccountID). Logging out."
+            } else {
+                message = "Login is restricted to workspace \(expectedAccountID), but current credentials lack a workspace identifier. Logging out."
+            }
+            throw restrictionErrorAfterLogout(
+                message: message,
+                codexHome: codexHome,
+                mode: config.cliAuthCredentialsStoreMode,
+                keyringStore: keyringStore
+            )
+        }
     }
 
     private static func refreshToken(
@@ -647,6 +762,46 @@ public enum CodexAuthStorage {
         )
         try saveAuthDotJSON(updated, codexHome: codexHome, mode: mode, encoder: encoder, keyringStore: keyringStore)
         return updated
+    }
+
+    private static func currentAuthMode(
+        codexHome: URL,
+        mode: AuthCredentialsStoreMode,
+        environment: [String: String],
+        decoder: JSONDecoder,
+        keyringStore: AuthKeyringStore
+    ) throws -> CurrentAuthMode? {
+        if readCodexAPIKeyFromEnvironment(environment) != nil {
+            return .apiKey
+        }
+
+        guard let auth = try loadAuthDotJSON(
+            codexHome: codexHome,
+            mode: mode,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ) else {
+            return nil
+        }
+
+        if auth.openAIAPIKey != nil {
+            return .apiKey
+        }
+        return .chatGPT
+    }
+
+    private static func restrictionErrorAfterLogout(
+        message: String,
+        codexHome: URL,
+        mode: AuthCredentialsStoreMode,
+        keyringStore: AuthKeyringStore
+    ) -> CodexAuthRestrictionError {
+        do {
+            _ = try logout(codexHome: codexHome, mode: mode, keyringStore: keyringStore)
+            return .violation(message)
+        } catch {
+            return .violation("\(message). Failed to remove auth.json: \(String(describing: error))")
+        }
     }
 
     public static func computeKeyringStoreKey(codexHome: URL) -> String {
@@ -775,6 +930,14 @@ public enum CodexAuthStorage {
             return path
         }
         return codexHome.resolvingSymlinksInPath().path
+    }
+
+    private static func trimmedEnvironmentValue(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func urlSessionRefreshTransport(_ request: URLRequest) async throws -> AuthRefreshHTTPResponse {

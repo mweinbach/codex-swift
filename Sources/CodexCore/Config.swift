@@ -10,6 +10,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public let chatgptBaseURL: String
     public let cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public let forcedLoginMethod: ForcedLoginMethod?
+    public let forcedChatGPTWorkspaceID: String?
     public let features: FeatureStates
     public let activeProfile: String?
     public let projectRootMarkers: [String]
@@ -20,6 +21,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
+        forcedChatGPTWorkspaceID: String? = nil,
         features: FeatureStates = .withDefaults(),
         activeProfile: String? = nil,
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
@@ -29,6 +31,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
+        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
         self.features = features
         self.activeProfile = activeProfile
         self.projectRootMarkers = projectRootMarkers
@@ -367,6 +370,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: try Self.stringValue(baseURL, key: "chatgpt_base_url"),
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: config.projectRootMarkers,
@@ -384,6 +388,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: mode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: config.projectRootMarkers,
@@ -401,6 +406,21 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: method,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
+                features: config.features,
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
+            )
+        }
+
+        if let workspaceID = topLevel["forced_chatgpt_workspace_id"] {
+            config = CodexRuntimeConfig(
+                chatgptBaseURL: config.chatgptBaseURL,
+                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: try Self.stringValue(workspaceID, key: "forced_chatgpt_workspace_id"),
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: config.projectRootMarkers,
@@ -414,6 +434,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers"),
@@ -427,6 +448,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: config.projectRootMarkers,
@@ -440,6 +462,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                 features: config.features,
                 activeProfile: config.activeProfile,
                 projectRootMarkers: config.projectRootMarkers,
@@ -462,6 +485,7 @@ private struct ParsedCodexConfigToml {
                     chatgptBaseURL: try Self.stringValue(baseURL, key: "profiles.\(activeProfile).chatgpt_base_url"),
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
+                    forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                     features: config.features,
                     activeProfile: activeProfile,
                     projectRootMarkers: config.projectRootMarkers,
@@ -473,6 +497,7 @@ private struct ParsedCodexConfigToml {
                     chatgptBaseURL: config.chatgptBaseURL,
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
+                    forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
                     features: config.features,
                     activeProfile: activeProfile,
                     projectRootMarkers: config.projectRootMarkers,
@@ -491,6 +516,7 @@ private struct ParsedCodexConfigToml {
             chatgptBaseURL: config.chatgptBaseURL,
             cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
             forcedLoginMethod: config.forcedLoginMethod,
+            forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
             features: featureStates,
             activeProfile: config.activeProfile,
             projectRootMarkers: config.projectRootMarkers,
@@ -512,6 +538,7 @@ private struct ParsedCodexConfigToml {
         key == "chatgpt_base_url"
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
+            || key == "forced_chatgpt_workspace_id"
             || key == "profile"
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
