@@ -146,6 +146,29 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
+    func testBuildSpecsAppendsMCPToolsSortedLikeRust() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            mcpTools: [
+                "mcp__test_server__something": makeMcpTool(name: "something"),
+                "mcp__test_server__cool": makeMcpTool(name: "cool"),
+                "mcp__test_server__do": makeMcpTool(name: "do")
+            ]
+        )
+
+        let mcpSpecs = specs.filter { $0.spec.name.hasPrefix("mcp__test_server__") }
+        XCTAssertEqual(mcpSpecs.map { $0.spec.name }, [
+            "mcp__test_server__cool",
+            "mcp__test_server__do",
+            "mcp__test_server__something"
+        ])
+        XCTAssertTrue(mcpSpecs.allSatisfy { !$0.supportsParallelToolCalls })
+    }
+
     func testChatCompletionsJSONWrapsFunctionToolsOnly() throws {
         let tools: [ToolSpec] = [
             ToolSpecFactory.createViewImageTool(),
@@ -222,5 +245,9 @@ final class ToolSpecTests: XCTestCase {
 
     private func encode<T: Encodable>(_ value: T) throws -> String {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
+    }
+
+    private func makeMcpTool(name: String) -> McpTool {
+        McpTool(name: name, inputSchema: McpToolInputSchema())
     }
 }

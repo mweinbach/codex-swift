@@ -360,7 +360,7 @@ public struct ToolsConfig: Equatable, Sendable {
 }
 
 public enum ToolSpecFactory {
-    public static func buildSpecs(config: ToolsConfig) -> [ConfiguredToolSpec] {
+    public static func buildSpecs(config: ToolsConfig, mcpTools: [String: McpTool]? = nil) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
         switch config.shellType {
@@ -419,6 +419,18 @@ public enum ToolSpecFactory {
             specs.append(ConfiguredToolSpec(spec: createComputerScrollTool(), supportsParallelToolCalls: true))
             specs.append(ConfiguredToolSpec(spec: createComputerTypeTool(), supportsParallelToolCalls: true))
             specs.append(ConfiguredToolSpec(spec: createComputerKeyTool(), supportsParallelToolCalls: true))
+        }
+
+        if let mcpTools {
+            for name in mcpTools.keys.sorted() {
+                guard let tool = mcpTools[name] else {
+                    continue
+                }
+                specs.append(ConfiguredToolSpec(
+                    spec: createMCPTool(fullyQualifiedName: name, tool: tool),
+                    supportsParallelToolCalls: false
+                ))
+            }
         }
 
         return specs
