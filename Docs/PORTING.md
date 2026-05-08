@@ -172,6 +172,8 @@ Source baseline inspected for this scaffold:
   - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
 - `codex-rs/feedback/src/lib.rs`
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, and temp-file save path
+- `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
+  - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
 
 ## Known Gaps
 
