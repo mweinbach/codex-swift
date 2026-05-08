@@ -165,6 +165,33 @@ public enum McpToolName {
     }
 }
 
+/// Port of codex-rs/core/src/mcp_connection_manager.rs ToolFilter.
+public struct McpToolFilter: Equatable, Sendable {
+    public var enabled: Set<String>?
+    public var disabled: Set<String>
+
+    public init(enabled: Set<String>? = nil, disabled: Set<String> = []) {
+        self.enabled = enabled
+        self.disabled = disabled
+    }
+
+    public init(config: McpServerConfig) {
+        self.enabled = config.enabledTools.map(Set.init)
+        self.disabled = Set(config.disabledTools ?? [])
+    }
+
+    public func allows(_ toolName: String) -> Bool {
+        if let enabled, !enabled.contains(toolName) {
+            return false
+        }
+        return !disabled.contains(toolName)
+    }
+
+    public func filterTools(_ tools: [(serverName: String, tool: McpTool)]) -> [(serverName: String, tool: McpTool)] {
+        tools.filter { allows($0.tool.name) }
+    }
+}
+
 public enum McpRole: String, Codable, Equatable, Sendable {
     case assistant
     case user

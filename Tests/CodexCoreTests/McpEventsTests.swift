@@ -249,6 +249,55 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(tools["mcp__server1__unique_tool"], makeMcpTool(name: "unique_tool"))
     }
 
+    func testToolFilterAllowsByDefault() {
+        XCTAssertTrue(McpToolFilter().allows("any"))
+    }
+
+    func testToolFilterAppliesEnabledList() {
+        let filter = McpToolFilter(enabled: ["allowed"])
+
+        XCTAssertTrue(filter.allows("allowed"))
+        XCTAssertFalse(filter.allows("denied"))
+    }
+
+    func testToolFilterAppliesDisabledList() {
+        let filter = McpToolFilter(disabled: ["blocked"])
+
+        XCTAssertFalse(filter.allows("blocked"))
+        XCTAssertTrue(filter.allows("open"))
+    }
+
+    func testToolFilterAppliesEnabledThenDisabled() {
+        let filter = McpToolFilter(enabled: ["keep", "remove"], disabled: ["remove"])
+
+        XCTAssertTrue(filter.allows("keep"))
+        XCTAssertFalse(filter.allows("remove"))
+        XCTAssertFalse(filter.allows("unknown"))
+    }
+
+    func testToolFilterFromConfigAndFilterToolsApplyPerServerFilters() {
+        let server1Filter = McpToolFilter(config: McpServerConfig(
+            transport: .stdio(command: "server1", args: [], env: nil, envVars: [], cwd: nil),
+            enabledTools: ["tool_a", "tool_b"],
+            disabledTools: ["tool_b"]
+        ))
+        let server2Filter = McpToolFilter(config: McpServerConfig(
+            transport: .stdio(command: "server2", args: [], env: nil, envVars: [], cwd: nil),
+            disabledTools: ["tool_a"]
+        ))
+
+        let filtered = server1Filter.filterTools([
+            (serverName: "server1", tool: makeMcpTool(name: "tool_a")),
+            (serverName: "server1", tool: makeMcpTool(name: "tool_b"))
+        ]) + server2Filter.filterTools([
+            (serverName: "server2", tool: makeMcpTool(name: "tool_a"))
+        ])
+
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered[0].serverName, "server1")
+        XCTAssertEqual(filtered[0].tool.name, "tool_a")
+    }
+
     func testToolSchemasDefaultTypeOnDecodeAndAlwaysEncodeType() throws {
         let inputSchema = try JSONDecoder().decode(McpToolInputSchema.self, from: Data("""
         {

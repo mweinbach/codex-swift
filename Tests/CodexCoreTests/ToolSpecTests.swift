@@ -164,6 +164,62 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNil(function["type"])
     }
 
+    func testMCPToolConversionDefaultsDescriptionAndObjectPropertiesLikeRust() throws {
+        let spec = ToolSpecFactory.createMCPTool(
+            fullyQualifiedName: "mcp__docs__search",
+            tool: McpTool(name: "search", inputSchema: McpToolInputSchema())
+        )
+
+        let object = try JSONObject(spec)
+        XCTAssertEqual(object["type"] as? String, "function")
+        XCTAssertEqual(object["name"] as? String, "mcp__docs__search")
+        XCTAssertEqual(object["description"] as? String, "")
+        XCTAssertEqual(object["strict"] as? Bool, false)
+
+        let parameters = try XCTUnwrap(object["parameters"] as? [String: Any])
+        XCTAssertEqual(parameters["type"] as? String, "object")
+        XCTAssertEqual((parameters["properties"] as? [String: Any])?.isEmpty, true)
+    }
+
+    func testMCPToolConversionSanitizesSchemaLikeRust() throws {
+        let spec = ToolSpecFactory.createMCPTool(
+            fullyQualifiedName: "mcp__docs__lookup",
+            tool: McpTool(
+                name: "lookup",
+                inputSchema: McpToolInputSchema(
+                    properties: .object([
+                        "count": .object(["type": .string("integer")]),
+                        "tags": .object(["type": .string("array")]),
+                        "mode": .object(["enum": .array([.string("fast"), .string("slow")])])
+                    ]),
+                    required: ["count"],
+                    type: "object"
+                ),
+                description: "Look up docs"
+            )
+        )
+
+        XCTAssertEqual(
+            spec,
+            .function(
+                ResponsesAPITool(
+                    name: "mcp__docs__lookup",
+                    description: "Look up docs",
+                    strict: false,
+                    parameters: .object(
+                        properties: [
+                            "count": .number(description: nil),
+                            "tags": .array(items: .string(description: nil), description: nil),
+                            "mode": .string(description: nil)
+                        ],
+                        required: ["count"],
+                        additionalProperties: nil
+                    )
+                )
+            )
+        )
+    }
+
     private func encode<T: Encodable>(_ value: T) throws -> String {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
     }

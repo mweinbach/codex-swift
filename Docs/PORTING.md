@@ -173,7 +173,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
-  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
+  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP tool conversion to Responses function tools, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
@@ -263,7 +263,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` MCP tool-call event models plus `codex-rs/mcp-types/src/lib.rs`
   - MCP invocation payloads, arbitrary JSON arguments/structured content, Rust `Result` Ok/Err encoding, CallToolResult content blocks, Duration-backed tool-call end events, and success classification
 - `codex-rs/protocol/src/protocol.rs` MCP list-tools response plus `codex-rs/mcp-types/src/lib.rs`
-  - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, camelCase MCP field names, fully qualified MCP tool naming, duplicate qualified-tool skipping, and SHA-1 suffix truncation for OpenAI's 64-character tool-name limit
+  - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, camelCase MCP field names, fully qualified MCP tool naming, duplicate qualified-tool skipping, SHA-1 suffix truncation for OpenAI's 64-character tool-name limit, and per-server MCP tool allow/deny filtering
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
   - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models

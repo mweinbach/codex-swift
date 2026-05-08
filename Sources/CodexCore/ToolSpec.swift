@@ -448,6 +448,27 @@ public enum ToolSpecFactory {
         }
     }
 
+    public static func createMCPTool(fullyQualifiedName: String, tool: McpTool) -> ToolSpec {
+        var inputSchema: [String: Any] = ["type": tool.inputSchema.type]
+        if let properties = tool.inputSchema.properties {
+            inputSchema["properties"] = jsonCompatibleValue(properties)
+        } else if tool.inputSchema.type == "object" {
+            inputSchema["properties"] = [String: Any]()
+        }
+        if let required = tool.inputSchema.required {
+            inputSchema["required"] = required
+        }
+
+        return .function(
+            ResponsesAPITool(
+                name: fullyQualifiedName,
+                description: tool.description ?? "",
+                strict: false,
+                parameters: JSONSchema.sanitized(from: inputSchema)
+            )
+        )
+    }
+
     public static func createExecCommandTool() -> ToolSpec {
         functionTool(
             name: "exec_command",
@@ -781,6 +802,25 @@ public enum ToolSpecFactory {
                 )
             )
         )
+    }
+
+    private static func jsonCompatibleValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .null:
+            return NSNull()
+        case let .bool(value):
+            return value
+        case let .integer(value):
+            return value
+        case let .double(value):
+            return value
+        case let .string(value):
+            return value
+        case let .array(values):
+            return values.map(jsonCompatibleValue)
+        case let .object(values):
+            return values.mapValues(jsonCompatibleValue)
+        }
     }
 
     public static let applyPatchLarkGrammar = """
