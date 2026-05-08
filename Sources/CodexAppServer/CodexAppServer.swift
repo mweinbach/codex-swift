@@ -19,6 +19,8 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
     public let environment: [String: String]
     public let scopes: [String]
     public let timeoutSeconds: Int?
+    public let callbackPort: UInt16?
+    public let callbackURL: String?
 
     public init(
         name: String,
@@ -29,7 +31,9 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         envHttpHeaders: [String: String]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         scopes: [String] = [],
-        timeoutSeconds: Int? = nil
+        timeoutSeconds: Int? = nil,
+        callbackPort: UInt16? = nil,
+        callbackURL: String? = nil
     ) {
         self.name = name
         self.serverURL = serverURL
@@ -40,6 +44,8 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         self.environment = environment
         self.scopes = scopes
         self.timeoutSeconds = timeoutSeconds
+        self.callbackPort = callbackPort
+        self.callbackURL = callbackURL
     }
 }
 
@@ -309,7 +315,9 @@ public enum CodexAppServer {
                         environment: request.environment,
                         scopes: request.scopes,
                         timeoutSeconds: request.timeoutSeconds,
-                        launchBrowser: true
+                        launchBrowser: true,
+                        callbackPort: request.callbackPort,
+                        callbackURL: request.callbackURL
                     ),
                     browserLauncher: { _ in },
                     messageSink: { message in
@@ -986,7 +994,9 @@ public enum CodexAppServer {
                         envHttpHeaders: envHttpHeaders,
                         environment: configuration.environment,
                         scopes: scopes,
-                        timeoutSeconds: timeoutSeconds
+                        timeoutSeconds: timeoutSeconds,
+                        callbackPort: runtimeConfig.mcpOAuthCallbackPort,
+                        callbackURL: runtimeConfig.mcpOAuthCallbackURL
                     ),
                     { success, error in
                         await sendMcpServerOAuthLoginCompletedNotification(

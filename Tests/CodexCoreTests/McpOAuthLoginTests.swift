@@ -24,7 +24,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 scopes: ["repo", "user"],
                 timeoutSeconds: 9
             ),
-            callbackServerFactory: { callbackServer },
+            callbackServerFactory: { _, _ in callbackServer },
             browserLauncher: { url in
                 await recorder.recordBrowserURL(url)
             },
@@ -88,7 +88,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 codexHome: temp.url,
                 storeMode: .file
             ),
-            callbackServerFactory: { callbackServer },
+            callbackServerFactory: { _, _ in callbackServer },
             browserLauncher: { _ in throw McpOAuthBrowserError.openFailed(1) },
             messageSink: { message in await recorder.recordMessage(message) },
             transport: { request in try await probe.handle(request) },
@@ -105,6 +105,68 @@ final class McpOAuthLoginTests: XCTestCase {
             codexHome: temp.url,
             mode: .file
         ))
+    }
+
+    func testPerformPassesConfiguredCallbackPortAndURLToServerFactory() async throws {
+        let temp = try OAuthLoginTemporaryDirectory()
+        let callbackServer = StubOAuthCallbackServer(
+            redirectURI: "https://oauth.example/custom/callback",
+            callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
+        )
+        let probe = OAuthLoginProbe()
+        let capture = CallbackServerFactoryCapture()
+
+        try await McpOAuthLogin.perform(
+            request: McpOAuthLoginRequest(
+                serverName: "github",
+                serverURL: "https://mcp.example",
+                codexHome: temp.url,
+                storeMode: .file,
+                callbackPort: 5678,
+                callbackURL: "https://oauth.example/custom/callback"
+            ),
+            callbackServerFactory: { callbackPort, callbackURL in
+                capture.record(callbackPort: callbackPort, callbackURL: callbackURL)
+                return callbackServer
+            },
+            browserLauncher: { _ in },
+            transport: { request in try await probe.handle(request) },
+            pkceGenerator: { PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge") },
+            csrfTokenGenerator: { "csrf" }
+        )
+
+        XCTAssertEqual(capture.callbackPort, 5678)
+        XCTAssertEqual(capture.callbackURL, "https://oauth.example/custom/callback")
+        let requests = await probe.requests()
+        let registrationBody = try XCTUnwrap(requests[1].body)
+        let registrationJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(registrationBody.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            registrationJSON["redirect_uris"] as? [String],
+            ["https://oauth.example/custom/callback"]
+        )
+    }
+}
+
+private final class CallbackServerFactoryCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _callbackPort: UInt16?
+    private var _callbackURL: String?
+
+    var callbackPort: UInt16? {
+        lock.withLock { _callbackPort }
+    }
+
+    var callbackURL: String? {
+        lock.withLock { _callbackURL }
+    }
+
+    func record(callbackPort: UInt16?, callbackURL: String?) {
+        lock.withLock {
+            _callbackPort = callbackPort
+            _callbackURL = callbackURL
+        }
     }
 }
 

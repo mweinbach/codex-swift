@@ -51,6 +51,20 @@ final class StreamEventUtilsTests: XCTestCase {
             )),
             .customToolCallOutput(callID: "custom1", output: "ok")
         )
+        XCTAssertEqual(
+            StreamEventUtils.responseInputToResponseItem(.toolSearchOutput(
+                callID: "search1",
+                status: "completed",
+                execution: "client",
+                tools: [.object(["name": .string("calendar")])]
+            )),
+            .toolSearchOutput(
+                callID: "search1",
+                status: "completed",
+                execution: "client",
+                tools: [.object(["name": .string("calendar")])]
+            )
+        )
         XCTAssertNil(StreamEventUtils.responseInputToResponseItem(.message(role: "user", content: [])))
     }
 

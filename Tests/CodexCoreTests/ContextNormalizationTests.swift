@@ -15,6 +15,27 @@ final class ContextNormalizationTests: XCTestCase {
         ])
     }
 
+    func testEnsureCallOutputsPresentAddsMissingToolSearchOutput() {
+        var items: [ResponseItem] = [
+            .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            )
+        ]
+
+        ContextNormalization.ensureCallOutputsPresent(&items)
+
+        XCTAssertEqual(items, [
+            .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            ),
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: [])
+        ])
+    }
+
     func testEnsureCallOutputsPresentAddsMissingCustomAndLocalShellOutputs() {
         var items: [ResponseItem] = [
             .customToolCall(callID: "tool-x", name: "custom", input: "{}"),
@@ -65,6 +86,31 @@ final class ContextNormalizationTests: XCTestCase {
         ])
     }
 
+    func testRemoveOrphanOutputsHandlesToolSearchOutputs() {
+        var items: [ResponseItem] = [
+            .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            ),
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
+            .toolSearchOutput(callID: "orphan", status: "completed", execution: "client", tools: []),
+            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: [])
+        ]
+
+        ContextNormalization.removeOrphanOutputs(&items)
+
+        XCTAssertEqual(items, [
+            .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            ),
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
+            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: [])
+        ])
+    }
+
     func testNormalizeHistoryInsertsMissingAndRemovesOrphans() {
         var items: [ResponseItem] = [
             .functionCall(name: "f1", arguments: "{}", callID: "c1"),
@@ -103,6 +149,37 @@ final class ContextNormalizationTests: XCTestCase {
         ]
         ContextNormalization.removeCorresponding(
             for: .functionCallOutput(callID: "c1", output: FunctionCallOutputPayload(content: "ok")),
+            from: &callSide
+        )
+        XCTAssertEqual(callSide, [])
+    }
+
+    func testRemoveCorrespondingForToolSearchPairs() {
+        var outputSide: [ResponseItem] = [
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
+            .toolSearchOutput(callID: "other", status: "completed", execution: "client", tools: [])
+        ]
+        ContextNormalization.removeCorresponding(
+            for: .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            ),
+            from: &outputSide
+        )
+        XCTAssertEqual(outputSide, [
+            .toolSearchOutput(callID: "other", status: "completed", execution: "client", tools: [])
+        ])
+
+        var callSide: [ResponseItem] = [
+            .toolSearchCall(
+                callID: "search-1",
+                execution: "client",
+                arguments: .object(["query": .string("calendar")])
+            )
+        ]
+        ContextNormalization.removeCorresponding(
+            for: .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
             from: &callSide
         )
         XCTAssertEqual(callSide, [])

@@ -10,6 +10,8 @@ public protocol McpOAuthCallbackServing: Sendable {
 
 public enum McpOAuthCallbackServerError: Error, Equatable, CustomStringConvertible, Sendable {
     case listenFailed(String)
+    case invalidCallbackPort(UInt16)
+    case invalidCallbackURL(String)
     case callbackTimedOut
     case callbackCancelled
 
@@ -17,6 +19,10 @@ public enum McpOAuthCallbackServerError: Error, Equatable, CustomStringConvertib
         switch self {
         case let .listenFailed(message):
             return message
+        case let .invalidCallbackPort(port):
+            return "invalid MCP OAuth callback port `\(port)`: port must be between 1 and 65535"
+        case let .invalidCallbackURL(url):
+            return "invalid MCP OAuth callback URL `\(url)`"
         case .callbackTimedOut:
             return "timed out waiting for OAuth callback"
         case .callbackCancelled:
@@ -29,6 +35,7 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
     public let redirectURI: String
 
     private let queue: DispatchQueue
+    private let callbackPath: String
     private let lock = NSLock()
     private var listenFileDescriptor: Int32?
     private var waitContinuation: CheckedContinuation<McpOAuthCallbackResult, Error>?
@@ -36,9 +43,10 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
     private var pendingError: Error?
     private var completed = false
 
-    private init(listenFileDescriptor: Int32, port: UInt16) {
+    private init(listenFileDescriptor: Int32, port: UInt16, redirectURI: String?, callbackPath: String) {
         self.listenFileDescriptor = listenFileDescriptor
-        self.redirectURI = "http://127.0.0.1:\(port)/callback"
+        self.redirectURI = redirectURI ?? "http://127.0.0.1:\(port)/callback"
+        self.callbackPath = callbackPath
         self.queue = DispatchQueue(label: "codex.mcp-oauth.callback.\(port)")
     }
 
@@ -46,7 +54,26 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
         stop()
     }
 
-    public static func start() throws -> McpOAuthLocalCallbackServer {
+    public static func start(
+        port requestedPort: UInt16? = nil,
+        redirectURI redirectURIOverride: String? = nil
+    ) throws -> McpOAuthLocalCallbackServer {
+        if let requestedPort, requestedPort == 0 {
+            throw McpOAuthCallbackServerError.invalidCallbackPort(requestedPort)
+        }
+
+        let parsedRedirectURI: URL?
+        if let redirectURIOverride {
+            guard let url = URL(string: redirectURIOverride), url.scheme != nil, url.host != nil else {
+                throw McpOAuthCallbackServerError.invalidCallbackURL(redirectURIOverride)
+            }
+            parsedRedirectURI = url
+        } else {
+            parsedRedirectURI = nil
+        }
+        let bindHost = Self.callbackBindHost(parsedRedirectURI)
+        let callbackPath = Self.callbackPath(from: parsedRedirectURI)
+
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
             throw McpOAuthCallbackServerError.listenFailed(posixMessage(operation: "socket"))
@@ -67,8 +94,8 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
             var address = sockaddr_in()
             address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             address.sin_family = sa_family_t(AF_INET)
-            address.sin_port = in_port_t(0).bigEndian
-            address.sin_addr = in_addr(s_addr: Darwin.inet_addr("127.0.0.1"))
+            address.sin_port = in_port_t(requestedPort ?? 0).bigEndian
+            address.sin_addr = in_addr(s_addr: Darwin.inet_addr(bindHost))
 
             let bindResult = withUnsafePointer(to: &address) { pointer in
                 pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
@@ -96,7 +123,9 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
 
             let server = McpOAuthLocalCallbackServer(
                 listenFileDescriptor: fd,
-                port: UInt16(bigEndian: actualAddress.sin_port)
+                port: UInt16(bigEndian: actualAddress.sin_port),
+                redirectURI: redirectURIOverride,
+                callbackPath: callbackPath
             )
             server.queue.async { [server] in
                 server.acceptLoop()
@@ -203,7 +232,7 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
 
     private func handleConnection(fileDescriptor: Int32) -> Bool {
         guard let path = readRequestPath(fileDescriptor: fileDescriptor),
-              let callback = McpOAuthCallbackParser.parse(path: path)
+              let callback = McpOAuthCallbackParser.parse(path: path, callbackPath: callbackPath)
         else {
             writeHTTPResponse(
                 fileDescriptor: fileDescriptor,
@@ -321,5 +350,24 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
 
     private static func posixMessage(operation: String) -> String {
         "\(operation) failed: \(String(cString: Darwin.strerror(errno)))"
+    }
+
+    private static func callbackBindHost(_ redirectURI: URL?) -> String {
+        guard let host = redirectURI?.host else {
+            return "127.0.0.1"
+        }
+        switch host {
+        case "localhost", "127.0.0.1", "::1":
+            return "127.0.0.1"
+        default:
+            return "0.0.0.0"
+        }
+    }
+
+    private static func callbackPath(from redirectURI: URL?) -> String {
+        guard let path = redirectURI?.path, !path.isEmpty else {
+            return "/callback"
+        }
+        return path
     }
 }

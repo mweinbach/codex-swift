@@ -11,12 +11,12 @@ public struct McpOAuthCallbackResult: Equatable, Sendable {
 }
 
 public enum McpOAuthCallbackParser {
-    public static func parse(path: String) -> McpOAuthCallbackResult? {
+    public static func parse(path: String, callbackPath: String = "/callback") -> McpOAuthCallbackResult? {
         guard let queryStart = path.firstIndex(of: "?") else {
             return nil
         }
         let route = String(path[..<queryStart])
-        guard route == "/callback" else {
+        guard route == callbackPath else {
             return nil
         }
 

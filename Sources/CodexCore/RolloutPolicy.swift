@@ -196,7 +196,10 @@ public enum RolloutPolicy {
              .functionCallOutput,
              .customToolCall,
              .customToolCallOutput,
+             .toolSearchCall,
+             .toolSearchOutput,
              .webSearchCall,
+             .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
              .knownPersisted:

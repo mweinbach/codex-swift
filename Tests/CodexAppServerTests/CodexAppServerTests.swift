@@ -1331,6 +1331,8 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         try """
         mcp_oauth_credentials_store = "file"
+        mcp_oauth_callback_port = 5678
+        mcp_oauth_callback_url = "https://oauth.github.test/callback"
 
         [mcp_servers.github]
         url = "https://mcp.github.test/mcp"
@@ -1363,6 +1365,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requests[0].storeMode, .file)
         XCTAssertEqual(requests[0].scopes, ["repo"])
         XCTAssertEqual(requests[0].timeoutSeconds, 7)
+        XCTAssertEqual(requests[0].callbackPort, 5678)
+        XCTAssertEqual(requests[0].callbackURL, "https://oauth.github.test/callback")
         let notifications = try await notificationCapture.payloadsData()
             .flatMap { try decodeMessages($0) }
         XCTAssertEqual(notifications.count, 1)

@@ -332,10 +332,15 @@ private extension ResponseItem {
             return id
         case let .customToolCall(id, _, _, _, _):
             return id
+        case let .toolSearchCall(id, _, _, _, _):
+            return id
         case let .webSearchCall(id, _, _):
+            return id
+        case let .imageGenerationCall(id, _, _, _):
             return id
         case .functionCallOutput,
              .customToolCallOutput,
+             .toolSearchOutput,
              .ghostSnapshot,
              .compaction,
              .knownPersisted,

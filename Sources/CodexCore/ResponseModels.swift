@@ -198,6 +198,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
     case mcpToolCallOutput(callID: String, result: McpToolCallResult)
     case customToolCallOutput(callID: String, output: String)
+    case toolSearchOutput(callID: String, status: String, execution: String, tools: [JSONValue])
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -206,6 +207,9 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case callID = "call_id"
         case output
         case result
+        case status
+        case execution
+        case tools
     }
 
     private enum ItemType: String, Codable {
@@ -213,6 +217,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case functionCallOutput = "function_call_output"
         case mcpToolCallOutput = "mcp_tool_call_output"
         case customToolCallOutput = "custom_tool_call_output"
+        case toolSearchOutput = "tool_search_output"
     }
 
     public init(from decoder: Decoder) throws {
@@ -238,6 +243,13 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
                 callID: try container.decode(String.self, forKey: .callID),
                 output: try container.decode(String.self, forKey: .output)
             )
+        case .toolSearchOutput:
+            self = .toolSearchOutput(
+                callID: try container.decode(String.self, forKey: .callID),
+                status: try container.decode(String.self, forKey: .status),
+                execution: try container.decode(String.self, forKey: .execution),
+                tools: try container.decode([JSONValue].self, forKey: .tools)
+            )
         }
     }
 
@@ -260,6 +272,12 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
             try container.encode(ItemType.customToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(output, forKey: .output)
+        case let .toolSearchOutput(callID, status, execution, tools):
+            try container.encode(ItemType.toolSearchOutput, forKey: .type)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(status, forKey: .status)
+            try container.encode(execution, forKey: .execution)
+            try container.encode(tools, forKey: .tools)
         }
     }
 }
@@ -656,10 +674,19 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     )
     case localShellCall(id: String? = nil, callID: String?, status: LocalShellStatus, action: LocalShellAction)
     case functionCall(id: String? = nil, name: String, arguments: String, callID: String)
+    case toolSearchCall(
+        id: String? = nil,
+        callID: String? = nil,
+        status: String? = nil,
+        execution: String,
+        arguments: JSONValue
+    )
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
     case customToolCall(id: String? = nil, status: String? = nil, callID: String, name: String, input: String)
     case customToolCallOutput(callID: String, output: String)
-    case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction)
+    case toolSearchOutput(callID: String? = nil, status: String, execution: String, tools: [JSONValue])
+    case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction?)
+    case imageGenerationCall(id: String, status: String, revisedPrompt: String? = nil, result: String)
     case ghostSnapshot(ghostCommit: GhostCommit)
     case compaction(encryptedContent: String)
     case knownPersisted(type: String)
@@ -678,6 +705,10 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case output
         case status
         case action
+        case execution
+        case tools
+        case revisedPrompt = "revised_prompt"
+        case result
         case ghostCommit = "ghost_commit"
         case encryptedContent = "encrypted_content"
     }
@@ -732,6 +763,20 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             } else {
                 self = .knownPersisted(type: type)
             }
+        case "tool_search_call":
+            if let execution = try? container.decode(String.self, forKey: .execution),
+               let arguments = try? container.decode(JSONValue.self, forKey: .arguments)
+            {
+                self = .toolSearchCall(
+                    id: try container.decodeIfPresent(String.self, forKey: .id),
+                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                    status: try container.decodeIfPresent(String.self, forKey: .status),
+                    execution: execution,
+                    arguments: arguments
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
         case "function_call_output":
             if let callID = try? container.decode(String.self, forKey: .callID),
                let output = try? container.decode(FunctionCallOutputPayload.self, forKey: .output)
@@ -763,12 +808,40 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             } else {
                 self = .knownPersisted(type: type)
             }
+        case "tool_search_output":
+            if let status = try? container.decode(String.self, forKey: .status),
+               let execution = try? container.decode(String.self, forKey: .execution),
+               let tools = try? container.decode([JSONValue].self, forKey: .tools)
+            {
+                self = .toolSearchOutput(
+                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                    status: status,
+                    execution: execution,
+                    tools: tools
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
         case "web_search_call":
             self = .webSearchCall(
                 id: try container.decodeIfPresent(String.self, forKey: .id),
                 status: try container.decodeIfPresent(String.self, forKey: .status),
-                action: try container.decode(WebSearchAction.self, forKey: .action)
+                action: try container.decodeIfPresent(WebSearchAction.self, forKey: .action)
             )
+        case "image_generation_call":
+            if let id = try? container.decode(String.self, forKey: .id),
+               let status = try? container.decode(String.self, forKey: .status),
+               let result = try? container.decode(String.self, forKey: .result)
+            {
+                self = .imageGenerationCall(
+                    id: id,
+                    status: status,
+                    revisedPrompt: try container.decodeIfPresent(String.self, forKey: .revisedPrompt),
+                    result: result
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
         case "ghost_snapshot":
@@ -810,6 +883,13 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(name, forKey: .name)
             try container.encode(arguments, forKey: .arguments)
             try container.encode(callID, forKey: .callID)
+        case let .toolSearchCall(id, callID, status, execution, arguments):
+            try container.encode("tool_search_call", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
+            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encodeIfPresent(status, forKey: .status)
+            try container.encode(execution, forKey: .execution)
+            try container.encode(arguments, forKey: .arguments)
         case let .functionCallOutput(callID, output):
             try container.encode("function_call_output", forKey: .type)
             try container.encode(callID, forKey: .callID)
@@ -825,11 +905,23 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode("custom_tool_call_output", forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(output, forKey: .output)
+        case let .toolSearchOutput(callID, status, execution, tools):
+            try container.encode("tool_search_output", forKey: .type)
+            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encode(status, forKey: .status)
+            try container.encode(execution, forKey: .execution)
+            try container.encode(tools, forKey: .tools)
         case let .webSearchCall(id, status, action):
             try container.encode("web_search_call", forKey: .type)
             try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(status, forKey: .status)
-            try container.encode(action, forKey: .action)
+            try container.encodeIfPresent(action, forKey: .action)
+        case let .imageGenerationCall(id, status, revisedPrompt, result):
+            try container.encode("image_generation_call", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(status, forKey: .status)
+            try container.encodeIfPresent(revisedPrompt, forKey: .revisedPrompt)
+            try container.encode(result, forKey: .result)
         case let .ghostSnapshot(ghostCommit):
             try container.encode("ghost_snapshot", forKey: .type)
             try container.encode(ghostCommit, forKey: .ghostCommit)

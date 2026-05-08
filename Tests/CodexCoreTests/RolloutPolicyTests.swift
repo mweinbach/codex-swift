@@ -6,11 +6,14 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.message(role: "assistant", content: [])))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.reasoning(id: "r1", summary: [])))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.functionCall(name: "do_it", arguments: "{}", callID: "call-1")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.toolSearchCall(callID: "search-1", execution: "client", arguments: .object(["query": .string("docs")]))))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: [])))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.customToolCall(callID: "tool-1", name: "custom", input: "{}")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.customToolCallOutput(callID: "tool-1", output: "ok")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.localShellCall(callID: "shell-1", status: .completed, action: .exec(LocalShellExecAction(command: ["echo"])))))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.webSearchCall(status: "completed", action: .search(query: "weather"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.imageGenerationCall(id: "ig-1", status: "completed", result: "Zm9v")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.other))
 
@@ -18,9 +21,12 @@ final class RolloutPolicyTests: XCTestCase {
             "reasoning",
             "local_shell_call",
             "function_call",
+            "tool_search_call",
             "function_call_output",
+            "tool_search_output",
             "custom_tool_call",
             "custom_tool_call_output",
+            "image_generation_call",
             "ghost_snapshot"
         ] {
             let item = try JSONDecoder().decode(ResponseItem.self, from: Data(#"{"type":"\#(type)"}"#.utf8))

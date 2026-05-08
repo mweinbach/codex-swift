@@ -1,6 +1,9 @@
 import Foundation
 
-public typealias McpOAuthCallbackServerFactory = @Sendable () throws -> any McpOAuthCallbackServing
+public typealias McpOAuthCallbackServerFactory = @Sendable (
+    _ callbackPort: UInt16?,
+    _ callbackURL: String?
+) throws -> any McpOAuthCallbackServing
 public typealias McpOAuthBrowserLauncher = @Sendable (String) async throws -> Void
 public typealias McpOAuthLoginMessageSink = @Sendable (McpOAuthLoginMessage) async -> Void
 
@@ -15,6 +18,8 @@ public struct McpOAuthLoginRequest: Sendable {
     public let scopes: [String]
     public let timeoutSeconds: Int?
     public let launchBrowser: Bool
+    public let callbackPort: UInt16?
+    public let callbackURL: String?
 
     public init(
         serverName: String,
@@ -26,7 +31,9 @@ public struct McpOAuthLoginRequest: Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         scopes: [String] = [],
         timeoutSeconds: Int? = nil,
-        launchBrowser: Bool = true
+        launchBrowser: Bool = true,
+        callbackPort: UInt16? = nil,
+        callbackURL: String? = nil
     ) {
         self.serverName = serverName
         self.serverURL = serverURL
@@ -38,6 +45,8 @@ public struct McpOAuthLoginRequest: Sendable {
         self.scopes = scopes
         self.timeoutSeconds = timeoutSeconds
         self.launchBrowser = launchBrowser
+        self.callbackPort = callbackPort
+        self.callbackURL = callbackURL
     }
 }
 
@@ -62,8 +71,8 @@ public enum McpOAuthLogin {
 
     public static func perform(
         request: McpOAuthLoginRequest,
-        callbackServerFactory: McpOAuthCallbackServerFactory = {
-            try McpOAuthLocalCallbackServer.start()
+        callbackServerFactory: McpOAuthCallbackServerFactory = { callbackPort, callbackURL in
+            try McpOAuthLocalCallbackServer.start(port: callbackPort, redirectURI: callbackURL)
         },
         browserLauncher: @escaping McpOAuthBrowserLauncher = McpOAuthBrowser.open,
         messageSink: @escaping McpOAuthLoginMessageSink = { _ in },
@@ -72,7 +81,7 @@ public enum McpOAuthLogin {
         pkceGenerator: @Sendable () throws -> PKCECodes = { try PKCE.generate() },
         csrfTokenGenerator: @Sendable () throws -> String = { try McpOAuthAuthorizationSession.generateCSRFToken() }
     ) async throws {
-        let callbackServer = try callbackServerFactory()
+        let callbackServer = try callbackServerFactory(request.callbackPort, request.callbackURL)
         defer {
             callbackServer.stop()
         }

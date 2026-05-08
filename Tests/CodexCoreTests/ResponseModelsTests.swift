@@ -229,6 +229,153 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["status"] as? String, "completed")
     }
 
+    func testRoundTripsToolSearchCallLikeRust() throws {
+        let json = #"""
+        {
+            "type": "tool_search_call",
+            "call_id": "search-1",
+            "execution": "client",
+            "arguments": {
+                "query": "calendar create",
+                "limit": 1
+            }
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .toolSearchCall(
+            callID: "search-1",
+            execution: "client",
+            arguments: .object([
+                "query": .string("calendar create"),
+                "limit": .integer(1)
+            ])
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "tool_search_call",
+            "call_id": "search-1",
+            "execution": "client",
+            "arguments": [
+                "query": "calendar create",
+                "limit": 1
+            ]
+        ])
+    }
+
+    func testRoundTripsToolSearchOutputLikeRust() throws {
+        let tool: JSONValue = .object([
+            "type": .string("function"),
+            "name": .string("mcp__codex_apps__calendar_create_event"),
+            "description": .string("Create a calendar event."),
+            "defer_loading": .bool(true),
+            "parameters": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "title": .object(["type": .string("string")])
+                ]),
+                "required": .array([.string("title")]),
+                "additionalProperties": .bool(false)
+            ])
+        ])
+        let input = ResponseInputItem.toolSearchOutput(
+            callID: "search-1",
+            status: "completed",
+            execution: "client",
+            tools: [tool]
+        )
+
+        XCTAssertEqual(
+            input.responseItem(),
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: [tool])
+        )
+
+        try XCTAssertJSONObjectEqual(input, [
+            "type": "tool_search_output",
+            "call_id": "search-1",
+            "status": "completed",
+            "execution": "client",
+            "tools": [[
+                "type": "function",
+                "name": "mcp__codex_apps__calendar_create_event",
+                "description": "Create a calendar event.",
+                "defer_loading": true,
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"]
+                    ],
+                    "required": ["title"],
+                    "additionalProperties": false
+                ]
+            ]]
+        ])
+    }
+
+    func testToolSearchServerItemsAllowNullCallID() throws {
+        let call = try JSONDecoder().decode(ResponseItem.self, from: Data(#"""
+        {
+            "type": "tool_search_call",
+            "execution": "server",
+            "call_id": null,
+            "status": "completed",
+            "arguments": {
+                "paths": ["crm"]
+            }
+        }
+        """#.utf8))
+        XCTAssertEqual(call, .toolSearchCall(
+            callID: nil,
+            status: "completed",
+            execution: "server",
+            arguments: .object(["paths": .array([.string("crm")])])
+        ))
+
+        let output = try JSONDecoder().decode(ResponseItem.self, from: Data(#"""
+        {
+            "type": "tool_search_output",
+            "execution": "server",
+            "call_id": null,
+            "status": "completed",
+            "tools": []
+        }
+        """#.utf8))
+        XCTAssertEqual(output, .toolSearchOutput(
+            callID: nil,
+            status: "completed",
+            execution: "server",
+            tools: []
+        ))
+    }
+
+    func testRoundTripsImageGenerationCallLikeRust() throws {
+        let json = #"""
+        {
+            "id": "ig_123",
+            "type": "image_generation_call",
+            "status": "completed",
+            "revised_prompt": "A gray tabby cat",
+            "result": "Zm9v"
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .imageGenerationCall(
+            id: "ig_123",
+            status: "completed",
+            revisedPrompt: "A gray tabby cat",
+            result: "Zm9v"
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "id": "ig_123",
+            "type": "image_generation_call",
+            "status": "completed",
+            "revised_prompt": "A gray tabby cat",
+            "result": "Zm9v"
+        ])
+    }
+
     func testRoundTripsGhostSnapshotPayloadLikeRust() throws {
         let json = #"""
         {

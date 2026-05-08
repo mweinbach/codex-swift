@@ -31,7 +31,7 @@ public enum EventMapping {
             return .reasoning(ReasoningItem(id: id, summaryText: summaryText, rawContent: rawContent))
 
         case let .webSearchCall(id, _, action):
-            guard case let .search(query) = action else {
+            guard case let .some(.search(query)) = action else {
                 return nil
             }
             return .webSearch(WebSearchItem(id: id ?? "", query: query ?? ""))
@@ -39,9 +39,12 @@ public enum EventMapping {
         case .compaction,
              .localShellCall,
              .functionCall,
+             .toolSearchCall,
              .functionCallOutput,
              .customToolCall,
              .customToolCallOutput,
+             .toolSearchOutput,
+             .imageGenerationCall,
              .ghostSnapshot,
              .knownPersisted,
              .other:

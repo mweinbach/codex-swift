@@ -21,6 +21,25 @@ public enum ContextNormalization {
                     ))
                 }
 
+            case let .toolSearchCall(_, callID, _, _, _):
+                guard let callID else {
+                    continue
+                }
+
+                let hasOutput = items.contains { candidate in
+                    if case let .toolSearchOutput(existing?, _, _, _) = candidate {
+                        return existing == callID
+                    }
+                    return false
+                }
+
+                if !hasOutput {
+                    missingOutputsToInsert.append((
+                        index,
+                        .toolSearchOutput(callID: callID, status: "completed", execution: "client", tools: [])
+                    ))
+                }
+
             case let .customToolCall(_, _, callID, _, _):
                 let hasOutput = items.contains { candidate in
                     if case let .customToolCallOutput(existing, _) = candidate {
@@ -59,7 +78,9 @@ public enum ContextNormalization {
                  .reasoning,
                  .functionCallOutput,
                  .customToolCallOutput,
+                 .toolSearchOutput,
                  .webSearchCall,
+                 .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
                  .knownPersisted,
@@ -92,6 +113,12 @@ public enum ContextNormalization {
             }
             return nil
         })
+        let toolSearchCallIDs = Set(items.compactMap { item -> String? in
+            if case let .toolSearchCall(_, callID?, _, _, _) = item {
+                return callID
+            }
+            return nil
+        })
 
         items.removeAll { item in
             switch item {
@@ -99,6 +126,11 @@ public enum ContextNormalization {
                 return !functionCallIDs.contains(callID) && !localShellCallIDs.contains(callID)
             case let .customToolCallOutput(callID, _):
                 return !customToolCallIDs.contains(callID)
+            case let .toolSearchOutput(callID, _, execution, _):
+                guard execution != "server", let callID else {
+                    return false
+                }
+                return !toolSearchCallIDs.contains(callID)
             default:
                 return false
             }
@@ -159,9 +191,32 @@ public enum ContextNormalization {
                 return false
             }
 
+        case let .toolSearchCall(_, callID, _, _, _):
+            guard let callID else {
+                return
+            }
+            removeFirstMatching(from: &items) { candidate in
+                if case let .toolSearchOutput(existing?, _, _, _) = candidate {
+                    return existing == callID
+                }
+                return false
+            }
+
+        case let .toolSearchOutput(callID, _, _, _):
+            guard let callID else {
+                return
+            }
+            removeFirstMatching(from: &items) { candidate in
+                if case let .toolSearchCall(_, existing?, _, _, _) = candidate {
+                    return existing == callID
+                }
+                return false
+            }
+
         case .message,
              .reasoning,
              .webSearchCall,
+             .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
              .knownPersisted,

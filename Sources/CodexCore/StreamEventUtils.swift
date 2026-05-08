@@ -9,9 +9,12 @@ public enum StreamEventUtils {
             return EventMapping.parseTurnItem(item)
         case .functionCallOutput,
              .customToolCallOutput,
+             .toolSearchCall,
+             .toolSearchOutput,
              .localShellCall,
              .functionCall,
              .customToolCall,
+             .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
              .knownPersisted,
@@ -41,6 +44,8 @@ public enum StreamEventUtils {
             return .functionCallOutput(callID: callID, output: output)
         case let .customToolCallOutput(callID, output):
             return .customToolCallOutput(callID: callID, output: output)
+        case let .toolSearchOutput(callID, status, execution, tools):
+            return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
             let output: FunctionCallOutputPayload
             switch result {
@@ -65,6 +70,8 @@ public extension ResponseInputItem {
             return .functionCallOutput(callID: callID, output: output)
         case let .customToolCallOutput(callID, output):
             return .customToolCallOutput(callID: callID, output: output)
+        case let .toolSearchOutput(callID, status, execution, tools):
+            return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
             let output: FunctionCallOutputPayload
             switch result {

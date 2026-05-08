@@ -1107,7 +1107,9 @@ private func runMcpOAuthLogin(
             httpHeaders: httpHeaders,
             envHttpHeaders: envHttpHeaders,
             environment: ProcessInfo.processInfo.environment,
-            scopes: scopes
+            scopes: scopes,
+            callbackPort: settings.mcpOAuthCallbackPort,
+            callbackURL: settings.mcpOAuthCallbackURL
         ),
         messageSink: { message in
             switch message {

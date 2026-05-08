@@ -380,7 +380,7 @@ public enum NonInteractiveExec {
         if let reasoningText = reasoningText(from: item) {
             return CompletedItem(id: id, type: "reasoning", text: reasoningText)
         }
-        if case let .webSearchCall(_, _, .search(query)) = item {
+        if case let .webSearchCall(_, _, .some(.search(query))) = item {
             return CompletedItem(id: id, type: "web_search", query: query ?? "")
         }
         return nil
@@ -645,12 +645,13 @@ public enum NonInteractiveExec {
     private static func toolCalls(from items: [ResponseItem]) -> [ResponseItem] {
         items.filter { item in
             switch item {
-            case .functionCall, .customToolCall, .localShellCall:
+            case .functionCall, .customToolCall, .localShellCall, .toolSearchCall, .imageGenerationCall:
                 return true
             case .message,
                  .reasoning,
                  .functionCallOutput,
                  .customToolCallOutput,
+                 .toolSearchOutput,
                  .webSearchCall,
                  .ghostSnapshot,
                  .compaction,
