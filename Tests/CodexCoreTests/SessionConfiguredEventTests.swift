@@ -85,6 +85,9 @@ final class SessionConfiguredEventTests: XCTestCase {
             ],
             "rollout_path": "/tmp/rollout.jsonl"
         ])
+
+        let data = try JSONEncoder().encode(event)
+        XCTAssertEqual(try JSONDecoder().decode(SessionConfiguredEvent.self, from: data), event)
     }
 
     func testSessionConfiguredIsEventMessage() throws {
