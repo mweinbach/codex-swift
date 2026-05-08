@@ -1,4 +1,5 @@
 import CodexChatGPT
+import CodexCore
 import CodexGit
 import Foundation
 import XCTest
@@ -80,6 +81,33 @@ final class ApplyCommandTests: XCTestCase {
             stderr text
             """
         )
+    }
+
+    func testCloudTaskCodexGitApplierBridgesApplyResult() async throws {
+        let repo = try ChatGPTGitTestRepository()
+        try "before\n".write(to: repo.url.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try repo.git(["add", "file.txt"])
+        try repo.git(["commit", "-m", "initial"])
+
+        let diff = """
+        diff --git a/file.txt b/file.txt
+        --- a/file.txt
+        +++ b/file.txt
+        @@ -1 +1 @@
+        -before
+        +after
+        """ + "\n"
+
+        let result = try await CloudTaskCodexGitApplier.apply(CloudGitApplyRequest(
+            cwd: repo.url,
+            diff: diff,
+            preflight: false
+        )).get()
+
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.skippedPaths, [])
+        XCTAssertEqual(result.conflictedPaths, [])
+        XCTAssertEqual(try String(contentsOf: repo.url.appendingPathComponent("file.txt")), "after\n")
     }
 
     private func decodeTaskResponse(diff: String) throws -> GetTaskResponse {

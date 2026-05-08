@@ -295,6 +295,8 @@ Source baseline inspected for this scaffold:
   - cloud task IDs/statuses/summaries, apply outcome/error wire behavior, mock task rows, diff-count summaries, task text/messages, sibling attempts, and local create/apply/preflight behavior
 - `codex-rs/cloud-tasks-client/src/http.rs` plus task-detail helpers from `codex-rs/backend-client`
   - ChatGPT backend URL normalization, `/wham` versus `/api/codex` task paths, auth/user-agent request construction, list/detail/create/sibling response mapping, task text/error extraction, unified-diff validation, and injectable git-apply outcome mapping
+- `codex-rs/cloud-tasks-client/src/http.rs` apply bridge to `codex-rs/utils/git/src/apply.rs`
+  - concrete Swift `CodexGit` adapter for cloud task apply/preflight injection without making `CodexCore` depend on the git target
 
 ## Known Gaps
 
@@ -311,7 +313,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - MCP server/client management
 - app-server protocol and server runtime
 - apply-patch runtime
-- cloud tasks CLI/TUI runtime integration and concrete CodexGit apply-engine wiring
+- cloud tasks CLI/TUI runtime integration
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
