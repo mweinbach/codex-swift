@@ -177,6 +177,20 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func gitDiffToRemoteResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let cwd = stringParam(params?["cwd"]) else {
+            throw AppServerError.invalidRequest("missing cwd")
+        }
+        let cwdURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        guard let state = GitInfoCollector.gitDiffToRemote(cwd: cwdURL) else {
+            throw AppServerError.invalidRequest("failed to compute git diff to remote for cwd: \"\(cwd)\"")
+        }
+        return [
+            "sha": state.sha,
+            "diff": state.diff
+        ]
+    }
+
     fileprivate static func buildUserAgent(
         configuration: CodexAppServerConfiguration,
         params: [String: Any]?,
@@ -874,6 +888,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.userSavedConfigResult(configuration: configuration)
+                    )
+                case "gitDiffToRemote":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.gitDiffToRemoteResult(params: params)
                     )
                 case "setDefaultModel":
                     response = CodexAppServer.responseObject(

@@ -4,6 +4,8 @@ import Foundation
 import XCTest
 
 final class CodexAppServerTests: XCTestCase {
+    private var retainedTemporaryDirectories: [TemporaryDirectory] = []
+
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
         let temp = try TemporaryDirectory()
         let newestID = try writeRollout(
@@ -477,6 +479,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((config["profiles"] as? [String: Any])?.isEmpty, true)
     }
 
+    func testGitDiffToRemoteReturnsLegacyRustShape() throws {
+        let (repo, branch) = try createGitRepositoryWithRemote()
+        let remoteSha = try runGit(["rev-parse", "origin/\(branch)"], cwd: repo)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try "modified".write(to: repo.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+        try "new".write(to: repo.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"gitDiffToRemote","params":{"cwd":"\#(repo.path)"}}"#,
+            codexHome: try TemporaryDirectory().url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["sha"] as? String, remoteSha)
+        let diff = try XCTUnwrap(result["diff"] as? String)
+        XCTAssertTrue(diff.contains("test.txt"))
+        XCTAssertTrue(diff.contains("untracked.txt"))
+        XCTAssertTrue(diff.contains("modified"))
+    }
+
+    func testGitDiffToRemoteReturnsInvalidRequestOutsideRepo() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"gitDiffToRemote","params":{"cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            #"failed to compute git diff to remote for cwd: "\#(temp.url.path)""#
+        )
+    }
+
     func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
@@ -621,6 +658,55 @@ final class CodexAppServerTests: XCTestCase {
             base64URL(payload),
             "signature"
         ].joined(separator: ".")
+    }
+
+    private func createGitRepositoryWithRemote() throws -> (repo: URL, branch: String) {
+        let temp = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(temp)
+        let repo = temp.url.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try runGit(["init"], cwd: repo)
+        try runGit(["config", "user.name", "Test User"], cwd: repo)
+        try runGit(["config", "user.email", "test@example.com"], cwd: repo)
+        try "test content".write(to: repo.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+        try runGit(["add", "test.txt"], cwd: repo)
+        try runGit(["commit", "-m", "Initial commit"], cwd: repo)
+
+        let remote = temp.url.appendingPathComponent("remote.git", isDirectory: true)
+        try runGit(["init", "--bare", remote.path], cwd: temp.url)
+        try runGit(["remote", "add", "origin", remote.path], cwd: repo)
+        let branch = try runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd: repo)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try runGit(["push", "-u", "origin", branch], cwd: repo)
+        return (repo, branch)
+    }
+
+    @discardableResult
+    private func runGit(
+        _ args: [String],
+        cwd: URL
+    ) throws -> (stdout: String, stderr: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = cwd
+        process.environment = [
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1"
+        ]
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "git \(args.joined(separator: " ")) failed: \(stderr)")
+        return (stdout, stderr)
     }
 
     private func base64URL(_ object: Any) throws -> String {
