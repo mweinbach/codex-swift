@@ -60,6 +60,20 @@ public struct AffectedPaths: Equatable, Sendable {
     public var deleted: [String] = []
 }
 
+public enum ApplyPatchToolInstructions {
+    public static let text: String = {
+        guard let url = Bundle.module.url(forResource: "apply_patch_tool_instructions", withExtension: "md") else {
+            preconditionFailure("Missing bundled apply_patch_tool_instructions.md")
+        }
+
+        do {
+            return try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            preconditionFailure("Unable to load apply_patch_tool_instructions.md: \(error)")
+        }
+    }()
+}
+
 public enum ApplyPatch {
     private static let beginPatchMarker = "*** Begin Patch"
     private static let endPatchMarker = "*** End Patch"

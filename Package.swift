@@ -21,9 +21,13 @@ let package = Package(
     targets: [
         .target(
             name: "CodexCore",
+            dependencies: ["CodexApplyPatch"],
             resources: [.process("Resources")]
         ),
-        .target(name: "CodexApplyPatch"),
+        .target(
+            name: "CodexApplyPatch",
+            resources: [.process("Resources")]
+        ),
         .target(name: "CodexGit"),
         .target(
             name: "CodexChatGPT",
