@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public struct McpOAuthAuthorizationMetadata: Codable, Equatable, Sendable {
     public let authorizationEndpoint: String
@@ -147,6 +148,194 @@ public enum McpOAuthClientRegistration {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(McpOAuthDiscovery.discoveryVersion, forHTTPHeaderField: McpOAuthDiscovery.discoveryHeader)
         return request
+    }
+}
+
+public struct McpOAuthAuthorizationSession: Equatable, Sendable {
+    public let metadata: McpOAuthAuthorizationMetadata
+    public let clientConfig: McpOAuthClientConfig
+    public let authURL: String
+    public let redirectURI: String
+    public let csrfToken: String
+    public let pkceVerifier: String
+
+    public init(
+        metadata: McpOAuthAuthorizationMetadata,
+        clientConfig: McpOAuthClientConfig,
+        authURL: String,
+        redirectURI: String,
+        csrfToken: String,
+        pkceVerifier: String
+    ) {
+        self.metadata = metadata
+        self.clientConfig = clientConfig
+        self.authURL = authURL
+        self.redirectURI = redirectURI
+        self.csrfToken = csrfToken
+        self.pkceVerifier = pkceVerifier
+    }
+
+    public static func start(
+        metadata: McpOAuthAuthorizationMetadata,
+        scopes: [String],
+        redirectURI: String,
+        clientName: String? = nil,
+        clientMetadataURL: String? = nil,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        transport: McpOAuthDiscoveryTransport? = nil,
+        pkceGenerator: @Sendable () throws -> PKCECodes = { try PKCE.generate() },
+        csrfTokenGenerator: @Sendable () throws -> String = { try generateCSRFToken() }
+    ) async throws -> McpOAuthAuthorizationSession {
+        let clientConfig = try await resolveClientConfig(
+            metadata: metadata,
+            scopes: scopes,
+            redirectURI: redirectURI,
+            clientName: clientName,
+            clientMetadataURL: clientMetadataURL,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment,
+            transport: transport
+        )
+        guard URL(string: metadata.authorizationEndpoint)?.scheme != nil else {
+            throw McpOAuthAuthorizationError.registrationFailed(
+                "Dynamic registration failed: OAuth error: Invalid authorization URL: \(metadata.authorizationEndpoint)"
+            )
+        }
+        guard URL(string: metadata.tokenEndpoint)?.scheme != nil else {
+            throw McpOAuthAuthorizationError.registrationFailed(
+                "Dynamic registration failed: OAuth error: Invalid token URL: \(metadata.tokenEndpoint)"
+            )
+        }
+
+        let pkce = try pkceGenerator()
+        let csrfToken = try csrfTokenGenerator()
+        let authURL = try authorizationURL(
+            authorizationEndpoint: metadata.authorizationEndpoint,
+            clientID: clientConfig.clientID,
+            redirectURI: redirectURI,
+            scopes: scopes,
+            csrfToken: csrfToken,
+            codeChallenge: pkce.codeChallenge
+        )
+
+        return McpOAuthAuthorizationSession(
+            metadata: metadata,
+            clientConfig: clientConfig,
+            authURL: authURL,
+            redirectURI: redirectURI,
+            csrfToken: csrfToken,
+            pkceVerifier: pkce.codeVerifier
+        )
+    }
+
+    private static func resolveClientConfig(
+        metadata: McpOAuthAuthorizationMetadata,
+        scopes: [String],
+        redirectURI: String,
+        clientName: String?,
+        clientMetadataURL: String?,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        environment: [String: String],
+        transport: McpOAuthDiscoveryTransport?
+    ) async throws -> McpOAuthClientConfig {
+        if metadata.clientIDMetadataDocumentSupported == true, let clientMetadataURL {
+            guard isHTTPSURLWithNonRootPath(clientMetadataURL) else {
+                throw McpOAuthAuthorizationError.registrationFailed(
+                    "client_metadata_url must be a valid HTTPS URL with a non-root pathname, got: \(clientMetadataURL)"
+                )
+            }
+            return McpOAuthClientConfig(
+                clientID: clientMetadataURL,
+                clientSecret: nil,
+                scopes: scopes,
+                redirectURI: redirectURI
+            )
+        }
+
+        do {
+            return try await McpOAuthClientRegistration.registerClient(
+                metadata: metadata,
+                clientName: clientName ?? "MCP Client",
+                redirectURI: redirectURI,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: environment,
+                transport: transport
+            )
+        } catch {
+            throw McpOAuthAuthorizationError.registrationFailed(
+                "Dynamic registration failed: \(String(describing: error))"
+            )
+        }
+    }
+
+    private static func authorizationURL(
+        authorizationEndpoint: String,
+        clientID: String,
+        redirectURI: String,
+        scopes: [String],
+        csrfToken: String,
+        codeChallenge: String
+    ) throws -> String {
+        guard var components = URLComponents(string: authorizationEndpoint) else {
+            throw McpOAuthAuthorizationError.registrationFailed(
+                "Dynamic registration failed: OAuth error: Invalid authorization URL: \(authorizationEndpoint)"
+            )
+        }
+
+        var encodedPairs = [
+            ("response_type", "code"),
+            ("client_id", clientID),
+            ("state", csrfToken),
+            ("code_challenge", codeChallenge),
+            ("code_challenge_method", "S256"),
+            ("redirect_uri", redirectURI)
+        ].map { "\(formEncode($0.0))=\(formEncode($0.1))" }
+
+        if !scopes.isEmpty {
+            encodedPairs.append("\(formEncode("scope"))=\(formEncode(scopes.joined(separator: " ")))")
+        }
+
+        let encodedQuery = encodedPairs.joined(separator: "&")
+        if let existingQuery = components.percentEncodedQuery, !existingQuery.isEmpty {
+            components.percentEncodedQuery = "\(existingQuery)&\(encodedQuery)"
+        } else {
+            components.percentEncodedQuery = encodedQuery
+        }
+
+        guard let url = components.url else {
+            throw McpOAuthAuthorizationError.registrationFailed(
+                "Dynamic registration failed: OAuth error: Invalid authorization URL: \(authorizationEndpoint)"
+            )
+        }
+        return url.absoluteString
+    }
+
+    private static func isHTTPSURLWithNonRootPath(_ value: String) -> Bool {
+        guard let url = URL(string: value) else {
+            return false
+        }
+        return url.scheme == "https" && url.host != nil && !url.path.isEmpty && url.path != "/"
+    }
+
+    private static func formEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)?
+            .replacingOccurrences(of: "%20", with: "+") ?? value
+    }
+
+    public static func generateCSRFToken() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw PKCEError.randomBytesFailed(status)
+        }
+        return PKCE.base64URLEncodedNoPadding(Data(bytes))
     }
 }
 

@@ -237,6 +237,92 @@ final class McpOAuthAuthorizationMetadataTests: XCTestCase {
             XCTAssertTrue(String(describing: error).contains("Registration failed: analyze response error:"))
         }
     }
+
+    func testAuthorizationSessionRegistersClientAndBuildsRustOrderedAuthorizationURL() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/register": .init(
+                statusCode: 200,
+                body: Data(#"{"client_id":"client-id","client_secret":"secret","redirect_uris":["http://127.0.0.1:123/callback"]}"#.utf8)
+            )
+        ])
+
+        let session = try await McpOAuthAuthorizationSession.start(
+            metadata: sampleAuthorizationMetadata(),
+            scopes: ["read", "write"],
+            redirectURI: "http://127.0.0.1:123/callback",
+            clientName: "Codex",
+            transport: { request in await probe.handle(request) },
+            pkceGenerator: {
+                PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge")
+            },
+            csrfTokenGenerator: {
+                "csrf_token"
+            }
+        )
+
+        XCTAssertEqual(session.clientConfig, McpOAuthClientConfig(
+            clientID: "client-id",
+            clientSecret: "secret",
+            scopes: [],
+            redirectURI: "http://127.0.0.1:123/callback"
+        ))
+        XCTAssertEqual(session.pkceVerifier, "verifier")
+        XCTAssertEqual(session.csrfToken, "csrf_token")
+        XCTAssertEqual(
+            session.authURL,
+            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf_token&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A123%2Fcallback&scope=read+write"
+        )
+    }
+
+    func testAuthorizationSessionUsesURLBasedClientIDWhenSupported() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [:])
+        let session = try await McpOAuthAuthorizationSession.start(
+            metadata: sampleAuthorizationMetadata(
+                registrationEndpoint: nil,
+                clientIDMetadataDocumentSupported: true
+            ),
+            scopes: ["profile"],
+            redirectURI: "http://127.0.0.1/callback",
+            clientMetadataURL: "https://client.example/metadata.json",
+            transport: { request in await probe.handle(request) },
+            pkceGenerator: {
+                PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge")
+            },
+            csrfTokenGenerator: {
+                "csrf"
+            }
+        )
+
+        XCTAssertEqual(session.clientConfig.clientID, "https://client.example/metadata.json")
+        XCTAssertEqual(session.clientConfig.scopes, ["profile"])
+        let requests = await probe.requests()
+        XCTAssertEqual(requests, [])
+        XCTAssertTrue(session.authURL.contains("client_id=https%3A%2F%2Fclient.example%2Fmetadata.json"))
+    }
+
+    func testAuthorizationSessionRejectsInvalidURLBasedClientID() async throws {
+        do {
+            _ = try await McpOAuthAuthorizationSession.start(
+                metadata: sampleAuthorizationMetadata(clientIDMetadataDocumentSupported: true),
+                scopes: [],
+                redirectURI: "http://127.0.0.1/callback",
+                clientMetadataURL: "https://client.example/",
+                transport: { _ in McpOAuthDiscoveryHTTPResponse(statusCode: 500, body: Data()) },
+                pkceGenerator: {
+                    PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge")
+                },
+                csrfTokenGenerator: {
+                    "csrf"
+                }
+            )
+            XCTFail("session should fail")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "Registration failed: client_metadata_url must be a valid HTTPS URL with a non-root pathname, got: https://client.example/"
+            )
+        }
+    }
 }
 
 private struct RecordedAuthorizationMetadataRequest: Equatable, Sendable {
@@ -292,12 +378,14 @@ private func authorizationMetadataJSON() -> Data {
 
 private func sampleAuthorizationMetadata(
     registrationEndpoint: String? = "https://auth.example/register",
-    responseTypesSupported: [String]? = ["code"]
+    responseTypesSupported: [String]? = ["code"],
+    clientIDMetadataDocumentSupported: Bool? = nil
 ) -> McpOAuthAuthorizationMetadata {
     McpOAuthAuthorizationMetadata(
         authorizationEndpoint: "https://auth.example/authorize",
         tokenEndpoint: "https://auth.example/token",
         registrationEndpoint: registrationEndpoint,
-        responseTypesSupported: responseTypesSupported
+        responseTypesSupported: responseTypesSupported,
+        clientIDMetadataDocumentSupported: clientIDMetadataDocumentSupported
     )
 }
