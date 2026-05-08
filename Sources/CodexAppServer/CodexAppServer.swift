@@ -1232,6 +1232,47 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func threadInjectItemsResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        guard let rawItems = params?["items"] as? [Any] else {
+            throw AppServerError.invalidRequest("missing items")
+        }
+        guard !rawItems.isEmpty else {
+            throw AppServerError.invalidRequest("items must not be empty")
+        }
+
+        let items = try rawItems.enumerated().map { index, value in
+            do {
+                guard JSONSerialization.isValidJSONObject(value) else {
+                    throw AppServerError.invalidRequest("items[\(index)] is not a valid response item: invalid JSON object")
+                }
+                let data = try JSONSerialization.data(withJSONObject: value)
+                return try JSONDecoder().decode(ResponseItem.self, from: data)
+            } catch let error as AppServerError {
+                throw error
+            } catch {
+                throw AppServerError.invalidRequest("items[\(index)] is not a valid response item: \(error)")
+            }
+        }
+
+        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
+        try recorder.recordItems(items.map { .responseItem($0) })
+        try recorder.shutdown()
+        return [:]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -4487,6 +4528,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadMemoryModeSetResult(params: params, configuration: configuration)
+                    )
+                case "thread/inject_items":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadInjectItemsResult(params: params, configuration: configuration)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

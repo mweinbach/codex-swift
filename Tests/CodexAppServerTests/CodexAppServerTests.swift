@@ -868,6 +868,73 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
     }
 
+    func testThreadInjectItemsAppendsResponseItemsToRollout() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T09-30-00",
+            timestamp: "2025-01-06T09:30:00Z",
+            preview: "Stored thread preview",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+
+        let response = try appServerResponse(
+            """
+            {"id":1,"method":"thread/inject_items","params":{"threadId":"\(threadID)","items":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Injected assistant context"}]}]}}
+            """,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""type":"response_item""#))
+        XCTAssertTrue(rollout.contains("Injected assistant context"))
+        let history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: rolloutPath))
+        guard case let .resumed(resumed) = history else {
+            return XCTFail("expected resumed rollout history")
+        }
+        XCTAssertTrue(resumed.history.contains {
+            guard case let .responseItem(.message(_, role, content, _)) = $0 else {
+                return false
+            }
+            return role == "assistant" && content == [.outputText(text: "Injected assistant context")]
+        })
+    }
+
+    func testThreadInjectItemsRejectsEmptyInvalidAndMissingThread() throws {
+        let temp = try TemporaryDirectory()
+        let missingID = UUID().uuidString.lowercased()
+
+        let empty = try appServerResponse(
+            #"{"id":1,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[]}}"#,
+            codexHome: temp.url
+        )
+        let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
+        XCTAssertEqual(emptyError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyError["message"] as? String, "items must not be empty")
+
+        let invalid = try appServerResponse(
+            #"{"id":2,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[{"role":"assistant"}]}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertTrue((invalidError["message"] as? String)?.hasPrefix("items[0] is not a valid response item:") == true)
+
+        let missing = try appServerResponse(
+            #"{"id":3,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid but missing thread"}]}]}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

@@ -314,8 +314,19 @@ public final class RolloutRecorder {
         if !fileManager.fileExists(atPath: path.path) {
             _ = fileManager.createFile(atPath: path.path, contents: nil)
         }
+        let size = (try? fileManager.attributesOfItem(atPath: path.path)[.size] as? NSNumber)?.uint64Value ?? 0
+        var needsSeparator = false
+        if size > 0 {
+            let readHandle = try FileHandle(forReadingFrom: path)
+            try readHandle.seek(toOffset: size - 1)
+            needsSeparator = readHandle.readData(ofLength: 1) != Data([0x0A])
+            try readHandle.close()
+        }
         let handle = try FileHandle(forWritingTo: path)
         try handle.seekToEnd()
+        if needsSeparator {
+            try handle.write(contentsOf: Data([0x0A]))
+        }
         return handle
     }
 
