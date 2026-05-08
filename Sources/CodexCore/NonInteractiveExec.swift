@@ -39,6 +39,7 @@ public enum NonInteractiveExec {
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
+        history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
     ) -> Prompt {
@@ -52,6 +53,7 @@ public enum NonInteractiveExec {
                 .fromTurnContext(context, shell: shell)
                 .asResponseItem()
         ]
+        input.append(contentsOf: history)
 
         let userInputs = imagePaths.map { UserInput.localImage(path: $0) } + [.text(prompt)]
         input.append(ResponseInputItem(userInputs: userInputs).responseItem())

@@ -194,6 +194,40 @@ public final class RolloutRecorder {
         ))
     }
 
+    public static func reconstructResponseHistory(
+        from rolloutItems: [RolloutRecordItem],
+        initialContext: [ResponseItem] = []
+    ) -> [ResponseItem] {
+        var history = initialContext
+
+        for item in rolloutItems {
+            switch item {
+            case let .responseItem(responseItem):
+                history.append(responseItem)
+
+            case let .compacted(compacted):
+                if let replacementHistory = compacted.replacementHistory {
+                    history = replacementHistory
+                } else {
+                    let snapshot = history
+                    history = Compact.buildCompactedHistory(
+                        initialContext: initialContext,
+                        userMessages: Compact.collectUserMessages(snapshot),
+                        summaryText: compacted.message
+                    )
+                }
+
+            case .sessionMeta,
+                 .turnContext,
+                 .eventMsg:
+                continue
+            }
+        }
+
+        ContextNormalization.normalizeHistory(&history)
+        return history
+    }
+
     public static func listConversations(
         codexHome: URL,
         pageSize: Int,

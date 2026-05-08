@@ -158,6 +158,49 @@ final class RolloutRecorderTests: XCTestCase {
             XCTAssertEqual(error as? RolloutRecorderError, .missingConversationID)
         }
     }
+
+    func testReconstructResponseHistoryUsesResponseItemsAndNormalizesToolPairs() {
+        let history = RolloutRecorder.reconstructResponseHistory(from: [
+            .sessionMeta(SessionMetaLine(meta: SessionMeta(
+                id: ConversationId(),
+                timestamp: "",
+                cwd: "",
+                originator: "",
+                cliVersion: ""
+            ))),
+            .responseItem(.message(role: "user", content: [.inputText(text: "run it")])),
+            .responseItem(.functionCall(name: "shell_command", arguments: "{}", callID: "call-1")),
+            .eventMsg(.warning(WarningEvent(message: "ignored")))
+        ])
+
+        XCTAssertEqual(history, [
+            .message(role: "user", content: [.inputText(text: "run it")]),
+            .functionCall(name: "shell_command", arguments: "{}", callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "aborted"))
+        ])
+    }
+
+    func testReconstructResponseHistoryAppliesCompactionReplacementAndFallback() {
+        let replacement: [ResponseItem] = [
+            .message(role: "user", content: [.inputText(text: "replacement")])
+        ]
+        XCTAssertEqual(
+            RolloutRecorder.reconstructResponseHistory(from: [
+                .responseItem(.message(role: "user", content: [.inputText(text: "old")])),
+                .compacted(CompactedItem(message: "summary", replacementHistory: replacement))
+            ]),
+            replacement
+        )
+
+        let rebuilt = RolloutRecorder.reconstructResponseHistory(from: [
+            .responseItem(.message(role: "user", content: [.inputText(text: "old request")])),
+            .compacted(CompactedItem(message: "summary"))
+        ])
+        XCTAssertEqual(rebuilt, [
+            .message(role: "user", content: [.inputText(text: "old request")]),
+            .message(role: "user", content: [.inputText(text: "summary")])
+        ])
+    }
 }
 
 private func rolloutLines(at path: URL) throws -> [RolloutLine] {

@@ -196,10 +196,29 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
             cwd: cwd
         )
 
-    case .resume:
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: exec resume runtime is not complete yet."
+    case let .resume(sessionID, last, promptResolution, outputSchema):
+        let codexHome = try CodexHome.find()
+        let resumeResolution = try ResumeCommandResolver.resolve(
+            CodexCLI.ResumeCommandRequest(sessionID: sessionID, last: last, all: false),
+            codexHome: codexHome
+        )
+        guard case let .session(session) = resumeResolution else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 0,
+                stdoutMessage: ResumeCommandFormatter.render(resumeResolution)
+            )
+        }
+        let initialHistory = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: session.path))
+        let responseHistory = RolloutRecorder.reconstructResponseHistory(from: initialHistory.rolloutItems)
+        return try await runNonInteractiveExec(
+            promptResolution: promptResolution,
+            outputSchema: outputSchema,
+            options: request.options,
+            arguments: request.arguments,
+            configOverrides: request.configOverrides,
+            cwd: cwd,
+            conversationID: session.conversationID,
+            history: responseHistory
         )
     }
 }
@@ -231,7 +250,9 @@ private func runNonInteractiveExec(
     options: CodexCLI.ExecCommandOptions,
     arguments: [String],
     configOverrides: CliConfigOverrides,
-    cwd: URL
+    cwd: URL,
+    conversationID: ConversationId = ConversationId(),
+    history: [ResponseItem] = []
 ) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
         cwd: cwd,
@@ -282,6 +303,7 @@ private func runNonInteractiveExec(
         approvalPolicy: approvalPolicy,
         sandboxPolicy: sandboxPolicy,
         shell: shell,
+        history: history,
         tools: configuredTools.map(\.spec),
         parallelToolCalls: modelFamily.supportsParallelToolCalls
     )
@@ -290,7 +312,6 @@ private func runNonInteractiveExec(
         cwd: cwd
     )
 
-    let conversationID = ConversationId()
     let client = ResponsesClient(
         transport: URLSessionAPITransport(),
         provider: provider,

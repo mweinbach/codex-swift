@@ -309,14 +309,16 @@ Source baseline inspected for this scaffold:
   - non-interactive `exec_command` can now keep long-running commands alive, return a session ID, and continue them through `write_stdin` with Rust-shaped unified exec output sections
 - Initial `codex-rs/exec/src/lib.rs` review operation dispatch
   - top-level `codex review ...` and `codex exec review ...` now resolve Rust-shaped review targets/prompts, reuse the non-interactive Responses tool loop, and use a local `git merge-base HEAD <branch>` when available for base-branch review prompts
+- Initial `codex-rs/exec/src/lib.rs` non-interactive resume continuation
+  - `codex exec resume ...` now resolves saved rollout targets, reconstructs persisted `ResponseItem` history including compaction replacement/fallback handling, appends the new user prompt after resume history, and continues the Responses tool loop under the saved conversation ID
 
 ## Known Gaps
 
 The executable is not functionally equivalent yet. Some commands have native runtime slices, while most registered commands still return a clear unimplemented status. The remaining major areas include:
 
 - interactive TUI runtime
-- non-interactive `exec resume` continuation and Rust-complete live tool orchestration
-- full resume continuation after rollout target resolution
+- Rust-complete non-interactive live tool orchestration
+- full interactive resume continuation after rollout target resolution
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
 - model-provider parity beyond the initial Responses/OpenAI provider/auth path
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring

@@ -30,6 +30,31 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(text, "ship it")
     }
 
+    func testMakePromptPlacesResumeHistoryBeforeNewUserInput() {
+        let history: [ResponseItem] = [
+            .message(role: "user", content: [.inputText(text: "previous request")]),
+            .message(role: "assistant", content: [.outputText(text: "previous answer")])
+        ]
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "continue",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            history: history
+        )
+
+        XCTAssertEqual(prompt.input.count, 4)
+        XCTAssertEqual(Array(prompt.input[1...2]), history)
+        guard case let .message(_, role, content) = prompt.input[3] else {
+            return XCTFail("expected user message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertEqual(content, [.inputText(text: "continue")])
+    }
+
     func testMakePromptAcceptsToolsAndParallelToolCalls() {
         let shellTool = ToolSpecFactory.createShellCommandTool()
         let prompt = NonInteractiveExec.makePrompt(
