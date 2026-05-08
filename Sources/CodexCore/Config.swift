@@ -7,35 +7,79 @@ public enum CodexConfigDefaults {
 }
 
 public struct CodexRuntimeConfig: Equatable, Sendable {
-    public let chatgptBaseURL: String
-    public let cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
-    public let forcedLoginMethod: ForcedLoginMethod?
-    public let forcedChatGPTWorkspaceID: String?
-    public let features: FeatureStates
-    public let mcpServers: [String: McpServerConfig]
-    public let mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
-    public let activeProfile: String?
-    public let projectRootMarkers: [String]
-    public let projectDocMaxBytes: Int
-    public let projectDocFallbackFilenames: [String]
+    public var model: String?
+    public var modelProvider: String?
+    public var approvalPolicy: AskForApproval?
+    public var sandboxMode: SandboxMode?
+    public var modelReasoningEffort: ReasoningEffort?
+    public var modelReasoningSummary: ReasoningSummary?
+    public var modelVerbosity: Verbosity?
+    public var chatgptBaseURL: String
+    public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
+    public var forcedLoginMethod: ForcedLoginMethod?
+    public var forcedChatGPTWorkspaceID: String?
+    public var experimentalInstructionsFile: String?
+    public var experimentalCompactPromptFile: String?
+    public var includeApplyPatchTool: Bool?
+    public var experimentalUseUnifiedExecTool: Bool?
+    public var experimentalUseFreeformApplyPatch: Bool?
+    public var toolsWebSearch: Bool?
+    public var toolsViewImage: Bool?
+    public var features: FeatureStates
+    public var mcpServers: [String: McpServerConfig]
+    public var mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
+    public var activeProfile: String?
+    public var projectRootMarkers: [String]
+    public var projectDocMaxBytes: Int
+    public var projectDocFallbackFilenames: [String]
+    public var ossProvider: String?
 
     public init(
+        model: String? = nil,
+        modelProvider: String? = nil,
+        approvalPolicy: AskForApproval? = nil,
+        sandboxMode: SandboxMode? = nil,
+        modelReasoningEffort: ReasoningEffort? = nil,
+        modelReasoningSummary: ReasoningSummary? = nil,
+        modelVerbosity: Verbosity? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
+        experimentalInstructionsFile: String? = nil,
+        experimentalCompactPromptFile: String? = nil,
+        includeApplyPatchTool: Bool? = nil,
+        experimentalUseUnifiedExecTool: Bool? = nil,
+        experimentalUseFreeformApplyPatch: Bool? = nil,
+        toolsWebSearch: Bool? = nil,
+        toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
         mcpServers: [String: McpServerConfig] = [:],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
         activeProfile: String? = nil,
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
-        projectDocFallbackFilenames: [String] = []
+        projectDocFallbackFilenames: [String] = [],
+        ossProvider: String? = nil
     ) {
+        self.model = model
+        self.modelProvider = modelProvider
+        self.approvalPolicy = approvalPolicy
+        self.sandboxMode = sandboxMode
+        self.modelReasoningEffort = modelReasoningEffort
+        self.modelReasoningSummary = modelReasoningSummary
+        self.modelVerbosity = modelVerbosity
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.experimentalInstructionsFile = experimentalInstructionsFile
+        self.experimentalCompactPromptFile = experimentalCompactPromptFile
+        self.includeApplyPatchTool = includeApplyPatchTool
+        self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
+        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.toolsWebSearch = toolsWebSearch
+        self.toolsViewImage = toolsViewImage
         self.features = features
         self.mcpServers = mcpServers
         self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
@@ -43,6 +87,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectRootMarkers = projectRootMarkers
         self.projectDocMaxBytes = projectDocMaxBytes
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
+        self.ossProvider = ossProvider
     }
 }
 
@@ -386,36 +431,14 @@ private struct ParsedCodexConfigToml {
     func resolvedConfig() throws -> CodexRuntimeConfig {
         var config = CodexRuntimeConfig()
 
-        if let baseURL = topLevel["chatgpt_base_url"] {
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: try Self.stringValue(baseURL, key: "chatgpt_base_url"),
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
-        }
+        try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
 
         if let authStore = topLevel["cli_auth_credentials_store"] {
             let rawMode = try Self.stringValue(authStore, key: "cli_auth_credentials_store")
             guard let mode = AuthCredentialsStoreMode(rawValue: rawMode) else {
                 throw CodexConfigLoadError.invalidAuthCredentialsStoreMode
             }
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: mode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
+            config.cliAuthCredentialsStoreMode = mode
         }
 
         if let forcedLoginMethod = topLevel["forced_login_method"] {
@@ -423,75 +446,25 @@ private struct ParsedCodexConfigToml {
             guard let method = ForcedLoginMethod(rawValue: rawMethod) else {
                 throw CodexConfigLoadError.invalidForcedLoginMethod
             }
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: method,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
+            config.forcedLoginMethod = method
         }
 
         if let workspaceID = topLevel["forced_chatgpt_workspace_id"] {
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: try Self.stringValue(workspaceID, key: "forced_chatgpt_workspace_id"),
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
+            config.forcedChatGPTWorkspaceID = try Self.stringValue(workspaceID, key: "forced_chatgpt_workspace_id")
         }
 
         if let projectRootMarkers = topLevel["project_root_markers"] {
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers"),
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
+            config.projectRootMarkers = try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers")
         }
 
         if let projectDocMaxBytes = topLevel["project_doc_max_bytes"] {
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: try Self.nonNegativeIntValue(projectDocMaxBytes, key: "project_doc_max_bytes"),
-                projectDocFallbackFilenames: config.projectDocFallbackFilenames
-            )
+            config.projectDocMaxBytes = try Self.nonNegativeIntValue(projectDocMaxBytes, key: "project_doc_max_bytes")
         }
 
         if let fallbackFilenames = topLevel["project_doc_fallback_filenames"] {
-            config = CodexRuntimeConfig(
-                chatgptBaseURL: config.chatgptBaseURL,
-                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                forcedLoginMethod: config.forcedLoginMethod,
-                forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                features: config.features,
-                activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers,
-                projectDocMaxBytes: config.projectDocMaxBytes,
-                projectDocFallbackFilenames: try Self.stringArrayValue(
-                    fallbackFilenames,
-                    key: "project_doc_fallback_filenames"
-                )
+            config.projectDocFallbackFilenames = try Self.stringArrayValue(
+                fallbackFilenames,
+                key: "project_doc_fallback_filenames"
             )
         }
 
@@ -501,31 +474,12 @@ private struct ParsedCodexConfigToml {
                 throw CodexConfigLoadError.profileNotFound(activeProfile)
             }
 
-            if let baseURL = profile["chatgpt_base_url"] {
-                config = CodexRuntimeConfig(
-                    chatgptBaseURL: try Self.stringValue(baseURL, key: "profiles.\(activeProfile).chatgpt_base_url"),
-                    cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                    forcedLoginMethod: config.forcedLoginMethod,
-                    forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                    features: config.features,
-                    activeProfile: activeProfile,
-                    projectRootMarkers: config.projectRootMarkers,
-                    projectDocMaxBytes: config.projectDocMaxBytes,
-                    projectDocFallbackFilenames: config.projectDocFallbackFilenames
-                )
-            } else {
-                config = CodexRuntimeConfig(
-                    chatgptBaseURL: config.chatgptBaseURL,
-                    cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-                    forcedLoginMethod: config.forcedLoginMethod,
-                    forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-                    features: config.features,
-                    activeProfile: activeProfile,
-                    projectRootMarkers: config.projectRootMarkers,
-                    projectDocMaxBytes: config.projectDocMaxBytes,
-                    projectDocFallbackFilenames: config.projectDocFallbackFilenames
-                )
-            }
+            config.activeProfile = activeProfile
+            try Self.applyRuntimeFields(
+                from: profile,
+                to: &config,
+                keyPrefix: "profiles.\(activeProfile)."
+            )
         }
 
         var featureStates = FeatureStates.withDefaults()
@@ -545,19 +499,9 @@ private struct ParsedCodexConfigToml {
             mcpOAuthCredentialsStoreMode = .auto
         }
 
-        config = CodexRuntimeConfig(
-            chatgptBaseURL: config.chatgptBaseURL,
-            cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
-            forcedLoginMethod: config.forcedLoginMethod,
-            forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
-            features: featureStates,
-            mcpServers: mcpServers,
-            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
-            activeProfile: config.activeProfile,
-            projectRootMarkers: config.projectRootMarkers,
-            projectDocMaxBytes: config.projectDocMaxBytes,
-            projectDocFallbackFilenames: config.projectDocFallbackFilenames
-        )
+        config.features = featureStates
+        config.mcpServers = mcpServers
+        config.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
 
         return config
     }
@@ -569,20 +513,140 @@ private struct ParsedCodexConfigToml {
         return try Self.stringArrayValue(value, key: "project_root_markers")
     }
 
+    private static func applyRuntimeFields(
+        from values: [String: ConfigValue],
+        to config: inout CodexRuntimeConfig,
+        keyPrefix: String
+    ) throws {
+        if let model = values["model"] {
+            config.model = try stringValue(model, key: "\(keyPrefix)model")
+        }
+        if let provider = values["model_provider"] {
+            config.modelProvider = try stringValue(provider, key: "\(keyPrefix)model_provider")
+        }
+        if let approvalPolicy = values["approval_policy"] {
+            config.approvalPolicy = try stringEnumValue(
+                AskForApproval.self,
+                approvalPolicy,
+                key: "\(keyPrefix)approval_policy"
+            )
+        }
+        if let sandboxMode = values["sandbox_mode"] {
+            config.sandboxMode = try stringEnumValue(
+                SandboxMode.self,
+                sandboxMode,
+                key: "\(keyPrefix)sandbox_mode"
+            )
+        }
+        if let effort = values["model_reasoning_effort"] {
+            config.modelReasoningEffort = try stringEnumValue(
+                ReasoningEffort.self,
+                effort,
+                key: "\(keyPrefix)model_reasoning_effort"
+            )
+        }
+        if let summary = values["model_reasoning_summary"] {
+            config.modelReasoningSummary = try stringEnumValue(
+                ReasoningSummary.self,
+                summary,
+                key: "\(keyPrefix)model_reasoning_summary"
+            )
+        }
+        if let verbosity = values["model_verbosity"] {
+            config.modelVerbosity = try stringEnumValue(
+                Verbosity.self,
+                verbosity,
+                key: "\(keyPrefix)model_verbosity"
+            )
+        }
+        if let baseURL = values["chatgpt_base_url"] {
+            config.chatgptBaseURL = try stringValue(baseURL, key: "\(keyPrefix)chatgpt_base_url")
+        }
+        if let instructionsFile = values["experimental_instructions_file"] {
+            config.experimentalInstructionsFile = try stringValue(
+                instructionsFile,
+                key: "\(keyPrefix)experimental_instructions_file"
+            )
+        }
+        if let compactPromptFile = values["experimental_compact_prompt_file"] {
+            config.experimentalCompactPromptFile = try stringValue(
+                compactPromptFile,
+                key: "\(keyPrefix)experimental_compact_prompt_file"
+            )
+        }
+        if let includeApplyPatchTool = values["include_apply_patch_tool"] {
+            config.includeApplyPatchTool = try boolValue(
+                includeApplyPatchTool,
+                key: "\(keyPrefix)include_apply_patch_tool"
+            )
+        }
+        if let unifiedExecTool = values["experimental_use_unified_exec_tool"] {
+            config.experimentalUseUnifiedExecTool = try boolValue(
+                unifiedExecTool,
+                key: "\(keyPrefix)experimental_use_unified_exec_tool"
+            )
+        }
+        if let freeformApplyPatch = values["experimental_use_freeform_apply_patch"] {
+            config.experimentalUseFreeformApplyPatch = try boolValue(
+                freeformApplyPatch,
+                key: "\(keyPrefix)experimental_use_freeform_apply_patch"
+            )
+        }
+        if let webSearch = values["tools_web_search"] {
+            config.toolsWebSearch = try boolValue(webSearch, key: "\(keyPrefix)tools_web_search")
+        }
+        if let viewImage = values["tools_view_image"] {
+            config.toolsViewImage = try boolValue(viewImage, key: "\(keyPrefix)tools_view_image")
+        }
+        if let ossProvider = values["oss_provider"] {
+            config.ossProvider = try stringValue(ossProvider, key: "\(keyPrefix)oss_provider")
+        }
+    }
+
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
-        key == "chatgpt_base_url"
+        key == "model"
+            || key == "model_provider"
+            || key == "approval_policy"
+            || key == "sandbox_mode"
+            || key == "model_reasoning_effort"
+            || key == "model_reasoning_summary"
+            || key == "model_verbosity"
+            || key == "chatgpt_base_url"
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
             || key == "forced_chatgpt_workspace_id"
+            || key == "experimental_instructions_file"
+            || key == "experimental_compact_prompt_file"
+            || key == "include_apply_patch_tool"
+            || key == "experimental_use_unified_exec_tool"
+            || key == "experimental_use_freeform_apply_patch"
+            || key == "tools_web_search"
+            || key == "tools_view_image"
             || key == "mcp_oauth_credentials_store"
             || key == "profile"
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
             || key == "project_doc_fallback_filenames"
+            || key == "oss_provider"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {
-        key == "chatgpt_base_url"
+        key == "model"
+            || key == "model_provider"
+            || key == "approval_policy"
+            || key == "sandbox_mode"
+            || key == "model_reasoning_effort"
+            || key == "model_reasoning_summary"
+            || key == "model_verbosity"
+            || key == "chatgpt_base_url"
+            || key == "experimental_instructions_file"
+            || key == "experimental_compact_prompt_file"
+            || key == "include_apply_patch_tool"
+            || key == "experimental_use_unified_exec_tool"
+            || key == "experimental_use_freeform_apply_patch"
+            || key == "tools_web_search"
+            || key == "tools_view_image"
+            || key == "oss_provider"
     }
 
     private static func stringValue(_ value: ConfigValue, key: String) throws -> String {
@@ -597,6 +661,18 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidBoolValue(key)
         }
         return bool
+    }
+
+    private static func stringEnumValue<T: RawRepresentable>(
+        _ type: T.Type,
+        _ value: ConfigValue,
+        key: String
+    ) throws -> T where T.RawValue == String {
+        let rawValue = try stringValue(value, key: key)
+        guard let enumValue = type.init(rawValue: rawValue) else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return enumValue
     }
 
     private static func stringArrayValue(_ value: ConfigValue, key: String) throws -> [String] {

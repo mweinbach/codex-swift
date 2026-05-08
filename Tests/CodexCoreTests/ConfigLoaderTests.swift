@@ -7,10 +7,24 @@ final class ConfigLoaderTests: XCTestCase {
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
+        XCTAssertNil(config.model)
+        XCTAssertNil(config.modelProvider)
+        XCTAssertNil(config.approvalPolicy)
+        XCTAssertNil(config.sandboxMode)
+        XCTAssertNil(config.modelReasoningEffort)
+        XCTAssertNil(config.modelReasoningSummary)
+        XCTAssertNil(config.modelVerbosity)
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
         XCTAssertNil(config.forcedChatGPTWorkspaceID)
+        XCTAssertNil(config.experimentalInstructionsFile)
+        XCTAssertNil(config.experimentalCompactPromptFile)
+        XCTAssertNil(config.includeApplyPatchTool)
+        XCTAssertNil(config.experimentalUseUnifiedExecTool)
+        XCTAssertNil(config.experimentalUseFreeformApplyPatch)
+        XCTAssertNil(config.toolsWebSearch)
+        XCTAssertNil(config.toolsViewImage)
         XCTAssertTrue(config.features.isEnabled(.parallel))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertEqual(config.mcpServers, [:])
@@ -19,25 +33,56 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.projectRootMarkers, [".git"])
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
         XCTAssertEqual(config.projectDocFallbackFilenames, [])
+        XCTAssertNil(config.ossProvider)
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
         let dir = try CoreTemporaryDirectory()
         try """
+        model = "gpt-5.4"
+        model_provider = "openai-responses"
+        approval_policy = "on-failure"
+        sandbox_mode = "workspace-write"
+        model_reasoning_effort = "high"
+        model_reasoning_summary = "detailed"
+        model_verbosity = "low"
         chatgpt_base_url = "https://example.test/backend-api/"
         cli_auth_credentials_store = "auto"
         forced_login_method = "api"
         forced_chatgpt_workspace_id = "org_workspace"
+        experimental_instructions_file = "instructions.md"
+        experimental_compact_prompt_file = "compact.md"
+        include_apply_patch_tool = true
+        experimental_use_unified_exec_tool = true
+        experimental_use_freeform_apply_patch = false
+        tools_web_search = true
+        tools_view_image = false
         mcp_oauth_credentials_store = "file"
+        oss_provider = "ollama"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
+        XCTAssertEqual(config.model, "gpt-5.4")
+        XCTAssertEqual(config.modelProvider, "openai-responses")
+        XCTAssertEqual(config.approvalPolicy, .onFailure)
+        XCTAssertEqual(config.sandboxMode, .workspaceWrite)
+        XCTAssertEqual(config.modelReasoningEffort, .high)
+        XCTAssertEqual(config.modelReasoningSummary, .detailed)
+        XCTAssertEqual(config.modelVerbosity, .low)
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
+        XCTAssertEqual(config.experimentalInstructionsFile, "instructions.md")
+        XCTAssertEqual(config.experimentalCompactPromptFile, "compact.md")
+        XCTAssertEqual(config.includeApplyPatchTool, true)
+        XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
+        XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
+        XCTAssertEqual(config.toolsWebSearch, true)
+        XCTAssertEqual(config.toolsViewImage, false)
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
+        XCTAssertEqual(config.ossProvider, "ollama")
     }
 
     func testLoadsMcpServersIntoRuntimeConfig() throws {
@@ -143,16 +188,76 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://profile.example/backend-api/")
     }
 
+    func testProfileRuntimeFieldsOverrideTopLevelValues() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+        model = "top-model"
+        model_provider = "top-provider"
+        approval_policy = "on-request"
+        sandbox_mode = "read-only"
+        model_reasoning_effort = "low"
+        model_reasoning_summary = "concise"
+        model_verbosity = "medium"
+        experimental_instructions_file = "top-instructions.md"
+        experimental_compact_prompt_file = "top-compact.md"
+        include_apply_patch_tool = true
+        experimental_use_unified_exec_tool = false
+        experimental_use_freeform_apply_patch = false
+        tools_web_search = false
+        tools_view_image = false
+        oss_provider = "top-oss"
+
+        [profiles.work]
+        model = "profile-model"
+        model_provider = "profile-provider"
+        approval_policy = "never"
+        sandbox_mode = "danger-full-access"
+        model_reasoning_effort = "xhigh"
+        model_reasoning_summary = "auto"
+        model_verbosity = "high"
+        experimental_instructions_file = "profile-instructions.md"
+        experimental_compact_prompt_file = "profile-compact.md"
+        include_apply_patch_tool = false
+        experimental_use_unified_exec_tool = true
+        experimental_use_freeform_apply_patch = true
+        tools_web_search = true
+        tools_view_image = true
+        oss_provider = "profile-oss"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.activeProfile, "work")
+        XCTAssertEqual(config.model, "profile-model")
+        XCTAssertEqual(config.modelProvider, "profile-provider")
+        XCTAssertEqual(config.approvalPolicy, .never)
+        XCTAssertEqual(config.sandboxMode, .dangerFullAccess)
+        XCTAssertEqual(config.modelReasoningEffort, .xhigh)
+        XCTAssertEqual(config.modelReasoningSummary, .auto)
+        XCTAssertEqual(config.modelVerbosity, .high)
+        XCTAssertEqual(config.experimentalInstructionsFile, "profile-instructions.md")
+        XCTAssertEqual(config.experimentalCompactPromptFile, "profile-compact.md")
+        XCTAssertEqual(config.includeApplyPatchTool, false)
+        XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
+        XCTAssertEqual(config.experimentalUseFreeformApplyPatch, true)
+        XCTAssertEqual(config.toolsWebSearch, true)
+        XCTAssertEqual(config.toolsViewImage, true)
+        XCTAssertEqual(config.ossProvider, "profile-oss")
+    }
+
     func testCLIOverridesCanSelectAndPatchProfile() throws {
         let dir = try CoreTemporaryDirectory()
         try """
         profile = "default"
+        model = "top-model"
         chatgpt_base_url = "https://top-level.example/backend-api/"
 
         [profiles.default]
         chatgpt_base_url = "https://default.example/backend-api/"
 
         [profiles.work]
+        model = "work-model"
         chatgpt_base_url = "https://work.example/backend-api/"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
@@ -160,6 +265,9 @@ final class ConfigLoaderTests: XCTestCase {
             codexHome: dir.url,
             overrides: CliConfigOverrides(rawOverrides: [
                 "profile=\"work\"",
+                "model=\"cli-model\"",
+                "profiles.work.model=\"profile-cli-model\"",
+                "profiles.work.approval_policy=\"never\"",
                 "profiles.work.chatgpt_base_url=\"https://override.example/backend-api/\"",
                 "cli_auth_credentials_store=\"keyring\"",
                 "forced_login_method=\"chatgpt\"",
@@ -169,6 +277,8 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(config.activeProfile, "work")
+        XCTAssertEqual(config.model, "profile-cli-model")
+        XCTAssertEqual(config.approvalPolicy, .never)
         XCTAssertEqual(config.chatgptBaseURL, "https://override.example/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .keyring)
         XCTAssertEqual(config.forcedLoginMethod, .chatgpt)
@@ -230,7 +340,7 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
-    func testProfileWithoutApplyRelevantKeysFallsBackToTopLevel() throws {
+    func testProfileRuntimeKeysApplyWhileChatGPTBaseURLFallsBackToTopLevel() throws {
         let dir = try CoreTemporaryDirectory()
         try """
         profile = "work"
@@ -243,6 +353,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.activeProfile, "work")
+        XCTAssertEqual(config.model, "o3")
         XCTAssertEqual(config.chatgptBaseURL, "https://top-level.example/backend-api/")
     }
 
