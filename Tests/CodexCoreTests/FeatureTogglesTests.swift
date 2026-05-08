@@ -247,6 +247,40 @@ final class FeatureTogglesTests: XCTestCase {
             """
         )
     }
+
+    func testConfigFeatureEditorClearsRootDefaultFalseFeatureOnDisable() {
+        let input = """
+        [features]
+        runtime_metrics = true
+        shell_tool = true
+
+        """
+
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "runtime_metrics", enabled: false),
+            """
+            [features]
+            shell_tool = true
+
+            """
+        )
+
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: "", feature: "runtime_metrics", enabled: false),
+            ""
+        )
+    }
+
+    func testConfigFeatureEditorPersistsRootDefaultTrueFeatureOnDisable() {
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: "", feature: "shell_tool", enabled: false),
+            """
+            [features]
+            shell_tool = false
+
+            """
+        )
+    }
 }
 
 private final class FeatureToggleTemporaryDirectory {

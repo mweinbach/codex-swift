@@ -38,6 +38,10 @@ public enum ConfigFeatureEditor {
         enabled: Bool,
         profile: String? = nil
     ) -> String {
+        if shouldClearRootFeature(feature: feature, enabled: enabled, profile: profile) {
+            return clearFeature(in: contents, feature: feature, profile: profile)
+        }
+
         let sectionName = featureSectionName(profile: profile)
         let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var output: [String] = []
@@ -89,6 +93,45 @@ public enum ConfigFeatureEditor {
             result.append("\n")
         }
         return result
+    }
+
+    private static func clearFeature(in contents: String, feature: String, profile: String?) -> String {
+        let sectionName = featureSectionName(profile: profile)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var output: [String] = []
+        var inTargetSection = false
+
+        for line in lines {
+            let trimmed = stripComment(from: line).trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("[") {
+                inTargetSection = trimmed == "[\(sectionName)]"
+                output.append(line)
+                continue
+            }
+
+            if inTargetSection, let equalsIndex = firstEqualsIndex(in: trimmed) {
+                let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if key == tomlKey(feature) || key == feature {
+                    continue
+                }
+            }
+            output.append(line)
+        }
+
+        var result = trimTrailingBlankLines(output.joined(separator: "\n"))
+        if !result.isEmpty, !result.hasSuffix("\n") {
+            result.append("\n")
+        }
+        return result
+    }
+
+    private static func shouldClearRootFeature(feature: String, enabled: Bool, profile: String?) -> Bool {
+        guard !enabled, profile == nil else {
+            return false
+        }
+        return FeatureRegistry.specs
+            .first(where: { $0.key == feature })
+            .map { !$0.defaultEnabled } ?? false
     }
 
     private static func featureSectionName(profile: String?) -> String {
