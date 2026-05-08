@@ -98,6 +98,8 @@ Source baseline inspected for this scaffold:
   - WSL detection and Windows drive path normalization for update command execution
 - `codex-rs/tui/src/update_action.rs` and CLI exit-message helpers from `codex-rs/cli/src/main.rs`
   - update action command argument rendering/detection and token-usage/resume-hint exit message formatting
+- `codex-rs/tui/src/updates.rs` pure update-version helpers
+  - version cache model, cask/latest-tag parsing, plain semver comparison, stale-cache detection, popup dismissal logic, and version-file path
 
 ## Known Gaps
 
