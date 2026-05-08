@@ -386,6 +386,54 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func threadStartResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let model = stringParam(params?["model"])
+            ?? runtimeConfig.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let modelProvider = stringParam(params?["modelProvider"])
+            ?? runtimeConfig.selectedModelProviderID
+        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+            ?? runtimeConfig.approvalPolicy
+            ?? .unlessTrusted
+        let sandboxMode = sandboxModeParam(params?["sandbox"])
+            ?? runtimeConfig.sandboxMode
+            ?? .readOnly
+        let sandbox = sandboxPolicy(for: sandboxMode)
+        let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let conversationID = ConversationId()
+        let recorder = try RolloutRecorder.create(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            instructions: stringParam(params?["developerInstructions"]),
+            source: .mcp,
+            originator: "codex_app_server",
+            cliVersion: configuration.version,
+            modelProvider: modelProvider
+        )
+        try recorder.shutdown()
+
+        let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
+        let thread = try threadObject(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider
+        )
+        return [
+            "thread": thread,
+            "model": model,
+            "modelProvider": modelProvider,
+            "cwd": cwd.path,
+            "approvalPolicy": approvalPolicy.rawValue,
+            "sandbox": try jsonObject(sandbox),
+            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func threadResumeResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -654,6 +702,15 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to login to MCP server '\(name)': \(error)")
         }
+    }
+
+    fileprivate static func threadStartedNotification(thread: [String: Any]) -> [String: Any] {
+        [
+            "method": "thread/started",
+            "params": [
+                "thread": thread
+            ]
+        ]
     }
 
     fileprivate static func skillsListResult(
@@ -1377,6 +1434,14 @@ public enum CodexAppServer {
 
     private static func stringParam(_ value: Any?) -> String? {
         value as? String
+    }
+
+    private static func approvalPolicyParam(_ value: Any?) -> AskForApproval? {
+        stringParam(value).flatMap(AskForApproval.init(rawValue:))
+    }
+
+    private static func sandboxModeParam(_ value: Any?) -> SandboxMode? {
+        stringParam(value).flatMap(SandboxMode.init(rawValue:))
     }
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
@@ -2533,6 +2598,12 @@ final class CodexAppServerMessageProcessor {
         } else {
             do {
                 switch method {
+                case "thread/start":
+                    let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result)
+                    if let thread = result["thread"] as? [String: Any] {
+                        notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
+                    }
                 case "thread/list":
                     response = CodexAppServer.responseObject(
                         id: id,
