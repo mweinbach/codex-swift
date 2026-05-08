@@ -58,15 +58,21 @@ public struct McpOAuthClientConfig: Equatable, Sendable {
 }
 
 public enum McpOAuthAuthorizationError: Error, Equatable, CustomStringConvertible, Sendable {
+    case internalError(String)
     case invalidScope(String)
     case registrationFailed(String)
+    case tokenExchangeFailed(String)
 
     public var description: String {
         switch self {
+        case let .internalError(message):
+            return "Internal error: \(message)"
         case let .invalidScope(scope):
             return "Invalid scope: \(scope)"
         case let .registrationFailed(message):
             return "Registration failed: \(message)"
+        case let .tokenExchangeFailed(message):
+            return "OAuth token exchange failed: \(message)"
         }
     }
 }
@@ -323,10 +329,14 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
     }
 
     private static func formEncode(_ value: String) -> String {
+        percentEncode(value, spaceAsPlus: true)
+    }
+
+    private static func percentEncode(_ value: String, spaceAsPlus: Bool) -> String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
-        return value.addingPercentEncoding(withAllowedCharacters: allowed)?
-            .replacingOccurrences(of: "%20", with: "+") ?? value
+        let encoded = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+        return spaceAsPlus ? encoded.replacingOccurrences(of: "%20", with: "+") : encoded
     }
 
     public static func generateCSRFToken() throws -> String {
@@ -336,6 +346,82 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
             throw PKCEError.randomBytesFailed(status)
         }
         return PKCE.base64URLEncodedNoPadding(Data(bytes))
+    }
+
+    public func exchangeCodeForToken(
+        code: String,
+        state: String,
+        transport: McpOAuthDiscoveryTransport? = nil
+    ) async throws -> McpOAuthTokenResponse {
+        guard state == csrfToken else {
+            throw McpOAuthAuthorizationError.internalError("CSRF token mismatch")
+        }
+        guard let tokenURL = URL(string: metadata.tokenEndpoint) else {
+            throw McpOAuthAuthorizationError.tokenExchangeFailed("Invalid token URL: \(metadata.tokenEndpoint)")
+        }
+
+        let send = transport ?? McpOAuthDiscovery.urlSessionTransport
+        let response: McpOAuthDiscoveryHTTPResponse
+        do {
+            response = try await send(tokenRequest(url: tokenURL, code: code))
+        } catch {
+            throw McpOAuthAuthorizationError.tokenExchangeFailed(String(describing: error))
+        }
+
+        guard (200..<300).contains(response.statusCode) else {
+            let body = String(data: response.body, encoding: .utf8) ?? ""
+            throw McpOAuthAuthorizationError.tokenExchangeFailed("HTTP \(response.statusCode): \(body)")
+        }
+
+        do {
+            return try JSONDecoder().decode(McpOAuthTokenResponse.self, from: response.body)
+        } catch {
+            throw McpOAuthAuthorizationError.tokenExchangeFailed(String(describing: error))
+        }
+    }
+
+    public func storedTokens(
+        serverName: String,
+        serverURL: String,
+        tokenResponse: McpOAuthTokenResponse,
+        now: Date = Date()
+    ) -> McpOAuthStoredTokens {
+        McpOAuthStoredTokens(
+            serverName: serverName,
+            url: serverURL,
+            clientID: clientConfig.clientID,
+            tokenResponse: tokenResponse,
+            expiresAt: McpOAuthCredentialStore.computeExpiresAtMillis(tokenResponse: tokenResponse, now: now)
+        )
+    }
+
+    private func tokenRequest(url: URL, code: String) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: McpOAuthDiscovery.discoveryTimeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        var params = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("code_verifier", pkceVerifier)
+        ]
+
+        if let clientSecret = clientConfig.clientSecret {
+            let encodedClientID = Self.percentEncode(clientConfig.clientID, spaceAsPlus: false)
+            let encodedClientSecret = Self.percentEncode(clientSecret, spaceAsPlus: false)
+            let credentials = Data("\(encodedClientID):\(encodedClientSecret)".utf8).base64EncodedString()
+            request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        } else {
+            params.append(("client_id", clientConfig.clientID))
+        }
+
+        params.append(("redirect_uri", redirectURI))
+        request.httpBody = params
+            .map { "\(Self.formEncode($0.0))=\(Self.formEncode($0.1))" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        return request
     }
 }
 

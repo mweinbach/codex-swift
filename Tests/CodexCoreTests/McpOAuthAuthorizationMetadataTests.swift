@@ -323,6 +323,100 @@ final class McpOAuthAuthorizationMetadataTests: XCTestCase {
             )
         }
     }
+
+    func testAuthorizationSessionExchangesCodeWithBasicAuthWhenSecretIsPresent() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/token": .init(
+                statusCode: 200,
+                body: Data(#"{"access_token":"access-token","token_type":"bearer","expires_in":3600,"refresh_token":"refresh-token","scope":"read write"}"#.utf8)
+            )
+        ])
+        let session = sampleAuthorizationSession(clientSecret: "secret")
+
+        let token = try await session.exchangeCodeForToken(
+            code: "auth-code",
+            state: "csrf",
+            transport: { request in await probe.handle(request) }
+        )
+
+        XCTAssertEqual(token, McpOAuthTokenResponse(
+            accessToken: "access-token",
+            expiresIn: 3_600,
+            refreshToken: "refresh-token",
+            scopes: ["read", "write"]
+        ))
+        let requests = await probe.requests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertEqual(request.hostPath, "auth.example/token")
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.headers["Accept"], "application/json")
+        XCTAssertEqual(request.headers["Content-Type"], "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.headers["Authorization"], "Basic Y2xpZW50LWlkOnNlY3JldA==")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            "grant_type=authorization_code&code=auth-code&code_verifier=verifier&redirect_uri=http%3A%2F%2F127.0.0.1%3A123%2Fcallback"
+        )
+    }
+
+    func testAuthorizationSessionExchangesCodeWithClientIDForPublicClient() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/token": .init(
+                statusCode: 200,
+                body: Data(#"{"access_token":"access-token","token_type":"bearer"}"#.utf8)
+            )
+        ])
+        let session = sampleAuthorizationSession(clientSecret: nil)
+
+        _ = try await session.exchangeCodeForToken(
+            code: "auth code",
+            state: "csrf",
+            transport: { request in await probe.handle(request) }
+        )
+
+        let requests = await probe.requests()
+        let request = try XCTUnwrap(requests.last)
+        XCTAssertNil(request.headers["Authorization"])
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            "grant_type=authorization_code&code=auth+code&code_verifier=verifier&client_id=client-id&redirect_uri=http%3A%2F%2F127.0.0.1%3A123%2Fcallback"
+        )
+    }
+
+    func testAuthorizationSessionRejectsMismatchedCSRFState() async throws {
+        do {
+            _ = try await sampleAuthorizationSession(clientSecret: nil).exchangeCodeForToken(
+                code: "auth-code",
+                state: "wrong",
+                transport: { _ in McpOAuthDiscoveryHTTPResponse(statusCode: 500, body: Data()) }
+            )
+            XCTFail("exchange should fail")
+        } catch {
+            XCTAssertEqual(String(describing: error), "Internal error: CSRF token mismatch")
+        }
+    }
+
+    func testAuthorizationSessionBuildsStoredTokensForPersistence() {
+        let token = McpOAuthTokenResponse(
+            accessToken: "access-token",
+            expiresIn: 3_600,
+            refreshToken: "refresh-token",
+            scopes: ["read"]
+        )
+        let stored = sampleAuthorizationSession(clientSecret: nil).storedTokens(
+            serverName: "linear",
+            serverURL: "https://linear.example/mcp",
+            tokenResponse: token,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(stored, McpOAuthStoredTokens(
+            serverName: "linear",
+            url: "https://linear.example/mcp",
+            clientID: "client-id",
+            tokenResponse: token,
+            expiresAt: 4_600_000
+        ))
+    }
 }
 
 private struct RecordedAuthorizationMetadataRequest: Equatable, Sendable {
@@ -387,5 +481,20 @@ private func sampleAuthorizationMetadata(
         registrationEndpoint: registrationEndpoint,
         responseTypesSupported: responseTypesSupported,
         clientIDMetadataDocumentSupported: clientIDMetadataDocumentSupported
+    )
+}
+
+private func sampleAuthorizationSession(clientSecret: String?) -> McpOAuthAuthorizationSession {
+    McpOAuthAuthorizationSession(
+        metadata: sampleAuthorizationMetadata(),
+        clientConfig: McpOAuthClientConfig(
+            clientID: "client-id",
+            clientSecret: clientSecret,
+            redirectURI: "http://127.0.0.1:123/callback"
+        ),
+        authURL: "https://auth.example/authorize",
+        redirectURI: "http://127.0.0.1:123/callback",
+        csrfToken: "csrf",
+        pkceVerifier: "verifier"
     )
 }
