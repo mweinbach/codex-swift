@@ -136,6 +136,8 @@ Source baseline inspected for this scaffold:
   - retry backoff math with jitter seam, server error-message extraction, debug panic/log helper, and relative path resolution
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
+- `codex-rs/core/src/model_provider_info.rs` plus provider URL/Azure helpers from `codex-rs/codex-api/src/provider.rs`
+  - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, and Azure Responses endpoint detection
 - `codex-rs/common/src/config_summary.rs`
   - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
 - `codex-rs/tui/src/additional_dirs.rs`
