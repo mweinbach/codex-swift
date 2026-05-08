@@ -327,7 +327,7 @@ Source baseline inspected for this scaffold:
 - URLSession transport behavior from `codex-rs/codex-client/src/{request,transport,error}.rs`
   - API request to URLRequest conversion, JSON body encoding, content-type defaults, timeout propagation, success response capture, non-2xx HTTP error mapping with headers/body, URL build errors, URL timeout mapping, injectable buffered stream compatibility, and live byte-stream responses via `URLSession.bytes(for:)`
 - `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
-  - PNG/JPEG local image loading, bounds-preserving resize to 2048x2048, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
+  - PNG/JPEG/GIF local image loading, bounds-preserving resize to 2048x2048, GIF-to-PNG prompt transcoding, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 - `codex-rs/utils/readiness/src/lib.rs`
   - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, and Rust-matching readiness error strings
 - `codex-rs/cloud-tasks-client/src/api.rs` and `codex-rs/cloud-tasks-client/src/mock.rs`

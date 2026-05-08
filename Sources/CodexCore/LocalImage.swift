@@ -77,7 +77,7 @@ public enum LocalImageProcessor {
         let width = image.width
         let height = image.height
 
-        if width <= maxWidth && height <= maxHeight {
+        if width <= maxWidth && height <= maxHeight, inputFormat.canPreserveSourceBytes {
             return EncodedImage(
                 bytes: fileBytes,
                 mime: inputFormat.mime,
@@ -86,18 +86,22 @@ public enum LocalImageProcessor {
             )
         }
 
-        let resizedSize = fittingSize(width: width, height: height)
+        let resizedSize = if width <= maxWidth && height <= maxHeight {
+            (width: width, height: height)
+        } else {
+            fittingSize(width: width, height: height)
+        }
         let resized = try resize(
             image,
             width: resizedSize.width,
             height: resizedSize.height,
-            outputFormat: inputFormat
+            outputFormat: inputFormat.promptOutputFormat
         )
-        let bytes = try encode(resized, format: inputFormat)
+        let bytes = try encode(resized, format: inputFormat.promptOutputFormat)
 
         return EncodedImage(
             bytes: bytes,
-            mime: inputFormat.mime,
+            mime: inputFormat.promptOutputFormat.mime,
             width: resized.width,
             height: resized.height
         )
@@ -163,7 +167,8 @@ public enum LocalImageProcessor {
         switch outputFormat {
         case .jpeg:
             bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
-        case .png:
+        case .png,
+             .gif:
             bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         }
 
@@ -208,7 +213,8 @@ public enum LocalImageProcessor {
         switch format {
         case .jpeg:
             options = [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary
-        case .png:
+        case .png,
+             .gif:
             options = nil
         }
 
@@ -227,6 +233,7 @@ public enum LocalImageProcessor {
 private enum ImageFileFormat: CustomStringConvertible {
     case jpeg
     case png
+    case gif
 
     init?(fileBytes: Data) {
         if fileBytes.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
@@ -237,6 +244,10 @@ private enum ImageFileFormat: CustomStringConvertible {
                   fileBytes[fileBytes.index(fileBytes.startIndex, offsetBy: 2)] == 0xFF
         {
             self = .jpeg
+        } else if fileBytes.starts(with: Array("GIF87a".utf8))
+            || fileBytes.starts(with: Array("GIF89a".utf8))
+        {
+            self = .gif
         } else {
             return nil
         }
@@ -248,6 +259,8 @@ private enum ImageFileFormat: CustomStringConvertible {
             "image/jpeg"
         case .png:
             "image/png"
+        case .gif:
+            "image/gif"
         }
     }
 
@@ -257,6 +270,28 @@ private enum ImageFileFormat: CustomStringConvertible {
             UTType.jpeg.identifier
         case .png:
             UTType.png.identifier
+        case .gif:
+            UTType.gif.identifier
+        }
+    }
+
+    var canPreserveSourceBytes: Bool {
+        switch self {
+        case .jpeg,
+             .png:
+            true
+        case .gif:
+            false
+        }
+    }
+
+    var promptOutputFormat: ImageFileFormat {
+        switch self {
+        case .jpeg,
+             .png:
+            self
+        case .gif:
+            .png
         }
     }
 
@@ -266,6 +301,8 @@ private enum ImageFileFormat: CustomStringConvertible {
             "Jpeg"
         case .png:
             "Png"
+        case .gif:
+            "Gif"
         }
     }
 }

@@ -198,6 +198,22 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(processed.mime, "image/png")
     }
 
+    func testLocalImageGIFTranscodesToPNGWithoutUpscalingLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("small.gif")
+        let original = try writeImage(width: 64, height: 32, type: UTType.gif.identifier, to: path)
+
+        let processed = try LocalImageProcessor.loadAndResizeToFit(path: path)
+        let dimensions = try imageDimensions(processed.bytes)
+
+        XCTAssertNotEqual(processed.bytes, original)
+        XCTAssertEqual(processed.mime, "image/png")
+        XCTAssertEqual(processed.width, 64)
+        XCTAssertEqual(processed.height, 32)
+        XCTAssertEqual(dimensions.width, 64)
+        XCTAssertEqual(dimensions.height, 32)
+    }
+
     func testLocalImageReadErrorAddsPlaceholder() throws {
         let temp = try TemporaryDirectory()
         let missingPath = temp.url.appendingPathComponent("missing-image.png")
@@ -566,6 +582,10 @@ final class ResponseModelsTests: XCTestCase {
     }
 
     private func writePNG(width: Int, height: Int, to path: URL) throws -> Data {
+        try writeImage(width: width, height: height, type: UTType.png.identifier, to: path)
+    }
+
+    private func writeImage(width: Int, height: Int, type: String, to path: URL) throws -> Data {
         guard let context = CGContext(
             data: nil,
             width: width,
@@ -582,7 +602,7 @@ final class ResponseModelsTests: XCTestCase {
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
         guard let image = context.makeImage(),
-              let destination = CGImageDestinationCreateWithURL(path as CFURL, UTType.png.identifier as CFString, 1, nil)
+              let destination = CGImageDestinationCreateWithURL(path as CFURL, type as CFString, 1, nil)
         else {
             throw TestImageError.imageEncoding
         }
