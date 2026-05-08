@@ -58,6 +58,29 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertEqual(Array(args.suffix(3)), ["--", "touch", "file"])
     }
 
+    func testNetworkPolicyAllowsTLSWithoutDarwinUserCacheWrite() throws {
+        let cwd = try AbsolutePath(absolutePath: FileManager.default.currentDirectoryPath)
+        let policy = SandboxPolicy.workspaceWrite(
+            writableRoots: [],
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false
+        )
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["curl", "https://example.com"],
+            sandboxPolicy: policy,
+            sandboxPolicyCwd: cwd,
+            environment: [:]
+        )
+
+        XCTAssertTrue(
+            args[1].contains(#"(global-name "com.apple.trustd.agent")"#),
+            "policy should keep trustd agent access for TLS certificate verification"
+        )
+        XCTAssertFalse(args[1].contains("DARWIN_USER_CACHE_DIR"))
+        XCTAssertFalse(args.contains { $0.hasPrefix("-DDARWIN_USER_CACHE_DIR=") })
+    }
+
     func testFullAutoSelectsWorkspaceWritePolicy() {
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: false), .readOnly)
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: true), .newWorkspaceWritePolicy())

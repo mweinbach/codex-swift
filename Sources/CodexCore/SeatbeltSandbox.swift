@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public enum SeatbeltSandboxError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -98,7 +97,7 @@ public enum SeatbeltSandbox {
         \(networkPolicy)
         """
 
-        let dirParams = fileWriteDirParams + macOSDirParams()
+        let dirParams = fileWriteDirParams
         var args = ["-p", fullPolicy]
         args.append(contentsOf: dirParams.map { key, value in "-D\(key)=\(value)" })
         args.append("--")
@@ -156,21 +155,6 @@ public enum SeatbeltSandbox {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
     }
 
-    private static func macOSDirParams() -> [(String, String)] {
-        guard let cacheDir = confstrPath(_CS_DARWIN_USER_CACHE_DIR) else {
-            return []
-        }
-        return [("DARWIN_USER_CACHE_DIR", canonicalPath(cacheDir))]
-    }
-
-    private static func confstrPath(_ name: Int32) -> String? {
-        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
-        let length = Darwin.confstr(name, &buffer, buffer.count)
-        guard length > 0 else {
-            return nil
-        }
-        return String(cString: buffer)
-    }
 }
 
 private let macOSSeatbeltBasePolicy = #"""
@@ -292,7 +276,7 @@ private let macOSSeatbeltNetworkPolicy = #"""
 (allow system-socket)
 
 (allow mach-lookup
-    ; Used to look up the _CS_DARWIN_USER_CACHE_DIR in the sandbox.
+    ; Used by platform helpers that resolve user directory locations.
     (global-name "com.apple.bsd.dirhelper")
     (global-name "com.apple.system.opendirectoryd.membership")
 
@@ -309,9 +293,5 @@ private let macOSSeatbeltNetworkPolicy = #"""
 
 (allow sysctl-read
   (sysctl-name-regex #"^net.routetable")
-)
-
-(allow file-write*
-  (subpath (param "DARWIN_USER_CACHE_DIR"))
 )
 """#
