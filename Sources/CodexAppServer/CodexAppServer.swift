@@ -573,6 +573,30 @@ public enum CodexAppServer {
         return ["thread": thread]
     }
 
+    fileprivate static func threadUnsubscribeResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        unsubscribe: (String) -> Bool
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        if unsubscribe(conversationID.description) {
+            return ["status": "unsubscribed"]
+        }
+
+        let rolloutPath = try? rolloutPathForConversation(conversationID, configuration: configuration)
+        return ["status": rolloutPath == nil ? "notLoaded" : "notSubscribed"]
+    }
+
     fileprivate static func resumeConversationResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -3214,6 +3238,14 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
+    private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
+        let manager = threadStateManager
+        let connectionID = connectionID
+        return (try? CodexAppServer.runAsyncBlocking {
+            await manager.unsubscribeConnectionFromThread(threadID: threadID, connectionID: connectionID)
+        }) ?? false
+    }
+
     private func receiveClientResponseIfPresent(_ object: [String: Any]) -> Bool {
         guard let rawID = object["id"],
               let requestID = AppServerRequestIDCodec.requestID(from: rawID)
@@ -3390,6 +3422,15 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadReadResult(params: params, configuration: configuration)
+                    )
+                case "thread/unsubscribe":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadUnsubscribeResult(
+                            params: params,
+                            configuration: configuration,
+                            unsubscribe: { unsubscribeCurrentConnection(fromThreadID: $0) }
+                        )
                     )
                 case "thread/resume":
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)

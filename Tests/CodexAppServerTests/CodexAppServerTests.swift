@@ -701,6 +701,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "thread not loaded: \(threadID)")
     }
 
+    func testThreadUnsubscribeReportsSubscriptionStatus() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let first = try decode(processor.processLine(Data(#"{"id":2,"method":"thread/unsubscribe","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        XCTAssertEqual((first["result"] as? [String: Any])?["status"] as? String, "unsubscribed")
+
+        let second = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/unsubscribe","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        XCTAssertEqual((second["result"] as? [String: Any])?["status"] as? String, "notSubscribed")
+    }
+
+    func testThreadUnsubscribeReportsNotLoadedAndRejectsInvalidThreadID() throws {
+        let temp = try TemporaryDirectory()
+        let missingThreadID = UUID().uuidString.lowercased()
+
+        let notLoaded = try appServerResponse(
+            #"{"id":1,"method":"thread/unsubscribe","params":{"threadId":"\#(missingThreadID)"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((notLoaded["result"] as? [String: Any])?["status"] as? String, "notLoaded")
+
+        let invalid = try appServerResponse(
+            #"{"id":2,"method":"thread/unsubscribe","params":{"threadId":"not-a-uuid"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid thread id: Invalid conversation id: not-a-uuid")
+    }
+
     func testThreadResumeRebuildsImageGenerationEvents() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
