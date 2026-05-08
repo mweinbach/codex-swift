@@ -935,6 +935,76 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
     }
 
+    func testMemoryResetClearsMemoryRootsAndPreservesDirectories() throws {
+        let temp = try TemporaryDirectory()
+        let memoryRoot = temp.url.appendingPathComponent("memories", isDirectory: true)
+        let memoryExtensionsRoot = temp.url.appendingPathComponent("memories_extensions", isDirectory: true)
+        let summaries = memoryRoot.appendingPathComponent("rollout_summaries", isDirectory: true)
+        let extensionResources = memoryExtensionsRoot
+            .appendingPathComponent("ad_hoc", isDirectory: true)
+            .appendingPathComponent("resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: summaries, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: extensionResources, withIntermediateDirectories: true)
+        try "stale memory\n".write(
+            to: memoryRoot.appendingPathComponent("MEMORY.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "stale rollout\n".write(
+            to: summaries.appendingPathComponent("stale.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "extension stale\n".write(
+            to: extensionResources.appendingPathComponent("stale.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: memoryRoot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: memoryExtensionsRoot.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryRoot.path), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionsRoot.path), [])
+    }
+
+    func testMemoryResetCreatesMissingRootsAndRejectsSymlinkedRoot() throws {
+        let temp = try TemporaryDirectory()
+        let missingRoots = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(missingRoots["result"] as? [String: Any])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("memories").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("memories_extensions").path))
+
+        let target = temp.url.appendingPathComponent("outside", isDirectory: true)
+        let symlink = temp.url.appendingPathComponent("symlink_home", isDirectory: true)
+            .appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: symlink.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "keep\n".write(
+            to: target.appendingPathComponent("keep.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+
+        let rejected = try appServerResponse(
+            #"{"id":2,"method":"memory/reset","params":{}}"#,
+            codexHome: symlink.deletingLastPathComponent()
+        )
+        let error = try XCTUnwrap(rejected["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertTrue((error["message"] as? String)?.contains("refusing to clear symlinked memory root") == true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("keep.txt").path))
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

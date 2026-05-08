@@ -1273,6 +1273,18 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func memoryResetResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        do {
+            try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories", isDirectory: true))
+            try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories_extensions", isDirectory: true))
+        } catch {
+            throw AppServerError.internalError(
+                "failed to clear memory directories under \(configuration.codexHome.path): \(error)"
+            )
+        }
+        return [:]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -4529,6 +4541,11 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadMemoryModeSetResult(params: params, configuration: configuration)
                     )
+                case "memory/reset":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.memoryResetResult(configuration: configuration)
+                    )
                 case "thread/inject_items":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -5101,6 +5118,25 @@ private func parseThreadTurnsCursor(_ cursor: String) throws -> AppServerThreadT
         throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
     }
     return AppServerThreadTurnsCursor(turnID: turnID, includeAnchor: includeAnchor)
+}
+
+private func clearMemoryRootContents(_ root: URL, fileManager: FileManager = .default) throws {
+    if let type = try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink,
+       type == true {
+        throw CocoaError(
+            .fileWriteInvalidFileName,
+            userInfo: [NSFilePathErrorKey: root.path, NSLocalizedDescriptionKey: "refusing to clear symlinked memory root \(root.path)"]
+        )
+    }
+    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+    let entries = try fileManager.contentsOfDirectory(
+        at: root,
+        includingPropertiesForKeys: [.isDirectoryKey],
+        options: [.skipsSubdirectoryDescendants]
+    )
+    for entry in entries {
+        try fileManager.removeItem(at: entry)
+    }
 }
 
 private struct RolloutSummary {
