@@ -188,6 +188,8 @@ Source baseline inspected for this scaffold:
   - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content-delta payloads, and legacy-event projection helpers
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
   - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
+- `codex-rs/protocol/src/protocol.rs` response-wrapper event models
+  - get-history-entry response payloads, custom-prompts response payloads, and raw response item event wrappers around already-ported history/custom-prompt/response item models
 
 ## Known Gaps
 
@@ -196,7 +198,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - interactive TUI runtime
 - non-interactive `exec`
 - exec runtime event emission
-- full `EventMsg` variant coverage for history, session, and raw-response payloads
+- full `EventMsg` variant coverage for session configuration payloads
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing

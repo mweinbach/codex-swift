@@ -52,13 +52,16 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case patchApplyBegin(PatchApplyBeginEvent)
     case patchApplyEnd(PatchApplyEndEvent)
     case turnDiff(TurnDiffEvent)
+    case getHistoryEntryResponse(GetHistoryEntryResponseEvent)
     case listSkillsResponse(ListSkillsResponseEvent)
+    case listCustomPromptsResponse(ListCustomPromptsResponseEvent)
     case skillsUpdateAvailable
     case planUpdate(UpdatePlanArguments)
     case turnAborted(TurnAbortedEvent)
     case shutdownComplete
     case enteredReviewMode(ReviewRequest)
     case exitedReviewMode(ExitedReviewModeEvent)
+    case rawResponseItem(RawResponseItemEvent)
     case itemStarted(ItemStartedEvent)
     case itemCompleted(ItemCompletedEvent)
     case agentMessageContentDelta(AgentMessageContentDeltaEvent)
@@ -107,13 +110,16 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case patchApplyBegin = "patch_apply_begin"
         case patchApplyEnd = "patch_apply_end"
         case turnDiff = "turn_diff"
+        case getHistoryEntryResponse = "get_history_entry_response"
         case listSkillsResponse = "list_skills_response"
+        case listCustomPromptsResponse = "list_custom_prompts_response"
         case skillsUpdateAvailable = "skills_update_available"
         case planUpdate = "plan_update"
         case turnAborted = "turn_aborted"
         case shutdownComplete = "shutdown_complete"
         case enteredReviewMode = "entered_review_mode"
         case exitedReviewMode = "exited_review_mode"
+        case rawResponseItem = "raw_response_item"
         case itemStarted = "item_started"
         case itemCompleted = "item_completed"
         case agentMessageContentDelta = "agent_message_content_delta"
@@ -198,8 +204,12 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .patchApplyEnd(try PatchApplyEndEvent(from: decoder))
         case .turnDiff:
             self = .turnDiff(try TurnDiffEvent(from: decoder))
+        case .getHistoryEntryResponse:
+            self = .getHistoryEntryResponse(try GetHistoryEntryResponseEvent(from: decoder))
         case .listSkillsResponse:
             self = .listSkillsResponse(try ListSkillsResponseEvent(from: decoder))
+        case .listCustomPromptsResponse:
+            self = .listCustomPromptsResponse(try ListCustomPromptsResponseEvent(from: decoder))
         case .skillsUpdateAvailable:
             self = .skillsUpdateAvailable
         case .planUpdate:
@@ -212,6 +222,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .enteredReviewMode(try ReviewRequest(from: decoder))
         case .exitedReviewMode:
             self = .exitedReviewMode(try ExitedReviewModeEvent(from: decoder))
+        case .rawResponseItem:
+            self = .rawResponseItem(try RawResponseItemEvent(from: decoder))
         case .itemStarted:
             self = .itemStarted(try ItemStartedEvent(from: decoder))
         case .itemCompleted:
@@ -339,8 +351,14 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case let .turnDiff(event):
             try container.encode(EventType.turnDiff, forKey: .type)
             try event.encode(to: encoder)
+        case let .getHistoryEntryResponse(event):
+            try container.encode(EventType.getHistoryEntryResponse, forKey: .type)
+            try event.encode(to: encoder)
         case let .listSkillsResponse(event):
             try container.encode(EventType.listSkillsResponse, forKey: .type)
+            try event.encode(to: encoder)
+        case let .listCustomPromptsResponse(event):
+            try container.encode(EventType.listCustomPromptsResponse, forKey: .type)
             try event.encode(to: encoder)
         case .skillsUpdateAvailable:
             try container.encode(EventType.skillsUpdateAvailable, forKey: .type)
@@ -357,6 +375,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .exitedReviewMode(event):
             try container.encode(EventType.exitedReviewMode, forKey: .type)
+            try event.encode(to: encoder)
+        case let .rawResponseItem(event):
+            try container.encode(EventType.rawResponseItem, forKey: .type)
             try event.encode(to: encoder)
         case let .itemStarted(event):
             try container.encode(EventType.itemStarted, forKey: .type)
