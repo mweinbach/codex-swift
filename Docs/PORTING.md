@@ -287,7 +287,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
   - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
 - `codex-rs/protocol/src/protocol.rs` submission queue model
-  - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
+  - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user input with bundled turn-context overrides, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models

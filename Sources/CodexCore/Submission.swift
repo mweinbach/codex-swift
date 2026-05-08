@@ -46,6 +46,7 @@ public enum Op: Equatable, Sendable {
         finalOutputJSONSchema: JSONValue? = nil,
         responsesAPIClientMetadata: [String: String]? = nil
     )
+    case userInputWithTurnContext(UserInputWithTurnContextParams)
     case userTurn(
         items: [UserInput],
         cwd: String,
@@ -132,6 +133,7 @@ public enum Op: Equatable, Sendable {
         case realtimeConversationClose = "realtime_conversation_close"
         case realtimeConversationListVoices = "realtime_conversation_list_voices"
         case userInput = "user_input"
+        case userInputWithTurnContext = "user_input_with_turn_context"
         case userTurn = "user_turn"
         case interAgentCommunication = "inter_agent_communication"
         case overrideTurnContext = "override_turn_context"
@@ -188,6 +190,8 @@ extension Op: Codable {
                     forKey: .responsesAPIClientMetadata
                 )
             )
+        case .userInputWithTurnContext:
+            self = .userInputWithTurnContext(try UserInputWithTurnContextParams(from: decoder))
         case .userTurn:
             self = .userTurn(
                 items: try container.decode([UserInput].self, forKey: .items),
@@ -308,6 +312,9 @@ extension Op: Codable {
             try container.encodeIfPresent(environments, forKey: .environments)
             try container.encodeIfPresent(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
             try container.encodeIfPresent(responsesAPIClientMetadata, forKey: .responsesAPIClientMetadata)
+        case let .userInputWithTurnContext(params):
+            try container.encode(OperationType.userInputWithTurnContext, forKey: .type)
+            try params.encode(to: encoder)
         case let .userTurn(items, cwd, approvalPolicy, sandboxPolicy, model, effort, summary, finalOutputJSONSchema):
             try container.encode(OperationType.userTurn, forKey: .type)
             try container.encode(items, forKey: .items)

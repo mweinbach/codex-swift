@@ -148,6 +148,78 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
     }
 
+    func testUserInputWithTurnContextWireShapePreservesOptionalOverrides() throws {
+        let op = Op.userInputWithTurnContext(UserInputWithTurnContextParams(
+            items: [.text("ship it")],
+            environments: [TurnEnvironmentSelection(environmentID: "env-1", cwd: "/repo")],
+            finalOutputJSONSchema: .object([
+                "type": .string("object")
+            ]),
+            responsesAPIClientMetadata: ["surface": "app"],
+            cwd: "/repo",
+            approvalPolicy: .onRequest,
+            approvalsReviewer: .string("native"),
+            sandboxPolicy: .readOnly,
+            permissionProfile: .object([
+                "type": .string("managed")
+            ]),
+            activePermissionProfile: .object([
+                "id": .string(":workspace")
+            ]),
+            windowsSandboxLevel: .string("read_only"),
+            model: "gpt-5.4",
+            effort: .null,
+            summary: .auto,
+            serviceTier: .null,
+            collaborationMode: .string("default"),
+            personality: .string("codex")
+        ))
+
+        try XCTAssertJSONObjectEqual(op, [
+            "type": "user_input_with_turn_context",
+            "items": [
+                [
+                    "type": "text",
+                    "text": "ship it"
+                ]
+            ],
+            "environments": [
+                [
+                    "environment_id": "env-1",
+                    "cwd": "/repo"
+                ]
+            ],
+            "final_output_json_schema": [
+                "type": "object"
+            ],
+            "responsesapi_client_metadata": [
+                "surface": "app"
+            ],
+            "cwd": "/repo",
+            "approval_policy": "on-request",
+            "approvals_reviewer": "native",
+            "sandbox_policy": [
+                "type": "read-only"
+            ],
+            "permission_profile": [
+                "type": "managed"
+            ],
+            "active_permission_profile": [
+                "id": ":workspace"
+            ],
+            "windows_sandbox_level": "read_only",
+            "model": "gpt-5.4",
+            "effort": NSNull(),
+            "summary": "auto",
+            "service_tier": NSNull(),
+            "collaboration_mode": "default",
+            "personality": "codex"
+        ])
+
+        let data = try JSONEncoder().encode(op)
+        XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
