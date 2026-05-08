@@ -159,6 +159,36 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertEqual(stack.layersHighToLow().first?.name, .legacyManagedConfigTomlFromMdm)
     }
 
+    func testLayerStackReturnsEmptyUserLayerWhenAllFilesMissing() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let cwd = dir.url.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: cwd,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.effectiveConfig(), .table([:]))
+        XCTAssertEqual(stack.getUserLayer()?.config, .table([:]))
+        XCTAssertEqual(
+            stack.getUserLayer()?.name,
+            .user(file: try AbsolutePath(absolutePath: home.appendingPathComponent("config.toml").path))
+        )
+        XCTAssertTrue(stack.layersHighToLow().allSatisfy { layer in
+            if case .project = layer.name {
+                return false
+            }
+            return true
+        })
+    }
+
     func testProjectLayerAddedWhenDotCodexExistsWithoutConfig() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)
@@ -222,6 +252,58 @@ final class ConfigLayerLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(stack.effectiveConfig(), .table(["foo": .string("child")]))
+        let projectLayerNames = stack.layersHighToLow().compactMap { layer -> AbsolutePath? in
+            if case let .project(dotCodexFolder) = layer.name {
+                return dotCodexFolder
+            }
+            return nil
+        }
+        XCTAssertEqual(projectLayerNames, [
+            try AbsolutePath(absolutePath: nested.appendingPathComponent(".codex").path),
+            try AbsolutePath(absolutePath: project.appendingPathComponent(".codex").path)
+        ])
+    }
+
+    func testProjectRootMarkersSupportAlternateMarkersLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let nested = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent(".codex"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nested.appendingPathComponent(".codex"), withIntermediateDirectories: true)
+        try "hg\n".write(to: project.appendingPathComponent(".hg"), atomically: true, encoding: .utf8)
+        try """
+        project_root_markers = [".hg"]
+        """.write(
+            to: home.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"foo = "root""#.write(
+            to: project.appendingPathComponent(".codex/config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"foo = "child""#.write(
+            to: nested.appendingPathComponent(".codex/config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: nested,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.effectiveConfig(), .table([
+            "project_root_markers": .array([.string(".hg")]),
+            "foo": .string("child")
+        ]))
         let projectLayerNames = stack.layersHighToLow().compactMap { layer -> AbsolutePath? in
             if case let .project(dotCodexFolder) = layer.name {
                 return dotCodexFolder
