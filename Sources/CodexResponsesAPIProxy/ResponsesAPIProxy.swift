@@ -104,75 +104,72 @@ public enum ResponsesAPIProxyAuth {
     public static func readAuthHeader(
         read: (UnsafeMutableBufferPointer<UInt8>) throws -> Int
     ) throws -> String {
-        var buffer = [UInt8](repeating: 0, count: bufferSize)
-        buffer.replaceSubrange(0..<prefix.count, with: prefix)
+        try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: bufferSize) { buffer in
+            buffer.initialize(repeating: 0)
+            defer { secureZero(buffer) }
 
-        let prefixLength = prefix.count
-        let capacity = buffer.count - prefixLength
-        var totalRead = 0
-        var sawNewline = false
-        var sawEOF = false
-
-        func zeroize() {
-            for index in buffer.indices {
-                buffer[index] = 0
+            for index in prefix.indices {
+                buffer[index] = prefix[index]
             }
-        }
 
-        while totalRead < capacity {
-            let start = prefixLength + totalRead
-            let count = buffer.count - start
-            let readCount: Int
-            do {
-                readCount = try buffer.withUnsafeMutableBufferPointer { pointer in
-                    let base = pointer.baseAddress?.advanced(by: start)
-                    return try read(UnsafeMutableBufferPointer(start: base, count: count))
+            let prefixLength = prefix.count
+            let capacity = buffer.count - prefixLength
+            var totalRead = 0
+            var sawNewline = false
+            var sawEOF = false
+
+            while totalRead < capacity {
+                let start = prefixLength + totalRead
+                let count = buffer.count - start
+                let readCount = try read(UnsafeMutableBufferPointer(
+                    start: buffer.baseAddress?.advanced(by: start),
+                    count: count
+                ))
+
+                if readCount == 0 {
+                    sawEOF = true
+                    break
                 }
-            } catch {
-                zeroize()
-                throw error
+
+                let end = start + readCount
+                if let newlineIndex = (start..<end).first(where: { buffer[$0] == UInt8(ascii: "\n") }) {
+                    totalRead += newlineIndex - start + 1
+                    sawNewline = true
+                    break
+                }
+                totalRead += readCount
             }
 
-            if readCount == 0 {
-                sawEOF = true
-                break
+            if totalRead == capacity, !sawNewline, !sawEOF {
+                throw ResponsesAPIProxyError.apiKeyTooLarge(bufferSize)
             }
 
-            let newlyWritten = buffer[start..<(start + readCount)]
-            if let newlineOffset = newlyWritten.firstIndex(of: UInt8(ascii: "\n")) {
-                totalRead += newlineOffset - start + 1
-                sawNewline = true
-                break
+            var total = prefixLength + totalRead
+            while total > prefixLength,
+                  buffer[total - 1] == UInt8(ascii: "\n") || buffer[total - 1] == UInt8(ascii: "\r") {
+                total -= 1
             }
-            totalRead += readCount
-        }
 
-        if totalRead == capacity, !sawNewline, !sawEOF {
-            zeroize()
-            throw ResponsesAPIProxyError.apiKeyTooLarge(bufferSize)
-        }
+            guard total > prefixLength else {
+                throw ResponsesAPIProxyError.apiKeyMissing
+            }
 
-        var total = prefixLength + totalRead
-        while total > prefixLength, buffer[total - 1] == UInt8(ascii: "\n") || buffer[total - 1] == UInt8(ascii: "\r") {
-            total -= 1
-        }
+            for index in prefixLength..<total {
+                let byte = buffer[index]
+                guard byte.isASCIIAlphaNumeric || byte == UInt8(ascii: "-") || byte == UInt8(ascii: "_") else {
+                    throw ResponsesAPIProxyError.invalidAPIKeyCharacters
+                }
+            }
 
-        guard total > prefixLength else {
-            zeroize()
-            throw ResponsesAPIProxyError.apiKeyMissing
+            return String(decoding: UnsafeBufferPointer(start: buffer.baseAddress, count: total), as: UTF8.self)
         }
+    }
 
-        let keyBytes = buffer[prefixLength..<total]
-        guard keyBytes.allSatisfy({ byte in
-            byte.isASCIIAlphaNumeric || byte == UInt8(ascii: "-") || byte == UInt8(ascii: "_")
-        }) else {
-            zeroize()
-            throw ResponsesAPIProxyError.invalidAPIKeyCharacters
+    private static func secureZero(_ buffer: UnsafeMutableBufferPointer<UInt8>) {
+        guard let baseAddress = buffer.baseAddress else {
+            return
         }
-
-        let header = String(decoding: buffer[0..<total], as: UTF8.self)
-        zeroize()
-        return header
+        _ = memset_s(baseAddress, buffer.count, 0, buffer.count)
     }
 }
 
