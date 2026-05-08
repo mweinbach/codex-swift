@@ -173,7 +173,10 @@ public enum CodexRequestHeaders {
 
         return [
             "conversation_id": conversationID,
-            "session_id": conversationID
+            "thread_id": conversationID,
+            "thread-id": conversationID,
+            "session_id": conversationID,
+            "session-id": conversationID
         ]
     }
 

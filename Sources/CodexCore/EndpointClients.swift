@@ -632,7 +632,11 @@ private enum AttestationRequestHeaders {
     ) async -> [String: String] {
         guard auth.accountID != nil,
               let provider,
-              let threadID = headers["conversation_id"] ?? headers["session_id"],
+              let threadID = headers["thread_id"]
+                ?? headers["thread-id"]
+                ?? headers["conversation_id"]
+                ?? headers["session_id"]
+                ?? headers["session-id"],
               let headerValue = await provider.header(for: Attestation.Context(threadID: threadID))
         else {
             return headers

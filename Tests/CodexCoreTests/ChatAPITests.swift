@@ -17,7 +17,10 @@ final class ChatAPITests: XCTestCase {
         .build(provider: provider())
 
         XCTAssertEqual(request.headers["conversation_id"], "conv-1")
+        XCTAssertEqual(request.headers["thread_id"], "conv-1")
+        XCTAssertEqual(request.headers["thread-id"], "conv-1")
         XCTAssertEqual(request.headers["session_id"], "conv-1")
+        XCTAssertEqual(request.headers["session-id"], "conv-1")
         XCTAssertEqual(request.headers["x-openai-subagent"], "review")
     }
 

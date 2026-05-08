@@ -52,7 +52,10 @@ final class SessionSourceTests: XCTestCase {
         XCTAssertEqual(CodexRequestHeaders.conversationHeaders(conversationID: nil), [:])
         XCTAssertEqual(CodexRequestHeaders.conversationHeaders(conversationID: "conv-1"), [
             "conversation_id": "conv-1",
-            "session_id": "conv-1"
+            "thread_id": "conv-1",
+            "thread-id": "conv-1",
+            "session_id": "conv-1",
+            "session-id": "conv-1"
         ])
     }
 
