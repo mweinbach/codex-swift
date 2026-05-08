@@ -161,6 +161,8 @@ Source baseline inspected for this scaffold:
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
 - `codex-rs/core/src/project_doc.rs`
   - AGENTS.md/AGENTS.override.md discovery from git root to cwd, project-doc byte limits, fallback filenames, configured instruction merging, and runtime skill-section append behavior
+- Pure helpers and templates from `codex-rs/core/src/compact.rs` and `codex-rs/core/templates/compact`
+  - compaction prompt resources, content-item text joining, user-message extraction/filtering, summary-prefix detection, and token-limited compacted-history construction
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
   - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`
