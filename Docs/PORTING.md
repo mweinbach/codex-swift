@@ -102,6 +102,8 @@ Source baseline inspected for this scaffold:
   - version cache model, cask/latest-tag parsing, plain semver comparison, stale-cache detection, popup dismissal logic, and version-file path
 - `codex-rs/core/src/truncate.rs`
   - byte/token truncation policies, middle truncation with UTF-8 scalar boundaries, formatted output line counts, approximate token budgets, and function-call output item truncation with omitted-text summaries
+- `codex-rs/core/src/path_utils.rs`
+  - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
 
 ## Known Gaps
 
