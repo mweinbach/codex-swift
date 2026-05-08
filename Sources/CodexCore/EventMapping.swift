@@ -3,7 +3,7 @@ import Foundation
 public enum EventMapping {
     public static func parseTurnItem(_ item: ResponseItem) -> TurnItem? {
         switch item {
-        case let .message(id, role, content):
+        case let .message(id, role, content, _):
             switch role {
             case "user":
                 return parseUserMessage(content).map(TurnItem.userMessage)

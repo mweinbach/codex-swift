@@ -22,6 +22,31 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Submission.self, from: data), submission)
     }
 
+    func testSubmissionTraceContextIsOptionalAndUsesRustWireShape() throws {
+        let submission = Submission(
+            id: "sub-2",
+            op: .interrupt,
+            trace: W3CTraceContext(
+                traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                tracestate: "vendor=value"
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(submission, [
+            "id": "sub-2",
+            "op": [
+                "type": "interrupt"
+            ],
+            "trace": [
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                "tracestate": "vendor=value"
+            ]
+        ])
+
+        let data = try JSONEncoder().encode(submission)
+        XCTAssertEqual(try JSONDecoder().decode(Submission.self, from: data), submission)
+    }
+
     func testUnitOperationsUseRustTagsOnly() throws {
         let cases: [(Op, [String: Any])] = [
             (.interrupt, ["type": "interrupt"]),

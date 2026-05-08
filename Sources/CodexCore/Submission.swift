@@ -3,10 +3,22 @@ import Foundation
 public struct Submission: Equatable, Codable, Sendable {
     public let id: String
     public let op: Op
+    public let trace: W3CTraceContext?
 
-    public init(id: String, op: Op) {
+    public init(id: String, op: Op, trace: W3CTraceContext? = nil) {
         self.id = id
         self.op = op
+        self.trace = trace
+    }
+}
+
+public struct W3CTraceContext: Equatable, Codable, Sendable {
+    public let traceparent: String?
+    public let tracestate: String?
+
+    public init(traceparent: String? = nil, tracestate: String? = nil) {
+        self.traceparent = traceparent
+        self.tracestate = tracestate
     }
 }
 

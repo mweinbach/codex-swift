@@ -105,6 +105,46 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["call_id"] as? String, "call-mcp")
     }
 
+    func testMessagePhaseRoundTripsOnMessages() throws {
+        let input = ResponseInputItem.message(
+            role: "assistant",
+            content: [.outputText(text: "thinking")],
+            phase: .commentary
+        )
+
+        try XCTAssertJSONObjectEqual(input, [
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                [
+                    "type": "output_text",
+                    "text": "thinking"
+                ]
+            ],
+            "phase": "commentary"
+        ])
+        XCTAssertEqual(try JSONDecoder().decode(ResponseInputItem.self, from: JSONEncoder().encode(input)), input)
+
+        let output = ResponseItem.message(
+            role: "assistant",
+            content: [.outputText(text: "done")],
+            phase: .finalAnswer
+        )
+
+        try XCTAssertJSONObjectEqual(output, [
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                [
+                    "type": "output_text",
+                    "text": "done"
+                ]
+            ],
+            "phase": "final_answer"
+        ])
+        XCTAssertEqual(try JSONDecoder().decode(ResponseItem.self, from: JSONEncoder().encode(output)), output)
+    }
+
     func testUserInputsBecomeMessageAndSkipSkills() throws {
         let item = ResponseInputItem(userInputs: [
             .text("hello"),
@@ -112,7 +152,7 @@ final class ResponseModelsTests: XCTestCase {
             .skill(name: "sample", path: "/tmp/SKILL.md")
         ])
 
-        guard case let .message(role, content) = item else {
+        guard case let .message(role, content, _) = item else {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(role, "user")
@@ -129,7 +169,7 @@ final class ResponseModelsTests: XCTestCase {
 
         let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
 
-        guard case let .message(_, content) = item,
+        guard case let .message(_, content, _) = item,
               case let .inputImage(imageURL) = content.first
         else {
             return XCTFail("expected local image to become an input image")
@@ -162,7 +202,7 @@ final class ResponseModelsTests: XCTestCase {
 
         let item = ResponseInputItem(userInputs: [.localImage(path: missingPath.path)])
 
-        guard case let .message(_, content) = item,
+        guard case let .message(_, content, _) = item,
               case let .inputText(text) = content.first
         else {
             return XCTFail("expected local image read failure to become placeholder text")
@@ -179,7 +219,7 @@ final class ResponseModelsTests: XCTestCase {
 
         let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
 
-        guard case let .message(_, content) = item,
+        guard case let .message(_, content, _) = item,
               case let .inputText(text) = content.first
         else {
             return XCTFail("expected non-image file to become placeholder text")
@@ -197,7 +237,7 @@ final class ResponseModelsTests: XCTestCase {
 
         let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
 
-        guard case let .message(_, content) = item,
+        guard case let .message(_, content, _) = item,
               case let .inputText(text) = content.first
         else {
             return XCTFail("expected unsupported image file to become placeholder text")

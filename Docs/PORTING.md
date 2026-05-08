@@ -103,7 +103,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/account.rs`
   - lowercase ChatGPT plan wire values with unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
-  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, and compaction alias decoding
+  - sandbox permission values, response input items, optional message phases, content items, function-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, and compaction alias decoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
   - turn item wire tags, user/agent/reasoning/web-search/image-generation item models, item IDs, legacy message/reasoning/web-search/image-generation events, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models
@@ -195,7 +195,7 @@ Source baseline inspected for this scaffold:
 - Additional thread-control operations from `codex-rs/protocol/src/protocol.rs`
   - clean-background-terminals, reload-user-config, set-thread-memory-mode, and thread-rollback operation tags and payloads
 - Agent-path and inter-agent communication models from `codex-rs/protocol/src/agent_path.rs` and `codex-rs/protocol/src/protocol.rs`
-  - absolute `/root`/`/morpheus` path validation, child/relative resolution, string-backed serde, inter-agent message payload defaults, message-content detection, and operation wrapping
+  - absolute `/root`/`/morpheus` path validation, child/relative resolution, string-backed serde, inter-agent message payload defaults, message-content detection, operation wrapping, and commentary-phase response-input projection
 - Request-response protocol payloads from `codex-rs/protocol/src/{request_user_input.rs,request_permissions.rs,dynamic_tools.rs,protocol.rs}`
   - request-user-input question/answer defaults, permission-response defaults, dynamic-tool response content items and legacy `exposeToContext` compatibility, turn environment selections, MCP refresh config payloads, and `Op` wrappers for user-input answers, permission responses, dynamic-tool responses, and MCP refresh
 - `codex-rs/process-hardening/src/lib.rs`
@@ -287,7 +287,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
   - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
 - `codex-rs/protocol/src/protocol.rs` submission queue model
-  - `Submission { id, op }` and Rust `Op` tagged variants for user input, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
+  - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
@@ -377,6 +377,4 @@ The executable is not functionally equivalent yet. Some commands have native run
 - persistent SQLite-backed local agent graph store adapter
 - hook discovery, execution, output parsing/spilling, and config-state integration
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
-- commentary-phase preservation when converting inter-agent communication into response input history items
-
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

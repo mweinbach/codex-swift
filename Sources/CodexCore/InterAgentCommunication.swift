@@ -40,6 +40,16 @@ public struct InterAgentCommunication: Codable, Equatable, Sendable {
         fromMessageContent(content) != nil
     }
 
+    public func toResponseInputItem() -> ResponseInputItem {
+        let data = (try? JSONEncoder().encode(self)) ?? Data()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return .message(
+            role: "assistant",
+            content: [.outputText(text: text)],
+            phase: .commentary
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case author
         case recipient

@@ -71,4 +71,34 @@ final class InterAgentCommunicationTests: XCTestCase {
         XCTAssertFalse(InterAgentCommunication.isMessageContent([.inputImage(imageURL: "file:///tmp/a.png")]))
         XCTAssertFalse(InterAgentCommunication.isMessageContent([.outputText(text: "{}"), .outputText(text: "{}")]))
     }
+
+    func testInterAgentCommunicationResponseInputItemPreservesCommentaryPhase() throws {
+        let communication = InterAgentCommunication(
+            author: .root,
+            recipient: try AgentPath.root.join("reviewer"),
+            otherRecipients: [try AgentPath.root.join("worker")],
+            content: "review the diff",
+            triggerTurn: true
+        )
+
+        let item = communication.toResponseInputItem()
+        guard case let .message(role, content, phase) = item else {
+            return XCTFail("expected assistant message")
+        }
+        XCTAssertEqual(role, "assistant")
+        XCTAssertEqual(phase, .commentary)
+        XCTAssertEqual(InterAgentCommunication.fromMessageContent(content), communication)
+
+        let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(item)) as? [String: Any]
+        XCTAssertEqual(encoded?["type"] as? String, "message")
+        XCTAssertEqual(encoded?["role"] as? String, "assistant")
+        XCTAssertEqual(encoded?["phase"] as? String, "commentary")
+        let encodedContent = try XCTUnwrap(encoded?["content"] as? [[String: Any]])
+        XCTAssertEqual(encodedContent.first?["type"] as? String, "output_text")
+        let encodedText = try XCTUnwrap(encodedContent.first?["text"] as? String)
+        XCTAssertEqual(
+            InterAgentCommunication.fromMessageContent([.outputText(text: encodedText)]),
+            communication
+        )
+    }
 }

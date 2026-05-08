@@ -322,7 +322,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
 private extension ResponseItem {
     var responsesRequestID: String? {
         switch self {
-        case let .message(id, _, _):
+        case let .message(id, _, _, _):
             return id
         case let .reasoning(id, _, _, _):
             return id

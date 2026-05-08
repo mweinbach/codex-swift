@@ -19,7 +19,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(prompt.outputSchema, schema)
         XCTAssertEqual(prompt.input.count, 2)
 
-        guard case let .message(_, role, content) = prompt.input[1] else {
+        guard case let .message(_, role, content, _) = prompt.input[1] else {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(role, "user")
@@ -48,7 +48,7 @@ final class NonInteractiveExecTests: XCTestCase {
 
         XCTAssertEqual(prompt.input.count, 4)
         XCTAssertEqual(Array(prompt.input[1...2]), history)
-        guard case let .message(_, role, content) = prompt.input[3] else {
+        guard case let .message(_, role, content, _) = prompt.input[3] else {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(role, "user")

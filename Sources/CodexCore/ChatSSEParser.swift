@@ -142,10 +142,10 @@ public struct ChatSSEParser: Sendable {
             output.append(.success(.outputItemAdded(item)))
         }
 
-        if case let .message(id, role, content)? = assistantItem {
+        if case let .message(id, role, content, phase)? = assistantItem {
             var updatedContent = content
             updatedContent.append(.outputText(text: text))
-            assistantItem = .message(id: id, role: role, content: updatedContent)
+            assistantItem = .message(id: id, role: role, content: updatedContent, phase: phase)
             output.append(.success(.outputTextDelta(text)))
         }
     }

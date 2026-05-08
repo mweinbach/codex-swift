@@ -27,7 +27,7 @@ final class UserShellCommandTests: XCTestCase {
             truncationPolicy: .bytes(10_000)
         )
 
-        guard case let .message(_, role, content) = item else {
+        guard case let .message(_, role, content, _) = item else {
             return XCTFail("Expected message item")
         }
         XCTAssertEqual(role, "user")

@@ -127,14 +127,14 @@ public struct ResponseEventAggregator: Sendable {
 
 private extension ResponseItem {
     var isAssistantMessage: Bool {
-        guard case let .message(_, role, _) = self else {
+        guard case let .message(_, role, _, _) = self else {
             return false
         }
         return role == "assistant"
     }
 
     var firstOutputText: String? {
-        guard case let .message(_, _, content) = self else {
+        guard case let .message(_, _, content, _) = self else {
             return nil
         }
 

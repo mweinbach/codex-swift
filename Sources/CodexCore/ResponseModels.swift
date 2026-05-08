@@ -207,8 +207,13 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
     }
 }
 
+public enum MessagePhase: String, Codable, Equatable, Sendable {
+    case commentary
+    case finalAnswer = "final_answer"
+}
+
 public enum ResponseInputItem: Equatable, Codable, Sendable {
-    case message(role: String, content: [ContentItem])
+    case message(role: String, content: [ContentItem], phase: MessagePhase? = nil)
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
     case mcpToolCallOutput(callID: String, result: McpToolCallResult)
     case customToolCallOutput(callID: String, output: String)
@@ -218,6 +223,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case type
         case role
         case content
+        case phase
         case callID = "call_id"
         case output
         case result
@@ -240,7 +246,8 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case .message:
             self = .message(
                 role: try container.decode(String.self, forKey: .role),
-                content: try container.decode([ContentItem].self, forKey: .content)
+                content: try container.decode([ContentItem].self, forKey: .content),
+                phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase)
             )
         case .functionCallOutput:
             self = .functionCallOutput(
@@ -270,10 +277,11 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .message(role, content):
+        case let .message(role, content, phase):
             try container.encode(ItemType.message, forKey: .type)
             try container.encode(role, forKey: .role)
             try container.encode(content, forKey: .content)
+            try container.encodeIfPresent(phase, forKey: .phase)
         case let .functionCallOutput(callID, output):
             try container.encode(ItemType.functionCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
@@ -716,7 +724,7 @@ public struct WriteStdinToolCallParams: Equatable, Decodable, Sendable {
 }
 
 public enum ResponseItem: Equatable, Codable, Sendable {
-    case message(id: String? = nil, role: String, content: [ContentItem])
+    case message(id: String? = nil, role: String, content: [ContentItem], phase: MessagePhase? = nil)
     case reasoning(
         id: String,
         summary: [ReasoningItemReasoningSummary],
@@ -748,6 +756,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case id
         case role
         case content
+        case phase
         case summary
         case callID = "call_id"
         case name
@@ -772,7 +781,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             self = .message(
                 id: try container.decodeIfPresent(String.self, forKey: .id),
                 role: try container.decode(String.self, forKey: .role),
-                content: try container.decode([ContentItem].self, forKey: .content)
+                content: try container.decode([ContentItem].self, forKey: .content),
+                phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase)
             )
         case "reasoning":
             if let id = try container.decodeIfPresent(String.self, forKey: .id),
@@ -909,11 +919,12 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .message(id, role, content):
+        case let .message(id, role, content, phase):
             try container.encode("message", forKey: .type)
             try container.encodeIfPresent(id, forKey: .id)
             try container.encode(role, forKey: .role)
             try container.encode(content, forKey: .content)
+            try container.encodeIfPresent(phase, forKey: .phase)
         case let .reasoning(id, summary, content, encryptedContent):
             try container.encode("reasoning", forKey: .type)
             try container.encode(id, forKey: .id)

@@ -62,7 +62,7 @@ public enum StreamEventUtils {
     }
 
     public static func lastAssistantMessage(from item: ResponseItem) -> String? {
-        guard case let .message(_, role, content) = item,
+        guard case let .message(_, role, content, _) = item,
               role == "assistant"
         else {
             return nil
@@ -149,8 +149,8 @@ public enum StreamEventUtils {
 public extension ResponseInputItem {
     func responseItem() -> ResponseItem {
         switch self {
-        case let .message(role, content):
-            return .message(role: role, content: content)
+        case let .message(role, content, phase):
+            return .message(role: role, content: content, phase: phase)
         case let .functionCallOutput(callID, output):
             return .functionCallOutput(callID: callID, output: output)
         case let .customToolCallOutput(callID, output):

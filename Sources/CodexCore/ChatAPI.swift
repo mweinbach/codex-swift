@@ -57,7 +57,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
 
         for (index, item) in input.enumerated() {
             switch item {
-            case let .message(_, role, content):
+            case let .message(_, role, content, _):
                 let mapped = Self.chatContent(from: content, role: role)
                 if role == "assistant" {
                     if lastAssistantText == mapped.text {
@@ -180,7 +180,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
         }
 
         let lastUserIndex = input.lastIndex { item in
-            if case let .message(_, role, _) = item {
+            if case let .message(_, role, _, _) = item {
                 return role == "user"
             }
             return false
@@ -202,7 +202,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
 
             var attached = false
             if index > 0,
-               case let .message(_, role, _) = input[index - 1],
+               case let .message(_, role, _, _) = input[index - 1],
                role == "assistant"
             {
                 reasoningByAnchorIndex[index - 1, default: ""].append(text)
@@ -214,7 +214,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                 case .functionCall,
                      .localShellCall:
                     reasoningByAnchorIndex[index + 1, default: ""].append(text)
-                case let .message(_, role, _) where role == "assistant":
+                case let .message(_, role, _, _) where role == "assistant":
                     reasoningByAnchorIndex[index + 1, default: ""].append(text)
                 default:
                     break
@@ -229,7 +229,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
         var role: String?
         for item in input {
             switch item {
-            case let .message(_, itemRole, _):
+            case let .message(_, itemRole, _, _):
                 role = itemRole
             case .functionCall,
                  .localShellCall:

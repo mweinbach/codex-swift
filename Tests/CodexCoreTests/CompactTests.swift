@@ -113,7 +113,7 @@ final class CompactTests: XCTestCase {
     }
 
     private func messageText(_ item: ResponseItem) -> String {
-        guard case let .message(_, role, content) = item, role == "user" else {
+        guard case let .message(_, role, content, _) = item, role == "user" else {
             XCTFail("expected user message, got \(item)")
             return ""
         }

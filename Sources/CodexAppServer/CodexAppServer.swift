@@ -3716,7 +3716,7 @@ private struct RolloutSummary {
     }
 
     private static func itemPreview(_ item: ResponseItem) -> String? {
-        guard case let .message(_, role, content) = item,
+        guard case let .message(_, role, content, _) = item,
               role == "user"
         else {
             return nil
