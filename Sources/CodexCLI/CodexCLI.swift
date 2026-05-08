@@ -161,6 +161,14 @@ public struct CodexCLI: Sendable {
         case .help:
             stdout(renderHelp())
             return 0
+        case let .command(spec, commandArguments) where spec.name == "completion":
+            do {
+                stdout(try CompletionGenerator.render(arguments: commandArguments))
+                return 0
+            } catch {
+                stderr(describe(error))
+                return 64
+            }
         case let .command(spec, _):
             stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
             return 78
@@ -190,6 +198,14 @@ public struct CodexCLI: Sendable {
         case .help:
             stdout(renderHelp())
             return 0
+        case let .command(spec, commandArguments) where spec.name == "completion":
+            do {
+                stdout(try CompletionGenerator.render(arguments: commandArguments))
+                return 0
+            } catch {
+                stderr(describe(error))
+                return 64
+            }
         case let .command(spec, commandArguments) where spec.name == "apply":
             guard let applyRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")

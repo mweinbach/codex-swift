@@ -44,6 +44,58 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(CodexCLI().renderVersion(), "codex 0.0.0")
     }
 
+    func testRunAsyncCompletionDefaultsToBash() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["completion"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(stdout.count, 1)
+        XCTAssertTrue(stdout[0].contains("_codex()"))
+        XCTAssertTrue(stdout[0].contains("complete -F _codex codex"))
+        XCTAssertTrue(stdout[0].contains("exec e computer-use cu review"))
+        XCTAssertFalse(stdout[0].contains("execpolicy"))
+    }
+
+    func testRunAsyncCompletionSupportsRustShellNames() async {
+        for shell in ["elvish", "fish", "powershell", "zsh"] {
+            var stdout: [String] = []
+            var stderr: [String] = []
+
+            let exitCode = await CodexCLI().runAsync(
+                arguments: ["completion", shell],
+                stdout: { stdout.append($0) },
+                stderr: { stderr.append($0) }
+            )
+
+            XCTAssertEqual(exitCode, 0, shell)
+            XCTAssertTrue(stderr.isEmpty, shell)
+            XCTAssertEqual(stdout.count, 1, shell)
+            XCTAssertTrue(stdout[0].contains("codex"), shell)
+            XCTAssertTrue(stdout[0].contains("exec"), shell)
+            XCTAssertFalse(stdout[0].contains("responses-api-proxy"), shell)
+        }
+    }
+
+    func testRunAsyncCompletionRejectsUnknownShell() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["completion", "tcsh"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["unsupported completion shell: tcsh"])
+    }
+
     func testInvocationSkipsOptionValuesBeforeCommand() {
         XCTAssertEqual(
             CodexCLI().parseInvocation(arguments: ["--model", "gpt-5.4", "exec"]),

@@ -30,7 +30,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/tui/src/slash_command.rs`
   - slash command names, presentation order, descriptions, and task availability
 - `codex-rs/cli/src/main.rs`
-  - top-level command registry, visible aliases, hidden command marking, version
+  - top-level command registry, visible aliases, hidden command marking, version, and shell completion generation for bash, elvish, fish, PowerShell, and zsh
 - `codex-rs/common/src/approval_mode_cli_arg.rs`
   - approval CLI argument names and protocol mapping
 - `codex-rs/common/src/sandbox_mode_cli_arg.rs`
@@ -303,7 +303,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - app-server protocol and server runtime
 - apply-patch runtime
 - cloud tasks
-- completion generation
 - platform-specific process hardening
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
