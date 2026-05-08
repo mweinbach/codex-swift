@@ -616,16 +616,19 @@ public struct CodexCLI: Sendable {
                 return 78
             }
             let rawArguments = rawCommandArguments(after: spec, in: arguments)
-            do {
-                let result = try await execRunner(ExecCommandRequest(
-                    arguments: rawArguments,
-                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
-                ))
-                emit(result, stdout: stdout, stderr: stderr)
-                return result.exitCode
-            } catch {
-                stderr(describe(error))
-                return 1
+            switch parseExecCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await execRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
             }
         case let .command(spec, _) where spec.name == "computer-use":
             guard let computerUseRunner else {
@@ -1065,6 +1068,18 @@ public struct CodexCLI: Sendable {
             return .success(CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments)))
         } catch {
             return .failure(describe(error), 1)
+        }
+    }
+
+    private func parseExecCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ExecCommandRequest> {
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(ExecCommandRequest(arguments: arguments, configOverrides: configOverrides))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
         }
     }
 
