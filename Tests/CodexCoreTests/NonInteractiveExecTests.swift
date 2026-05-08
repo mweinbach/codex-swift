@@ -101,6 +101,20 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(names.contains("view_image"))
     }
 
+    func testResponsesOptionsCarriesServiceTier() {
+        let options = NonInteractiveExec.responsesOptions(
+            conversationID: ConversationId(),
+            modelFamily: ModelFamily(slug: "gpt-test", family: "test"),
+            reasoningEffort: nil,
+            reasoningSummary: nil,
+            verbosity: nil,
+            serviceTier: "flex",
+            outputSchema: nil
+        )
+
+        XCTAssertEqual(options.serviceTier, "flex")
+    }
+
     func testResponsesLoopExecutesFunctionCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])

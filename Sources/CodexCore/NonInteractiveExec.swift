@@ -121,6 +121,7 @@ public enum NonInteractiveExec {
         reasoningEffort: ReasoningEffort?,
         reasoningSummary: ReasoningSummary?,
         verbosity: Verbosity?,
+        serviceTier: String? = nil,
         outputSchema: JSONValue?
     ) -> ResponsesOptions {
         let effort = reasoningEffort ?? modelFamily.defaultReasoningEffort
@@ -131,6 +132,7 @@ public enum NonInteractiveExec {
 
         return ResponsesOptions(
             reasoning: reasoning,
+            serviceTier: serviceTier,
             text: ResponsesAPITextControls.createForRequest(
                 verbosity: verbosity ?? modelFamily.defaultVerbosity,
                 outputSchema: outputSchema

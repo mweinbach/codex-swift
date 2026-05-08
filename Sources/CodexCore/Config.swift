@@ -16,6 +16,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
+    public var serviceTier: String?
     public var chatgptBaseURL: String
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
@@ -51,6 +52,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
+        serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
@@ -85,6 +87,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
+        self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
@@ -667,6 +670,10 @@ private struct ParsedCodexConfigToml {
         if let activeProfile = config.activeProfile {
             featureStates.apply(featureValues: profileFeatures[activeProfile] ?? [:])
         }
+        config.serviceTier = Self.normalizedServiceTier(
+            config.serviceTier,
+            features: featureStates
+        )
 
         let mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
         if let rawStore = topLevel["mcp_oauth_credentials_store"] {
@@ -787,6 +794,9 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)model_verbosity"
             )
         }
+        if let serviceTier = values["service_tier"] {
+            config.serviceTier = try stringValue(serviceTier, key: "\(keyPrefix)service_tier")
+        }
         if let baseURL = values["chatgpt_base_url"] {
             config.chatgptBaseURL = try stringValue(baseURL, key: "\(keyPrefix)chatgpt_base_url")
         }
@@ -839,6 +849,7 @@ private struct ParsedCodexConfigToml {
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
+            || key == "service_tier"
             || key == "chatgpt_base_url"
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
@@ -871,6 +882,7 @@ private struct ParsedCodexConfigToml {
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
+            || key == "service_tier"
             || key == "chatgpt_base_url"
             || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
@@ -891,6 +903,20 @@ private struct ParsedCodexConfigToml {
     private static func trimmedNonEmptyStringValue(_ value: ConfigValue, key: String) throws -> String? {
         let trimmed = try stringValue(value, key: key).trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedServiceTier(_ value: String?, features: FeatureStates) -> String? {
+        guard let value else {
+            return nil
+        }
+        switch ServiceTier.fromRequestValue(value) {
+        case .fast:
+            return features.isEnabled(.fastMode) ? ServiceTier.fast.requestValue : nil
+        case .flex:
+            return ServiceTier.flex.requestValue
+        case nil:
+            return value
+        }
     }
 
     private static func readNonEmptyFile(_ path: String?, description: String) throws -> String? {

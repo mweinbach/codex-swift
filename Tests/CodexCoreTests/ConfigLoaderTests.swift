@@ -18,6 +18,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
         XCTAssertNil(config.modelVerbosity)
+        XCTAssertNil(config.serviceTier)
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
@@ -60,6 +61,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
         model_verbosity = "low"
+        service_tier = "fast"
         chatgpt_base_url = "https://example.test/backend-api/"
         cli_auth_credentials_store = "auto"
         forced_login_method = "api"
@@ -90,6 +92,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
         XCTAssertEqual(config.modelVerbosity, .low)
+        XCTAssertEqual(config.serviceTier, "priority")
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
@@ -159,6 +162,28 @@ final class ConfigLoaderTests: XCTestCase {
                 enabledTools: ["search"]
             )
         )
+    }
+
+    func testServiceTierConfigAcceptsArbitraryStringsAndLegacyFastAlias() throws {
+        let arbitraryDir = try CoreTemporaryDirectory()
+        try """
+        service_tier = "experimental-tier-id"
+        """.write(to: arbitraryDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            try CodexConfigLoader.load(codexHome: arbitraryDir.url, systemConfigFile: nil).serviceTier,
+            "experimental-tier-id"
+        )
+
+        let disabledFastDir = try CoreTemporaryDirectory()
+        try """
+        service_tier = "fast"
+
+        [features]
+        fast_mode = false
+        """.write(to: disabledFastDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertNil(try CodexConfigLoader.load(codexHome: disabledFastDir.url, systemConfigFile: nil).serviceTier)
     }
 
     func testLoadsModelProvidersIntoRuntimeConfig() throws {
@@ -298,6 +323,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_effort = "low"
         model_reasoning_summary = "concise"
         model_verbosity = "medium"
+        service_tier = "experimental-tier-id"
         experimental_instructions_file = "top-instructions.md"
         experimental_compact_prompt_file = "top-compact.md"
         include_apply_patch_tool = true
@@ -315,6 +341,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_effort = "xhigh"
         model_reasoning_summary = "auto"
         model_verbosity = "high"
+        service_tier = "flex"
         experimental_instructions_file = "profile-instructions.md"
         experimental_compact_prompt_file = "profile-compact.md"
         include_apply_patch_tool = false
@@ -336,6 +363,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelReasoningEffort, .xhigh)
         XCTAssertEqual(config.modelReasoningSummary, .auto)
         XCTAssertEqual(config.modelVerbosity, .high)
+        XCTAssertEqual(config.serviceTier, "flex")
         XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile-instructions.md").path)
         XCTAssertEqual(config.experimentalCompactPromptFile, dir.url.appendingPathComponent("profile-compact.md").path)
         XCTAssertEqual(config.baseInstructions, "profile-instructions.md")
