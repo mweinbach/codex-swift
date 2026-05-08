@@ -182,6 +182,8 @@ Source baseline inspected for this scaffold:
   - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
   - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content-delta payloads, and legacy-event projection helpers
+- `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
+  - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
 
 ## Known Gaps
 
@@ -190,6 +192,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - interactive TUI runtime
 - non-interactive `exec`
 - full exec begin/end event payloads and runtime event emission
+- full `EventMsg` variant coverage for unported approval/MCP/history/session/raw-response payloads
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing
