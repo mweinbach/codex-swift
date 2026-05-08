@@ -309,6 +309,8 @@ Source baseline inspected for this scaffold:
   - executable `codex apply <task_id>` now loads ChatGPT auth, calls the cloud task HTTP client, applies via the Swift `CodexGit` bridge, and exits nonzero for missing auth/account IDs or non-success apply outcomes
 - `codex-rs/cloud-tasks/src/cli.rs` and non-TUI command dispatch from `codex-rs/cloud-tasks/src/lib.rs`
   - `codex cloud status`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt` validation, status/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection, and cloud-task status/diff summary formatting
+- `codex-rs/cloud-tasks/src/exec_command.rs` task creation path
+  - `codex cloud exec` prompt/stdin loading, `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path
   - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, and `--output-last-message` writes
 - Initial `codex-rs/core/src/unified_exec` tool-session behavior
@@ -341,7 +343,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
 - app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
 - apply-patch live tool runtime integration inside model/tool execution
-- cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
+- cloud tasks TUI list/browse runtime
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
