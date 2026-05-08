@@ -2048,6 +2048,93 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testExperimentalFeatureEnablementSetAppliesToFeatureListAndConfigRead() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let set = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memories":true,"plugins":false,"tool_search":false}}}"#.utf8
+        )))
+        let setResult = try XCTUnwrap(set["result"] as? [String: Any])
+        let setEnablement = try XCTUnwrap(setResult["enablement"] as? [String: Bool])
+        XCTAssertEqual(setEnablement["memories"], true)
+        XCTAssertEqual(setEnablement["plugins"], false)
+        XCTAssertEqual(setEnablement["tool_search"], false)
+
+        let list = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/list","params":{"limit":100}}"#.utf8
+        )))
+        let listResult = try XCTUnwrap(list["result"] as? [String: Any])
+        let listData = try XCTUnwrap(listResult["data"] as? [[String: Any]])
+        let memories = try XCTUnwrap(listData.first { $0["name"] as? String == "memories" })
+        let plugins = try XCTUnwrap(listData.first { $0["name"] as? String == "plugins" })
+        let toolSearch = try XCTUnwrap(listData.first { $0["name"] as? String == "tool_search" })
+        XCTAssertEqual(memories["enabled"] as? Bool, true)
+        XCTAssertEqual(plugins["enabled"] as? Bool, false)
+        XCTAssertEqual(toolSearch["enabled"] as? Bool, false)
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"config/read","params":{}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(readResult["config"] as? [String: Any])
+        let features = try XCTUnwrap(config["features"] as? [String: Any])
+        XCTAssertEqual(features["memories"] as? Bool, true)
+        XCTAssertEqual(features["plugins"] as? Bool, false)
+        XCTAssertEqual(features["tool_search"] as? Bool, false)
+    }
+
+    func testExperimentalFeatureEnablementSetDoesNotOverrideUserConfig() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        memories = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memories":true}}}"#.utf8
+        )))
+        let read = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"config/read","params":{}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(readResult["config"] as? [String: Any])
+        let features = try XCTUnwrap(config["features"] as? [String: Any])
+        XCTAssertEqual(features["memories"] as? Bool, false)
+
+        let list = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"experimentalFeature/list","params":{"limit":100}}"#.utf8
+        )))
+        let listResult = try XCTUnwrap(list["result"] as? [String: Any])
+        let listData = try XCTUnwrap(listResult["data"] as? [[String: Any]])
+        let memories = try XCTUnwrap(listData.first { $0["name"] as? String == "memories" })
+        XCTAssertEqual(memories["enabled"] as? Bool, false)
+    }
+
+    func testExperimentalFeatureEnablementSetRejectsUnsupportedAndNonCanonicalFeatures() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let unsupported = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"personality":false}}}"#.utf8
+        )))
+        let unsupportedError = try XCTUnwrap(unsupported["error"] as? [String: Any])
+        XCTAssertEqual(unsupportedError["code"] as? Int, -32600)
+        XCTAssertTrue((unsupportedError["message"] as? String)?.contains("unsupported feature enablement `personality`") == true)
+        XCTAssertTrue((unsupportedError["message"] as? String)?.contains("apps, memories, plugins, remote_control, tool_search, tool_suggest, tool_call_mcp_elicitation") == true)
+
+        let alias = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memory_tool":true}}}"#.utf8
+        )))
+        let aliasError = try XCTUnwrap(alias["error"] as? [String: Any])
+        XCTAssertEqual(aliasError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            aliasError["message"] as? String,
+            "invalid feature enablement `memory_tool`: use canonical feature key `memories`"
+        )
+    }
+
     func testCollaborationModeListReturnsRustPresets() throws {
         let temp = try TemporaryDirectory()
 

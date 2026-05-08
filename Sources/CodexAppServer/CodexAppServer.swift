@@ -1444,9 +1444,10 @@ public enum CodexAppServer {
 
     fileprivate static func experimentalFeatureListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
-        let runtimeConfig: CodexRuntimeConfig
+        var runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
                 codexHome: configuration.codexHome,
@@ -1456,6 +1457,16 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to reload config: \(error)")
         }
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        applyRuntimeFeatureEnablement(
+            runtimeFeatureEnablement,
+            to: &runtimeConfig.features,
+            protectedFeatureKeys: protectedFeatureKeys(in: stack.effectiveConfig())
+        )
 
         let data = FeatureRegistry.specs.map { spec in
             experimentalFeatureObject(spec: spec, features: runtimeConfig.features)
@@ -1477,6 +1488,36 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func experimentalFeatureEnablementSetResult(
+        params: [String: Any]?,
+        runtimeFeatureEnablement: inout [String: Bool]
+    ) throws -> [String: Any] {
+        guard let rawEnablement = params?["enablement"] as? [String: Any] else {
+            throw AppServerError.invalidRequest("missing enablement")
+        }
+        let enablement = try featureEnablementParam(rawEnablement)
+        for key in enablement.keys {
+            guard let spec = FeatureRegistry.specs.first(where: { $0.key == key }) else {
+                if let feature = FeatureRegistry.feature(forKey: key),
+                   let canonical = FeatureRegistry.specs.first(where: { $0.id == feature })?.key {
+                    throw AppServerError.invalidRequest(
+                        "invalid feature enablement `\(key)`: use canonical feature key `\(canonical)`"
+                    )
+                }
+                throw AppServerError.invalidRequest("invalid feature enablement `\(key)`")
+            }
+            if !supportedExperimentalFeatureEnablement.contains(spec.key) {
+                throw AppServerError.invalidRequest(
+                    "unsupported feature enablement `\(key)`: currently supported features are \(supportedExperimentalFeatureEnablement.joined(separator: ", "))"
+                )
+            }
+        }
+        for (key, value) in enablement {
+            runtimeFeatureEnablement[key] = value
+        }
+        return ["enablement": enablement]
+    }
+
     fileprivate static func collaborationModeListResult() -> [String: Any] {
         [
             "data": CollaborationModeRegistry.builtinPresets.map { preset in
@@ -1492,7 +1533,8 @@ public enum CodexAppServer {
 
     fileprivate static func configReadResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
@@ -1501,7 +1543,12 @@ public enum CodexAppServer {
         )
         let includeLayers = boolParam(params?["includeLayers"], defaultValue: false)
         var response: [String: Any] = [
-            "config": configValueObject(stack.effectiveConfig()),
+            "config": configValueObject(
+                effectiveConfig(
+                    stack.effectiveConfig(),
+                    applyingRuntimeFeatureEnablement: runtimeFeatureEnablement
+                )
+            ),
             "origins": metadataObjects(stack.origins())
         ]
         if includeLayers {
@@ -2269,6 +2316,17 @@ public enum CodexAppServer {
             return number.boolValue
         }
         return defaultValue
+    }
+
+    private static func featureEnablementParam(_ value: [String: Any]) throws -> [String: Bool] {
+        var enablement: [String: Bool] = [:]
+        for (key, rawValue) in value {
+            guard let boolValue = rawValue as? Bool else {
+                throw AppServerError.invalidRequest("invalid feature enablement `\(key)`")
+            }
+            enablement[key] = boolValue
+        }
+        return enablement
     }
 
     fileprivate static func stringParam(_ value: Any?) -> String? {
@@ -3251,6 +3309,59 @@ public enum CodexAppServer {
         }
     }
 
+    private static let supportedExperimentalFeatureEnablement = [
+        "apps",
+        "memories",
+        "plugins",
+        "remote_control",
+        "tool_search",
+        "tool_suggest",
+        "tool_call_mcp_elicitation"
+    ]
+
+    private static func effectiveConfig(
+        _ config: ConfigValue,
+        applyingRuntimeFeatureEnablement runtimeFeatureEnablement: [String: Bool]
+    ) -> ConfigValue {
+        let protectedFeatures = protectedFeatureKeys(in: config)
+        var featureValues: [String: ConfigValue] = [:]
+        for (name, enabled) in runtimeFeatureEnablement where !protectedFeatures.contains(name) {
+            guard FeatureRegistry.specs.contains(where: { $0.key == name }) else {
+                continue
+            }
+            featureValues[name] = .bool(enabled)
+        }
+        guard !featureValues.isEmpty else {
+            return config
+        }
+        return config.merging(overlay: .table([
+            "features": .table(featureValues)
+        ]))
+    }
+
+    private static func applyRuntimeFeatureEnablement(
+        _ runtimeFeatureEnablement: [String: Bool],
+        to features: inout FeatureStates,
+        protectedFeatureKeys: Set<String>
+    ) {
+        for (name, enabled) in runtimeFeatureEnablement where !protectedFeatureKeys.contains(name) {
+            guard let feature = FeatureRegistry.feature(forKey: name) else {
+                continue
+            }
+            features.set(feature, enabled: enabled)
+        }
+        features.normalizeDependencies()
+    }
+
+    private static func protectedFeatureKeys(in config: ConfigValue) -> Set<String> {
+        guard case let .table(table) = config,
+              case let .table(features)? = table["features"]
+        else {
+            return []
+        }
+        return Set(features.keys)
+    }
+
     private static func configWriteResult(
         edits: [ConfigWriteEdit],
         filePath: String?,
@@ -3891,6 +4002,7 @@ final class CodexAppServerMessageProcessor {
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
+    private var runtimeFeatureEnablement: [String: Bool] = [:]
 
     init(
         configuration: CodexAppServerConfiguration,
@@ -4343,7 +4455,16 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.experimentalFeatureListResult(
                             params: params,
-                            configuration: configuration
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        )
+                    )
+                case "experimentalFeature/enablement/set":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.experimentalFeatureEnablementSetResult(
+                            params: params,
+                            runtimeFeatureEnablement: &runtimeFeatureEnablement
                         )
                     )
                 case "collaborationMode/list":
@@ -4354,7 +4475,11 @@ final class CodexAppServerMessageProcessor {
                 case "config/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.configReadResult(
+                            params: params,
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        )
                     )
                 case "configRequirements/read":
                     response = CodexAppServer.responseObject(
