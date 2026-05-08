@@ -78,6 +78,8 @@ Source baseline inspected for this scaffold:
   - models request path construction, `client_version` query appending, extra-header merging, response decoding, and ETag header precedence
 - `codex-rs/codex-api/src/auth.rs`
   - bearer-token and ChatGPT account-id request header injection with invalid header-value skips
+- `codex-rs/core/src/api_bridge.rs` auth-provider selection helper
+  - provider environment API key, experimental bearer token, auth.json API key, ChatGPT access token/account-id precedence, and empty-auth fallback
 - `codex-rs/codex-api/src/rate_limits.rs`
   - Codex rate-limit header parsing for primary/secondary windows, credits snapshots, finite-number filtering, boolean aliases, and empty-window omission
 - `codex-rs/protocol/src/protocol.rs`

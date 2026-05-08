@@ -15,6 +15,35 @@ public struct StaticAPIAuthProvider: APIAuthProvider, Equatable, Sendable {
     }
 }
 
+public enum APIAuthResolver {
+    public static func authProvider(
+        auth: AuthDotJSON?,
+        provider: ModelProviderInfo,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> StaticAPIAuthProvider {
+        if let apiKey = try provider.apiKey(environment: environment) {
+            return StaticAPIAuthProvider(bearerToken: apiKey)
+        }
+
+        if let token = provider.experimentalBearerToken {
+            return StaticAPIAuthProvider(bearerToken: token)
+        }
+
+        if let apiKey = auth?.openAIAPIKey {
+            return StaticAPIAuthProvider(bearerToken: apiKey)
+        }
+
+        if let tokens = auth?.tokens {
+            return StaticAPIAuthProvider(
+                bearerToken: tokens.accessToken,
+                accountID: tokens.accountID
+            )
+        }
+
+        return StaticAPIAuthProvider()
+    }
+}
+
 public enum APIAuthHeaders {
     public static let authorization = "authorization"
     public static let chatGPTAccountID = "ChatGPT-Account-ID"
