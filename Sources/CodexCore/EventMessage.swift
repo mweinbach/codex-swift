@@ -33,8 +33,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case mcpStartupComplete(McpStartupCompleteEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
+    case execCommandBegin(ExecCommandBeginEvent)
     case execCommandOutputDelta(ExecCommandOutputDeltaEvent)
     case terminalInteraction(TerminalInteractionEvent)
+    case execCommandEnd(ExecCommandEndEvent)
     case viewImageToolCall(ViewImageToolCallEvent)
     case deprecationNotice(DeprecationNoticeEvent)
     case backgroundEvent(BackgroundEventEvent)
@@ -80,8 +82,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case mcpStartupComplete = "mcp_startup_complete"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
+        case execCommandBegin = "exec_command_begin"
         case execCommandOutputDelta = "exec_command_output_delta"
         case terminalInteraction = "terminal_interaction"
+        case execCommandEnd = "exec_command_end"
         case viewImageToolCall = "view_image_tool_call"
         case deprecationNotice = "deprecation_notice"
         case backgroundEvent = "background_event"
@@ -144,10 +148,14 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
             self = .webSearchEnd(try WebSearchEndEvent(from: decoder))
+        case .execCommandBegin:
+            self = .execCommandBegin(try ExecCommandBeginEvent(from: decoder))
         case .execCommandOutputDelta:
             self = .execCommandOutputDelta(try ExecCommandOutputDeltaEvent(from: decoder))
         case .terminalInteraction:
             self = .terminalInteraction(try TerminalInteractionEvent(from: decoder))
+        case .execCommandEnd:
+            self = .execCommandEnd(try ExecCommandEndEvent(from: decoder))
         case .viewImageToolCall:
             self = .viewImageToolCall(try ViewImageToolCallEvent(from: decoder))
         case .deprecationNotice:
@@ -250,11 +258,17 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case let .webSearchEnd(event):
             try container.encode(EventType.webSearchEnd, forKey: .type)
             try event.encode(to: encoder)
+        case let .execCommandBegin(event):
+            try container.encode(EventType.execCommandBegin, forKey: .type)
+            try event.encode(to: encoder)
         case let .execCommandOutputDelta(event):
             try container.encode(EventType.execCommandOutputDelta, forKey: .type)
             try event.encode(to: encoder)
         case let .terminalInteraction(event):
             try container.encode(EventType.terminalInteraction, forKey: .type)
+            try event.encode(to: encoder)
+        case let .execCommandEnd(event):
+            try container.encode(EventType.execCommandEnd, forKey: .type)
             try event.encode(to: encoder)
         case let .viewImageToolCall(event):
             try container.encode(EventType.viewImageToolCall, forKey: .type)

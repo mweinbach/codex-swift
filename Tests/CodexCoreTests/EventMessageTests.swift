@@ -124,7 +124,7 @@ final class EventMessageTests: XCTestCase {
     func testUnsupportedEventMessageVariantThrows() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             EventMessage.self,
-            from: Data(#"{"type":"exec_command_begin","call_id":"exec-1"}"#.utf8)
+            from: Data(#"{"type":"mcp_tool_call_begin","call_id":"tool-1"}"#.utf8)
         ))
     }
 }

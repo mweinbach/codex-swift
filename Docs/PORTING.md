@@ -175,7 +175,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
   - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
-  - exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
+  - exec command begin/end payloads, Rust duration wire shape, exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
 - `codex-rs/protocol/src/protocol.rs` MCP startup/auth event models
   - MCP startup update/complete/failure payloads, internally tagged startup status, and auth status wire/display values
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
@@ -191,7 +191,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 
 - interactive TUI runtime
 - non-interactive `exec`
-- full exec begin/end event payloads and runtime event emission
+- exec runtime event emission
 - full `EventMsg` variant coverage for unported approval/MCP/history/session/raw-response payloads
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
