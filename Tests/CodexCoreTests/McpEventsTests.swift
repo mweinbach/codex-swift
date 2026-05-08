@@ -185,6 +185,35 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testSplitQualifiedToolNameReturnsServerAndTool() throws {
+        let split = try XCTUnwrap(McpToolName.splitQualifiedToolName("mcp__alpha__do_thing"))
+        XCTAssertEqual(split.serverName, "alpha")
+        XCTAssertEqual(split.toolName, "do_thing")
+    }
+
+    func testSplitQualifiedToolNameRejectsInvalidNames() {
+        XCTAssertNil(McpToolName.splitQualifiedToolName("other__alpha__do_thing"))
+        XCTAssertNil(McpToolName.splitQualifiedToolName("mcp__alpha__"))
+    }
+
+    func testGroupToolsByServerStripsPrefixAndGroups() {
+        let tools = [
+            "mcp__alpha__do_thing": makeMcpTool(name: "do_thing"),
+            "mcp__alpha__nested__op": makeMcpTool(name: "nested__op"),
+            "mcp__beta__do_other": makeMcpTool(name: "do_other")
+        ]
+
+        XCTAssertEqual(McpToolName.groupToolsByServer(tools), [
+            "alpha": [
+                "do_thing": makeMcpTool(name: "do_thing"),
+                "nested__op": makeMcpTool(name: "nested__op")
+            ],
+            "beta": [
+                "do_other": makeMcpTool(name: "do_other")
+            ]
+        ])
+    }
+
     func testToolSchemasDefaultTypeOnDecodeAndAlwaysEncodeType() throws {
         let inputSchema = try JSONDecoder().decode(McpToolInputSchema.self, from: Data("""
         {
@@ -424,6 +453,10 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(McpAuthStatus.notLoggedIn.description, "Not logged in")
         XCTAssertEqual(McpAuthStatus.bearerToken.description, "Bearer token")
         XCTAssertEqual(McpAuthStatus.oauth.description, "OAuth")
+    }
+
+    private func makeMcpTool(name: String) -> McpTool {
+        McpTool(name: name, inputSchema: McpToolInputSchema())
     }
 
     private func encode<T: Encodable>(_ value: T) throws -> String {

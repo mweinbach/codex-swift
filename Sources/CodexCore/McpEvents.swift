@@ -106,6 +106,36 @@ public struct McpListToolsResponseEvent: Equatable, Codable, Sendable {
     }
 }
 
+public enum McpToolName {
+    public static let prefix = "mcp"
+    public static let delimiter = "__"
+
+    public static func splitQualifiedToolName(_ qualifiedName: String) -> (serverName: String, toolName: String)? {
+        let parts = qualifiedName.components(separatedBy: delimiter)
+        guard parts.first == prefix, parts.count >= 2 else {
+            return nil
+        }
+
+        let toolName = parts.dropFirst(2).joined(separator: delimiter)
+        guard !toolName.isEmpty else {
+            return nil
+        }
+
+        return (serverName: parts[1], toolName: toolName)
+    }
+
+    public static func groupToolsByServer(_ tools: [String: McpTool]) -> [String: [String: McpTool]] {
+        var grouped: [String: [String: McpTool]] = [:]
+        for (qualifiedName, tool) in tools {
+            guard let split = splitQualifiedToolName(qualifiedName) else {
+                continue
+            }
+            grouped[split.serverName, default: [:]][split.toolName] = tool
+        }
+        return grouped
+    }
+}
+
 public enum McpRole: String, Codable, Equatable, Sendable {
     case assistant
     case user
