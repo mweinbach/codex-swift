@@ -11,6 +11,10 @@ final class RolloutModelsTests: XCTestCase {
             originator: "codex_swift",
             cliVersion: "0.1.0",
             source: .cli,
+            threadSource: .subagent,
+            agentNickname: "reviewer",
+            agentRole: "analyst",
+            agentPath: "/root/reviewer",
             modelProvider: "openai"
         ))
 
@@ -22,6 +26,10 @@ final class RolloutModelsTests: XCTestCase {
             "cli_version": "0.1.0",
             "instructions": NSNull(),
             "source": "cli",
+            "thread_source": "subagent",
+            "agent_nickname": "reviewer",
+            "agent_role": "analyst",
+            "agent_path": "/root/reviewer",
             "model_provider": "openai"
         ])
 
@@ -43,7 +51,30 @@ final class RolloutModelsTests: XCTestCase {
         """.utf8))
 
         XCTAssertEqual(line.meta.source, .vscode)
+        XCTAssertNil(line.meta.threadSource)
+        XCTAssertNil(line.meta.agentNickname)
+        XCTAssertNil(line.meta.agentRole)
+        XCTAssertNil(line.meta.agentPath)
         XCTAssertNil(line.git)
+    }
+
+    func testSessionMetaDecodesAgentTypeAliasForAgentRole() throws {
+        let line = try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
+        {
+          "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "timestamp": "",
+          "cwd": "",
+          "originator": "",
+          "cli_version": "",
+          "source": "cli",
+          "thread_source": "memory_consolidation",
+          "agent_type": "critic",
+          "model_provider": null
+        }
+        """.utf8))
+
+        XCTAssertEqual(line.meta.threadSource, .memoryConsolidation)
+        XCTAssertEqual(line.meta.agentRole, "critic")
     }
 
     func testSessionMetaLineIncludesGitWhenPresent() throws {

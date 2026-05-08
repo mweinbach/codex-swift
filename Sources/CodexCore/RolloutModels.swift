@@ -8,6 +8,10 @@ public struct SessionMeta: Equatable, Codable, Sendable {
     public let cliVersion: String
     public let instructions: String?
     public let source: SessionSource
+    public let threadSource: ThreadSource?
+    public let agentNickname: String?
+    public let agentRole: String?
+    public let agentPath: String?
     public let modelProvider: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -18,6 +22,11 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         case cliVersion = "cli_version"
         case instructions
         case source
+        case threadSource = "thread_source"
+        case agentNickname = "agent_nickname"
+        case agentRole = "agent_role"
+        case agentType = "agent_type"
+        case agentPath = "agent_path"
         case modelProvider = "model_provider"
     }
 
@@ -29,6 +38,10 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         cliVersion: String,
         instructions: String? = nil,
         source: SessionSource = .default,
+        threadSource: ThreadSource? = nil,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
+        agentPath: String? = nil,
         modelProvider: String? = nil
     ) {
         self.id = id
@@ -38,6 +51,10 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.cliVersion = cliVersion
         self.instructions = instructions
         self.source = source
+        self.threadSource = threadSource
+        self.agentNickname = agentNickname
+        self.agentRole = agentRole
+        self.agentPath = agentPath
         self.modelProvider = modelProvider
     }
 
@@ -50,6 +67,11 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.cliVersion = try container.decode(String.self, forKey: .cliVersion)
         self.instructions = try container.decodeIfPresent(String.self, forKey: .instructions)
         self.source = try container.decodeIfPresent(SessionSource.self, forKey: .source) ?? .default
+        self.threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
+        self.agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
+        self.agentRole = try container.decodeIfPresent(String.self, forKey: .agentRole)
+            ?? container.decodeIfPresent(String.self, forKey: .agentType)
+        self.agentPath = try container.decodeIfPresent(String.self, forKey: .agentPath)
         self.modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
     }
 
@@ -62,6 +84,10 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         try container.encode(cliVersion, forKey: .cliVersion)
         try container.encode(instructions, forKey: .instructions)
         try container.encode(source, forKey: .source)
+        try container.encodeIfPresent(threadSource, forKey: .threadSource)
+        try container.encodeIfPresent(agentNickname, forKey: .agentNickname)
+        try container.encodeIfPresent(agentRole, forKey: .agentRole)
+        try container.encodeIfPresent(agentPath, forKey: .agentPath)
         try container.encode(modelProvider, forKey: .modelProvider)
     }
 }
