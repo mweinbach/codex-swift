@@ -37,8 +37,8 @@ public protocol AgentGraphStore: Sendable {
     /// `childThreadID` has at most one persisted parent. Re-inserting the same child updates both
     /// the parent and status to match the supplied values.
     func upsertThreadSpawnEdge(
-        parentThreadID: ConversationId,
-        childThreadID: ConversationId,
+        parentThreadID: ThreadId,
+        childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
     ) async throws
 
@@ -46,7 +46,7 @@ public protocol AgentGraphStore: Sendable {
     ///
     /// Implementations treat missing children as a successful no-op.
     func setThreadSpawnEdgeStatus(
-        childThreadID: ConversationId,
+        childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
     ) async throws
 
@@ -55,9 +55,9 @@ public protocol AgentGraphStore: Sendable {
     /// When `statusFilter` is non-nil, only child edges with that exact status are returned. When
     /// it is nil, all direct child edges are returned regardless of status.
     func listThreadSpawnChildren(
-        parentThreadID: ConversationId,
+        parentThreadID: ThreadId,
         statusFilter: ThreadSpawnEdgeStatus?
-    ) async throws -> [ConversationId]
+    ) async throws -> [ThreadId]
 
     /// List spawned descendants breadth-first by depth, then by thread id.
     ///
@@ -65,27 +65,27 @@ public protocol AgentGraphStore: Sendable {
     /// For example, `.open` walks only open edges, so descendants under a closed edge are not
     /// included even if their own incoming edge is open. `nil` walks and returns every edge.
     func listThreadSpawnDescendants(
-        rootThreadID: ConversationId,
+        rootThreadID: ThreadId,
         statusFilter: ThreadSpawnEdgeStatus?
-    ) async throws -> [ConversationId]
+    ) async throws -> [ThreadId]
 }
 
 public actor InMemoryAgentGraphStore: AgentGraphStore {
     private struct Edge: Equatable, Sendable {
-        var parentThreadID: ConversationId
-        var childThreadID: ConversationId
+        var parentThreadID: ThreadId
+        var childThreadID: ThreadId
         var status: ThreadSpawnEdgeStatus
     }
 
-    private var edgesByChild: [ConversationId: Edge]
+    private var edgesByChild: [ThreadId: Edge]
 
     public init() {
         self.edgesByChild = [:]
     }
 
     public func upsertThreadSpawnEdge(
-        parentThreadID: ConversationId,
-        childThreadID: ConversationId,
+        parentThreadID: ThreadId,
+        childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
     ) async throws {
         edgesByChild[childThreadID] = Edge(
@@ -96,7 +96,7 @@ public actor InMemoryAgentGraphStore: AgentGraphStore {
     }
 
     public func setThreadSpawnEdgeStatus(
-        childThreadID: ConversationId,
+        childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
     ) async throws {
         guard var edge = edgesByChild[childThreadID] else {
@@ -107,22 +107,22 @@ public actor InMemoryAgentGraphStore: AgentGraphStore {
     }
 
     public func listThreadSpawnChildren(
-        parentThreadID: ConversationId,
+        parentThreadID: ThreadId,
         statusFilter: ThreadSpawnEdgeStatus?
-    ) async throws -> [ConversationId] {
+    ) async throws -> [ThreadId] {
         directChildren(parentThreadID: parentThreadID, statusFilter: statusFilter)
     }
 
     public func listThreadSpawnDescendants(
-        rootThreadID: ConversationId,
+        rootThreadID: ThreadId,
         statusFilter: ThreadSpawnEdgeStatus?
-    ) async throws -> [ConversationId] {
-        var descendants: [ConversationId] = []
-        var visited = Set<ConversationId>()
+    ) async throws -> [ThreadId] {
+        var descendants: [ThreadId] = []
+        var visited = Set<ThreadId>()
         var currentLevel = directChildren(parentThreadID: rootThreadID, statusFilter: statusFilter)
 
         while !currentLevel.isEmpty {
-            var nextLevel: [ConversationId] = []
+            var nextLevel: [ThreadId] = []
             for threadID in currentLevel {
                 guard visited.insert(threadID).inserted else {
                     continue
@@ -139,9 +139,9 @@ public actor InMemoryAgentGraphStore: AgentGraphStore {
     }
 
     private func directChildren(
-        parentThreadID: ConversationId,
+        parentThreadID: ThreadId,
         statusFilter: ThreadSpawnEdgeStatus?
-    ) -> [ConversationId] {
+    ) -> [ThreadId] {
         edgesByChild.values
             .filter { edge in
                 edge.parentThreadID == parentThreadID

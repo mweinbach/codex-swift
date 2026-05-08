@@ -179,8 +179,8 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(closedDescendants, [closedChildThreadID, closedGreatGrandchildThreadID])
     }
 
-    private func threadID(_ suffix: Int) throws -> ConversationId {
-        try ConversationId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
+    private func threadID(_ suffix: Int) throws -> ThreadId {
+        try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
 
     private func jsonString<T: Encodable>(_ value: T) throws -> String {

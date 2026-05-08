@@ -44,7 +44,109 @@ public enum ConversationIdError: Error, Equatable, CustomStringConvertible, Send
     }
 }
 
-private extension UUID {
+public struct ThreadId: Equatable, Hashable, Codable, CustomStringConvertible, Sendable {
+    public let uuid: UUID
+
+    public init() {
+        self.uuid = UUID.v7()
+    }
+
+    public init(uuid: UUID) {
+        self.uuid = uuid
+    }
+
+    public init(string: String) throws {
+        guard let uuid = UUID(uuidString: string) else {
+            throw ThreadIdError.invalidUUID(string)
+        }
+        self.uuid = uuid
+    }
+
+    public var description: String {
+        uuid.uuidString.lowercased()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self = try ThreadId(string: container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
+    }
+}
+
+public enum ThreadIdError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidUUID(String)
+
+    public var description: String {
+        switch self {
+        case let .invalidUUID(value):
+            return "Invalid thread id: \(value)"
+        }
+    }
+}
+
+public struct SessionId: Equatable, Hashable, Codable, CustomStringConvertible, Sendable {
+    public let uuid: UUID
+
+    public init() {
+        self.uuid = UUID.v7()
+    }
+
+    public init(uuid: UUID) {
+        self.uuid = uuid
+    }
+
+    public init(threadID: ThreadId) {
+        self.uuid = threadID.uuid
+    }
+
+    public init(string: String) throws {
+        guard let uuid = UUID(uuidString: string) else {
+            throw SessionIdError.invalidUUID(string)
+        }
+        self.uuid = uuid
+    }
+
+    public var threadID: ThreadId {
+        ThreadId(uuid: uuid)
+    }
+
+    public var description: String {
+        uuid.uuidString.lowercased()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self = try SessionId(string: container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
+    }
+}
+
+public enum SessionIdError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidUUID(String)
+
+    public var description: String {
+        switch self {
+        case let .invalidUUID(value):
+            return "Invalid session id: \(value)"
+        }
+    }
+}
+
+extension ThreadId {
+    public init(sessionID: SessionId) {
+        self.init(uuid: sessionID.uuid)
+    }
+}
+
+extension UUID {
     static func v7(date: Date = Date()) -> UUID {
         let milliseconds = UInt64((date.timeIntervalSince1970 * 1_000.0).rounded(.down))
         var random = SystemRandomNumberGenerator()

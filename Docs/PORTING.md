@@ -49,6 +49,8 @@ Source baseline inspected for this scaffold:
   - known feature keys, stages, defaults, `[features]` and `[profiles.<name>.features]` config state, and `--enable`/`--disable` override generation
 - `codex-rs/protocol/src/conversation_id.rs`
   - string-backed Codable conversation IDs with UUIDv7 generation
+- `codex-rs/protocol/src/thread_id.rs` and `codex-rs/protocol/src/session_id.rs`
+  - string-backed Codable thread/session IDs with UUIDv7 generation and thread/session conversion helpers
 - `codex-rs/protocol/src/config_types.rs`
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
 - `codex-rs/protocol/src/openai_models.rs`
@@ -362,6 +364,6 @@ The executable is not functionally equivalent yet. Some commands have native run
 - full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
-- persistent SQLite-backed local agent graph store adapter and explicit protocol `ThreadId`/`SessionId` wrappers
+- persistent SQLite-backed local agent graph store adapter
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
