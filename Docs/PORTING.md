@@ -108,6 +108,8 @@ Source baseline inspected for this scaffold:
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
+- `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
+  - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 
 ## Known Gaps
 
@@ -116,6 +118,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - interactive TUI runtime
 - non-interactive `exec`
 - model provider configuration and auth
+- LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Responses API streaming and tool orchestration
 - sandbox execution
 - MCP server/client management
