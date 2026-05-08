@@ -80,7 +80,11 @@ final class TurnItemTests: XCTestCase {
 
         XCTAssertEqual(item.id, "search-1")
         XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
-            .webSearchEnd(WebSearchEndEvent(callID: "search-1", query: "find docs"))
+            .webSearchEnd(WebSearchEndEvent(
+                callID: "search-1",
+                query: "find docs",
+                action: .search(query: "find docs")
+            ))
         ])
     }
 
@@ -152,7 +156,11 @@ final class TurnItemTests: XCTestCase {
         try XCTAssertJSONObjectEqual(event, [
             "type": "web_search_end",
             "call_id": "search-1",
-            "query": "docs"
+            "query": "docs",
+            "action": [
+                "type": "search",
+                "query": "docs"
+            ]
         ])
 
         let data = try JSONEncoder().encode(event)

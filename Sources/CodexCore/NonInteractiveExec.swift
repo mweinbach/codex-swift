@@ -380,8 +380,8 @@ public enum NonInteractiveExec {
         if let reasoningText = reasoningText(from: item) {
             return CompletedItem(id: id, type: "reasoning", text: reasoningText)
         }
-        if case let .webSearchCall(_, _, .some(.search(query))) = item {
-            return CompletedItem(id: id, type: "web_search", query: query ?? "")
+        if case let .webSearchCall(_, _, action) = item {
+            return CompletedItem(id: id, type: "web_search", query: action?.detail ?? "")
         }
         return nil
     }

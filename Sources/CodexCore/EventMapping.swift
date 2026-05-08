@@ -31,10 +31,12 @@ public enum EventMapping {
             return .reasoning(ReasoningItem(id: id, summaryText: summaryText, rawContent: rawContent))
 
         case let .webSearchCall(id, _, action):
-            guard case let .some(.search(query)) = action else {
-                return nil
-            }
-            return .webSearch(WebSearchItem(id: id ?? "", query: query ?? ""))
+            let action = action ?? .other
+            return .webSearch(WebSearchItem(
+                id: id ?? "",
+                query: action.detail,
+                action: action
+            ))
 
         case let .imageGenerationCall(id, status, revisedPrompt, result):
             return .imageGeneration(ImageGenerationItem(
@@ -103,4 +105,5 @@ public enum EventMapping {
             .lowercased()
             .hasPrefix("<environment_context>")
     }
+
 }

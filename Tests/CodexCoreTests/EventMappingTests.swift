@@ -119,7 +119,56 @@ final class EventMappingTests: XCTestCase {
 
         let turnItem = EventMapping.parseTurnItem(item)
 
-        XCTAssertEqual(turnItem, .webSearch(WebSearchItem(id: "ws_1", query: "weather")))
+        XCTAssertEqual(turnItem, .webSearch(WebSearchItem(
+            id: "ws_1",
+            query: "weather",
+            action: .search(query: "weather")
+        )))
+    }
+
+    func testParsesWebSearchOpenPageAndFindInPageCalls() {
+        XCTAssertEqual(EventMapping.parseTurnItem(.webSearchCall(
+            id: "ws_open",
+            status: "completed",
+            action: .openPage(url: "https://example.com")
+        )), .webSearch(WebSearchItem(
+            id: "ws_open",
+            query: "https://example.com",
+            action: .openPage(url: "https://example.com")
+        )))
+
+        XCTAssertEqual(EventMapping.parseTurnItem(.webSearchCall(
+            id: "ws_find",
+            status: "completed",
+            action: .findInPage(url: "https://example.com", pattern: "needle")
+        )), .webSearch(WebSearchItem(
+            id: "ws_find",
+            query: "'needle' in https://example.com",
+            action: .findInPage(url: "https://example.com", pattern: "needle")
+        )))
+    }
+
+    func testParsesPartialWebSearchCallAsOtherAction() {
+        XCTAssertEqual(EventMapping.parseTurnItem(.webSearchCall(
+            id: "ws_partial",
+            status: "in_progress",
+            action: nil
+        )), .webSearch(WebSearchItem(
+            id: "ws_partial",
+            query: "",
+            action: .other
+        )))
+    }
+
+    func testWebSearchActionDetailUsesFirstQueryPreview() {
+        XCTAssertEqual(EventMapping.parseTurnItem(.webSearchCall(
+            id: "ws_multi",
+            action: .search(query: nil, queries: ["first", "second"])
+        )), .webSearch(WebSearchItem(
+            id: "ws_multi",
+            query: "first ...",
+            action: .search(query: nil, queries: ["first", "second"])
+        )))
     }
 
     func testParsesImageGenerationCall() {
@@ -141,7 +190,6 @@ final class EventMappingTests: XCTestCase {
     }
 
     func testSkipsNonSearchWebSearchActionsAndOtherItems() {
-        XCTAssertNil(EventMapping.parseTurnItem(.webSearchCall(action: .openPage(url: "https://example.com"))))
         XCTAssertNil(EventMapping.parseTurnItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertNil(EventMapping.parseTurnItem(.knownPersisted(type: "function_call")))
         XCTAssertNil(EventMapping.parseTurnItem(.other))

@@ -410,7 +410,7 @@ public struct LocalShellExecAction: Equatable, Codable, Sendable {
 }
 
 public enum WebSearchAction: Equatable, Codable, Sendable {
-    case search(query: String?)
+    case search(query: String?, queries: [String]? = nil)
     case openPage(url: String?)
     case findInPage(url: String?, pattern: String?)
     case other
@@ -418,6 +418,7 @@ public enum WebSearchAction: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type
         case query
+        case queries
         case url
         case pattern
     }
@@ -428,6 +429,38 @@ public enum WebSearchAction: Equatable, Codable, Sendable {
         case findInPage = "find_in_page"
     }
 
+    public var detail: String {
+        switch self {
+        case let .search(query, queries):
+            if let query, !query.isEmpty {
+                return query
+            }
+            let first = queries?.first ?? ""
+            if let queries, queries.count > 1, !first.isEmpty {
+                return "\(first) ..."
+            }
+            return first
+
+        case let .openPage(url):
+            return url ?? ""
+
+        case let .findInPage(url, pattern):
+            switch (pattern, url) {
+            case let (pattern?, url?):
+                return "'\(pattern)' in \(url)"
+            case let (pattern?, nil):
+                return "'\(pattern)'"
+            case let (nil, url?):
+                return url
+            case (nil, nil):
+                return ""
+            }
+
+        case .other:
+            return ""
+        }
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         guard let type = try? container.decode(ActionType.self, forKey: .type) else {
@@ -436,7 +469,10 @@ public enum WebSearchAction: Equatable, Codable, Sendable {
         }
         switch type {
         case .search:
-            self = .search(query: try container.decodeIfPresent(String.self, forKey: .query))
+            self = .search(
+                query: try container.decodeIfPresent(String.self, forKey: .query),
+                queries: try container.decodeIfPresent([String].self, forKey: .queries)
+            )
         case .openPage:
             self = .openPage(url: try container.decodeIfPresent(String.self, forKey: .url))
         case .findInPage:
@@ -450,9 +486,10 @@ public enum WebSearchAction: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .search(query):
+        case let .search(query, queries):
             try container.encode(ActionType.search, forKey: .type)
             try container.encodeIfPresent(query, forKey: .query)
+            try container.encodeIfPresent(queries, forKey: .queries)
         case let .openPage(url):
             try container.encode(ActionType.openPage, forKey: .type)
             try container.encodeIfPresent(url, forKey: .url)

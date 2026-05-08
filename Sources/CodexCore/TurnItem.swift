@@ -210,14 +210,16 @@ public struct ReasoningItem: Equatable, Codable, Sendable {
 public struct WebSearchItem: Equatable, Codable, Sendable {
     public let id: String
     public let query: String
+    public let action: WebSearchAction
 
-    public init(id: String, query: String) {
+    public init(id: String, query: String, action: WebSearchAction? = nil) {
         self.id = id
         self.query = query
+        self.action = action ?? .search(query: query)
     }
 
     public func asLegacyEvent() -> LegacyEventMessage {
-        .webSearchEnd(WebSearchEndEvent(callID: id, query: query))
+        .webSearchEnd(WebSearchEndEvent(callID: id, query: query, action: action))
     }
 }
 

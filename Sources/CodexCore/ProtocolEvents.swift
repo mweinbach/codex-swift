@@ -111,15 +111,18 @@ public struct WebSearchBeginEvent: Equatable, Codable, Sendable {
 public struct WebSearchEndEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let query: String
+    public let action: WebSearchAction
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
         case query
+        case action
     }
 
-    public init(callID: String, query: String) {
+    public init(callID: String, query: String, action: WebSearchAction? = nil) {
         self.callID = callID
         self.query = query
+        self.action = action ?? .search(query: query)
     }
 }
 

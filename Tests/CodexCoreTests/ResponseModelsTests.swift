@@ -229,6 +229,22 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["status"] as? String, "completed")
     }
 
+    func testRoundTripsWebSearchSearchQueriesLikeRust() throws {
+        let json = #"""
+        {
+            "type": "search",
+            "queries": ["first", "second"]
+        }
+        """#
+        let action = try JSONDecoder().decode(WebSearchAction.self, from: Data(json.utf8))
+        XCTAssertEqual(action, .search(query: nil, queries: ["first", "second"]))
+
+        try XCTAssertJSONObjectEqual(action, [
+            "type": "search",
+            "queries": ["first", "second"]
+        ])
+    }
+
     func testRoundTripsToolSearchCallLikeRust() throws {
         let json = #"""
         {
