@@ -140,7 +140,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/config/mod.rs` apply-relevant config loading
   - apply/auth-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from detected project root to cwd, `project_root_markers`, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, top-level `forced_login_method`, top-level `forced_chatgpt_workspace_id`, MCP OAuth callback port/URL loading and login flow use, `developer_instructions`, `compact_prompt`, `tool_output_token_limit`, prompt-file path resolution/loading for `experimental_instructions_file` and `experimental_compact_prompt_file`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 - `codex-rs/core/src/config/profile.rs`
-  - profile option wire shape, feature-table flattening, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
+  - profile option wire shape, service-tier string field, feature-table flattening, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, Rust-matching refresh failure messages, and login-restriction logout enforcement for forced method/workspace policies
 - `codex-rs/core/src/auth/storage.rs`
