@@ -5,6 +5,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
     case agentMessage(AgentMessageItem)
     case reasoning(ReasoningItem)
     case webSearch(WebSearchItem)
+    case imageGeneration(ImageGenerationItem)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -15,6 +16,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case agentMessage = "AgentMessage"
         case reasoning = "Reasoning"
         case webSearch = "WebSearch"
+        case imageGeneration = "ImageGeneration"
     }
 
     public var id: String {
@@ -26,6 +28,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .reasoning(item):
             return item.id
         case let .webSearch(item):
+            return item.id
+        case let .imageGeneration(item):
             return item.id
         }
     }
@@ -41,6 +45,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .reasoning(try ReasoningItem(from: decoder))
         case .webSearch:
             self = .webSearch(try WebSearchItem(from: decoder))
+        case .imageGeneration:
+            self = .imageGeneration(try ImageGenerationItem(from: decoder))
         }
     }
 
@@ -59,6 +65,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .webSearch(item):
             try container.encode(ItemType.webSearch, forKey: .type)
             try item.encode(to: encoder)
+        case let .imageGeneration(item):
+            try container.encode(ItemType.imageGeneration, forKey: .type)
+            try item.encode(to: encoder)
         }
     }
 
@@ -71,6 +80,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .reasoning(item):
             return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
         case let .webSearch(item):
+            return [item.asLegacyEvent()]
+        case let .imageGeneration(item):
             return [item.asLegacyEvent()]
         }
     }
@@ -210,6 +221,46 @@ public struct WebSearchItem: Equatable, Codable, Sendable {
     }
 }
 
+public struct ImageGenerationItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let status: String
+    public let revisedPrompt: String?
+    public let result: String
+    public let savedPath: AbsolutePath?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case revisedPrompt = "revised_prompt"
+        case result
+        case savedPath = "saved_path"
+    }
+
+    public init(
+        id: String,
+        status: String,
+        revisedPrompt: String? = nil,
+        result: String,
+        savedPath: AbsolutePath? = nil
+    ) {
+        self.id = id
+        self.status = status
+        self.revisedPrompt = revisedPrompt
+        self.result = result
+        self.savedPath = savedPath
+    }
+
+    public func asLegacyEvent() -> LegacyEventMessage {
+        .imageGenerationEnd(ImageGenerationEndEvent(
+            callID: id,
+            status: status,
+            revisedPrompt: revisedPrompt,
+            result: result,
+            savedPath: savedPath
+        ))
+    }
+}
+
 public struct ItemStartedEvent: Equatable, Codable, Sendable {
     public let threadID: ConversationId
     public let turnID: String
@@ -228,10 +279,14 @@ public struct ItemStartedEvent: Equatable, Codable, Sendable {
     }
 
     public func asLegacyEvents(showRawAgentReasoning _: Bool = false) -> [LegacyEventMessage] {
-        guard case let .webSearch(item) = item else {
+        switch item {
+        case let .webSearch(item):
+            return [.webSearchBegin(WebSearchBeginEvent(callID: item.id))]
+        case let .imageGeneration(item):
+            return [.imageGenerationBegin(ImageGenerationBeginEvent(callID: item.id))]
+        default:
             return []
         }
-        return [.webSearchBegin(WebSearchBeginEvent(callID: item.id))]
     }
 }
 

@@ -123,6 +123,48 @@ public struct WebSearchEndEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct ImageGenerationBeginEvent: Equatable, Codable, Sendable {
+    public let callID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case callID = "call_id"
+    }
+
+    public init(callID: String) {
+        self.callID = callID
+    }
+}
+
+public struct ImageGenerationEndEvent: Equatable, Codable, Sendable {
+    public let callID: String
+    public let status: String
+    public let revisedPrompt: String?
+    public let result: String
+    public let savedPath: AbsolutePath?
+
+    private enum CodingKeys: String, CodingKey {
+        case callID = "call_id"
+        case status
+        case revisedPrompt = "revised_prompt"
+        case result
+        case savedPath = "saved_path"
+    }
+
+    public init(
+        callID: String,
+        status: String,
+        revisedPrompt: String? = nil,
+        result: String,
+        savedPath: AbsolutePath? = nil
+    ) {
+        self.callID = callID
+        self.status = status
+        self.revisedPrompt = revisedPrompt
+        self.result = result
+        self.savedPath = savedPath
+    }
+}
+
 public struct AgentMessageContentDeltaEvent: Equatable, Codable, Sendable {
     public let threadID: String
     public let turnID: String
@@ -233,6 +275,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
     case agentReasoningSectionBreak(AgentReasoningSectionBreakEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
+    case imageGenerationBegin(ImageGenerationBeginEvent)
+    case imageGenerationEnd(ImageGenerationEndEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -249,6 +293,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case agentReasoningSectionBreak = "agent_reasoning_section_break"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
+        case imageGenerationBegin = "image_generation_begin"
+        case imageGenerationEnd = "image_generation_end"
     }
 
     public init(from decoder: Decoder) throws {
@@ -274,6 +320,10 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
             self = .webSearchEnd(try WebSearchEndEvent(from: decoder))
+        case .imageGenerationBegin:
+            self = .imageGenerationBegin(try ImageGenerationBeginEvent(from: decoder))
+        case .imageGenerationEnd:
+            self = .imageGenerationEnd(try ImageGenerationEndEvent(from: decoder))
         }
     }
 
@@ -309,6 +359,12 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .webSearchEnd(event):
             try container.encode(EventType.webSearchEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .imageGenerationBegin(event):
+            try container.encode(EventType.imageGenerationBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .imageGenerationEnd(event):
+            try container.encode(EventType.imageGenerationEnd, forKey: .type)
             try event.encode(to: encoder)
         }
     }

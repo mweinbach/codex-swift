@@ -95,6 +95,28 @@ final class EventMessageTests: XCTestCase {
             ]
         ])
 
+        try XCTAssertJSONObjectEqual(EventMessage.imageGenerationBegin(ImageGenerationBeginEvent(
+            callID: "ig-1"
+        )), [
+            "type": "image_generation_begin",
+            "call_id": "ig-1"
+        ])
+
+        try XCTAssertJSONObjectEqual(EventMessage.imageGenerationEnd(ImageGenerationEndEvent(
+            callID: "ig-1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png",
+            savedPath: try AbsolutePath(absolutePath: "/tmp/generated.png")
+        )), [
+            "type": "image_generation_end",
+            "call_id": "ig-1",
+            "status": "completed",
+            "revised_prompt": "a clearer prompt",
+            "result": "base64-png",
+            "saved_path": "/tmp/generated.png"
+        ])
+
         try XCTAssertJSONObjectEqual(EventMessage.agentMessageContentDelta(AgentMessageContentDeltaEvent(
             threadID: "thread-1",
             turnID: "turn-1",

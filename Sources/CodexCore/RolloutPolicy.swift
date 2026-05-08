@@ -22,6 +22,8 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case mcpToolCallEnd = "mcp_tool_call_end"
     case webSearchBegin = "web_search_begin"
     case webSearchEnd = "web_search_end"
+    case imageGenerationBegin = "image_generation_begin"
+    case imageGenerationEnd = "image_generation_end"
     case execCommandBegin = "exec_command_begin"
     case execCommandOutputDelta = "exec_command_output_delta"
     case terminalInteraction = "terminal_interaction"
@@ -111,6 +113,10 @@ public enum RolloutPolicy {
             return .webSearchBegin
         case .webSearchEnd:
             return .webSearchEnd
+        case .imageGenerationBegin:
+            return .imageGenerationBegin
+        case .imageGenerationEnd:
+            return .imageGenerationEnd
         case .execCommandBegin:
             return .execCommandBegin
         case .execCommandOutputDelta:
@@ -236,6 +242,8 @@ public enum RolloutPolicy {
              .mcpToolCallEnd,
              .webSearchBegin,
              .webSearchEnd,
+             .imageGenerationBegin,
+             .imageGenerationEnd,
              .execCommandBegin,
              .terminalInteraction,
              .execCommandOutputDelta,

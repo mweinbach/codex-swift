@@ -122,6 +122,24 @@ final class EventMappingTests: XCTestCase {
         XCTAssertEqual(turnItem, .webSearch(WebSearchItem(id: "ws_1", query: "weather")))
     }
 
+    func testParsesImageGenerationCall() {
+        let item = ResponseItem.imageGenerationCall(
+            id: "ig_1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png"
+        )
+
+        let turnItem = EventMapping.parseTurnItem(item)
+
+        XCTAssertEqual(turnItem, .imageGeneration(ImageGenerationItem(
+            id: "ig_1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png"
+        )))
+    }
+
     func testSkipsNonSearchWebSearchActionsAndOtherItems() {
         XCTAssertNil(EventMapping.parseTurnItem(.webSearchCall(action: .openPage(url: "https://example.com"))))
         XCTAssertNil(EventMapping.parseTurnItem(.compaction(encryptedContent: "encrypted")))

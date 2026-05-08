@@ -37,6 +37,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case mcpListToolsResponse(McpListToolsResponseEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
+    case imageGenerationBegin(ImageGenerationBeginEvent)
+    case imageGenerationEnd(ImageGenerationEndEvent)
     case execCommandBegin(ExecCommandBeginEvent)
     case execCommandOutputDelta(ExecCommandOutputDeltaEvent)
     case terminalInteraction(TerminalInteractionEvent)
@@ -96,6 +98,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case mcpListToolsResponse = "mcp_list_tools_response"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
+        case imageGenerationBegin = "image_generation_begin"
+        case imageGenerationEnd = "image_generation_end"
         case execCommandBegin = "exec_command_begin"
         case execCommandOutputDelta = "exec_command_output_delta"
         case terminalInteraction = "terminal_interaction"
@@ -176,6 +180,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
             self = .webSearchEnd(try WebSearchEndEvent(from: decoder))
+        case .imageGenerationBegin:
+            self = .imageGenerationBegin(try ImageGenerationBeginEvent(from: decoder))
+        case .imageGenerationEnd:
+            self = .imageGenerationEnd(try ImageGenerationEndEvent(from: decoder))
         case .execCommandBegin:
             self = .execCommandBegin(try ExecCommandBeginEvent(from: decoder))
         case .execCommandOutputDelta:
@@ -309,6 +317,12 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .webSearchEnd(event):
             try container.encode(EventType.webSearchEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .imageGenerationBegin(event):
+            try container.encode(EventType.imageGenerationBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .imageGenerationEnd(event):
+            try container.encode(EventType.imageGenerationEnd, forKey: .type)
             try event.encode(to: encoder)
         case let .execCommandBegin(event):
             try container.encode(EventType.execCommandBegin, forKey: .type)

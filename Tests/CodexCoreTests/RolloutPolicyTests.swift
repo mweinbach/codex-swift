@@ -61,8 +61,21 @@ final class RolloutPolicyTests: XCTestCase {
     func testEventMessageKindMappingFeedsPersistencePolicy() {
         XCTAssertEqual(RolloutPolicy.eventKind(for: .warning(WarningEvent(message: "heads up"))), .warning)
         XCTAssertEqual(RolloutPolicy.eventKind(for: .userMessage(UserMessageEvent(message: "hello"))), .userMessage)
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))),
+            .imageGenerationBegin
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .imageGenerationEnd(ImageGenerationEndEvent(
+                callID: "ig-1",
+                status: "completed",
+                result: "base64-png"
+            ))),
+            .imageGenerationEnd
+        )
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))
     }
 
     func testRolloutItemPersistenceMatchesRustBuckets() {

@@ -36,6 +36,14 @@ public enum EventMapping {
             }
             return .webSearch(WebSearchItem(id: id ?? "", query: query ?? ""))
 
+        case let .imageGenerationCall(id, status, revisedPrompt, result):
+            return .imageGeneration(ImageGenerationItem(
+                id: id,
+                status: status,
+                revisedPrompt: revisedPrompt,
+                result: result
+            ))
+
         case .compaction,
              .localShellCall,
              .functionCall,
@@ -44,7 +52,6 @@ public enum EventMapping {
              .customToolCall,
              .customToolCallOutput,
              .toolSearchOutput,
-             .imageGenerationCall,
              .ghostSnapshot,
              .knownPersisted,
              .other:

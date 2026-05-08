@@ -84,6 +84,28 @@ final class TurnItemTests: XCTestCase {
         ])
     }
 
+    func testImageGenerationAndTurnItemIDs() throws {
+        let savedPath = try AbsolutePath(absolutePath: "/tmp/generated.png")
+        let item = TurnItem.imageGeneration(ImageGenerationItem(
+            id: "ig-1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png",
+            savedPath: savedPath
+        ))
+
+        XCTAssertEqual(item.id, "ig-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .imageGenerationEnd(ImageGenerationEndEvent(
+                callID: "ig-1",
+                status: "completed",
+                revisedPrompt: "a clearer prompt",
+                result: "base64-png",
+                savedPath: savedPath
+            ))
+        ])
+    }
+
     func testTurnItemWireShapeUsesRustTags() throws {
         let item = TurnItem.agentMessage(AgentMessageItem(id: "agent-1", content: [.text("hello")]))
 
@@ -96,6 +118,28 @@ final class TurnItemTests: XCTestCase {
                     "text": "hello"
                 ]
             ]
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
+    func testImageGenerationTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.imageGeneration(ImageGenerationItem(
+            id: "ig-1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png",
+            savedPath: try AbsolutePath(absolutePath: "/tmp/generated.png")
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "ImageGeneration",
+            "id": "ig-1",
+            "status": "completed",
+            "revised_prompt": "a clearer prompt",
+            "result": "base64-png",
+            "saved_path": "/tmp/generated.png"
         ])
 
         let data = try JSONEncoder().encode(item)
@@ -115,12 +159,43 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(LegacyEventMessage.self, from: data), event)
     }
 
-    func testItemStartedEventEmitsWebSearchBeginOnlyForWebSearch() throws {
+    func testImageGenerationLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
+        let event = LegacyEventMessage.imageGenerationEnd(ImageGenerationEndEvent(
+            callID: "ig-1",
+            status: "completed",
+            revisedPrompt: "a clearer prompt",
+            result: "base64-png",
+            savedPath: try AbsolutePath(absolutePath: "/tmp/generated.png")
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "type": "image_generation_end",
+            "call_id": "ig-1",
+            "status": "completed",
+            "revised_prompt": "a clearer prompt",
+            "result": "base64-png",
+            "saved_path": "/tmp/generated.png"
+        ])
+
+        let data = try JSONEncoder().encode(event)
+        XCTAssertEqual(try JSONDecoder().decode(LegacyEventMessage.self, from: data), event)
+    }
+
+    func testItemStartedEventEmitsLegacyBeginForToolLikeItems() throws {
         let threadID = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let webSearch = ItemStartedEvent(
             threadID: threadID,
             turnID: "turn-1",
             item: .webSearch(WebSearchItem(id: "search-1", query: "docs"))
+        )
+        let imageGeneration = ItemStartedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .imageGeneration(ImageGenerationItem(
+                id: "ig-1",
+                status: "in_progress",
+                result: ""
+            ))
         )
         let userMessage = ItemStartedEvent(
             threadID: threadID,
@@ -130,6 +205,9 @@ final class TurnItemTests: XCTestCase {
 
         XCTAssertEqual(webSearch.asLegacyEvents(), [
             .webSearchBegin(WebSearchBeginEvent(callID: "search-1"))
+        ])
+        XCTAssertEqual(imageGeneration.asLegacyEvents(), [
+            .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))
         ])
         XCTAssertEqual(userMessage.asLegacyEvents(), [])
     }
