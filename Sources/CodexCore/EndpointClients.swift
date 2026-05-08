@@ -63,6 +63,38 @@ fileprivate func collectResponseEvents(_ stream: ResponseEventStream) async -> R
     return results
 }
 
+public enum ResponsesSSEFixtureStream {
+    public static func streamFromFixture(
+        path: String,
+        idleTimeoutMilliseconds: UInt64,
+        telemetry: SseTelemetry? = nil
+    ) -> Result<ResponseEventStream, APIError> {
+        let content: String
+        do {
+            content = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            return .failure(.stream(String(describing: error)))
+        }
+
+        return .success(makeResponseEventStream(
+            from: APIStreamResponse(statusCode: 200, sseText: fixtureSSEText(from: content)),
+            makeParser: ResponsesEventFrameParser.init,
+            includeRateLimits: false,
+            idleTimeoutMilliseconds: idleTimeoutMilliseconds,
+            telemetry: telemetry
+        ))
+    }
+
+    private static func fixtureSSEText(from content: String) -> String {
+        var text = ""
+        content.enumerateLines { line, _ in
+            text.append(line)
+            text.append("\n\n")
+        }
+        return text
+    }
+}
+
 public protocol ResponseEventFrameParsing: Sendable {
     mutating func receive(frame: String) -> ResponseEventResults
     mutating func finish() -> ResponseEventResults
@@ -184,7 +216,7 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
 
         switch result {
         case let .success(response):
-            return .success(Self.eventStream(
+            return .success(makeResponseEventStream(
                 from: response,
                 makeParser: makeParser,
                 includeRateLimits: includeRateLimits,
@@ -208,90 +240,90 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
         request.headers["accept"] = "text/event-stream"
         return request.addingAuthHeaders(from: auth)
     }
+}
 
-    private static func eventStream<Parser: ResponseEventFrameParsing>(
-        from response: APIStreamResponse,
-        makeParser: @escaping @Sendable () -> Parser,
-        includeRateLimits: Bool,
-        idleTimeoutMilliseconds: UInt64,
-        telemetry: SseTelemetry?
-    ) -> ResponseEventStream {
-        ResponseEventStream { continuation in
-            let taskBox = StreamTaskBox()
-            let timeout = SseIdleTimeout(
-                milliseconds: idleTimeoutMilliseconds,
-                telemetry: telemetry,
-                continuation: continuation,
-                taskBox: taskBox
-            )
-            let task = Task {
-                if includeRateLimits, let snapshot = RateLimitSnapshot.parseRateLimit(headers: response.headers) {
-                    continuation.yield(.success(.rateLimits(snapshot)))
-                }
+private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
+    from response: APIStreamResponse,
+    makeParser: @escaping @Sendable () -> Parser,
+    includeRateLimits: Bool,
+    idleTimeoutMilliseconds: UInt64,
+    telemetry: SseTelemetry?
+) -> ResponseEventStream {
+    ResponseEventStream { continuation in
+        let taskBox = StreamTaskBox()
+        let timeout = SseIdleTimeout(
+            milliseconds: idleTimeoutMilliseconds,
+            telemetry: telemetry,
+            continuation: continuation,
+            taskBox: taskBox
+        )
+        let task = Task {
+            if includeRateLimits, let snapshot = RateLimitSnapshot.parseRateLimit(headers: response.headers) {
+                continuation.yield(.success(.rateLimits(snapshot)))
+            }
 
-                var parser = makeParser()
-                var textDecoder = UTF8StreamDecoder()
-                var frameDecoder = SSEDataFrameDecoder()
-                var pollStart = timeout.startPoll()
+            var parser = makeParser()
+            var textDecoder = UTF8StreamDecoder()
+            var frameDecoder = SSEDataFrameDecoder()
+            var pollStart = timeout.startPoll()
 
-                for await chunk in response.byteStream {
-                    guard !Task.isCancelled else {
-                        timeout.cancel()
-                        return
-                    }
-
-                    switch chunk {
-                    case let .success(data):
-                        guard timeout.finishPoll(.event, startedAt: pollStart) else {
-                            return
-                        }
-                        appendEvents(
-                            from: frameDecoder.receive(textDecoder.receive(data)),
-                            using: &parser,
-                            to: continuation
-                        )
-                        pollStart = timeout.startPoll()
-                    case let .failure(error):
-                        guard timeout.finishPoll(.streamError(error), startedAt: pollStart) else {
-                            return
-                        }
-                        continuation.yield(.failure(.stream(String(describing: error))))
-                        continuation.finish()
-                        return
-                    }
-                }
-
-                guard timeout.finishPoll(.streamClosed, startedAt: pollStart) else {
+            for await chunk in response.byteStream {
+                guard !Task.isCancelled else {
+                    timeout.cancel()
                     return
                 }
-                appendEvents(
-                    from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
-                    using: &parser,
-                    to: continuation
-                )
-                for event in parser.finish() {
-                    continuation.yield(event)
+
+                switch chunk {
+                case let .success(data):
+                    guard timeout.finishPoll(.event, startedAt: pollStart) else {
+                        return
+                    }
+                    appendResponseEvents(
+                        from: frameDecoder.receive(textDecoder.receive(data)),
+                        using: &parser,
+                        to: continuation
+                    )
+                    pollStart = timeout.startPoll()
+                case let .failure(error):
+                    guard timeout.finishPoll(.streamError(error), startedAt: pollStart) else {
+                        return
+                    }
+                    continuation.yield(.failure(.stream(String(describing: error))))
+                    continuation.finish()
+                    return
                 }
-                continuation.finish()
             }
-            taskBox.task = task
 
-            continuation.onTermination = { _ in
-                timeout.cancel()
-                task.cancel()
+            guard timeout.finishPoll(.streamClosed, startedAt: pollStart) else {
+                return
             }
-        }
-    }
-
-    private static func appendEvents<Parser: ResponseEventFrameParsing>(
-        from frames: [String],
-        using parser: inout Parser,
-        to continuation: ResponseEventStream.Continuation
-    ) {
-        for frame in frames {
-            for event in parser.receive(frame: frame) {
+            appendResponseEvents(
+                from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
+                using: &parser,
+                to: continuation
+            )
+            for event in parser.finish() {
                 continuation.yield(event)
             }
+            continuation.finish()
+        }
+        taskBox.task = task
+
+        continuation.onTermination = { _ in
+            timeout.cancel()
+            task.cancel()
+        }
+    }
+}
+
+private func appendResponseEvents<Parser: ResponseEventFrameParsing>(
+    from frames: [String],
+    using parser: inout Parser,
+    to continuation: ResponseEventStream.Continuation
+) {
+    for frame in frames {
+        for event in parser.receive(frame: frame) {
+            continuation.yield(event)
         }
     }
 }

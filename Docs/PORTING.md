@@ -202,7 +202,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/prompts.rs` and `codex-rs/core/computer_use_prompt.md`
   - bundled computer-use prompt loading for native Swift callers
 - `codex-rs/core/src/flags.rs`
-  - `CODEX_RS_SSE_FIXTURE` environment flag helper for offline SSE fixture wiring
+  - `CODEX_RS_SSE_FIXTURE` environment flag helper and Responses SSE fixture stream reader for offline SSE fixture wiring
 - `codex-rs/core/src/git_info.rs`
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`

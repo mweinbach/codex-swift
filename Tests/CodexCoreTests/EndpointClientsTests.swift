@@ -330,6 +330,50 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(telemetry.records.map(\.result), [.idleTimeout])
     }
 
+    func testResponsesSSEFixtureStreamReadsFixtureLinesAsEventsWithoutRateLimits() async throws {
+        let telemetry = CapturingSseTelemetry()
+        let fixtureURL = try writeFixture("""
+        data: {"type":"response.created","response":{}}
+        data: {"type":"response.output_text.delta","delta":"fixture"}
+        data: {"type":"response.completed","response":{"id":"resp_fixture","usage":null}}
+        """)
+
+        let result = ResponsesSSEFixtureStream.streamFromFixture(
+            path: fixtureURL.path,
+            idleTimeoutMilliseconds: 1_000,
+            telemetry: telemetry
+        )
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected fixture event stream, got \(result)")
+        }
+
+        let events = await collect(stream)
+
+        XCTAssertEqual(events, [
+            .success(.created),
+            .success(.outputTextDelta("fixture")),
+            .success(.completed(responseID: "resp_fixture", tokenUsage: nil))
+        ])
+        XCTAssertEqual(telemetry.records.map(\.result), [.event, .streamClosed])
+    }
+
+    func testResponsesSSEFixtureStreamReportsFileReadError() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("missing.sse")
+
+        let result = ResponsesSSEFixtureStream.streamFromFixture(
+            path: missing.path,
+            idleTimeoutMilliseconds: 1_000
+        )
+
+        guard case let .failure(.stream(message)) = result else {
+            return XCTFail("expected stream error, got \(result)")
+        }
+        XCTAssertFalse(message.isEmpty)
+    }
+
     func testResponsesClientUsesChatPathWhenProviderWireIsChat() async {
         let transport = CapturingTransport(
             streamResults: [
@@ -401,6 +445,15 @@ final class EndpointClientsTests: XCTestCase {
             streamIdleTimeoutMilliseconds: streamIdleTimeoutMilliseconds
         )
     }
+}
+
+private func writeFixture(_ contents: String) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("fixture.sse")
+    try contents.write(to: url, atomically: true, encoding: .utf8)
+    return url
 }
 
 private final class CapturingTransport: APITransport, @unchecked Sendable {
