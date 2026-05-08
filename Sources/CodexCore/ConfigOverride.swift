@@ -7,6 +7,31 @@ public indirect enum ConfigValue: Equatable, Sendable {
     case bool(Bool)
     case array([ConfigValue])
     case table([String: ConfigValue])
+
+    public func merging(overlay: ConfigValue) -> ConfigValue {
+        var base = self
+        base.merge(overlay: overlay)
+        return base
+    }
+
+    public mutating func merge(overlay: ConfigValue) {
+        guard case let .table(overlayTable) = overlay,
+              case var .table(baseTable) = self
+        else {
+            self = overlay
+            return
+        }
+
+        for (key, value) in overlayTable {
+            if var existing = baseTable[key] {
+                existing.merge(overlay: value)
+                baseTable[key] = existing
+            } else {
+                baseTable[key] = value
+            }
+        }
+        self = .table(baseTable)
+    }
 }
 
 public enum ConfigOverrideError: Error, Equatable, CustomStringConvertible, Sendable {

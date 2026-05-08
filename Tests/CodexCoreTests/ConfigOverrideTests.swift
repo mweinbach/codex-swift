@@ -45,6 +45,60 @@ final class ConfigOverrideTests: XCTestCase {
         )
     }
 
+    func testApplyOverrideReplacesNonTableIntermediates() throws {
+        let overrides = CliConfigOverrides(rawOverrides: [
+            "profile.name=\"work\""
+        ])
+
+        XCTAssertEqual(
+            try overrides.applying(to: .table(["profile": .string("old")])),
+            .table(["profile": .table(["name": .string("work")])])
+        )
+    }
+
+    func testMergeTomlValuesRecursesIntoTablesAndKeepsBaseValues() {
+        let base = ConfigValue.table([
+            "model": .string("o3"),
+            "features": .table([
+                "web_search_request": .bool(false),
+                "agents": .bool(true)
+            ])
+        ])
+        let overlay = ConfigValue.table([
+            "features": .table([
+                "web_search_request": .bool(true)
+            ]),
+            "profile": .string("work")
+        ])
+
+        XCTAssertEqual(
+            base.merging(overlay: overlay),
+            .table([
+                "model": .string("o3"),
+                "features": .table([
+                    "web_search_request": .bool(true),
+                    "agents": .bool(true)
+                ]),
+                "profile": .string("work")
+            ])
+        )
+    }
+
+    func testMergeTomlValuesReplacesNonTables() {
+        XCTAssertEqual(
+            ConfigValue.string("old").merging(overlay: .table(["model": .string("o3")])),
+            .table(["model": .string("o3")])
+        )
+        XCTAssertEqual(
+            ConfigValue.table(["profile": .string("work")]).merging(overlay: .string("replace")),
+            .string("replace")
+        )
+        XCTAssertEqual(
+            ConfigValue.table(["profile": .string("work")]).merging(overlay: .table(["profile": .bool(true)])),
+            .table(["profile": .bool(true)])
+        )
+    }
+
     func testInvalidOverrideErrors() {
         XCTAssertThrowsError(try CliConfigOverrides(rawOverrides: ["missing"]).parseOverrides())
         XCTAssertThrowsError(try CliConfigOverrides(rawOverrides: ["=value"]).parseOverrides())

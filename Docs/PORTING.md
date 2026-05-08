@@ -37,6 +37,8 @@ Source baseline inspected for this scaffold:
   - sandbox CLI argument names and protocol mapping
 - `codex-rs/common/src/config_override.rs`
   - `-c key=value` parsing, TOML-like literal fallback, and dotted-path application
+- `codex-rs/core/src/config_loader/merge.rs` and `codex-rs/core/src/config_loader/overrides.rs`
+  - recursive TOML-like value merging, non-table replacement, and CLI override layer construction
 - `codex-rs/core/src/features.rs`
   - known feature keys, stages, defaults, `[features]` and `[profiles.<name>.features]` config state, and `--enable`/`--disable` override generation
 - `codex-rs/protocol/src/conversation_id.rs`
