@@ -211,6 +211,8 @@ Source baseline inspected for this scaffold:
   - compaction prompt resources, content-item text joining, user-message extraction/filtering, summary-prefix detection, and token-limited compacted-history construction
 - `codex-rs/core/src/prompts.rs` and `codex-rs/core/computer_use_prompt.md`
   - bundled computer-use prompt loading for native Swift callers
+- `codex-rs/cli/src/main.rs` computer-use dispatch
+  - top-level `codex computer-use ...` now reuses the non-interactive exec parser/runtime with `features.computer_use_gui` overrides and the bundled computer-use prompt as a harness/base-instructions override
 - `codex-rs/core/src/flags.rs`
   - `CODEX_RS_SSE_FIXTURE` environment flag helper and Responses SSE fixture stream reader for offline SSE fixture wiring
 - `codex-rs/core/src/git_info.rs`

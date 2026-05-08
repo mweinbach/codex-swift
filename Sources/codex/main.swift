@@ -23,7 +23,8 @@ let exitCode = await cli.runAsync(
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
-    execRunner: runExecCommand,
+    execRunner: { request in try await runExecCommand(request) },
+    computerUseRunner: runComputerUseCommand,
     reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
     execPolicyRunner: runExecPolicyCommand,
@@ -160,7 +161,10 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
         .joined(separator: "\n")
 }
 
-private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+private func runExecCommand(
+    _ request: CodexCLI.ExecCommandRequest,
+    baseInstructionsOverride: String? = nil
+) async throws -> CodexCLI.CommandExecutionResult {
     let operation = try request.resolvedInitialOperation(
         stdinIsTerminal: isatty(STDIN_FILENO) != 0,
         readStdin: readUTF8FromStdin,
@@ -178,7 +182,8 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
             options: request.options,
             arguments: request.arguments,
             configOverrides: request.configOverrides,
-            cwd: cwd
+            cwd: cwd,
+            baseInstructionsOverride: baseInstructionsOverride
         )
 
     case let .review(reviewRequest):
@@ -193,7 +198,8 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
             options: request.options,
             arguments: request.arguments,
             configOverrides: request.configOverrides,
-            cwd: cwd
+            cwd: cwd,
+            baseInstructionsOverride: baseInstructionsOverride
         )
 
     case let .resume(sessionID, last, promptResolution, outputSchema):
@@ -218,7 +224,8 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
             configOverrides: request.configOverrides,
             cwd: cwd,
             conversationID: session.conversationID,
-            history: responseHistory
+            history: responseHistory,
+            baseInstructionsOverride: baseInstructionsOverride
         )
     }
 }
@@ -244,6 +251,34 @@ private func runReviewCommand(_ request: CodexCLI.ReviewCommandRequest) async th
     )
 }
 
+private func runComputerUseCommand(_ request: CodexCLI.ComputerUseCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    var parsedRequest: CodexCLI.ExecCommandRequest?
+    var parseError: String?
+    let parseExitCode = await CodexCLI().runAsync(
+        arguments: ["exec"] + request.arguments,
+        stdout: { _ in },
+        stderr: { parseError = $0 },
+        execRunner: { execRequest in
+            parsedRequest = execRequest
+            return CodexCLI.CommandExecutionResult(exitCode: 0)
+        }
+    )
+    guard parseExitCode == 0, let parsedRequest else {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: parseExitCode,
+            stderrMessage: parseError
+        )
+    }
+
+    let execRequest = CodexCLI.ExecCommandRequest(
+        arguments: parsedRequest.arguments,
+        action: parsedRequest.action,
+        options: parsedRequest.options,
+        configOverrides: request.configOverrides
+    )
+    return try await runExecCommand(execRequest, baseInstructionsOverride: CodexPrompts.computerUsePrompt)
+}
+
 private func runNonInteractiveExec(
     promptResolution: NonInteractivePromptResolution,
     outputSchema: JSONValue?,
@@ -252,7 +287,8 @@ private func runNonInteractiveExec(
     configOverrides: CliConfigOverrides,
     cwd: URL,
     conversationID: ConversationId = ConversationId(),
-    history: [ResponseItem] = []
+    history: [ResponseItem] = [],
+    baseInstructionsOverride: String? = nil
 ) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
         cwd: cwd,
@@ -307,10 +343,14 @@ private func runNonInteractiveExec(
         tools: configuredTools.map(\.spec),
         parallelToolCalls: modelFamily.supportsParallelToolCalls
     )
-    prompt.baseInstructionsOverride = try readExperimentalInstructionsFile(
-        settings.experimentalInstructionsFile,
-        cwd: cwd
-    )
+    if let baseInstructionsOverride {
+        prompt.baseInstructionsOverride = baseInstructionsOverride
+    } else {
+        prompt.baseInstructionsOverride = try readExperimentalInstructionsFile(
+            settings.experimentalInstructionsFile,
+            cwd: cwd
+        )
+    }
 
     let client = ResponsesClient(
         transport: URLSessionAPITransport(),
