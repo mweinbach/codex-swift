@@ -1,0 +1,1191 @@
+import Foundation
+
+public enum CloudTasksPathStyle: Equatable, Sendable {
+    case codexAPI
+    case chatGPTAPI
+
+    public static func fromBaseURL(_ baseURL: String) -> CloudTasksPathStyle {
+        baseURL.contains("/backend-api") ? .chatGPTAPI : .codexAPI
+    }
+}
+
+public struct CloudGitApplyRequest: Equatable, Sendable {
+    public let cwd: URL
+    public let diff: String
+    public let revert: Bool
+    public let preflight: Bool
+
+    public init(cwd: URL, diff: String, revert: Bool = false, preflight: Bool) {
+        self.cwd = cwd
+        self.diff = diff
+        self.revert = revert
+        self.preflight = preflight
+    }
+}
+
+public struct CloudGitApplyResult: Equatable, Sendable {
+    public let exitCode: Int32
+    public let appliedPaths: [String]
+    public let skippedPaths: [String]
+    public let conflictedPaths: [String]
+    public let stdout: String
+    public let stderr: String
+    public let commandForLog: String
+
+    public init(
+        exitCode: Int32,
+        appliedPaths: [String] = [],
+        skippedPaths: [String] = [],
+        conflictedPaths: [String] = [],
+        stdout: String = "",
+        stderr: String = "",
+        commandForLog: String = "git apply"
+    ) {
+        self.exitCode = exitCode
+        self.appliedPaths = appliedPaths
+        self.skippedPaths = skippedPaths
+        self.conflictedPaths = conflictedPaths
+        self.stdout = stdout
+        self.stderr = stderr
+        self.commandForLog = commandForLog
+    }
+}
+
+public typealias CloudGitApply = @Sendable (CloudGitApplyRequest) async -> CloudTaskResult<CloudGitApplyResult>
+public typealias CloudTaskErrorLog = @Sendable (String) -> Void
+
+public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: CloudBackend {
+    public let baseURL: String
+    public let pathStyle: CloudTasksPathStyle
+    public let transport: Transport
+    public let auth: Auth
+    public let retry: ProviderRetryConfig
+    public let headers: [String: String]
+
+    private let now: @Sendable () -> Date
+    private let environment: @Sendable () -> [String: String]
+    private let currentDirectory: @Sendable () -> URL
+    private let applyGitPatch: CloudGitApply?
+    private let errorLog: CloudTaskErrorLog
+
+    public init(
+        baseURL: String,
+        transport: Transport,
+        auth: Auth,
+        retry: ProviderRetryConfig = ProviderRetryConfig(
+            maxAttempts: 0,
+            baseDelayMilliseconds: 0,
+            retry429: false,
+            retry5xx: false,
+            retryTransport: false
+        ),
+        headers: [String: String] = ["user-agent": "codex-cli"],
+        now: @escaping @Sendable () -> Date = Date.init,
+        environment: @escaping @Sendable () -> [String: String] = { ProcessInfo.processInfo.environment },
+        currentDirectory: @escaping @Sendable () -> URL = {
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        },
+        applyGitPatch: CloudGitApply? = nil,
+        errorLog: @escaping CloudTaskErrorLog = CloudTaskErrorLogger.append
+    ) {
+        let normalizedBaseURL = Self.normalizedBaseURL(baseURL)
+        self.baseURL = normalizedBaseURL
+        self.pathStyle = CloudTasksPathStyle.fromBaseURL(normalizedBaseURL)
+        self.transport = transport
+        self.auth = auth
+        self.retry = retry
+        self.headers = headers
+        self.now = now
+        self.environment = environment
+        self.currentDirectory = currentDirectory
+        self.applyGitPatch = applyGitPatch
+        self.errorLog = errorLog
+    }
+
+    public static func normalizedBaseURL(_ raw: String) -> String {
+        var baseURL = raw
+        while baseURL.last == "/" {
+            baseURL.removeLast()
+        }
+        if (baseURL.hasPrefix("https://chatgpt.com") || baseURL.hasPrefix("https://chat.openai.com")),
+           !baseURL.contains("/backend-api") {
+            baseURL += "/backend-api"
+        }
+        return baseURL
+    }
+
+    public func listTasks(environment env: String?) async -> CloudTaskResult<[CloudTaskSummary]> {
+        var query = [
+            ("limit", "20"),
+            ("task_filter", "current")
+        ]
+        if let env {
+            query.append(("environment_id", env))
+        }
+
+        switch await executeText(method: .get, path: path(codex: "api/codex/tasks/list", chatGPT: "wham/tasks/list"), query: query) {
+        case let .success(response):
+            do {
+                let list = try decode(CloudTaskListResponse.self, from: response)
+                let tasks = list.items.map { Self.mapTaskListItemToSummary($0, now: now) }
+                errorLog("http.list_tasks: env=\(env ?? "<all>") items=\(tasks.count)")
+                return .success(tasks)
+            } catch {
+                return .failure(.http("list_tasks failed: \(decodeDescription(error, response: response))"))
+            }
+        case let .failure(error):
+            return .failure(.http("list_tasks failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary> {
+        switch await detailsWithBody(id: id.rawValue) {
+        case let .success(details):
+            return Self.summaryFromDetails(id: id, details: details, now: now)
+        case let .failure(error):
+            return .failure(.http("get_task_details failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func getTaskDiff(id: CloudTaskID) async -> CloudTaskResult<String?> {
+        switch await detailsWithBody(id: id.rawValue) {
+        case let .success(details):
+            return .success(details.parsed.unifiedDiff())
+        case let .failure(error):
+            return .failure(.http("get_task_details failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func getTaskMessages(id: CloudTaskID) async -> CloudTaskResult<[String]> {
+        switch await detailsWithBody(id: id.rawValue) {
+        case let .success(details):
+            var messages = details.parsed.assistantTextMessages()
+            if messages.isEmpty {
+                messages.append(contentsOf: Self.extractAssistantMessages(fromBody: details.body))
+            }
+            if !messages.isEmpty {
+                return .success(messages)
+            }
+            if let error = details.parsed.assistantErrorMessage() {
+                return .success(["Task failed: \(error)"])
+            }
+
+            return .failure(.http(
+                "No assistant text messages in response. GET \(detailsPathForError(id: id.rawValue)); content-type=\(details.contentType); body=\(details.body)"
+            ))
+        case let .failure(error):
+            return .failure(.http("get_task_details failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func getTaskText(id: CloudTaskID) async -> CloudTaskResult<CloudTaskText> {
+        switch await detailsWithBody(id: id.rawValue) {
+        case let .success(details):
+            var messages = details.parsed.assistantTextMessages()
+            if messages.isEmpty {
+                messages.append(contentsOf: Self.extractAssistantMessages(fromBody: details.body))
+            }
+            let assistantTurn = details.parsed.currentAssistantTurn
+            return .success(CloudTaskText(
+                prompt: details.parsed.userTextPrompt(),
+                messages: messages,
+                turnID: assistantTurn?.id,
+                siblingTurnIDs: assistantTurn?.siblingTurnIDs ?? [],
+                attemptPlacement: assistantTurn?.attemptPlacement,
+                attemptStatus: Self.attemptStatus(from: assistantTurn?.turnStatus)
+            ))
+        case let .failure(error):
+            return .failure(.http("get_task_details failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func listSiblingAttempts(task: CloudTaskID, turnID: String) async -> CloudTaskResult<[CloudTurnAttempt]> {
+        let path = path(
+            codex: "api/codex/tasks/\(task.rawValue)/turns/\(turnID)/sibling_turns",
+            chatGPT: "wham/tasks/\(task.rawValue)/turns/\(turnID)/sibling_turns"
+        )
+        switch await executeText(method: .get, path: path) {
+        case let .success(response):
+            do {
+                let decoded = try decode(CloudSiblingTurnsResponse.self, from: response)
+                return .success(decoded.siblingTurns.compactMap(Self.turnAttempt(from:)).sorted(by: Self.compareAttempts))
+            } catch {
+                return .failure(.http("list_sibling_turns failed: \(decodeDescription(error, response: response))"))
+            }
+        case let .failure(error):
+            return .failure(.http("list_sibling_turns failed: \(Self.message(from: error))"))
+        }
+    }
+
+    public func applyTaskPreflight(id: CloudTaskID, diffOverride: String?) async -> CloudTaskResult<CloudApplyOutcome> {
+        await runApply(id: id, diffOverride: diffOverride, preflight: true)
+    }
+
+    public func applyTask(id: CloudTaskID, diffOverride: String?) async -> CloudTaskResult<CloudApplyOutcome> {
+        await runApply(id: id, diffOverride: diffOverride, preflight: false)
+    }
+
+    public func createTask(
+        environmentID: String,
+        prompt: String,
+        gitRef: String,
+        qaMode: Bool,
+        bestOfN: Int
+    ) async -> CloudTaskResult<CloudCreatedTask> {
+        var inputItems: [JSONValue] = [
+            .object([
+                "type": .string("message"),
+                "role": .string("user"),
+                "content": .array([
+                    .object([
+                        "content_type": .string("text"),
+                        "text": .string(prompt)
+                    ])
+                ])
+            ])
+        ]
+
+        if let diff = environment()["CODEX_STARTING_DIFF"], !diff.isEmpty {
+            inputItems.append(.object([
+                "type": .string("pre_apply_patch"),
+                "output_diff": .object(["diff": .string(diff)])
+            ]))
+        }
+
+        var body: [String: JSONValue] = [
+            "new_task": .object([
+                "environment_id": .string(environmentID),
+                "branch": .string(gitRef),
+                "run_environment_in_qa_mode": .bool(qaMode)
+            ]),
+            "input_items": .array(inputItems)
+        ]
+        if bestOfN > 1 {
+            body["metadata"] = .object(["best_of_n": .integer(Int64(bestOfN))])
+        }
+
+        let path = path(codex: "api/codex/tasks", chatGPT: "wham/tasks")
+        switch await executeText(method: .post, path: path, body: .object(body)) {
+        case let .success(response):
+            do {
+                let value = try decode(JSONValue.self, from: response)
+                if let id = value.objectValue?["task"]?.objectValue?["id"]?.stringValue
+                    ?? value.objectValue?["id"]?.stringValue {
+                    errorLog("new_task: created id=\(id) env=\(environmentID) prompt_chars=\(prompt.count)")
+                    return .success(CloudCreatedTask(id: CloudTaskID(id)))
+                }
+                return .failure(.http(
+                    "create_task failed: POST \(response.url) succeeded but no task id found; content-type=\(response.contentType); body=\(response.body)"
+                ))
+            } catch {
+                return .failure(.http("create_task failed: \(decodeDescription(error, response: response))"))
+            }
+        case let .failure(error):
+            errorLog("new_task: create failed env=\(environmentID) prompt_chars=\(prompt.count): \(Self.message(from: error))")
+            return .failure(.http("create_task failed: \(Self.message(from: error))"))
+        }
+    }
+
+    private func runApply(id: CloudTaskID, diffOverride: String?, preflight: Bool) async -> CloudTaskResult<CloudApplyOutcome> {
+        let diff: String
+        if let diffOverride {
+            diff = diffOverride
+        } else {
+            switch await detailsWithBody(id: id.rawValue) {
+            case let .success(details):
+                guard let fetchedDiff = details.parsed.unifiedDiff() else {
+                    return .failure(.message("No diff available for task \(id.rawValue)"))
+                }
+                diff = fetchedDiff
+            case let .failure(error):
+                return .failure(.http("get_task_details failed: \(Self.message(from: error))"))
+            }
+        }
+
+        if !Self.isUnifiedDiff(diff) {
+            let mode = preflight ? "preflight" : "apply"
+            errorLog("apply_error: id=\(id.rawValue) mode=\(mode) format=non-unified; \(Self.summarizePatchForLogging(diff, cwd: currentDirectory()))")
+            return .success(CloudApplyOutcome(
+                applied: false,
+                status: .error,
+                message: "Expected unified git diff; backend returned an incompatible format."
+            ))
+        }
+
+        guard let applyGitPatch else {
+            return .failure(.unimplemented("cloud task apply"))
+        }
+
+        let request = CloudGitApplyRequest(
+            cwd: currentDirectory(),
+            diff: diff,
+            revert: false,
+            preflight: preflight
+        )
+
+        let result: CloudGitApplyResult
+        switch await applyGitPatch(request) {
+        case let .success(value):
+            result = value
+        case let .failure(error):
+            return .failure(.io("git apply failed to run: \(Self.message(from: error))"))
+        }
+
+        let status: CloudApplyStatus
+        if result.exitCode == 0 {
+            status = .success
+        } else if !result.appliedPaths.isEmpty || !result.conflictedPaths.isEmpty {
+            status = .partial
+        } else {
+            status = .error
+        }
+        let applied = status == .success && !preflight
+        let message = Self.applyMessage(
+            id: id.rawValue,
+            result: result,
+            status: status,
+            preflight: preflight
+        )
+
+        if status == .partial || status == .error || (preflight && status != .success) {
+            let mode = preflight ? "preflight" : "apply"
+            errorLog("""
+            apply_result: mode=\(mode) id=\(id.rawValue) status=\(status) applied=\(result.appliedPaths.count) skipped=\(result.skippedPaths.count) conflicts=\(result.conflictedPaths.count) cmd=\(result.commandForLog)
+            stdout_tail=
+            \(Self.tail(result.stdout, max: 2_000))
+            stderr_tail=
+            \(Self.tail(result.stderr, max: 2_000))
+            \(Self.summarizePatchForLogging(diff, cwd: currentDirectory()))
+            ----- PATCH BEGIN -----
+            \(diff)
+            ----- PATCH END -----
+            """)
+        }
+
+        return .success(CloudApplyOutcome(
+            applied: applied,
+            status: status,
+            message: message,
+            skippedPaths: result.skippedPaths,
+            conflictPaths: result.conflictedPaths
+        ))
+    }
+
+    private func detailsWithBody(id: String) async -> CloudTaskResult<CloudTaskDetailsPayload> {
+        switch await executeText(method: .get, path: path(codex: "api/codex/tasks/\(id)", chatGPT: "wham/tasks/\(id)")) {
+        case let .success(response):
+            do {
+                return .success(CloudTaskDetailsPayload(
+                    parsed: try decode(CloudTaskDetailsResponse.self, from: response),
+                    body: response.body,
+                    contentType: response.contentType
+                ))
+            } catch {
+                return .failure(.http(decodeDescription(error, response: response)))
+            }
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+
+    private func executeText(
+        method: HTTPMethod,
+        path: String,
+        query: [(String, String)] = [],
+        body: JSONValue? = nil
+    ) async -> CloudTaskResult<CloudHTTPTextResponse> {
+        let result = await TransportRetry.runWithRetry(
+            policy: retry.toPolicy(),
+            makeRequest: {
+                makeRequest(method: method, path: path, query: query, body: body)
+            },
+            operation: { request, _ in
+                await transport.execute(request)
+            }
+        )
+
+        switch result {
+        case let .success(response):
+            return .success(CloudHTTPTextResponse(
+                url: makeURL(path: path, query: query),
+                body: String(decoding: response.body, as: UTF8.self),
+                contentType: Self.contentType(from: response.headers)
+            ))
+        case let .failure(error):
+            return .failure(.http(String(describing: error)))
+        }
+    }
+
+    private func makeRequest(method: HTTPMethod, path: String, query: [(String, String)], body: JSONValue?) -> APIRequest {
+        var requestHeaders = headers
+        if body != nil,
+           !requestHeaders.keys.contains(where: { $0.caseInsensitiveCompare("content-type") == .orderedSame }) {
+            requestHeaders["content-type"] = "application/json"
+        }
+        let request = APIRequest(
+            method: method,
+            url: makeURL(path: path, query: query),
+            headers: requestHeaders,
+            body: body
+        )
+        return request.addingAuthHeaders(from: auth)
+    }
+
+    private func makeURL(path: String, query: [(String, String)] = []) -> String {
+        var url = "\(baseURL)/\(path)"
+        guard !query.isEmpty, var components = URLComponents(string: url) else {
+            return url
+        }
+        components.queryItems = (components.queryItems ?? []) + query.map {
+            URLQueryItem(name: $0.0, value: $0.1)
+        }
+        url = components.string ?? url
+        return url
+    }
+
+    private func path(codex: String, chatGPT: String) -> String {
+        switch pathStyle {
+        case .codexAPI:
+            return codex
+        case .chatGPTAPI:
+            return chatGPT
+        }
+    }
+
+    private func detailsPathForError(id: String) -> String {
+        switch pathStyle {
+        case .chatGPTAPI:
+            return "\(baseURL)/wham/tasks/\(id)"
+        case .codexAPI where baseURL.contains("/api/codex"):
+            return "\(baseURL)/tasks/\(id)"
+        case .codexAPI:
+            return "\(baseURL)/api/codex/tasks/\(id)"
+        }
+    }
+
+    private static func contentType(from headers: [String: String]) -> String {
+        headers.first { key, _ in key.caseInsensitiveCompare("content-type") == .orderedSame }?.value ?? ""
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from response: CloudHTTPTextResponse) throws -> T {
+        _ = type
+        return try JSONDecoder().decode(T.self, from: Data(response.body.utf8))
+    }
+
+    private func decodeDescription(_ error: Error, response: CloudHTTPTextResponse) -> String {
+        "Decode error for \(response.url): \(error); content-type=\(response.contentType); body=\(response.body)"
+    }
+
+    private static func message(from error: CloudTaskError) -> String {
+        switch error {
+        case let .unimplemented(message),
+             let .http(message),
+             let .io(message),
+             let .message(message):
+            return message
+        }
+    }
+}
+
+private struct CloudHTTPTextResponse: Equatable, Sendable {
+    let url: String
+    let body: String
+    let contentType: String
+}
+
+private struct CloudTaskDetailsPayload: Equatable, Sendable {
+    let parsed: CloudTaskDetailsResponse
+    let body: String
+    let contentType: String
+}
+
+private struct CloudTaskListResponse: Decodable, Equatable, Sendable {
+    let items: [CloudTaskListItem]
+}
+
+private struct CloudTaskListItem: Decodable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let updatedAt: Double?
+    let taskStatusDisplay: [String: JSONValue]?
+    let pullRequests: [JSONValue]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case updatedAt = "updated_at"
+        case taskStatusDisplay = "task_status_display"
+        case pullRequests = "pull_requests"
+    }
+}
+
+private struct CloudSiblingTurnsResponse: Decodable, Equatable, Sendable {
+    let siblingTurns: [[String: JSONValue]]
+
+    private enum CodingKeys: String, CodingKey {
+        case siblingTurns = "sibling_turns"
+    }
+}
+
+private struct CloudTaskDetailsResponse: Decodable, Equatable, Sendable {
+    let currentUserTurn: CloudTaskTurn?
+    let currentAssistantTurn: CloudTaskTurn?
+    let currentDiffTaskTurn: CloudTaskTurn?
+
+    private enum CodingKeys: String, CodingKey {
+        case currentUserTurn = "current_user_turn"
+        case currentAssistantTurn = "current_assistant_turn"
+        case currentDiffTaskTurn = "current_diff_task_turn"
+    }
+}
+
+private struct CloudTaskTurn: Decodable, Equatable, Sendable {
+    let id: String?
+    let attemptPlacement: Int64?
+    let turnStatus: String?
+    let siblingTurnIDs: [String]
+    let inputItems: [CloudTaskTurnItem]
+    let outputItems: [CloudTaskTurnItem]
+    let worklog: CloudTaskWorklog?
+    let error: CloudTaskTurnError?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case attemptPlacement = "attempt_placement"
+        case turnStatus = "turn_status"
+        case siblingTurnIDs = "sibling_turn_ids"
+        case inputItems = "input_items"
+        case outputItems = "output_items"
+        case worklog
+        case error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+        self.attemptPlacement = try container.decodeIfPresent(Int64.self, forKey: .attemptPlacement)
+        self.turnStatus = try container.decodeIfPresent(String.self, forKey: .turnStatus)
+        self.siblingTurnIDs = try container.decodeIfPresent([String].self, forKey: .siblingTurnIDs) ?? []
+        self.inputItems = try container.decodeIfPresent([CloudTaskTurnItem].self, forKey: .inputItems) ?? []
+        self.outputItems = try container.decodeIfPresent([CloudTaskTurnItem].self, forKey: .outputItems) ?? []
+        self.worklog = try container.decodeIfPresent(CloudTaskWorklog.self, forKey: .worklog)
+        self.error = try container.decodeIfPresent(CloudTaskTurnError.self, forKey: .error)
+    }
+
+    func unifiedDiff() -> String? {
+        outputItems.lazy.compactMap(\.diffText).first
+    }
+
+    func messageTexts() -> [String] {
+        var output = outputItems
+            .filter { $0.kind == "message" }
+            .flatMap(\.textValues)
+
+        if let worklog {
+            for message in worklog.messages where message.isAssistant {
+                output.append(contentsOf: message.textValues)
+            }
+        }
+        return output
+    }
+
+    func userPrompt() -> String? {
+        let parts = inputItems
+            .filter { $0.kind == "message" }
+            .filter { item in
+                item.role.map { $0.caseInsensitiveCompare("user") == .orderedSame } ?? true
+            }
+            .flatMap(\.textValues)
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    func errorSummary() -> String? {
+        error?.summary
+    }
+}
+
+private struct CloudTaskTurnItem: Decodable, Equatable, Sendable {
+    let kind: String
+    let role: String?
+    let content: [CloudContentFragment]
+    let diff: String?
+    let outputDiff: CloudDiffPayload?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "type"
+        case role
+        case content
+        case diff
+        case outputDiff = "output_diff"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        self.role = try container.decodeIfPresent(String.self, forKey: .role)
+        self.content = try container.decodeIfPresent([CloudContentFragment].self, forKey: .content) ?? []
+        self.diff = try container.decodeIfPresent(String.self, forKey: .diff)
+        self.outputDiff = try container.decodeIfPresent(CloudDiffPayload.self, forKey: .outputDiff)
+    }
+
+    var textValues: [String] {
+        content.compactMap(\.text)
+    }
+
+    var diffText: String? {
+        if kind == "output_diff", let diff, !diff.isEmpty {
+            return diff
+        }
+        if kind == "pr", let diff = outputDiff?.diff, !diff.isEmpty {
+            return diff
+        }
+        return nil
+    }
+}
+
+private enum CloudContentFragment: Decodable, Equatable, Sendable {
+    case structured(CloudStructuredContent)
+    case text(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let structured = try? container.decode(CloudStructuredContent.self) {
+            self = .structured(structured)
+        } else {
+            self = .text(try container.decode(String.self))
+        }
+    }
+
+    var text: String? {
+        switch self {
+        case let .structured(content):
+            guard content.contentType?.caseInsensitiveCompare("text") == .orderedSame,
+                  let text = content.text,
+                  !text.isEmpty
+            else {
+                return nil
+            }
+            return text
+        case let .text(raw):
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : raw
+        }
+    }
+}
+
+private struct CloudStructuredContent: Decodable, Equatable, Sendable {
+    let contentType: String?
+    let text: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case contentType = "content_type"
+        case text
+    }
+}
+
+private struct CloudDiffPayload: Decodable, Equatable, Sendable {
+    let diff: String?
+}
+
+private struct CloudTaskWorklog: Decodable, Equatable, Sendable {
+    let messages: [CloudTaskWorklogMessage]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.messages = try container.decodeIfPresent([CloudTaskWorklogMessage].self, forKey: .messages) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case messages
+    }
+}
+
+private struct CloudTaskWorklogMessage: Decodable, Equatable, Sendable {
+    let author: CloudTaskAuthor?
+    let content: CloudTaskWorklogContent?
+
+    var isAssistant: Bool {
+        author?.role?.caseInsensitiveCompare("assistant") == .orderedSame
+    }
+
+    var textValues: [String] {
+        content?.parts.compactMap(\.text) ?? []
+    }
+}
+
+private struct CloudTaskAuthor: Decodable, Equatable, Sendable {
+    let role: String?
+}
+
+private struct CloudTaskWorklogContent: Decodable, Equatable, Sendable {
+    let parts: [CloudContentFragment]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.parts = try container.decodeIfPresent([CloudContentFragment].self, forKey: .parts) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case parts
+    }
+}
+
+private struct CloudTaskTurnError: Decodable, Equatable, Sendable {
+    let code: String?
+    let message: String?
+
+    var summary: String? {
+        let code = code ?? ""
+        let message = message ?? ""
+        switch (code.isEmpty, message.isEmpty) {
+        case (true, true):
+            return nil
+        case (false, true):
+            return code
+        case (true, false):
+            return message
+        case (false, false):
+            return "\(code): \(message)"
+        }
+    }
+}
+
+private extension CloudTaskDetailsResponse {
+    func unifiedDiff() -> String? {
+        [currentDiffTaskTurn, currentAssistantTurn].compactMap { $0 }.lazy.compactMap { $0.unifiedDiff() }.first
+    }
+
+    func assistantTextMessages() -> [String] {
+        [currentDiffTaskTurn, currentAssistantTurn].compactMap { $0 }.flatMap { $0.messageTexts() }
+    }
+
+    func userTextPrompt() -> String? {
+        currentUserTurn?.userPrompt()
+    }
+
+    func assistantErrorMessage() -> String? {
+        currentAssistantTurn?.errorSummary()
+    }
+}
+
+private extension CloudHTTPClient {
+    static func summaryFromDetails(
+        id: CloudTaskID,
+        details: CloudTaskDetailsPayload,
+        now: @Sendable () -> Date
+    ) -> CloudTaskResult<CloudTaskSummary> {
+        let value: JSONValue
+        do {
+            value = try JSONDecoder().decode(JSONValue.self, from: Data(details.body.utf8))
+        } catch {
+            return .failure(.http(
+                "Decode error for \(id.rawValue): \(error); content-type=\(details.contentType); body=\(details.body)"
+            ))
+        }
+
+        guard let taskObject = value.objectValue?["task"]?.objectValue else {
+            return .failure(.http("Task metadata missing from details for \(id.rawValue)"))
+        }
+
+        let statusDisplay = value.objectValue?["task_status_display"]?.objectValue
+            ?? taskObject["task_status_display"]?.objectValue
+        let status = mapStatus(statusDisplay)
+        var summary = diffSummaryFromStatusDisplay(statusDisplay)
+        if summary.filesChanged == 0,
+           summary.linesAdded == 0,
+           summary.linesRemoved == 0,
+           let diff = details.parsed.unifiedDiff() {
+            summary = diffSummaryFromDiff(diff)
+        }
+
+        let updatedAtRaw = taskObject["updated_at"]?.numberValue
+            ?? taskObject["created_at"]?.numberValue
+            ?? latestTurnTimestamp(statusDisplay)
+        let title = taskObject["title"]?.stringValue ?? "<untitled>"
+        return .success(CloudTaskSummary(
+            id: id,
+            title: title,
+            status: status,
+            updatedAt: updatedAtRaw.map(dateFromUnixTimestamp) ?? now(),
+            environmentID: taskObject["environment_id"]?.stringValue,
+            environmentLabel: envLabelFromStatusDisplay(statusDisplay),
+            summary: summary,
+            isReview: taskObject["is_review"]?.boolValue ?? false,
+            attemptTotal: attemptTotalFromStatusDisplay(statusDisplay)
+        ))
+    }
+
+    static func mapTaskListItemToSummary(
+        _ item: CloudTaskListItem,
+        now: @Sendable () -> Date
+    ) -> CloudTaskSummary {
+        let statusDisplay = item.taskStatusDisplay
+        return CloudTaskSummary(
+            id: CloudTaskID(item.id),
+            title: item.title,
+            status: mapStatus(statusDisplay),
+            updatedAt: item.updatedAt.map(dateFromUnixTimestamp) ?? now(),
+            environmentID: nil,
+            environmentLabel: envLabelFromStatusDisplay(statusDisplay),
+            summary: diffSummaryFromStatusDisplay(statusDisplay),
+            isReview: item.pullRequests?.isEmpty == false,
+            attemptTotal: attemptTotalFromStatusDisplay(statusDisplay)
+        )
+    }
+
+    static func mapStatus(_ value: [String: JSONValue]?) -> CloudTaskStatus {
+        if let latest = value?["latest_turn_status_display"]?.objectValue,
+           let status = latest["turn_status"]?.stringValue {
+            switch status {
+            case "failed", "cancelled":
+                return .error
+            case "completed":
+                return .ready
+            case "in_progress", "pending":
+                return .pending
+            default:
+                return .pending
+            }
+        }
+
+        if let state = value?["state"]?.stringValue {
+            switch state {
+            case "pending":
+                return .pending
+            case "ready":
+                return .ready
+            case "applied":
+                return .applied
+            case "error":
+                return .error
+            default:
+                return .pending
+            }
+        }
+
+        return .pending
+    }
+
+    static func diffSummaryFromStatusDisplay(_ value: [String: JSONValue]?) -> CloudDiffSummary {
+        guard let stats = value?["latest_turn_status_display"]?.objectValue?["diff_stats"]?.objectValue else {
+            return CloudDiffSummary()
+        }
+        return CloudDiffSummary(
+            filesChanged: max(0, stats["files_modified"]?.intValue ?? 0),
+            linesAdded: max(0, stats["lines_added"]?.intValue ?? 0),
+            linesRemoved: max(0, stats["lines_removed"]?.intValue ?? 0)
+        )
+    }
+
+    static func diffSummaryFromDiff(_ diff: String) -> CloudDiffSummary {
+        var filesChanged = 0
+        var linesAdded = 0
+        var linesRemoved = 0
+        for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("diff --git ") {
+                filesChanged += 1
+                continue
+            }
+            if line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("@@") {
+                continue
+            }
+            if line.hasPrefix("+") {
+                linesAdded += 1
+            } else if line.hasPrefix("-") {
+                linesRemoved += 1
+            }
+        }
+        if filesChanged == 0, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            filesChanged = 1
+        }
+        return CloudDiffSummary(filesChanged: filesChanged, linesAdded: linesAdded, linesRemoved: linesRemoved)
+    }
+
+    static func latestTurnTimestamp(_ value: [String: JSONValue]?) -> Double? {
+        let latest = value?["latest_turn_status_display"]?.objectValue
+        return latest?["updated_at"]?.numberValue ?? latest?["created_at"]?.numberValue
+    }
+
+    static func envLabelFromStatusDisplay(_ value: [String: JSONValue]?) -> String? {
+        value?["environment_label"]?.stringValue
+    }
+
+    static func attemptTotalFromStatusDisplay(_ value: [String: JSONValue]?) -> Int? {
+        guard let siblings = value?["latest_turn_status_display"]?.objectValue?["sibling_turn_ids"]?.arrayValue else {
+            return nil
+        }
+        return siblings.count + 1
+    }
+
+    static func extractAssistantMessages(fromBody body: String) -> [String] {
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(body.utf8)),
+              let messages = value.objectValue?["current_assistant_turn"]?.objectValue?["worklog"]?.objectValue?["messages"]?.arrayValue
+        else {
+            return []
+        }
+
+        var output: [String] = []
+        for message in messages {
+            let object = message.objectValue
+            let role = object?["author"]?.objectValue?["role"]?.stringValue
+            guard role == "assistant",
+                  let parts = object?["content"]?.objectValue?["parts"]?.arrayValue
+            else {
+                continue
+            }
+            for part in parts {
+                if let text = part.stringValue, !text.isEmpty {
+                    output.append(text)
+                    continue
+                }
+                if part.objectValue?["content_type"]?.stringValue == "text",
+                   let text = part.objectValue?["text"]?.stringValue {
+                    output.append(text)
+                }
+            }
+        }
+        return output
+    }
+
+    static func turnAttempt(from turn: [String: JSONValue]) -> CloudTurnAttempt? {
+        guard let turnID = turn["id"]?.stringValue else {
+            return nil
+        }
+        return CloudTurnAttempt(
+            turnID: turnID,
+            attemptPlacement: turn["attempt_placement"]?.int64Value,
+            createdAt: turn["created_at"]?.numberValue.map(dateFromUnixTimestamp),
+            status: attemptStatus(from: turn["turn_status"]?.stringValue),
+            diff: extractDiff(fromTurn: turn),
+            messages: extractAssistantMessages(fromTurn: turn)
+        )
+    }
+
+    static func compareAttempts(_ lhs: CloudTurnAttempt, _ rhs: CloudTurnAttempt) -> Bool {
+        switch (lhs.attemptPlacement, rhs.attemptPlacement) {
+        case let (left?, right?):
+            return left < right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            switch (lhs.createdAt, rhs.createdAt) {
+            case let (left?, right?):
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return lhs.turnID < rhs.turnID
+            }
+        }
+    }
+
+    static func extractDiff(fromTurn turn: [String: JSONValue]) -> String? {
+        guard let items = turn["output_items"]?.arrayValue else {
+            return nil
+        }
+        for item in items {
+            switch item.objectValue?["type"]?.stringValue {
+            case "output_diff":
+                if let diff = item.objectValue?["diff"]?.stringValue, !diff.isEmpty {
+                    return diff
+                }
+            case "pr":
+                if let diff = item.objectValue?["output_diff"]?.objectValue?["diff"]?.stringValue, !diff.isEmpty {
+                    return diff
+                }
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    static func extractAssistantMessages(fromTurn turn: [String: JSONValue]) -> [String] {
+        guard let items = turn["output_items"]?.arrayValue else {
+            return []
+        }
+        var output: [String] = []
+        for item in items where item.objectValue?["type"]?.stringValue == "message" {
+            guard let content = item.objectValue?["content"]?.arrayValue else {
+                continue
+            }
+            for part in content {
+                if part.objectValue?["content_type"]?.stringValue == "text",
+                   let text = part.objectValue?["text"]?.stringValue,
+                   !text.isEmpty {
+                    output.append(text)
+                }
+            }
+        }
+        return output
+    }
+
+    static func attemptStatus(from raw: String?) -> CloudAttemptStatus {
+        switch raw ?? "" {
+        case "failed":
+            return .failed
+        case "completed":
+            return .completed
+        case "in_progress":
+            return .inProgress
+        case "pending":
+            return .pending
+        default:
+            return .pending
+        }
+    }
+
+    static func dateFromUnixTimestamp(_ timestamp: Double) -> Date {
+        Date(timeIntervalSince1970: max(0, timestamp))
+    }
+
+    static func isUnifiedDiff(_ diff: String) -> Bool {
+        let trimmed = diff.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("diff --git ") {
+            return true
+        }
+        let hasDashHeaders = diff.contains("\n--- ") && diff.contains("\n+++ ")
+        let hasHunk = diff.contains("\n@@ ") || diff.hasPrefix("@@ ")
+        return hasDashHeaders && hasHunk
+    }
+
+    static func applyMessage(
+        id: String,
+        result: CloudGitApplyResult,
+        status: CloudApplyStatus,
+        preflight: Bool
+    ) -> String {
+        if preflight {
+            switch status {
+            case .success:
+                return "Preflight passed for task \(id) (applies cleanly)"
+            case .partial:
+                return "Preflight: patch does not fully apply for task \(id) (applied=\(result.appliedPaths.count), skipped=\(result.skippedPaths.count), conflicts=\(result.conflictedPaths.count))"
+            case .error:
+                return "Preflight failed for task \(id) (applied=\(result.appliedPaths.count), skipped=\(result.skippedPaths.count), conflicts=\(result.conflictedPaths.count))"
+            }
+        }
+
+        switch status {
+        case .success:
+            return "Applied task \(id) locally (\(result.appliedPaths.count) files)"
+        case .partial:
+            return "Apply partially succeeded for task \(id) (applied=\(result.appliedPaths.count), skipped=\(result.skippedPaths.count), conflicts=\(result.conflictedPaths.count))"
+        case .error:
+            return "Apply failed for task \(id) (applied=\(result.appliedPaths.count), skipped=\(result.skippedPaths.count), conflicts=\(result.conflictedPaths.count))"
+        }
+    }
+
+    static func tail(_ text: String, max: Int) -> String {
+        text.count <= max ? text : String(text.suffix(max))
+    }
+
+    static func summarizePatchForLogging(_ patch: String, cwd: URL) -> String {
+        let trimmed = patch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind: String
+        if trimmed.hasPrefix("*** Begin Patch") {
+            kind = "codex-patch"
+        } else if trimmed.hasPrefix("diff --git ") || trimmed.contains("\n*** End Patch\n") {
+            kind = "git-diff"
+        } else if trimmed.hasPrefix("@@ ") || trimmed.contains("\n@@ ") {
+            kind = "unified-diff"
+        } else {
+            kind = "unknown"
+        }
+        let head = patch.split(separator: "\n", omittingEmptySubsequences: false).prefix(20).joined(separator: "\n")
+        let headTruncated = head.count > 800 ? "\(head.prefix(800))..." : head
+        return "patch_summary: kind=\(kind) lines=\(patch.split(separator: "\n", omittingEmptySubsequences: false).count) chars=\(patch.count) cwd=\(cwd.path) ; head=\n\(headTruncated)"
+    }
+}
+
+private extension JSONValue {
+    var objectValue: [String: JSONValue]? {
+        guard case let .object(value) = self else {
+            return nil
+        }
+        return value
+    }
+
+    var arrayValue: [JSONValue]? {
+        guard case let .array(value) = self else {
+            return nil
+        }
+        return value
+    }
+
+    var stringValue: String? {
+        guard case let .string(value) = self else {
+            return nil
+        }
+        return value
+    }
+
+    var boolValue: Bool? {
+        guard case let .bool(value) = self else {
+            return nil
+        }
+        return value
+    }
+
+    var numberValue: Double? {
+        switch self {
+        case let .integer(value):
+            return Double(value)
+        case let .double(value):
+            return value
+        default:
+            return nil
+        }
+    }
+
+    var intValue: Int? {
+        switch self {
+        case let .integer(value):
+            return Int(value)
+        case let .double(value):
+            return Int(value)
+        default:
+            return nil
+        }
+    }
+
+    var int64Value: Int64? {
+        switch self {
+        case let .integer(value):
+            return value
+        case let .double(value):
+            return Int64(value)
+        default:
+            return nil
+        }
+    }
+}
+
+public enum CloudTaskErrorLogger {
+    public static func append(_ message: String) {
+        let timestamp = CloudTaskErrorLogger.timestamp()
+        guard let data = "[\(timestamp)] \(message)\n".data(using: .utf8),
+              let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "error.log"))
+        else {
+            if !FileManager.default.fileExists(atPath: "error.log") {
+                try? "[\(timestamp)] \(message)\n".write(toFile: "error.log", atomically: true, encoding: .utf8)
+            }
+            return
+        }
+        defer {
+            try? handle.close()
+        }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+    }
+
+    private static func timestamp() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: Date())
+    }
+}

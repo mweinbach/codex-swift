@@ -186,8 +186,366 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertEqual(counts.added, 2)
         XCTAssertEqual(counts.removed, 1)
     }
+
+    func testHTTPClientListTasksBuildsWhamRequestAndMapsRows() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            {
+              "items": [
+                {
+                  "id": "T-9000",
+                  "title": "Review branch",
+                  "updated_at": 1778243696.25,
+                  "task_status_display": {
+                    "environment_label": "Env A",
+                    "latest_turn_status_display": {
+                      "turn_status": "completed",
+                      "diff_stats": {
+                        "files_modified": 2,
+                        "lines_added": 3,
+                        "lines_removed": 1
+                      },
+                      "sibling_turn_ids": ["turn-2"]
+                    }
+                  },
+                  "pull_requests": [{"id": "pr-1"}]
+                }
+              ]
+            }
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com/",
+            transport: transport,
+            auth: StaticAPIAuthProvider(bearerToken: "tok", accountID: "acct"),
+            errorLog: { _ in }
+        )
+
+        let tasks = try await client.listTasks(environment: "env-A").get()
+
+        XCTAssertEqual(transport.executeRequests.count, 1)
+        let request = try XCTUnwrap(transport.executeRequests.first)
+        XCTAssertEqual(request.method, .get)
+        XCTAssertEqual(
+            request.url,
+            "https://chatgpt.com/backend-api/wham/tasks/list?limit=20&task_filter=current&environment_id=env-A"
+        )
+        XCTAssertEqual(request.headers["user-agent"], "codex-cli")
+        XCTAssertEqual(request.headers["authorization"], "Bearer tok")
+        XCTAssertEqual(request.headers["ChatGPT-Account-ID"], "acct")
+        XCTAssertNil(request.body)
+        XCTAssertEqual(tasks, [
+            CloudTaskSummary(
+                id: CloudTaskID("T-9000"),
+                title: "Review branch",
+                status: .ready,
+                updatedAt: Date(timeIntervalSince1970: 1_778_243_696.25),
+                environmentID: nil,
+                environmentLabel: "Env A",
+                summary: CloudDiffSummary(filesChanged: 2, linesAdded: 3, linesRemoved: 1),
+                isReview: true,
+                attemptTotal: 2
+            )
+        ])
+    }
+
+    func testHTTPClientTaskDetailsMapsSummaryDiffMessagesAndText() async throws {
+        let body = cloudDetailsBody()
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse(body)),
+            .success(cloudResponse(body)),
+            .success(cloudResponse(body)),
+            .success(cloudResponse(body))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://example.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            now: fixedCloudDate,
+            errorLog: { _ in }
+        )
+
+        let summary = try await client.getTaskSummary(id: CloudTaskID("T-9000")).get()
+        XCTAssertEqual(summary.id, CloudTaskID("T-9000"))
+        XCTAssertEqual(summary.title, "Detailed task")
+        XCTAssertEqual(summary.status, .pending)
+        XCTAssertEqual(summary.updatedAt, Date(timeIntervalSince1970: 1_778_243_000))
+        XCTAssertEqual(summary.environmentID, "env-A")
+        XCTAssertEqual(summary.environmentLabel, "Env A")
+        XCTAssertEqual(summary.summary, CloudDiffSummary(filesChanged: 1, linesAdded: 2, linesRemoved: 1))
+        XCTAssertTrue(summary.isReview)
+        XCTAssertEqual(summary.attemptTotal, 3)
+
+        let diff = try await client.getTaskDiff(id: CloudTaskID("T-9000")).get()
+        XCTAssertTrue(diff?.contains("diff --git") == true)
+
+        let messages = try await client.getTaskMessages(id: CloudTaskID("T-9000")).get()
+        XCTAssertEqual(messages, ["Assistant response"])
+
+        let text = try await client.getTaskText(id: CloudTaskID("T-9000")).get()
+        XCTAssertEqual(text.prompt, "First line\n\nSecond line")
+        XCTAssertEqual(text.messages, ["Assistant response"])
+        XCTAssertEqual(text.turnID, "turn-1")
+        XCTAssertEqual(text.siblingTurnIDs, ["turn-2"])
+        XCTAssertEqual(text.attemptPlacement, 0)
+        XCTAssertEqual(text.attemptStatus, .inProgress)
+
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://example.com/api/codex/tasks/T-9000",
+            "https://example.com/api/codex/tasks/T-9000",
+            "https://example.com/api/codex/tasks/T-9000",
+            "https://example.com/api/codex/tasks/T-9000"
+        ])
+    }
+
+    func testHTTPClientCreateTaskPostsRustBodyAndDecodesTaskID() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse(#"{"task":{"id":"task-new"}}"#))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://example.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(bearerToken: "tok"),
+            environment: { ["CODEX_STARTING_DIFF": "diff --git a/a b/a\n"] },
+            errorLog: { _ in }
+        )
+
+        let created = try await client.createTask(
+            environmentID: "env-A",
+            prompt: "Ship it",
+            gitRef: "main",
+            qaMode: true,
+            bestOfN: 3
+        ).get()
+
+        XCTAssertEqual(created, CloudCreatedTask(id: CloudTaskID("task-new")))
+        let request = try XCTUnwrap(transport.executeRequests.first)
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.url, "https://example.com/api/codex/tasks")
+        XCTAssertEqual(request.headers["content-type"], "application/json")
+        XCTAssertEqual(request.headers["authorization"], "Bearer tok")
+        XCTAssertEqual(request.body, .object([
+            "new_task": .object([
+                "environment_id": .string("env-A"),
+                "branch": .string("main"),
+                "run_environment_in_qa_mode": .bool(true)
+            ]),
+            "input_items": .array([
+                .object([
+                    "type": .string("message"),
+                    "role": .string("user"),
+                    "content": .array([
+                        .object([
+                            "content_type": .string("text"),
+                            "text": .string("Ship it")
+                        ])
+                    ])
+                ]),
+                .object([
+                    "type": .string("pre_apply_patch"),
+                    "output_diff": .object(["diff": .string("diff --git a/a b/a\n")])
+                ])
+            ]),
+            "metadata": .object(["best_of_n": .integer(3)])
+        ]))
+    }
+
+    func testHTTPClientSiblingAttemptsSortAndMapTurnPayloads() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            {
+              "sibling_turns": [
+                {
+                  "id": "turn-b",
+                  "attempt_placement": 2,
+                  "created_at": 1778243697,
+                  "turn_status": "completed",
+                  "output_items": [
+                    {
+                      "type": "pr",
+                      "output_diff": { "diff": "diff --git a/b b/b\\n" }
+                    }
+                  ]
+                },
+                {
+                  "id": "turn-a",
+                  "attempt_placement": 1,
+                  "created_at": 1778243696,
+                  "turn_status": "failed",
+                  "output_items": [
+                    {
+                      "type": "message",
+                      "content": [{ "content_type": "text", "text": "failed text" }]
+                    }
+                  ]
+                }
+              ]
+            }
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chat.openai.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+
+        let attempts = try await client.listSiblingAttempts(task: CloudTaskID("T-1"), turnID: "turn-root").get()
+
+        XCTAssertEqual(transport.executeRequests.first?.url, "https://chat.openai.com/backend-api/wham/tasks/T-1/turns/turn-root/sibling_turns")
+        XCTAssertEqual(attempts.map(\.turnID), ["turn-a", "turn-b"])
+        XCTAssertEqual(attempts[0].status, .failed)
+        XCTAssertEqual(attempts[0].messages, ["failed text"])
+        XCTAssertNil(attempts[0].diff)
+        XCTAssertEqual(attempts[1].status, .completed)
+        XCTAssertEqual(attempts[1].diff, "diff --git a/b b/b\n")
+    }
+
+    func testHTTPClientApplyUsesInjectedGitApplyAndRejectsNonUnifiedDiff() async throws {
+        let capture = CloudApplyCapture()
+        let client = CloudHTTPClient(
+            baseURL: "https://example.com",
+            transport: CloudCapturingTransport(),
+            auth: StaticAPIAuthProvider(),
+            currentDirectory: { URL(fileURLWithPath: "/tmp/project", isDirectory: true) },
+            applyGitPatch: { request in
+                capture.requests.append(request)
+                return .success(CloudGitApplyResult(
+                    exitCode: 1,
+                    appliedPaths: ["Sources/A.swift"],
+                    skippedPaths: ["README.md"],
+                    conflictedPaths: ["Package.swift"],
+                    stdout: "out",
+                    stderr: "err",
+                    commandForLog: "git apply --check"
+                ))
+            },
+            errorLog: { _ in }
+        )
+
+        let nonUnified = try await client.applyTask(id: CloudTaskID("T-1"), diffOverride: "*** Begin Patch").get()
+        XCTAssertEqual(
+            nonUnified,
+            CloudApplyOutcome(
+                applied: false,
+                status: .error,
+                message: "Expected unified git diff; backend returned an incompatible format."
+            )
+        )
+        XCTAssertTrue(capture.requests.isEmpty)
+
+        let partial = try await client.applyTaskPreflight(
+            id: CloudTaskID("T-1"),
+            diffOverride: """
+            diff --git a/a b/a
+            --- a/a
+            +++ b/a
+            @@ -1 +1 @@
+            -old
+            +new
+            """
+        ).get()
+
+        XCTAssertEqual(capture.requests.count, 1)
+        XCTAssertEqual(capture.requests[0].cwd.path, "/tmp/project")
+        XCTAssertTrue(capture.requests[0].preflight)
+        XCTAssertFalse(capture.requests[0].revert)
+        XCTAssertEqual(
+            partial,
+            CloudApplyOutcome(
+                applied: false,
+                status: .partial,
+                message: "Preflight: patch does not fully apply for task T-1 (applied=1, skipped=1, conflicts=1)",
+                skippedPaths: ["README.md"],
+                conflictPaths: ["Package.swift"]
+            )
+        )
+    }
 }
 
 private func fixedCloudDate() -> Date {
     Date(timeIntervalSince1970: 1_778_243_696)
+}
+
+private func cloudResponse(
+    _ body: String,
+    statusCode: Int = 200,
+    headers: [String: String] = ["content-type": "application/json"]
+) -> APIResponse {
+    APIResponse(statusCode: statusCode, headers: headers, body: Data(body.utf8))
+}
+
+private func cloudDetailsBody() -> String {
+    """
+    {
+      "task": {
+        "id": "T-9000",
+        "title": "Detailed task",
+        "created_at": 1778243000,
+        "environment_id": "env-A",
+        "is_review": true
+      },
+      "task_status_display": {
+        "environment_label": "Env A",
+        "latest_turn_status_display": {
+          "turn_status": "in_progress",
+          "updated_at": 1778243696,
+          "sibling_turn_ids": ["turn-2", "turn-3"]
+        }
+      },
+      "current_user_turn": {
+        "input_items": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              { "content_type": "text", "text": "First line" },
+              { "content_type": "text", "text": "Second line" }
+            ]
+          }
+        ]
+      },
+      "current_assistant_turn": {
+        "id": "turn-1",
+        "attempt_placement": 0,
+        "turn_status": "in_progress",
+        "sibling_turn_ids": ["turn-2"],
+        "output_items": [
+          {
+            "type": "message",
+            "content": [{ "content_type": "text", "text": "Assistant response" }]
+          },
+          {
+            "type": "output_diff",
+            "diff": "diff --git a/README.md b/README.md\\n--- a/README.md\\n+++ b/README.md\\n@@ -1,2 +1,3 @@\\n Intro\\n-Hello\\n+Hello, world!\\n+Task: T-9000\\n"
+          }
+        ]
+      }
+    }
+    """
+}
+
+private final class CloudCapturingTransport: APITransport, @unchecked Sendable {
+    private var executeResults: [Result<APIResponse, TransportError>]
+    private(set) var executeRequests: [APIRequest] = []
+
+    init(executeResults: [Result<APIResponse, TransportError>] = []) {
+        self.executeResults = executeResults
+    }
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        executeRequests.append(request)
+        guard !executeResults.isEmpty else {
+            return .failure(.build("missing execute result"))
+        }
+        return executeResults.removeFirst()
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        .failure(.build("unexpected stream request: \(request.url)"))
+    }
+}
+
+private final class CloudApplyCapture: @unchecked Sendable {
+    var requests: [CloudGitApplyRequest] = []
 }

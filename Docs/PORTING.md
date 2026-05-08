@@ -293,6 +293,8 @@ Source baseline inspected for this scaffold:
   - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, and Rust-matching readiness error strings
 - `codex-rs/cloud-tasks-client/src/api.rs` and `codex-rs/cloud-tasks-client/src/mock.rs`
   - cloud task IDs/statuses/summaries, apply outcome/error wire behavior, mock task rows, diff-count summaries, task text/messages, sibling attempts, and local create/apply/preflight behavior
+- `codex-rs/cloud-tasks-client/src/http.rs` plus task-detail helpers from `codex-rs/backend-client`
+  - ChatGPT backend URL normalization, `/wham` versus `/api/codex` task paths, auth/user-agent request construction, list/detail/create/sibling response mapping, task text/error extraction, unified-diff validation, and injectable git-apply outcome mapping
 
 ## Known Gaps
 
@@ -309,7 +311,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - MCP server/client management
 - app-server protocol and server runtime
 - apply-patch runtime
-- cloud tasks live HTTP client and CLI/TUI runtime integration
+- cloud tasks CLI/TUI runtime integration and concrete CodexGit apply-engine wiring
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
