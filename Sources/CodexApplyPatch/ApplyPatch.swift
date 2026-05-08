@@ -54,6 +54,19 @@ public struct ApplyPatchResult: Equatable, Sendable {
     public var stderr: String
 }
 
+public enum ExtractHeredocError: Error, Equatable, Sendable {
+    case commandDidNotStartWithApplyPatch
+    case failedToParsePatchIntoAST
+    case failedToFindHeredocBody
+}
+
+public enum MaybeApplyPatch: Equatable, Sendable {
+    case body(ApplyPatchArgs)
+    case shellParseError(ExtractHeredocError)
+    case patchParseError(ApplyPatchError)
+    case notApplyPatch
+}
+
 public struct AffectedPaths: Equatable, Sendable {
     public var added: [String] = []
     public var modified: [String] = []
@@ -72,6 +85,240 @@ public enum ApplyPatchToolInstructions {
             preconditionFailure("Unable to load apply_patch_tool_instructions.md: \(error)")
         }
     }()
+}
+
+public enum ApplyPatchInvocation {
+    private enum ShellKind: Sendable {
+        case unix
+        case powerShell
+        case cmd
+    }
+
+    private static let applyPatchCommands: Set<String> = ["apply_patch", "applypatch"]
+
+    public static func maybeParseApplyPatch(_ argv: [String]) -> MaybeApplyPatch {
+        if argv.count == 2, applyPatchCommands.contains(argv[0]) {
+            do {
+                return .body(try ApplyPatch.parsePatch(argv[1]))
+            } catch let error as ApplyPatchError {
+                return .patchParseError(error)
+            } catch {
+                return .patchParseError(.io("\(error)"))
+            }
+        }
+
+        guard let (_, script) = parseShellScript(argv) else {
+            return .notApplyPatch
+        }
+
+        switch extractApplyPatchFromShell(script) {
+        case let .success((body, workdir)):
+            do {
+                let args = try ApplyPatch.parsePatch(body)
+                return .body(ApplyPatchArgs(patch: args.patch, hunks: args.hunks, workdir: workdir))
+            } catch let error as ApplyPatchError {
+                return .patchParseError(error)
+            } catch {
+                return .patchParseError(.io("\(error)"))
+            }
+        case .failure(.commandDidNotStartWithApplyPatch):
+            return .notApplyPatch
+        case let .failure(error):
+            return .shellParseError(error)
+        }
+    }
+
+    private static func parseShellScript(_ argv: [String]) -> (ShellKind, String)? {
+        if argv.count == 3 {
+            return classifyShell(argv[0], flag: argv[1]).map { ($0, argv[2]) }
+        }
+        if argv.count == 4, canSkipFlag(argv[0], flag: argv[1]) {
+            return classifyShell(argv[0], flag: argv[2]).map { ($0, argv[3]) }
+        }
+        return nil
+    }
+
+    private static func classifyShell(_ shell: String, flag: String) -> ShellKind? {
+        guard let name = shellStem(shell) else {
+            return nil
+        }
+
+        if ["bash", "zsh", "sh"].contains(name), flag == "-lc" || flag == "-c" {
+            return .unix
+        }
+        if ["pwsh", "powershell"].contains(name), flag.caseInsensitiveCompare("-command") == .orderedSame {
+            return .powerShell
+        }
+        if name == "cmd", flag.caseInsensitiveCompare("/c") == .orderedSame {
+            return .cmd
+        }
+        return nil
+    }
+
+    private static func canSkipFlag(_ shell: String, flag: String) -> Bool {
+        guard let name = shellStem(shell), name == "pwsh" || name == "powershell" else {
+            return false
+        }
+        return flag.caseInsensitiveCompare("-noprofile") == .orderedSame
+    }
+
+    private static func shellStem(_ shell: String) -> String? {
+        let executable = shell
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? shell
+        let stem = executable.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
+        return stem?.lowercased()
+    }
+
+    private static func extractApplyPatchFromShell(
+        _ script: String
+    ) -> Result<(String, String?), ExtractHeredocError> {
+        extractApplyPatchFromBash(script)
+    }
+
+    private static func extractApplyPatchFromBash(
+        _ script: String
+    ) -> Result<(String, String?), ExtractHeredocError> {
+        guard let newline = script.firstIndex(of: "\n") else {
+            return .failure(.commandDidNotStartWithApplyPatch)
+        }
+
+        let header = String(script[..<newline])
+        guard let tokens = shellWords(header) else {
+            return .failure(.failedToParsePatchIntoAST)
+        }
+
+        let workdir: String?
+        let redirect: String
+        if tokens.count == 2, applyPatchCommands.contains(tokens[0]) {
+            workdir = nil
+            redirect = tokens[1]
+        } else if tokens.count == 5,
+                  tokens[0] == "cd",
+                  tokens[2] == "&&",
+                  applyPatchCommands.contains(tokens[3])
+        {
+            workdir = tokens[1]
+            redirect = tokens[4]
+        } else {
+            return .failure(.commandDidNotStartWithApplyPatch)
+        }
+
+        guard let delimiter = heredocDelimiter(from: redirect) else {
+            return .failure(.commandDidNotStartWithApplyPatch)
+        }
+
+        let bodyWithTerminator = String(script[script.index(after: newline)...])
+        guard let body = heredocBody(in: bodyWithTerminator, delimiter: delimiter) else {
+            if hasNonTerminalDelimiterLine(in: bodyWithTerminator, delimiter: delimiter) {
+                return .failure(.commandDidNotStartWithApplyPatch)
+            }
+            return .failure(.failedToFindHeredocBody)
+        }
+
+        return .success((body, workdir))
+    }
+
+    private static func heredocDelimiter(from redirect: String) -> String? {
+        guard redirect.hasPrefix("<<") else {
+            return nil
+        }
+
+        var delimiter = String(redirect.dropFirst(2))
+        if delimiter.hasPrefix("-") {
+            delimiter.removeFirst()
+        }
+        guard !delimiter.isEmpty else {
+            return nil
+        }
+
+        if delimiter.count >= 2 {
+            let first = delimiter.first
+            let last = delimiter.last
+            if (first == "'" && last == "'") || (first == "\"" && last == "\"") {
+                delimiter = String(delimiter.dropFirst().dropLast())
+            }
+        }
+        return delimiter.isEmpty ? nil : delimiter
+    }
+
+    private static func heredocBody(in bodyWithTerminator: String, delimiter: String) -> String? {
+        var lines = bodyWithTerminator.components(separatedBy: "\n")
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+
+        guard let closingLine = lines.last,
+              closingLine.trimmingCharacters(in: .whitespacesAndNewlines) == delimiter
+        else {
+            return nil
+        }
+
+        lines.removeLast()
+        return lines.joined(separator: "\n")
+    }
+
+    private static func hasNonTerminalDelimiterLine(in bodyWithTerminator: String, delimiter: String) -> Bool {
+        bodyWithTerminator
+            .components(separatedBy: "\n")
+            .contains { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.hasPrefix(delimiter) && trimmed != delimiter
+            }
+    }
+
+    private static func shellWords(_ source: String) -> [String]? {
+        var words: [String] = []
+        var current = ""
+        var quote: Character?
+        var iterator = source.makeIterator()
+
+        while let character = iterator.next() {
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+
+            if character == "'" || character == "\"" {
+                quote = character
+                continue
+            }
+
+            if character == "\\" {
+                if let next = iterator.next() {
+                    current.append(next)
+                    continue
+                }
+                current.append(character)
+                continue
+            }
+
+            if character.isWhitespace {
+                if !current.isEmpty {
+                    words.append(current)
+                    current.removeAll(keepingCapacity: true)
+                }
+                continue
+            }
+
+            current.append(character)
+        }
+
+        guard quote == nil else {
+            return nil
+        }
+
+        if !current.isEmpty {
+            words.append(current)
+        }
+        return words
+    }
 }
 
 public enum ApplyPatch {
@@ -472,6 +719,10 @@ public enum ApplyPatch {
         }
         return output
     }
+}
+
+public func maybeParseApplyPatch(_ argv: [String]) -> MaybeApplyPatch {
+    ApplyPatchInvocation.maybeParseApplyPatch(argv)
 }
 
 private extension String {
