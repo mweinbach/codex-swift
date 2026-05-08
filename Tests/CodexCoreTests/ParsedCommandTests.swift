@@ -44,6 +44,12 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testNpmRunBuildIsUnknownLikeRust() {
+        XCTAssertEqual(parseCommand(["npm", "run", "build"]), [
+            .unknown(cmd: "npm run build")
+        ])
+    }
+
     func testBashRedirectFallsBackToUnknownScript() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "echo foo > bar"]), [
             .unknown(cmd: "echo foo > bar")
@@ -256,6 +262,14 @@ final class ParsedCommandTests: XCTestCase {
             .search(cmd: "rg --files", query: nil, path: nil)
         ])
 
+        XCTAssertEqual(parseCommand(["sed", "-n", "260,640p", "exec/src/event_processor_with_human_output.rs", "|", "nl", "-ba"]), [
+            .read(
+                cmd: "sed -n '260,640p' exec/src/event_processor_with_human_output.rs",
+                name: "event_processor_with_human_output.rs",
+                path: "exec/src/event_processor_with_human_output.rs"
+            )
+        ])
+
         let inner = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'"
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
             .read(
@@ -284,6 +298,18 @@ final class ParsedCommandTests: XCTestCase {
             .search(cmd: "rg --files -g '!target'", query: nil, path: "!target"),
             .search(cmd: ##"rg -n "^\\[workspace\\]" -n Cargo.toml"##, query: #"^\[workspace\]"#, path: "Cargo.toml"),
             .unknown(cmd: "cargo --version")
+        ])
+
+        let fullMixed = #"pwd; ls -la; rg --files -g '!target' | wc -l; rg -n '^\[workspace\]' -n Cargo.toml || true; rg -n '^\[package\]' -n */Cargo.toml || true; cargo --version; rustc --version; cargo clippy --workspace --all-targets --all-features -q"#
+        XCTAssertEqual(parseCommand(["bash", "-lc", fullMixed]), [
+            .unknown(cmd: "pwd"),
+            .listFiles(cmd: "ls -la", path: nil),
+            .search(cmd: "rg --files -g '!target'", query: nil, path: "!target"),
+            .search(cmd: ##"rg -n "^\\[workspace\\]" -n Cargo.toml"##, query: #"^\[workspace\]"#, path: "Cargo.toml"),
+            .search(cmd: ##"rg -n "^\\[package\\]" -n '*/Cargo.toml'"##, query: #"^\[package\]"#, path: "Cargo.toml"),
+            .unknown(cmd: "cargo --version"),
+            .unknown(cmd: "rustc --version"),
+            .unknown(cmd: "cargo clippy --workspace --all-targets --all-features -q")
         ])
     }
 
