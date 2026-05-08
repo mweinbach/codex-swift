@@ -63,6 +63,9 @@ Source baseline inspected for this scaffold:
   - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, `cd` context, `rg`, `grep`, `ls`, `cat`, `head`, `tail`, `nl`, and `sed -n`
 - `codex-rs/common/src/fuzzy_match.rs`
   - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
+- `codex-rs/apply-patch`
+  - initial native `CodexApplyPatch` target and `apply_patch` executable
+  - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
 
 ## Known Gaps
 
@@ -82,5 +85,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - local image loading/resizing into data URLs
 - MCP `CallToolResult` conversion into function-call output payloads
 - full Rust command parser parity for complex Bash/Powershell AST cases
+- apply-patch invocation detection from arbitrary shell commands/heredocs
+- apply-patch unified diff preview helpers
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

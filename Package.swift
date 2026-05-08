@@ -9,18 +9,29 @@ let package = Package(
     ],
     products: [
         .executable(name: "codex", targets: ["codex"]),
+        .executable(name: "apply_patch", targets: ["apply_patch"]),
+        .library(name: "CodexApplyPatch", targets: ["CodexApplyPatch"]),
         .library(name: "CodexCLI", targets: ["CodexCLI"]),
         .library(name: "CodexCore", targets: ["CodexCore"])
     ],
     targets: [
         .target(name: "CodexCore"),
+        .target(name: "CodexApplyPatch"),
         .target(
             name: "CodexCLI",
             dependencies: ["CodexCore"]
         ),
         .executableTarget(
+            name: "apply_patch",
+            dependencies: ["CodexApplyPatch"]
+        ),
+        .executableTarget(
             name: "codex",
             dependencies: ["CodexCLI"]
+        ),
+        .testTarget(
+            name: "CodexApplyPatchTests",
+            dependencies: ["CodexApplyPatch"]
         ),
         .testTarget(
             name: "CodexCoreTests",
