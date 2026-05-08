@@ -1,0 +1,92 @@
+import CodexCore
+import XCTest
+
+final class BashPlainCommandParserTests: XCTestCase {
+    func testAcceptsSingleSimpleCommand() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("ls -1"),
+            [["ls", "-1"]]
+        )
+    }
+
+    func testAcceptsMultipleCommandsWithAllowedOperators() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("ls && pwd; echo 'hi there' | wc -l"),
+            [["ls"], ["pwd"], ["echo", "hi there"], ["wc", "-l"]]
+        )
+    }
+
+    func testExtractsDoubleAndSingleQuotedStrings() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "hello world""#),
+            [["echo", "hello world"]]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("echo 'hi there'"),
+            [["echo", "hi there"]]
+        )
+    }
+
+    func testAcceptsNumbersAsWords() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("echo 123 456"),
+            [["echo", "123", "456"]]
+        )
+    }
+
+    func testRejectsParenthesesAndSubshells() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("(ls)"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls || (pwd && echo hi)"))
+    }
+
+    func testRejectsRedirectionsAndUnsupportedOperators() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls > out.txt"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("echo hi & echo bye"))
+    }
+
+    func testRejectsCommandAndProcessSubstitutionsAndExpansions() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("echo $(pwd)"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("echo `pwd`"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("echo $HOME"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "hi $USER""#))
+    }
+
+    func testRejectsVariableAssignmentPrefix() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("FOO=bar ls"))
+    }
+
+    func testRejectsTrailingOperatorParseError() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls &&"))
+    }
+
+    func testParseZshLcPlainCommands() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseShellLcPlainCommands(["zsh", "-lc", "ls"]),
+            [["ls"]]
+        )
+    }
+
+    func testAcceptsConcatenatedFlagAndValue() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -n "foo" -g"*.py""#),
+            [["rg", "-n", "foo", "-g*.py"]]
+        )
+    }
+
+    func testAcceptsConcatenatedFlagWithSingleQuotes() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("grep -n 'pattern' -g'*.txt'"),
+            [["grep", "-n", "pattern", "-g*.txt"]]
+        )
+    }
+
+    func testRejectsConcatenationWithVariableSubstitution() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"$VAR" pattern"#))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"${VAR}" pattern"#))
+    }
+
+    func testRejectsConcatenationWithCommandSubstitution() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"$(pwd)" pattern"#))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"$(echo '*.py')" pattern"#))
+    }
+}
