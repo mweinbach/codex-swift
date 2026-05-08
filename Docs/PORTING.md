@@ -57,6 +57,10 @@ Source baseline inspected for this scaffold:
   - custom prompt metadata and `prompts` command prefix
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
+- `codex-rs/protocol/src/parse_command.rs`
+  - tagged parsed-command model
+- `codex-rs/core/src/parse_command.rs`
+  - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, `cd` context, `rg`, `grep`, `ls`, `cat`, `head`, `tail`, `nl`, and `sed -n`
 
 ## Known Gaps
 
@@ -75,5 +79,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - platform-specific process hardening
 - local image loading/resizing into data URLs
 - MCP `CallToolResult` conversion into function-call output payloads
+- full Rust command parser parity for complex Bash/Powershell AST cases
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
