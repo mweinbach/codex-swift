@@ -5,6 +5,8 @@ import CodexStdioToUDS
 import Darwin
 import Foundation
 
+ProcessHardening.preMainHardening()
+
 let cli = CodexCLI()
 let exitCode = await cli.runAsync(
     arguments: Array(CommandLine.arguments.dropFirst()),

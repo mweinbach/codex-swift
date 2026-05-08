@@ -177,6 +177,8 @@ Source baseline inspected for this scaffold:
   - non-Windows command safety allow-list, Windows PowerShell read-only command allow-list, dangerous command detection, approval-prompt gating, and conservative shell plain-command sequence parsing for safe operators
 - `codex-rs/core/src/command_safety/windows_dangerous_commands.rs`
   - PowerShell/Cmd/browser ShellExecute-style URL launch danger detection, including `Start-Process`, `Invoke-Item`, Shell.Application COM calls, `rundll32 url.dll,FileProtocolHandler`, `cmd /c start`, and direct browser/explorer/mshta URL launches
+- `codex-rs/process-hardening/src/lib.rs`
+  - macOS pre-main process hardening for debugger attach denial, core-dump limit disabling, byte-level environment key filtering, and `DYLD_` environment removal before CLI dispatch
 - `codex-rs/core/src/safety.rs`
   - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
@@ -304,7 +306,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - app-server protocol and server runtime
 - apply-patch runtime
 - cloud tasks
-- platform-specific process hardening
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
