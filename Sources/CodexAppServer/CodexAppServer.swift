@@ -156,6 +156,14 @@ public enum CodexAppServer {
         return response
     }
 
+    fileprivate static func userSavedConfigResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        return [
+            "config": userSavedConfigObject(config)
+        ]
+    }
+
     fileprivate static func setDefaultModelResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -450,6 +458,103 @@ public enum CodexAppServer {
             return array.map(configValueObject)
         case let .table(table):
             return table.mapValues(configValueObject)
+        }
+    }
+
+    private static func userSavedConfigObject(_ value: ConfigValue) -> [String: Any] {
+        let table = configTable(value) ?? [:]
+        return [
+            "approvalPolicy": nullable(stringConfig(table, "approval_policy")),
+            "sandboxMode": nullable(stringConfig(table, "sandbox_mode")),
+            "sandboxSettings": sandboxSettingsObject(table["sandbox_workspace_write"]) as Any,
+            "forcedChatgptWorkspaceId": nullable(stringConfig(table, "forced_chatgpt_workspace_id")),
+            "forcedLoginMethod": nullable(stringConfig(table, "forced_login_method")),
+            "model": nullable(stringConfig(table, "model")),
+            "modelReasoningEffort": nullable(stringConfig(table, "model_reasoning_effort")),
+            "modelReasoningSummary": nullable(stringConfig(table, "model_reasoning_summary")),
+            "modelVerbosity": nullable(stringConfig(table, "model_verbosity")),
+            "tools": toolsObject(table["tools"]) as Any,
+            "profile": nullable(stringConfig(table, "profile")),
+            "profiles": profilesObject(table["profiles"])
+        ]
+    }
+
+    private static func sandboxSettingsObject(_ value: ConfigValue?) -> Any {
+        guard let table = value.flatMap(configTable) else {
+            return NSNull()
+        }
+        return [
+            "writableRoots": stringArrayConfig(table, "writable_roots"),
+            "networkAccess": nullable(boolConfig(table, "network_access")),
+            "excludeTmpdirEnvVar": nullable(boolConfig(table, "exclude_tmpdir_env_var")),
+            "excludeSlashTmp": nullable(boolConfig(table, "exclude_slash_tmp"))
+        ]
+    }
+
+    private static func toolsObject(_ value: ConfigValue?) -> Any {
+        guard let table = value.flatMap(configTable) else {
+            return NSNull()
+        }
+        return [
+            "webSearch": nullable(boolConfig(table, "web_search")),
+            "viewImage": nullable(boolConfig(table, "view_image"))
+        ]
+    }
+
+    private static func profilesObject(_ value: ConfigValue?) -> [String: Any] {
+        guard let profiles = value.flatMap(configTable) else {
+            return [:]
+        }
+        var output: [String: Any] = [:]
+        for (name, profileValue) in profiles {
+            let table = configTable(profileValue) ?? [:]
+            output[name] = [
+                "model": nullable(stringConfig(table, "model")),
+                "modelProvider": nullable(stringConfig(table, "model_provider")),
+                "approvalPolicy": nullable(stringConfig(table, "approval_policy")),
+                "modelReasoningEffort": nullable(stringConfig(table, "model_reasoning_effort")),
+                "modelReasoningSummary": nullable(stringConfig(table, "model_reasoning_summary")),
+                "modelVerbosity": nullable(stringConfig(table, "model_verbosity")),
+                "chatgptBaseUrl": nullable(stringConfig(table, "chatgpt_base_url"))
+            ]
+        }
+        return output
+    }
+
+    private static func nullable(_ value: Any?) -> Any {
+        value ?? NSNull()
+    }
+
+    private static func configTable(_ value: ConfigValue) -> [String: ConfigValue]? {
+        guard case let .table(table) = value else {
+            return nil
+        }
+        return table
+    }
+
+    private static func stringConfig(_ table: [String: ConfigValue], _ key: String) -> String? {
+        guard case let .string(value)? = table[key] else {
+            return nil
+        }
+        return value
+    }
+
+    private static func boolConfig(_ table: [String: ConfigValue], _ key: String) -> Bool? {
+        guard case let .bool(value)? = table[key] else {
+            return nil
+        }
+        return value
+    }
+
+    private static func stringArrayConfig(_ table: [String: ConfigValue], _ key: String) -> [String] {
+        guard case let .array(values)? = table[key] else {
+            return []
+        }
+        return values.compactMap { value in
+            guard case let .string(string) = value else {
+                return nil
+            }
+            return string
         }
     }
 
@@ -764,6 +869,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
+                    )
+                case "getUserSavedConfig":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.userSavedConfigResult(configuration: configuration)
                     )
                 case "setDefaultModel":
                     response = CodexAppServer.responseObject(

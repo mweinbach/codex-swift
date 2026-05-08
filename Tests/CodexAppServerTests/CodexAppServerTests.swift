@@ -379,6 +379,104 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["layers"])
     }
 
+    func testGetUserSavedConfigReturnsLegacyRustShape() throws {
+        let temp = try TemporaryDirectory()
+        let writableRoot = temp.url.appendingPathComponent("workspace", isDirectory: true).path
+        try """
+        model = "gpt-5.1-codex-max"
+        approval_policy = "on-request"
+        sandbox_mode = "workspace-write"
+        model_reasoning_summary = "detailed"
+        model_reasoning_effort = "high"
+        model_verbosity = "medium"
+        profile = "test"
+        forced_chatgpt_workspace_id = "12345678-0000-0000-0000-000000000000"
+        forced_login_method = "chatgpt"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(writableRoot)"]
+        network_access = true
+        exclude_tmpdir_env_var = true
+        exclude_slash_tmp = true
+
+        [tools]
+        web_search = false
+        view_image = true
+
+        [profiles.test]
+        model = "gpt-4o"
+        approval_policy = "on-request"
+        model_reasoning_effort = "high"
+        model_reasoning_summary = "detailed"
+        model_verbosity = "medium"
+        model_provider = "openai"
+        chatgpt_base_url = "https://api.chatgpt.com"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"getUserSavedConfig","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["approvalPolicy"] as? String, "on-request")
+        XCTAssertEqual(config["sandboxMode"] as? String, "workspace-write")
+        XCTAssertEqual(config["forcedChatgptWorkspaceId"] as? String, "12345678-0000-0000-0000-000000000000")
+        XCTAssertEqual(config["forcedLoginMethod"] as? String, "chatgpt")
+        XCTAssertEqual(config["model"] as? String, "gpt-5.1-codex-max")
+        XCTAssertEqual(config["modelReasoningEffort"] as? String, "high")
+        XCTAssertEqual(config["modelReasoningSummary"] as? String, "detailed")
+        XCTAssertEqual(config["modelVerbosity"] as? String, "medium")
+        XCTAssertEqual(config["profile"] as? String, "test")
+
+        let sandboxSettings = try XCTUnwrap(config["sandboxSettings"] as? [String: Any])
+        XCTAssertEqual(sandboxSettings["writableRoots"] as? [String], [writableRoot])
+        XCTAssertEqual(sandboxSettings["networkAccess"] as? Bool, true)
+        XCTAssertEqual(sandboxSettings["excludeTmpdirEnvVar"] as? Bool, true)
+        XCTAssertEqual(sandboxSettings["excludeSlashTmp"] as? Bool, true)
+
+        let tools = try XCTUnwrap(config["tools"] as? [String: Any])
+        XCTAssertEqual(tools["webSearch"] as? Bool, false)
+        XCTAssertEqual(tools["viewImage"] as? Bool, true)
+
+        let profiles = try XCTUnwrap(config["profiles"] as? [String: Any])
+        let profile = try XCTUnwrap(profiles["test"] as? [String: Any])
+        XCTAssertEqual(profile["model"] as? String, "gpt-4o")
+        XCTAssertEqual(profile["modelProvider"] as? String, "openai")
+        XCTAssertEqual(profile["approvalPolicy"] as? String, "on-request")
+        XCTAssertEqual(profile["modelReasoningEffort"] as? String, "high")
+        XCTAssertEqual(profile["modelReasoningSummary"] as? String, "detailed")
+        XCTAssertEqual(profile["modelVerbosity"] as? String, "medium")
+        XCTAssertEqual(profile["chatgptBaseUrl"] as? String, "https://api.chatgpt.com")
+    }
+
+    func testGetUserSavedConfigEmptyReturnsNullOptionsAndEmptyProfiles() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"getUserSavedConfig","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertTrue(config["approvalPolicy"] is NSNull)
+        XCTAssertTrue(config["sandboxMode"] is NSNull)
+        XCTAssertTrue(config["sandboxSettings"] is NSNull)
+        XCTAssertTrue(config["forcedChatgptWorkspaceId"] is NSNull)
+        XCTAssertTrue(config["forcedLoginMethod"] is NSNull)
+        XCTAssertTrue(config["model"] is NSNull)
+        XCTAssertTrue(config["modelReasoningEffort"] is NSNull)
+        XCTAssertTrue(config["modelReasoningSummary"] is NSNull)
+        XCTAssertTrue(config["modelVerbosity"] is NSNull)
+        XCTAssertTrue(config["tools"] is NSNull)
+        XCTAssertTrue(config["profile"] is NSNull)
+        XCTAssertEqual((config["profiles"] as? [String: Any])?.isEmpty, true)
+    }
+
     func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
