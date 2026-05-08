@@ -38,6 +38,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case terminalInteraction(TerminalInteractionEvent)
     case execCommandEnd(ExecCommandEndEvent)
     case viewImageToolCall(ViewImageToolCallEvent)
+    case execApprovalRequest(ExecApprovalRequestEvent)
+    case elicitationRequest(ElicitationRequestEvent)
+    case applyPatchApprovalRequest(ApplyPatchApprovalRequestEvent)
     case deprecationNotice(DeprecationNoticeEvent)
     case backgroundEvent(BackgroundEventEvent)
     case undoStarted(UndoStartedEvent)
@@ -87,6 +90,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case terminalInteraction = "terminal_interaction"
         case execCommandEnd = "exec_command_end"
         case viewImageToolCall = "view_image_tool_call"
+        case execApprovalRequest = "exec_approval_request"
+        case elicitationRequest = "elicitation_request"
+        case applyPatchApprovalRequest = "apply_patch_approval_request"
         case deprecationNotice = "deprecation_notice"
         case backgroundEvent = "background_event"
         case undoStarted = "undo_started"
@@ -158,6 +164,12 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .execCommandEnd(try ExecCommandEndEvent(from: decoder))
         case .viewImageToolCall:
             self = .viewImageToolCall(try ViewImageToolCallEvent(from: decoder))
+        case .execApprovalRequest:
+            self = .execApprovalRequest(try ExecApprovalRequestEvent(from: decoder))
+        case .elicitationRequest:
+            self = .elicitationRequest(try ElicitationRequestEvent(from: decoder))
+        case .applyPatchApprovalRequest:
+            self = .applyPatchApprovalRequest(try ApplyPatchApprovalRequestEvent(from: decoder))
         case .deprecationNotice:
             self = .deprecationNotice(try DeprecationNoticeEvent(from: decoder))
         case .backgroundEvent:
@@ -272,6 +284,15 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .viewImageToolCall(event):
             try container.encode(EventType.viewImageToolCall, forKey: .type)
+            try event.encode(to: encoder)
+        case let .execApprovalRequest(event):
+            try container.encode(EventType.execApprovalRequest, forKey: .type)
+            try event.encode(to: encoder)
+        case let .elicitationRequest(event):
+            try container.encode(EventType.elicitationRequest, forKey: .type)
+            try event.encode(to: encoder)
+        case let .applyPatchApprovalRequest(event):
+            try container.encode(EventType.applyPatchApprovalRequest, forKey: .type)
             try event.encode(to: encoder)
         case let .deprecationNotice(event):
             try container.encode(EventType.deprecationNotice, forKey: .type)

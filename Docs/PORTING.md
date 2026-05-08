@@ -52,7 +52,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/common/src/approval_presets.rs`
   - built-in approval preset ordering and policy pairs
 - `codex-rs/protocol/src/approvals.rs`
-  - transparent execpolicy amendment array encoding
+  - transparent execpolicy amendment array encoding, exec/apply-patch approval payloads, elicitation request/action models, JSON-RPC-style request IDs, default turn IDs, and optional omission rules
 - `codex-rs/protocol/src/protocol.rs` review decision model
   - approval response wire strings, externally tagged execpolicy-amendment approval payload, and denied default
 - `codex-rs/protocol/src/user_input.rs`
@@ -192,7 +192,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - interactive TUI runtime
 - non-interactive `exec`
 - exec runtime event emission
-- full `EventMsg` variant coverage for unported approval/MCP/history/session/raw-response payloads
+- full `EventMsg` variant coverage for unported MCP/history/session/raw-response payloads
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing
