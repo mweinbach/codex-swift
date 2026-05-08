@@ -91,4 +91,26 @@ final class APIErrorTests: XCTestCase {
             """
         )
     }
+
+    func testRetryLimitReachedErrorDisplayMatchesRustShape() {
+        XCTAssertEqual(
+            String(describing: RetryLimitReachedError(statusCode: 429)),
+            "exceeded retry limit, last status: 429 Too Many Requests"
+        )
+        XCTAssertEqual(
+            String(describing: RetryLimitReachedError(statusCode: 503, requestID: "req-3")),
+            "exceeded retry limit, last status: 503 Service Unavailable, request id: req-3"
+        )
+    }
+
+    func testEnvVarErrorDisplayMatchesRustShape() {
+        XCTAssertEqual(
+            String(describing: EnvVarError(variable: "OPENAI_API_KEY")),
+            "Missing environment variable: `OPENAI_API_KEY`."
+        )
+        XCTAssertEqual(
+            String(describing: EnvVarError(variable: "CODEX_HOME", instructions: "Set it before starting Codex.")),
+            "Missing environment variable: `CODEX_HOME`. Set it before starting Codex."
+        )
+    }
 }

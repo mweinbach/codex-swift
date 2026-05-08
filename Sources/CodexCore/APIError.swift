@@ -164,3 +164,39 @@ public struct UnexpectedResponseError: Error, Equatable, CustomStringConvertible
         return result + "..."
     }
 }
+
+public struct RetryLimitReachedError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let statusCode: Int
+    public let requestID: String?
+
+    public init(statusCode: Int, requestID: String? = nil) {
+        self.statusCode = statusCode
+        self.requestID = requestID
+    }
+
+    public var description: String {
+        var message = "exceeded retry limit, last status: \(HTTPStatus.description(for: statusCode))"
+        if let requestID {
+            message += ", request id: \(requestID)"
+        }
+        return message
+    }
+}
+
+public struct EnvVarError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let variable: String
+    public let instructions: String?
+
+    public init(variable: String, instructions: String? = nil) {
+        self.variable = variable
+        self.instructions = instructions
+    }
+
+    public var description: String {
+        var message = "Missing environment variable: `\(variable)`."
+        if let instructions {
+            message += " \(instructions)"
+        }
+        return message
+    }
+}
