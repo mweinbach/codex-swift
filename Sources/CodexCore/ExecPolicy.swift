@@ -284,7 +284,8 @@ public final class PolicyParser {
     public init() {}
 
     public func parse(_ policyIdentifier: String, _ policyFileContents: String) throws {
-        let bodies = try Self.extractPrefixRuleBodies(policyFileContents, identifier: policyIdentifier)
+        let source = Self.stripLineComments(from: policyFileContents)
+        let bodies = try Self.extractPrefixRuleBodies(source, identifier: policyIdentifier)
         for body in bodies {
             try addPrefixRule(from: body)
         }
@@ -338,10 +339,29 @@ public final class PolicyParser {
 
     private static func extractPrefixRuleBodies(_ source: String, identifier: String) throws -> [String] {
         var bodies: [String] = []
-        var searchIndex = source.startIndex
+        var index = source.startIndex
 
-        while let functionRange = source.range(of: "prefix_rule", range: searchIndex..<source.endIndex) {
-            var index = functionRange.upperBound
+        while index < source.endIndex {
+            let character = source[index]
+            if character == "\"" || character == "'" {
+                index = Self.index(afterQuotedStringAt: index, in: source)
+                continue
+            }
+
+            guard source[index...].hasPrefix("prefix_rule"),
+                  isIdentifierBoundaryBefore(index, in: source)
+            else {
+                index = source.index(after: index)
+                continue
+            }
+
+            let functionEnd = source.index(index, offsetBy: "prefix_rule".count)
+            guard isIdentifierBoundaryAfter(functionEnd, in: source) else {
+                index = functionEnd
+                continue
+            }
+
+            index = functionEnd
             while index < source.endIndex, source[index].isWhitespace {
                 index = source.index(after: index)
             }
@@ -376,7 +396,7 @@ public final class PolicyParser {
                     depth -= 1
                     if depth == 0 {
                         bodies.append(String(source[bodyStart..<index]))
-                        searchIndex = source.index(after: index)
+                        index = source.index(after: index)
                         break
                     }
                 }
@@ -389,6 +409,88 @@ public final class PolicyParser {
         }
 
         return bodies
+    }
+
+    private static func stripLineComments(from source: String) -> String {
+        var result = ""
+        var index = source.startIndex
+        var quote: Character?
+        var previousWasBackslash = false
+
+        while index < source.endIndex {
+            let character = source[index]
+            if let activeQuote = quote {
+                result.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = source.index(after: index)
+                continue
+            }
+
+            if character == "\"" || character == "'" {
+                quote = character
+                result.append(character)
+                index = source.index(after: index)
+                continue
+            }
+
+            if character == "#" {
+                while index < source.endIndex, !source[index].isNewline {
+                    index = source.index(after: index)
+                }
+                if index < source.endIndex {
+                    result.append(source[index])
+                    index = source.index(after: index)
+                }
+                continue
+            }
+
+            result.append(character)
+            index = source.index(after: index)
+        }
+
+        return result
+    }
+
+    private static func index(afterQuotedStringAt start: String.Index, in source: String) -> String.Index {
+        let quote = source[start]
+        var index = source.index(after: start)
+        var previousWasBackslash = false
+        while index < source.endIndex {
+            let character = source[index]
+            if character == quote && !previousWasBackslash {
+                return source.index(after: index)
+            }
+            previousWasBackslash = character == "\\" && !previousWasBackslash
+            if character != "\\" {
+                previousWasBackslash = false
+            }
+            index = source.index(after: index)
+        }
+        return index
+    }
+
+    private static func isIdentifierBoundaryBefore(_ index: String.Index, in source: String) -> Bool {
+        guard index > source.startIndex else {
+            return true
+        }
+        return !isStarlarkIdentifierCharacter(source[source.index(before: index)])
+    }
+
+    private static func isIdentifierBoundaryAfter(_ index: String.Index, in source: String) -> Bool {
+        guard index < source.endIndex else {
+            return true
+        }
+        return !isStarlarkIdentifierCharacter(source[index])
+    }
+
+    private static func isStarlarkIdentifierCharacter(_ character: Character) -> Bool {
+        character == "_" || character.isLetter || character.isNumber
     }
 
     private static func parseArguments(_ body: String) throws -> [String: ConfigValue] {

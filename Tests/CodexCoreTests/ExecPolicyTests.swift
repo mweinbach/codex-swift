@@ -173,6 +173,49 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testParserIgnoresStarlarkCommentsAndStringMentions() throws {
+        let policy = try parsePolicy("""
+        # prefix_rule(pattern = ["rm"], decision = "forbidden")
+        ignored_doc = "prefix_rule(pattern = [\\"rm\\"])"
+        prefix_rule(
+            pattern = ["git", "status"], # trailing comment
+            decision = "prompt",
+            match = [
+                "git status", # comment inside arguments
+            ],
+        )
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt
+                )
+            ]
+        )
+        XCTAssertEqual(policy.rules(for: "rm"), [])
+    }
+
+    func testParserPreservesHashInsideStringLiterals() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(
+            pattern = ["echo", "#tag"],
+            match = [["echo", "#tag"]],
+            not_match = ["echo other"],
+        )
+        """)
+
+        XCTAssertEqual(
+            policy.check(tokens("echo", "#tag", "rest"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("echo", "#tag"), decision: .allow)]
+            )
+        )
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
