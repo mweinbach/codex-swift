@@ -364,7 +364,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("reject command"))
     }
 
-    func testApplyPatchFunctionCallAppliesJsonInput() async throws {
+    func testApplyPatchFunctionCallIsNoLongerExecutable() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let patch = """
         *** Begin Patch
@@ -393,13 +393,9 @@ final class NonInteractiveExecTests: XCTestCase {
             return XCTFail("expected function call output")
         }
         XCTAssertEqual(callID, "call-patch")
-        XCTAssertEqual(payload.success, true)
-        XCTAssertTrue(payload.content.contains("Success. Updated the following files:"))
-        XCTAssertTrue(payload.content.contains("A created.txt"))
-        XCTAssertEqual(
-            try String(contentsOf: temp.url.appendingPathComponent("created.txt"), encoding: .utf8),
-            "hello\n"
-        )
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported tool: apply_patch")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
     func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {

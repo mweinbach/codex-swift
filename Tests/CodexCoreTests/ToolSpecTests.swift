@@ -6,7 +6,9 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(try encode(ConfigShellToolType.unifiedExec), #""unified_exec""#)
         XCTAssertEqual(try encode(ConfigShellToolType.shellCommand), #""shell_command""#)
         XCTAssertEqual(try encode(ApplyPatchToolType.freeform), #""freeform""#)
-        XCTAssertEqual(try encode(ApplyPatchToolType.function), #""function""#)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ApplyPatchToolType.self, from: Data(#""function""#.utf8))
+        )
     }
 
     func testJSONSchemaEncodesSerdeTaggedShape() throws {

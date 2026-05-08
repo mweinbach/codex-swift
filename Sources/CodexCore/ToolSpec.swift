@@ -10,7 +10,6 @@ public enum ConfigShellToolType: String, Codable, CaseIterable, Equatable, Senda
 
 public enum ApplyPatchToolType: String, Codable, CaseIterable, Equatable, Sendable {
     case freeform
-    case function
 }
 
 public enum JSONSchemaAdditionalProperties: Equatable, Codable, Sendable {
@@ -595,8 +594,6 @@ public enum ToolSpecFactory {
         switch config.applyPatchToolType {
         case .freeform:
             specs.append(ConfiguredToolSpec(spec: createApplyPatchFreeformTool(), supportsParallelToolCalls: false))
-        case .function:
-            specs.append(ConfiguredToolSpec(spec: createApplyPatchJSONTool(), supportsParallelToolCalls: false))
         case nil:
             break
         }
@@ -833,17 +830,6 @@ public enum ToolSpecFactory {
                 description: "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
                 format: FreeformToolFormat(type: "grammar", syntax: "lark", definition: applyPatchLarkGrammar)
             )
-        )
-    }
-
-    public static func createApplyPatchJSONTool() -> ToolSpec {
-        functionTool(
-            name: "apply_patch",
-            description: "Use the `apply_patch` tool to edit files.",
-            properties: [
-                "input": .string(description: "The entire contents of the apply_patch command")
-            ],
-            required: ["input"]
         )
     }
 

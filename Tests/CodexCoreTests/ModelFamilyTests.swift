@@ -17,7 +17,7 @@ final class ModelFamilyTests: XCTestCase {
 
         let gptOss = ModelsManager.findFamilyForModel("openai/gpt-oss-120b")
         XCTAssertEqual(gptOss.family, "gpt-oss")
-        XCTAssertEqual(gptOss.applyPatchToolType, .function)
+        XCTAssertEqual(gptOss.applyPatchToolType, .freeform)
         XCTAssertEqual(gptOss.contextWindow, 96_000)
 
         let testModel = ModelsManager.findFamilyForModel("test-gpt-5-codex")
@@ -119,7 +119,7 @@ final class ModelFamilyTests: XCTestCase {
             family: "gpt-5.1",
             supportsReasoningSummaries: false,
             supportsParallelToolCalls: false,
-            applyPatchToolType: .function,
+            applyPatchToolType: nil,
             experimentalSupportedTools: ["local"],
             supportVerbosity: false,
             defaultVerbosity: nil,

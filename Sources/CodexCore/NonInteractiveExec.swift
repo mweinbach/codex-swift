@@ -498,16 +498,6 @@ public enum NonInteractiveExec {
                     )
                 }
 
-            case "apply_patch":
-                return executeApplyPatchFunctionCall(
-                    arguments: arguments,
-                    callID: callID,
-                    cwd: cwd,
-                    approvalPolicy: approvalPolicy,
-                    sandboxPolicy: sandboxPolicy,
-                    environment: environment
-                )
-
             default:
                 return functionOutput(
                     callID: callID,
@@ -701,10 +691,6 @@ public enum NonInteractiveExec {
         )
     }
 
-    private struct ApplyPatchJSONArguments: Decodable {
-        let input: String
-    }
-
     private static func executeCustomToolCall(
         name: String,
         input: String,
@@ -726,33 +712,6 @@ public enum NonInteractiveExec {
             environment: environment
         )
         return .customToolCallOutput(callID: callID, output: result.content)
-    }
-
-    private static func executeApplyPatchFunctionCall(
-        arguments: String,
-        callID: String,
-        cwd: URL,
-        approvalPolicy: AskForApproval,
-        sandboxPolicy: SandboxPolicy,
-        environment: [String: String]
-    ) -> ResponseItem {
-        let patch: String
-        if let data = arguments.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode(ApplyPatchJSONArguments.self, from: data)
-        {
-            patch = decoded.input
-        } else {
-            patch = arguments
-        }
-
-        let result = executeApplyPatch(
-            patch: patch,
-            cwd: cwd,
-            approvalPolicy: approvalPolicy,
-            sandboxPolicy: sandboxPolicy,
-            environment: environment
-        )
-        return functionOutput(callID: callID, content: result.content, success: result.success)
     }
 
     private static func executeApplyPatch(

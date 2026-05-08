@@ -180,7 +180,7 @@ extension ModelsManager {
                 slug: slug,
                 family: "gpt-oss",
                 contextWindow: 96_000,
-                applyPatchToolType: .function
+                applyPatchToolType: .freeform
             )
         } else if slug.hasPrefix("gpt-4o") {
             return ModelFamily(
