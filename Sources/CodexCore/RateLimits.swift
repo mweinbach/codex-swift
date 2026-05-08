@@ -28,44 +28,65 @@ public struct TokenCountEvent: Equatable, Codable, Sendable {
 }
 
 public struct RateLimitSnapshot: Equatable, Codable, Sendable {
+    public var limitID: String?
+    public var limitName: String?
     public var primary: RateLimitWindow?
     public var secondary: RateLimitWindow?
     public var credits: CreditsSnapshot?
     public var planType: PlanType?
+    public var rateLimitReachedType: RateLimitReachedType?
 
     private enum CodingKeys: String, CodingKey {
+        case limitID = "limit_id"
+        case limitName = "limit_name"
         case primary
         case secondary
         case credits
         case planType = "plan_type"
+        case rateLimitReachedType = "rate_limit_reached_type"
     }
 
     public init(
+        limitID: String? = nil,
+        limitName: String? = nil,
         primary: RateLimitWindow?,
         secondary: RateLimitWindow?,
         credits: CreditsSnapshot?,
-        planType: PlanType?
+        planType: PlanType?,
+        rateLimitReachedType: RateLimitReachedType? = nil
     ) {
+        self.limitID = limitID
+        self.limitName = limitName
         self.primary = primary
         self.secondary = secondary
         self.credits = credits
         self.planType = planType
+        self.rateLimitReachedType = rateLimitReachedType
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.limitID = try container.decodeIfPresent(String.self, forKey: .limitID)
+        self.limitName = try container.decodeIfPresent(String.self, forKey: .limitName)
         self.primary = try container.decodeIfPresent(RateLimitWindow.self, forKey: .primary)
         self.secondary = try container.decodeIfPresent(RateLimitWindow.self, forKey: .secondary)
         self.credits = try container.decodeIfPresent(CreditsSnapshot.self, forKey: .credits)
         self.planType = try container.decodeIfPresent(PlanType.self, forKey: .planType)
+        self.rateLimitReachedType = try container.decodeIfPresent(
+            RateLimitReachedType.self,
+            forKey: .rateLimitReachedType
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresentOrNull(limitID, forKey: .limitID)
+        try container.encodeIfPresentOrNull(limitName, forKey: .limitName)
         try container.encodeIfPresentOrNull(primary, forKey: .primary)
         try container.encodeIfPresentOrNull(secondary, forKey: .secondary)
         try container.encodeIfPresentOrNull(credits, forKey: .credits)
         try container.encodeIfPresentOrNull(planType, forKey: .planType)
+        try container.encodeIfPresentOrNull(rateLimitReachedType, forKey: .rateLimitReachedType)
     }
 
     public func mergingMissingFields(from previous: RateLimitSnapshot?) -> RateLimitSnapshot {
@@ -185,6 +206,14 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
         }
         return nil
     }
+}
+
+public enum RateLimitReachedType: String, Codable, Equatable, Sendable {
+    case rateLimitReached = "rate_limit_reached"
+    case workspaceOwnerCreditsDepleted = "workspace_owner_credits_depleted"
+    case workspaceMemberCreditsDepleted = "workspace_member_credits_depleted"
+    case workspaceOwnerUsageLimitReached = "workspace_owner_usage_limit_reached"
+    case workspaceMemberUsageLimitReached = "workspace_member_usage_limit_reached"
 }
 
 public struct RateLimitWindow: Equatable, Codable, Sendable {

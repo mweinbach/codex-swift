@@ -75,7 +75,7 @@ Source baseline inspected for this scaffold:
 - Pure retry/error helpers from `codex-rs/codex-client/src/error.rs` and `retry.rs`
   - transport and stream error display strings, retry bucket decisions for 429/5xx/transport failures, attempt cap checks, configured-base exponential backoff, retry-loop request rebuilding, and request telemetry status/error recording
 - `codex-rs/codex-api/src/error.rs` and `RateLimitError` from `codex-rs/codex-api/src/rate_limits.rs`
-  - API error display strings, transparent transport error wrapping, retryable delay payload preservation, rate-limit error conversion, and shared HTTP status text rendering
+  - API error display strings, transparent transport error wrapping, retryable delay payload preservation, rate-limit error conversion, shared HTTP status text rendering, unexpected-response display formatting, retry-limit/env-var display strings, and usage-limit messages
 - Pure `/models` endpoint helpers from `codex-rs/codex-api/src/endpoint/models.rs`
   - models request path construction, `client_version` query appending, extra-header merging, response decoding, and ETag header precedence
 - `codex-rs/codex-api/src/auth.rs`
@@ -109,7 +109,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper
-  - token-count event payloads, rate-limit windows, credits snapshots, explicit null optional serialization, and preservation of omitted credits/plan fields across rate-limit updates
+  - token-count event payloads, rate-limit windows, credits snapshots, limit identity/name, rate-limit-reached type, explicit null optional serialization, and preservation of omitted credits/plan fields across rate-limit updates
 - `codex-rs/protocol/src/protocol.rs` patch-apply event models
   - tagged file-change payloads, patch-apply begin/end events with defaulted legacy fields, and turn-diff wire shape
 - `codex-rs/protocol/src/parse_command.rs`

@@ -200,3 +200,96 @@ public struct EnvVarError: Error, Equatable, CustomStringConvertible, Sendable {
         return message
     }
 }
+
+public struct UsageLimitReachedError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let planType: PlanType?
+    public let resetsAt: Date?
+    public let rateLimits: RateLimitSnapshot?
+    public let promoMessage: String?
+
+    public init(
+        planType: PlanType? = nil,
+        resetsAt: Date? = nil,
+        rateLimits: RateLimitSnapshot? = nil,
+        promoMessage: String? = nil
+    ) {
+        self.planType = planType
+        self.resetsAt = resetsAt
+        self.rateLimits = rateLimits
+        self.promoMessage = promoMessage
+    }
+
+    public var description: String {
+        if let limitName = rateLimits?.limitName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !limitName.isEmpty,
+           limitName.lowercased() != "codex" {
+            return "You've hit your usage limit for \(limitName). Switch to another model now,\(retrySuffixAfterOr)"
+        }
+
+        if let promoMessage {
+            return "You've hit your usage limit. \(promoMessage),\(retrySuffixAfterOr)"
+        }
+
+        switch planType {
+        case .plus:
+            return """
+            You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr)
+            """
+        case .team, .selfServeBusinessUsageBased, .business, .enterpriseCbpUsageBased:
+            return "You've hit your usage limit. To get more access now, send a request to your admin\(retrySuffixAfterOr)"
+        case .free, .go:
+            return "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus),\(retrySuffixAfterOr)"
+        case .pro, .proLite:
+            return "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr)"
+        case .enterprise, .edu, .unknown, nil:
+            return "You've hit your usage limit.\(retrySuffix)"
+        }
+    }
+
+    private var retrySuffix: String {
+        guard let resetsAt else {
+            return " Try again later."
+        }
+        return " Try again at \(Self.formatRetryTimestamp(resetsAt))."
+    }
+
+    private var retrySuffixAfterOr: String {
+        guard let resetsAt else {
+            return " or try again later."
+        }
+        return " or try again at \(Self.formatRetryTimestamp(resetsAt))."
+    }
+
+    static func formatRetryTimestamp(_ resetsAt: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+
+        if calendar.isDate(resetsAt, inSameDayAs: now) {
+            formatter.dateFormat = "h:mm a"
+            return formatter.string(from: resetsAt)
+        }
+
+        formatter.dateFormat = "MMM d'\(daySuffix(calendar.component(.day, from: resetsAt)))', yyyy h:mm a"
+        return formatter.string(from: resetsAt)
+    }
+
+    private static func daySuffix(_ day: Int) -> String {
+        switch day {
+        case 11...13:
+            return "th"
+        default:
+            switch day % 10 {
+            case 1:
+                return "st"
+            case 2:
+                return "nd"
+            case 3:
+                return "rd"
+            default:
+                return "th"
+            }
+        }
+    }
+}

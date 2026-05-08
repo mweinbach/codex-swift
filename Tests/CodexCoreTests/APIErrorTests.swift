@@ -113,4 +113,67 @@ final class APIErrorTests: XCTestCase {
             "Missing environment variable: `CODEX_HOME`. Set it before starting Codex."
         )
     }
+
+    func testUsageLimitReachedErrorFormatsPlanSpecificRustMessagesWithoutReset() {
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .plus)),
+            """
+            You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later.
+            """
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .free)),
+            "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .go)),
+            "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .proLite)),
+            "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later."
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .team)),
+            "You've hit your usage limit. To get more access now, send a request to your admin or try again later."
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(planType: .enterprise)),
+            "You've hit your usage limit. Try again later."
+        )
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError()),
+            "You've hit your usage limit. Try again later."
+        )
+    }
+
+    func testUsageLimitReachedErrorUsesLimitNameBeforeUpsellLikeRust() {
+        let snapshot = RateLimitSnapshot(
+            limitID: "codex_other",
+            limitName: " codex_other ",
+            primary: nil,
+            secondary: nil,
+            credits: nil,
+            planType: nil
+        )
+
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(
+                planType: .plus,
+                rateLimits: snapshot,
+                promoMessage: "Visit https://chatgpt.com/codex/settings/usage to purchase more credits"
+            )),
+            "You've hit your usage limit for codex_other. Switch to another model now, or try again later."
+        )
+    }
+
+    func testUsageLimitReachedErrorUsesPromoMessageBeforePlanLikeRust() {
+        XCTAssertEqual(
+            String(describing: UsageLimitReachedError(
+                planType: .plus,
+                promoMessage: "To continue using Codex, start a free trial of <PLAN> today"
+            )),
+            "You've hit your usage limit. To continue using Codex, start a free trial of <PLAN> today, or try again later."
+        )
+    }
 }

@@ -11,6 +11,8 @@ final class RateLimitsTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(snapshot, [
+            "limit_id": NSNull(),
+            "limit_name": NSNull(),
             "primary": [
                 "used_percent": 42.5,
                 "window_minutes": NSNull(),
@@ -22,29 +24,36 @@ final class RateLimitsTests: XCTestCase {
                 "unlimited": false,
                 "balance": NSNull()
             ],
-            "plan_type": "pro"
+            "plan_type": "pro",
+            "rate_limit_reached_type": NSNull()
         ])
     }
 
     func testRateLimitSnapshotDecodesMissingAndNullOptions() throws {
         let json = """
         {
+          "limit_id": null,
+          "limit_name": " codex_other ",
           "primary": null,
           "secondary": {
             "used_percent": 90,
             "window_minutes": null,
             "resets_at": null
           },
-          "credits": null
+          "credits": null,
+          "rate_limit_reached_type": "workspace_owner_usage_limit_reached"
         }
         """
 
         let snapshot = try JSONDecoder().decode(RateLimitSnapshot.self, from: Data(json.utf8))
 
+        XCTAssertNil(snapshot.limitID)
+        XCTAssertEqual(snapshot.limitName, " codex_other ")
         XCTAssertNil(snapshot.primary)
         XCTAssertEqual(snapshot.secondary, RateLimitWindow(usedPercent: 90, windowMinutes: nil, resetsAt: nil))
         XCTAssertNil(snapshot.credits)
         XCTAssertNil(snapshot.planType)
+        XCTAssertEqual(snapshot.rateLimitReachedType, .workspaceOwnerUsageLimitReached)
     }
 
     func testTokenCountEventWireShapeIncludesNullOptions() throws {
