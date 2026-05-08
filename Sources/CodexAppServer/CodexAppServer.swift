@@ -894,6 +894,27 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func threadUnarchiveResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        let rolloutPath = try unarchiveConversation(conversationID: conversationID, configuration: configuration)
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        return [
+            "thread": try threadObject(for: item, defaultProvider: configuration.defaultModelProvider)
+        ]
+    }
+
     fileprivate static func listConversationsResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1170,6 +1191,15 @@ public enum CodexAppServer {
             "method": "thread/started",
             "params": [
                 "thread": thread
+            ]
+        ]
+    }
+
+    fileprivate static func threadUnarchivedNotification(threadID: String) -> [String: Any] {
+        [
+            "method": "thread/unarchived",
+            "params": [
+                "threadId": threadID
             ]
         ]
     }
@@ -2378,6 +2408,80 @@ public enum CodexAppServer {
             throw AppServerError.internalError("failed to archive conversation: \(error)")
         }
     }
+
+    private static func unarchiveConversation(
+        conversationID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws -> String {
+        let archivedPath = try archivedRolloutPathForConversation(
+            conversationID,
+            configuration: configuration
+        )
+        let destinationDirectory = try sessionsDirectoryForArchivedRollout(
+            archivedPath,
+            configuration: configuration
+        )
+        let destinationPath = destinationDirectory.appendingPathComponent(
+            archivedPath.lastPathComponent,
+            isDirectory: false
+        )
+        do {
+            try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: archivedPath, to: destinationPath)
+        } catch {
+            throw AppServerError.internalError("failed to unarchive thread: \(error)")
+        }
+        return destinationPath.path
+    }
+
+    private static func archivedRolloutPathForConversation(
+        _ conversationID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws -> URL {
+        let archivedDirectory = configuration.codexHome
+            .appendingPathComponent(RolloutErrors.archivedSessionsSubdirectory, isDirectory: true)
+        guard isDirectory(archivedDirectory) else {
+            throw AppServerError.invalidRequest("thread not archived: \(conversationID)")
+        }
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: archivedDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        )
+        guard let path = files.first(where: { url in
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                return false
+            }
+            return url.lastPathComponent.hasSuffix("\(conversationID).jsonl")
+        }) else {
+            throw AppServerError.invalidRequest("thread not archived: \(conversationID)")
+        }
+        return path
+    }
+
+    private static func sessionsDirectoryForArchivedRollout(
+        _ archivedPath: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> URL {
+        guard let (timestamp, _) = RolloutListing.parseTimestampUUIDFromFilename(archivedPath.lastPathComponent) else {
+            throw AppServerError.invalidRequest("archived rollout filename is invalid: \(archivedPath.lastPathComponent)")
+        }
+        let components = rolloutSessionPathComponents.string(from: timestamp).split(separator: "/").map(String.init)
+        return components.reduce(
+            configuration.codexHome.appendingPathComponent(RolloutListing.sessionsSubdirectory, isDirectory: true)
+        ) { path, component in
+            path.appendingPathComponent(component, isDirectory: true)
+        }
+    }
+
+    private static let rolloutSessionPathComponents: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy/MM/dd"
+        return formatter
+    }()
 
     private static func skillRoots(cwd: URL, codexHome: URL) -> [(path: URL, scope: SkillScope)] {
         var roots: [(URL, SkillScope)] = []
@@ -3596,6 +3700,13 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadArchiveResult(params: params, configuration: configuration)
                     )
+                case "thread/unarchive":
+                    let result = try CodexAppServer.threadUnarchiveResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result)
+                    if let thread = result["thread"] as? [String: Any],
+                       let threadID = thread["id"] as? String {
+                        notifications.append(CodexAppServer.threadUnarchivedNotification(threadID: threadID))
+                    }
                 case "listConversations":
                     response = CodexAppServer.responseObject(
                         id: id,

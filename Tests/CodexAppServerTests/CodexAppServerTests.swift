@@ -1107,6 +1107,58 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
     }
 
+    func testThreadUnarchiveRestoresRolloutAndEmitsNotification() throws {
+        let temp = try TemporaryDirectory()
+        let id = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "restore me",
+            provider: "openai"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
+        _ = try appServerResponse(
+            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#,
+            codexHome: temp.url
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let messages = try decodeMessages(processor.processLine(
+            Data(#"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertEqual(thread["id"] as? String, id)
+        XCTAssertEqual(thread["preview"] as? String, "restore me")
+        XCTAssertEqual(thread["status"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "notLoaded")
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/unarchived")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rolloutPath))
+        XCTAssertNotNil(try RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
+    }
+
+    func testThreadUnarchiveRejectsInvalidOrMissingArchivedThread() throws {
+        let temp = try TemporaryDirectory()
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"thread/unarchive","params":{"threadId":"not-a-uuid"}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertTrue((invalidError["message"] as? String)?.contains("invalid thread id:") == true)
+
+        let missingID = UUID().uuidString.lowercased()
+        let missing = try appServerResponse(
+            #"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(missingID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "thread not archived: \(missingID)")
+    }
+
     func testArchiveConversationMovesExplicitRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
