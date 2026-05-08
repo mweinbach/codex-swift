@@ -258,8 +258,10 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
             taskBox: taskBox
         )
         let task = Task {
-            if includeRateLimits, let snapshot = RateLimitSnapshot.parseRateLimit(headers: response.headers) {
-                continuation.yield(.success(.rateLimits(snapshot)))
+            if includeRateLimits {
+                for snapshot in RateLimitSnapshot.parseAllRateLimits(headers: response.headers) {
+                    continuation.yield(.success(.rateLimits(snapshot)))
+                }
             }
 
             var parser = makeParser()

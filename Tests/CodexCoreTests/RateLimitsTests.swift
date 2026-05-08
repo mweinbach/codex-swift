@@ -80,6 +80,7 @@ final class RateLimitsTests: XCTestCase {
         XCTAssertEqual(
             RateLimitSnapshot.mergeRateLimitFields(previous: previous, snapshot: update),
             RateLimitSnapshot(
+                limitID: "codex",
                 primary: update.primary,
                 secondary: update.secondary,
                 credits: previous.credits,
@@ -90,12 +91,14 @@ final class RateLimitsTests: XCTestCase {
 
     func testMergeRateLimitFieldsKeepsNewCreditsAndPlanWhenPresent() {
         let previous = RateLimitSnapshot(
+            limitID: "codex",
             primary: nil,
             secondary: nil,
             credits: CreditsSnapshot(hasCredits: false, unlimited: false, balance: "0"),
             planType: .free
         )
         let update = RateLimitSnapshot(
+            limitID: "codex_other",
             primary: nil,
             secondary: nil,
             credits: CreditsSnapshot(hasCredits: true, unlimited: false, balance: "10"),
@@ -123,6 +126,7 @@ final class RateLimitsTests: XCTestCase {
         XCTAssertEqual(
             snapshot,
             RateLimitSnapshot(
+                limitID: "codex",
                 primary: RateLimitWindow(usedPercent: 42.5, windowMinutes: 300, resetsAt: 1_717_000_000),
                 secondary: RateLimitWindow(usedPercent: 0, windowMinutes: 60, resetsAt: nil),
                 credits: CreditsSnapshot(hasCredits: true, unlimited: false, balance: "123"),
@@ -144,6 +148,7 @@ final class RateLimitsTests: XCTestCase {
         XCTAssertEqual(
             snapshot,
             RateLimitSnapshot(
+                limitID: "codex",
                 primary: nil,
                 secondary: nil,
                 credits: CreditsSnapshot(hasCredits: false, unlimited: true, balance: nil),
@@ -162,7 +167,56 @@ final class RateLimitsTests: XCTestCase {
 
         XCTAssertEqual(
             snapshot,
-            RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil)
+            RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil)
+        )
+    }
+
+    func testMergeRateLimitFieldsDefaultsMissingLimitIDToCodexLikeRustSessionState() {
+        let previous = RateLimitSnapshot(
+            limitID: "codex_other",
+            limitName: "gpt-5.2-codex-sonic",
+            primary: RateLimitWindow(usedPercent: 20, windowMinutes: 60, resetsAt: 200),
+            secondary: nil,
+            credits: nil,
+            planType: nil
+        )
+        let update = RateLimitSnapshot(
+            primary: RateLimitWindow(usedPercent: 30, windowMinutes: 60, resetsAt: 300),
+            secondary: nil,
+            credits: nil,
+            planType: nil
+        )
+
+        XCTAssertEqual(
+            RateLimitSnapshot.mergeRateLimitFields(previous: previous, snapshot: update).limitID,
+            "codex"
+        )
+    }
+
+    func testParseAllRateLimitsReadsNamedHeaderFamiliesLikeRustParser() {
+        let updates = RateLimitSnapshot.parseAllRateLimits(headers: [
+            "x-codex-primary-used-percent": "12.5",
+            "x-codex-secondary-primary-used-percent": "80",
+            "x-codex-secondary-primary-window-minutes": "1440",
+            "x-codex-bengalfox-primary-used-percent": "50",
+            "x-codex-bengalfox-limit-name": " gpt-5.2-codex-sonic "
+        ])
+
+        XCTAssertEqual(updates.count, 3)
+        XCTAssertEqual(updates[0].limitID, "codex")
+        XCTAssertEqual(updates[0].primary?.usedPercent, 12.5)
+        XCTAssertEqual(updates[1].limitID, "codex_bengalfox")
+        XCTAssertEqual(updates[1].limitName, "gpt-5.2-codex-sonic")
+        XCTAssertEqual(updates[1].primary?.usedPercent, 50)
+        XCTAssertEqual(updates[2].limitID, "codex_secondary")
+        XCTAssertEqual(updates[2].primary?.usedPercent, 80)
+        XCTAssertEqual(updates[2].primary?.windowMinutes, 1440)
+    }
+
+    func testParseAllRateLimitsIncludesDefaultCodexSnapshotWhenNoHeadersLikeRustParser() {
+        XCTAssertEqual(
+            RateLimitSnapshot.parseAllRateLimits(headers: [:]),
+            [RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil)]
         )
     }
 }

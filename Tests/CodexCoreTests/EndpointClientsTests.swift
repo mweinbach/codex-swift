@@ -118,7 +118,7 @@ final class EndpointClientsTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .success([
-            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
             .success(.created),
             .success(.completed(responseID: "resp_1", tokenUsage: nil))
         ]))
@@ -163,7 +163,7 @@ final class EndpointClientsTests: XCTestCase {
         let result = await client.stream(body: .object([:]))
 
         XCTAssertEqual(result, .success([
-            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
             .success(.outputTextDelta(delta)),
             .success(.completed(responseID: "resp_1", tokenUsage: nil))
         ]))
@@ -191,13 +191,14 @@ final class EndpointClientsTests: XCTestCase {
         let result = await client.stream(body: .object([:]))
 
         XCTAssertEqual(result, .success([
-            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
             .failure(.stream("network error: reset"))
         ]))
     }
 
     func testResponsesClientStreamEventsEmitsRateLimitsBeforeSSEEvents() async {
         let snapshot = RateLimitSnapshot(
+            limitID: "codex",
             primary: RateLimitWindow(usedPercent: 42, windowMinutes: 300, resetsAt: nil),
             secondary: nil,
             credits: nil,
@@ -324,7 +325,7 @@ final class EndpointClientsTests: XCTestCase {
         let events = await collect(stream)
 
         XCTAssertEqual(events, [
-            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
             .failure(.stream("idle timeout waiting for SSE"))
         ])
         XCTAssertEqual(telemetry.records.map(\.result), [.idleTimeout])

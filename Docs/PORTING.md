@@ -83,7 +83,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/api_bridge.rs` auth-provider selection helper
   - provider environment API key, experimental bearer token, auth.json API key, ChatGPT access token/account-id precedence, and empty-auth fallback
 - `codex-rs/codex-api/src/rate_limits.rs`
-  - Codex rate-limit header parsing for primary/secondary windows, credits snapshots, finite-number filtering, boolean aliases, and empty-window omission
+  - Codex rate-limit header parsing for default and named limit buckets, primary/secondary windows, credits snapshots, finite-number filtering, boolean aliases, limit names/IDs, and empty-window omission
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
@@ -109,7 +109,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper
-  - token-count event payloads, rate-limit windows, credits snapshots, limit identity/name, rate-limit-reached type, explicit null optional serialization, and preservation of omitted credits/plan fields across rate-limit updates
+  - token-count event payloads, rate-limit windows, credits snapshots, limit identity/name, named rate-limit header families, rate-limit-reached type, explicit null optional serialization, preservation of omitted credits/plan fields across rate-limit updates, default `codex` bucket assignment, and multi-snapshot SSE prelude emission
 - `codex-rs/protocol/src/protocol.rs` patch-apply event models
   - tagged file-change payloads, patch-apply begin/end events with defaulted legacy fields, and turn-diff wire shape
 - `codex-rs/protocol/src/parse_command.rs`

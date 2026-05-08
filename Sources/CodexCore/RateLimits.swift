@@ -91,6 +91,9 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
 
     public func mergingMissingFields(from previous: RateLimitSnapshot?) -> RateLimitSnapshot {
         var snapshot = self
+        if snapshot.limitID == nil {
+            snapshot.limitID = "codex"
+        }
         if snapshot.credits == nil {
             snapshot.credits = previous?.credits
         }
@@ -108,22 +111,70 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
     }
 
     public static func parseRateLimit(headers: [String: String]) -> RateLimitSnapshot? {
-        RateLimitSnapshot(
+        parseRateLimit(headers: headers, limitID: nil)
+    }
+
+    public static func parseAllRateLimits(headers: [String: String]) -> [RateLimitSnapshot] {
+        var snapshots: [RateLimitSnapshot] = []
+        if let snapshot = parseRateLimit(headers: headers) {
+            snapshots.append(snapshot)
+        }
+
+        let limitIDs = Set(headers.keys.compactMap { headerNameToLimitID($0) })
+            .filter { $0 != "codex" }
+            .sorted()
+
+        for limitID in limitIDs {
+            guard let snapshot = parseRateLimit(headers: headers, limitID: limitID),
+                  snapshot.hasRateLimitData
+            else {
+                continue
+            }
+            snapshots.append(snapshot)
+        }
+
+        return snapshots
+    }
+
+    public static func parseRateLimit(headers: [String: String], limitID: String?) -> RateLimitSnapshot? {
+        let selectedLimit: String
+        if let trimmedLimitID = limitID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !trimmedLimitID.isEmpty {
+            selectedLimit = trimmedLimitID
+        } else {
+            selectedLimit = "codex"
+        }
+
+        let normalizedLimit = selectedLimit
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        let prefix = "x-\(normalizedLimit)"
+        let normalizedLimitID = normalizeLimitID(normalizedLimit)
+        let limitName = parseHeaderString(headers, "\(prefix)-limit-name")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return RateLimitSnapshot(
+            limitID: normalizedLimitID,
+            limitName: limitName?.isEmpty == false ? limitName : nil,
             primary: parseRateLimitWindow(
                 headers: headers,
-                usedPercentHeader: "x-codex-primary-used-percent",
-                windowMinutesHeader: "x-codex-primary-window-minutes",
-                resetsAtHeader: "x-codex-primary-reset-at"
+                usedPercentHeader: "\(prefix)-primary-used-percent",
+                windowMinutesHeader: "\(prefix)-primary-window-minutes",
+                resetsAtHeader: "\(prefix)-primary-reset-at"
             ),
             secondary: parseRateLimitWindow(
                 headers: headers,
-                usedPercentHeader: "x-codex-secondary-used-percent",
-                windowMinutesHeader: "x-codex-secondary-window-minutes",
-                resetsAtHeader: "x-codex-secondary-reset-at"
+                usedPercentHeader: "\(prefix)-secondary-used-percent",
+                windowMinutesHeader: "\(prefix)-secondary-window-minutes",
+                resetsAtHeader: "\(prefix)-secondary-reset-at"
             ),
             credits: parseCreditsSnapshot(headers: headers),
             planType: nil
         )
+    }
+
+    private var hasRateLimitData: Bool {
+        primary != nil || secondary != nil || credits != nil
     }
 
     private static func parseRateLimitWindow(
@@ -205,6 +256,26 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
             return value
         }
         return nil
+    }
+
+    private static func headerNameToLimitID(_ headerName: String) -> String? {
+        let lowercased = headerName.lowercased()
+        let suffix = "-primary-used-percent"
+        guard lowercased.hasSuffix(suffix) else {
+            return nil
+        }
+        let prefixEnd = lowercased.index(lowercased.endIndex, offsetBy: -suffix.count)
+        let prefix = String(lowercased[..<prefixEnd])
+        guard prefix.hasPrefix("x-") else {
+            return nil
+        }
+        return normalizeLimitID(String(prefix.dropFirst(2)))
+    }
+
+    private static func normalizeLimitID(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
     }
 }
 
