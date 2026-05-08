@@ -754,6 +754,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "thread not loaded: \(threadID)")
     }
 
+    func testThreadNameSetPersistsNameAndEmitsNotification() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"  Sharper thread name  "}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/name/updated")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(notificationParams["threadId"] as? String, threadID)
+        XCTAssertEqual(notificationParams["threadName"] as? String, "Sharper thread name")
+
+        let index = try String(contentsOf: temp.url.appendingPathComponent("session_index.jsonl"), encoding: .utf8)
+        XCTAssertTrue(index.contains(#""thread_name":"Sharper thread name""#))
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let thread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        XCTAssertEqual(thread["name"] as? String, "Sharper thread name")
+    }
+
+    func testThreadNameSetRejectsEmptyOrMissingThread() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+
+        let empty = try appServerResponse(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"   "}}"#,
+            codexHome: temp.url
+        )
+        let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
+        XCTAssertEqual(emptyError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyError["message"] as? String, "thread name must not be empty")
+
+        let missingID = UUID().uuidString.lowercased()
+        let missing = try appServerResponse(
+            #"{"id":2,"method":"thread/name/set","params":{"threadId":"\#(missingID)","name":"Name"}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

@@ -1153,6 +1153,32 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadSetNameResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (result: [String: Any], threadID: String, threadName: String) {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        guard let rawName = stringParam(params?["name"]) else {
+            throw AppServerError.invalidRequest("missing name")
+        }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw AppServerError.invalidRequest("thread name must not be empty")
+        }
+
+        _ = try rolloutPathForConversation(threadID, configuration: configuration)
+        try appendThreadName(threadID: threadID, name: name, codexHome: configuration.codexHome)
+        return ([:], threadID.description, name)
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -1850,6 +1876,16 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadNameUpdatedNotification(threadID: String, threadName: String) -> [String: Any] {
+        [
+            "method": "thread/name/updated",
+            "params": [
+                "threadId": threadID,
+                "threadName": threadName
+            ]
+        ]
+    }
+
     fileprivate static func sendMcpServerOAuthLoginCompletedNotification(
         name: String,
         success: Bool,
@@ -2152,7 +2188,7 @@ public enum CodexAppServer {
             "agentNickname": summary.agentNickname ?? NSNull(),
             "agentRole": summary.agentRole ?? NSNull(),
             "gitInfo": summary.gitInfo ?? NSNull(),
-            "name": NSNull(),
+            "name": summary.name ?? NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
     }
@@ -3362,6 +3398,29 @@ public enum CodexAppServer {
         return Set(features.keys)
     }
 
+    private static func appendThreadName(threadID: ConversationId, name: String, codexHome: URL) throws {
+        let path = sessionIndexPath(codexHome: codexHome)
+        let entry: [String: Any] = [
+            "id": threadID.description,
+            "thread_name": name,
+            "updated_at": ISO8601DateFormatter().string(from: Date())
+        ]
+        let data = try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: path.path) {
+            try Data().write(to: path, options: .atomic)
+        }
+        let handle = try FileHandle(forWritingTo: path)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+        try handle.write(contentsOf: Data([0x0A]))
+    }
+
+    private static func sessionIndexPath(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent("session_index.jsonl", isDirectory: false)
+    }
+
     private static func configWriteResult(
         edits: [ConfigWriteEdit],
         filePath: String?,
@@ -4350,6 +4409,13 @@ final class CodexAppServerMessageProcessor {
                        let threadID = thread["id"] as? String {
                         notifications.append(CodexAppServer.threadUnarchivedNotification(threadID: threadID))
                     }
+                case "thread/name/set":
+                    let result = try CodexAppServer.threadSetNameResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result.result)
+                    notifications.append(CodexAppServer.threadNameUpdatedNotification(
+                        threadID: result.threadID,
+                        threadName: result.threadName
+                    ))
                 case "listConversations":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -4933,6 +4999,7 @@ private struct RolloutSummary {
     let agentRole: String?
     let gitInfo: [String: Any]?
     let v1GitInfo: [String: Any]?
+    let name: String?
 
     init(path: String, defaultProvider: String) throws {
         let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
@@ -4983,6 +5050,7 @@ private struct RolloutSummary {
         self.threadSource = meta.meta.threadSource?.description
         self.agentNickname = meta.meta.agentNickname
         self.agentRole = meta.meta.agentRole
+        self.name = Self.findThreadName(threadID: meta.meta.id.description, rolloutPath: path)
         if let git = meta.git {
             self.gitInfo = [
                 "sha": git.commitHash as Any,
@@ -5012,6 +5080,43 @@ private struct RolloutSummary {
             }
             return nil
         }.joined(separator: "\n")
+    }
+
+    private static func findThreadName(threadID: String, rolloutPath: String) -> String? {
+        guard let codexHome = inferCodexHome(fromRolloutPath: rolloutPath) else {
+            return nil
+        }
+        let indexPath = codexHome.appendingPathComponent("session_index.jsonl", isDirectory: false)
+        guard let contents = try? String(contentsOf: indexPath, encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in contents.split(whereSeparator: \.isNewline).reversed() {
+            guard let data = rawLine.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["id"] as? String == threadID,
+                  let name = object["thread_name"] as? String
+            else {
+                continue
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private static func inferCodexHome(fromRolloutPath path: String) -> URL? {
+        let url = URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL
+        let components = url.pathComponents
+        guard let markerIndex = components.firstIndex(where: { $0 == "sessions" || $0 == "archived_sessions" }),
+              markerIndex > 0
+        else {
+            return nil
+        }
+        let homeComponents = components[..<markerIndex]
+        let homePath = NSString.path(withComponents: Array(homeComponents))
+        return URL(fileURLWithPath: homePath, isDirectory: true)
     }
 
     private static func unixSeconds(_ timestamp: String) -> Int {
