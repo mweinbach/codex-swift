@@ -9,7 +9,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertNil(config.model)
         XCTAssertNil(config.modelProvider)
-        XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "ollama", "lmstudio"])
+        XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "amazon-bedrock", "ollama", "lmstudio"])
         XCTAssertTrue(config.modelProviders["openai"]?.requiresOpenAIAuth == true)
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.selectedModelProvider?.name, "OpenAI")

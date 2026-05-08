@@ -1221,6 +1221,29 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func modelProviderCapabilitiesReadResult(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+
+        let capabilities = runtimeConfig.selectedModelProvider?.capabilities()
+            ?? ModelProviderCapabilities()
+        return [
+            "namespaceTools": capabilities.namespaceTools,
+            "imageGeneration": capabilities.imageGeneration,
+            "webSearch": capabilities.webSearch
+        ]
+    }
+
     fileprivate static func mcpServerOAuthLoginResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -3997,6 +4020,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                    )
+                case "modelProvider/capabilities/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.modelProviderCapabilitiesReadResult(configuration: configuration)
                     )
                 case "mcpServerStatus/list":
                     response = CodexAppServer.responseObject(

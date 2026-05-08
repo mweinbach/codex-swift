@@ -295,9 +295,10 @@ final class ModelProviderInfoTests: XCTestCase {
             packageVersion: "0.55.0"
         )
 
-        XCTAssertEqual(Set(providers.keys), ["openai", "ollama", "lmstudio"])
+        XCTAssertEqual(Set(providers.keys), ["openai", "amazon-bedrock", "ollama", "lmstudio"])
         XCTAssertEqual(providers["openai"]?.wireAPI, .responses)
         XCTAssertEqual(providers["openai"]?.requiresOpenAIAuth, true)
+        XCTAssertEqual(providers["amazon-bedrock"], ModelProviderInfo.createAmazonBedrockProvider())
         XCTAssertEqual(providers["ollama"], ModelProviderInfo.createOSSProvider(
             baseURL: "http://localhost:11434/v1",
             wireAPI: .chat
@@ -332,6 +333,14 @@ final class ModelProviderInfoTests: XCTestCase {
                 environment: ["CODEX_OSS_PORT": "1234"]
             ).baseURL,
             "http://localhost:1234/v1"
+        )
+    }
+
+    func testProviderCapabilitiesMatchRustDefaultsAndAmazonBedrock() {
+        XCTAssertEqual(ModelProviderInfo(name: "Custom").capabilities(), ModelProviderCapabilities())
+        XCTAssertEqual(
+            ModelProviderInfo.createAmazonBedrockProvider().capabilities(),
+            ModelProviderCapabilities(namespaceTools: false, imageGeneration: false, webSearch: false)
         )
     }
 

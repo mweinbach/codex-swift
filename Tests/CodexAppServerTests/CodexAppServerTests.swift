@@ -1940,6 +1940,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testModelProviderCapabilitiesReadReturnsDefaultProviderCapabilities() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"modelProvider/capabilities/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["namespaceTools"] as? Bool, true)
+        XCTAssertEqual(result["imageGeneration"] as? Bool, true)
+        XCTAssertEqual(result["webSearch"] as? Bool, true)
+    }
+
+    func testModelProviderCapabilitiesReadReturnsAmazonBedrockCapabilities() throws {
+        let temp = try TemporaryDirectory()
+        try #"model_provider = "amazon-bedrock""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"modelProvider/capabilities/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["namespaceTools"] as? Bool, false)
+        XCTAssertEqual(result["imageGeneration"] as? Bool, false)
+        XCTAssertEqual(result["webSearch"] as? Bool, false)
+    }
+
     func testExperimentalFeatureListReturnsRustV2ShapeAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """

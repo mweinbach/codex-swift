@@ -199,6 +199,9 @@ public enum ModelProviderError: Error, Equatable, CustomStringConvertible, Senda
 }
 
 public struct ModelProviderInfo: Codable, Equatable, Sendable {
+    public static let amazonBedrockProviderID = "amazon-bedrock"
+    public static let amazonBedrockProviderName = "Amazon Bedrock"
+    public static let amazonBedrockDefaultBaseURL = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
     public static let defaultStreamIdleTimeoutMilliseconds: UInt64 = 300_000
     public static let defaultStreamMaxRetries: UInt64 = 5
     public static let defaultRequestMaxRetries: UInt64 = 4
@@ -403,6 +406,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     ) -> [String: ModelProviderInfo] {
         [
             "openai": createOpenAIProvider(environment: environment, packageVersion: packageVersion),
+            amazonBedrockProviderID: createAmazonBedrockProvider(),
             ollamaOSSProviderID: createOSSProvider(
                 defaultProviderPort: defaultOllamaPort,
                 wireAPI: .chat,
@@ -414,6 +418,15 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
                 environment: environment
             )
         ]
+    }
+
+    public static func createAmazonBedrockProvider() -> ModelProviderInfo {
+        ModelProviderInfo(
+            name: amazonBedrockProviderName,
+            baseURL: amazonBedrockDefaultBaseURL,
+            wireAPI: .responses,
+            requiresOpenAIAuth: false
+        )
     }
 
     public static func createOSSProvider(
@@ -446,10 +459,41 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         name == Self.openAIProviderName
     }
 
+    public func isAmazonBedrock() -> Bool {
+        name == Self.amazonBedrockProviderName
+    }
+
+    public func capabilities() -> ModelProviderCapabilities {
+        if isAmazonBedrock() {
+            return ModelProviderCapabilities(
+                namespaceTools: false,
+                imageGeneration: false,
+                webSearch: false
+            )
+        }
+        return ModelProviderCapabilities()
+    }
+
     private static func isValidHeader(name: String, value: String) -> Bool {
         !name.isEmpty
             && !name.contains { $0.isWhitespace || $0.isNewline || $0 == ":" }
             && !value.contains { $0.isNewline }
+    }
+}
+
+public struct ModelProviderCapabilities: Equatable, Sendable {
+    public var namespaceTools: Bool
+    public var imageGeneration: Bool
+    public var webSearch: Bool
+
+    public init(
+        namespaceTools: Bool = true,
+        imageGeneration: Bool = true,
+        webSearch: Bool = true
+    ) {
+        self.namespaceTools = namespaceTools
+        self.imageGeneration = imageGeneration
+        self.webSearch = webSearch
     }
 }
 
