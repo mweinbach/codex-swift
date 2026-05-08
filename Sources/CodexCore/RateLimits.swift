@@ -173,8 +173,40 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
         )
     }
 
+    public static func parseRateLimitEvent(payload: String) -> RateLimitSnapshot? {
+        guard let event = try? JSONDecoder().decode(RateLimitEvent.self, from: Data(payload.utf8)),
+              event.kind == "codex.rate_limits"
+        else {
+            return nil
+        }
+
+        return RateLimitSnapshot(
+            limitID: event.meteredLimitName.map(normalizeLimitID)
+                ?? event.limitName.map(normalizeLimitID)
+                ?? "codex",
+            primary: event.rateLimits?.primary.map(mapEventWindow),
+            secondary: event.rateLimits?.secondary.map(mapEventWindow),
+            credits: event.credits.map {
+                CreditsSnapshot(
+                    hasCredits: $0.hasCredits,
+                    unlimited: $0.unlimited,
+                    balance: $0.balance
+                )
+            },
+            planType: event.planType
+        )
+    }
+
     private var hasRateLimitData: Bool {
         primary != nil || secondary != nil || credits != nil
+    }
+
+    private static func mapEventWindow(_ window: RateLimitEventWindow) -> RateLimitWindow {
+        RateLimitWindow(
+            usedPercent: window.usedPercent,
+            windowMinutes: window.windowMinutes,
+            resetsAt: window.resetAt
+        )
     }
 
     private static func parseRateLimitWindow(
@@ -276,6 +308,53 @@ public struct RateLimitSnapshot: Equatable, Codable, Sendable {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+private struct RateLimitEvent: Decodable {
+    let kind: String
+    let planType: PlanType?
+    let rateLimits: RateLimitEventDetails?
+    let credits: RateLimitEventCredits?
+    let meteredLimitName: String?
+    let limitName: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "type"
+        case planType = "plan_type"
+        case rateLimits = "rate_limits"
+        case credits
+        case meteredLimitName = "metered_limit_name"
+        case limitName = "limit_name"
+    }
+}
+
+private struct RateLimitEventDetails: Decodable {
+    let primary: RateLimitEventWindow?
+    let secondary: RateLimitEventWindow?
+}
+
+private struct RateLimitEventWindow: Decodable {
+    let usedPercent: Double
+    let windowMinutes: Int64?
+    let resetAt: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case usedPercent = "used_percent"
+        case windowMinutes = "window_minutes"
+        case resetAt = "reset_at"
+    }
+}
+
+private struct RateLimitEventCredits: Decodable {
+    let hasCredits: Bool
+    let unlimited: Bool
+    let balance: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case hasCredits = "has_credits"
+        case unlimited
+        case balance
     }
 }
 

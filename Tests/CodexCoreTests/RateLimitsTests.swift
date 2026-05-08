@@ -219,4 +219,47 @@ final class RateLimitsTests: XCTestCase {
             [RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil)]
         )
     }
+
+    func testParseRateLimitEventMapsCodexRateLimitPayloadLikeRustWebsocketParser() {
+        let payload = """
+        {
+          "type": "codex.rate_limits",
+          "plan_type": "plus",
+          "metered_limit_name": "codex-sonic",
+          "rate_limits": {
+            "primary": {
+              "used_percent": 88.5,
+              "window_minutes": 60,
+              "reset_at": 1704069000
+            },
+            "secondary": null
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "42"
+          }
+        }
+        """
+
+        XCTAssertEqual(
+            RateLimitSnapshot.parseRateLimitEvent(payload: payload),
+            RateLimitSnapshot(
+                limitID: "codex_sonic",
+                primary: RateLimitWindow(usedPercent: 88.5, windowMinutes: 60, resetsAt: 1_704_069_000),
+                secondary: nil,
+                credits: CreditsSnapshot(hasCredits: true, unlimited: false, balance: "42"),
+                planType: .plus
+            )
+        )
+    }
+
+    func testParseRateLimitEventIgnoresNonRateLimitEventAndDefaultsLimitIDLikeRust() {
+        XCTAssertNil(RateLimitSnapshot.parseRateLimitEvent(payload: #"{"type":"response.created"}"#))
+
+        XCTAssertEqual(
+            RateLimitSnapshot.parseRateLimitEvent(payload: #"{"type":"codex.rate_limits"}"#),
+            RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil)
+        )
+    }
 }
