@@ -29,6 +29,7 @@ public enum SeatbeltSandbox {
         cwd: URL,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         executablePath: String = Self.executablePath,
+        logDenials: Bool = false,
         fileManager: FileManager = .default
     ) throws -> Int32 {
         let cwdPath = cwd.standardizedFileURL.path
@@ -49,6 +50,8 @@ public enum SeatbeltSandbox {
             childEnvironment["CODEX_SANDBOX_NETWORK_DISABLED"] = "1"
         }
 
+        let denialLogger = logDenials ? SeatbeltDenialLogger.start() : nil
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = args
@@ -63,7 +66,11 @@ public enum SeatbeltSandbox {
         } catch {
             throw SeatbeltSandboxError.launchFailed(String(describing: error))
         }
+        denialLogger?.onChildSpawn(process.processIdentifier)
         process.waitUntilExit()
+        if let denialLogger {
+            FileHandle.standardError.write(SeatbeltDenialLogger.formatSummary(denials: denialLogger.finish()))
+        }
         return process.terminationStatus
     }
 

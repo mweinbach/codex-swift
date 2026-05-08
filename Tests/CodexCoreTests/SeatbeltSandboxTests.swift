@@ -1,4 +1,4 @@
-import CodexCore
+@testable import CodexCore
 import XCTest
 
 final class SeatbeltSandboxTests: XCTestCase {
@@ -61,6 +61,44 @@ final class SeatbeltSandboxTests: XCTestCase {
     func testFullAutoSelectsWorkspaceWritePolicy() {
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: false), .readOnly)
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: true), .newWorkspaceWritePolicy())
+    }
+
+    func testDenialParserFiltersTrackedPIDsAndDeduplicates() {
+        let logs = """
+        {"eventMessage":"Sandbox: bash(123) deny(1) file-read-data /private/etc/passwd"}
+        {"eventMessage":"Sandbox: bash(123) deny(1) file-read-data /private/etc/passwd"}
+        {"eventMessage":"Sandbox: sh(456) deny(1) file-write-create /tmp/nope"}
+        {"eventMessage":"Sandbox: ignored(789) deny(1) network-outbound *"}
+        {"eventMessage":"not a sandbox denial"}
+        not-json
+        """
+
+        let denials = SeatbeltDenialLogParser.parseDenials(from: logs, trackedPIDs: [123, 456])
+
+        XCTAssertEqual(denials, [
+            SeatbeltSandboxDenial(name: "bash", capability: "file-read-data /private/etc/passwd"),
+            SeatbeltSandboxDenial(name: "sh", capability: "file-write-create /tmp/nope")
+        ])
+    }
+
+    func testDenialSummaryMatchesRustShape() throws {
+        let emptySummary = String(
+            decoding: SeatbeltDenialLogger.formatSummary(denials: []),
+            as: UTF8.self
+        )
+        XCTAssertEqual(emptySummary, "\n=== Sandbox denials ===\nNone found.\n")
+
+        let denialSummary = String(
+            decoding: SeatbeltDenialLogger.formatSummary(denials: [
+                SeatbeltSandboxDenial(name: "bash", capability: "file-read-data /private/etc/passwd"),
+                SeatbeltSandboxDenial(name: "sh", capability: "file-write-create /tmp/nope")
+            ]),
+            as: UTF8.self
+        )
+        XCTAssertEqual(
+            denialSummary,
+            "\n=== Sandbox denials ===\n(bash) file-read-data /private/etc/passwd\n(sh) file-write-create /tmp/nope\n"
+        )
     }
 }
 

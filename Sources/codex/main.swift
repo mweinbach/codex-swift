@@ -173,16 +173,11 @@ private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) 
 private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case let .macos(fullAuto, logDenials, command):
-        guard !logDenials else {
-            return CodexCLI.CommandExecutionResult(
-                exitCode: 78,
-                stderrMessage: "codex-swift: sandbox macos --log-denials runtime is not complete yet."
-            )
-        }
         let exitCode = try SeatbeltSandbox.run(
             command: command,
             fullAuto: fullAuto,
-            cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+            logDenials: logDenials
         )
         return CodexCLI.CommandExecutionResult(exitCode: exitCode)
     case .linux:
