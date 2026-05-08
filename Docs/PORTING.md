@@ -124,6 +124,8 @@ Source baseline inspected for this scaffold:
   - constrained config values, Rust-matching constraint error strings, admin allowed approval policy constraints, sandbox-mode requirement constraints, and unset-field requirements merging
 - `codex-rs/core/src/bash.rs`, `codex-rs/core/src/command_safety/is_safe_command.rs`, and `codex-rs/core/src/command_safety/is_dangerous_command.rs`
   - non-Windows command safety allow-list, dangerous command detection, approval-prompt gating, and conservative `bash`/`zsh -lc` plain-command sequence parsing for safe shell operators
+- `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
+  - Swift-native prefix-rule policy model, parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, exec approval requirement derivation, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
@@ -174,6 +176,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - Windows PowerShell command safety parity
+- execpolicy config-layer file discovery and Starlark-compatible parser completeness
 - keyring storage for `codex apply <task_id>`
 - ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
 
