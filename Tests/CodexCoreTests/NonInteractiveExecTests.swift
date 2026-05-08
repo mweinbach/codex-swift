@@ -145,6 +145,38 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.stdoutMessage, "done")
     }
 
+    func testResponsesLoopWithTranscriptIncludesToolCallsOutputsAndFinalMessage() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let script = ExecLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .functionCall(_, _, _, callID) = item else {
+                    return .functionCallOutput(
+                        callID: "bad",
+                        output: FunctionCallOutputPayload(content: "bad", success: false)
+                    )
+                }
+                return .functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(content: "ok", success: true)
+                )
+            }
+        )
+
+        XCTAssertEqual(result.transcriptItems, [
+            .functionCall(name: "shell_command", arguments: #"{"command":"echo hi"}"#, callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok", success: true)),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
     func testShellCommandFunctionCallRunsUserShellCommand() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let item = ResponseItem.functionCall(

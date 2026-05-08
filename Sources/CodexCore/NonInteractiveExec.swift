@@ -28,6 +28,16 @@ public struct NonInteractiveExecRunResult: Equatable, Sendable {
     }
 }
 
+public struct NonInteractiveExecLoopResult: Equatable, Sendable {
+    public let events: ResponseEventResults
+    public let transcriptItems: [ResponseItem]
+
+    public init(events: ResponseEventResults, transcriptItems: [ResponseItem]) {
+        self.events = events
+        self.transcriptItems = transcriptItems
+    }
+}
+
 public enum NonInteractiveExec {
     private static let unifiedExecSessions = UnifiedExecSessionRegistry()
 
@@ -137,8 +147,23 @@ public enum NonInteractiveExec {
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
     ) async -> ResponseEventResults {
+        await runResponsesLoopWithTranscript(
+            initialPrompt: initialPrompt,
+            maxToolIterations: maxToolIterations,
+            streamPrompt: streamPrompt,
+            executeFunctionCall: executeFunctionCall
+        ).events
+    }
+
+    public static func runResponsesLoopWithTranscript(
+        initialPrompt: Prompt,
+        maxToolIterations: Int = 20,
+        streamPrompt: ResponseStreamer,
+        executeFunctionCall: FunctionCallExecutor
+    ) async -> NonInteractiveExecLoopResult {
         var prompt = initialPrompt
         var allEvents: ResponseEventResults = []
+        var transcriptItems: [ResponseItem] = []
 
         for _ in 0..<maxToolIterations {
             let streamResult = await streamPrompt(prompt)
@@ -152,24 +177,27 @@ public enum NonInteractiveExec {
 
             allEvents.append(contentsOf: turnEvents)
             if containsFailure(turnEvents) {
-                return allEvents
+                return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
             }
 
             let completedItems = completedOutputItems(from: turnEvents)
+            transcriptItems.append(contentsOf: completedItems)
             prompt.input.append(contentsOf: completedItems)
 
             let toolCalls = toolCalls(from: completedItems)
             if toolCalls.isEmpty {
-                return allEvents
+                return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
             }
 
             for call in toolCalls {
-                prompt.input.append(await executeFunctionCall(call))
+                let output = await executeFunctionCall(call)
+                prompt.input.append(output)
+                transcriptItems.append(output)
             }
         }
 
         allEvents.append(.failure(.stream("too many tool call iterations")))
-        return allEvents
+        return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
     }
 
     public static func executeFunctionCall(

@@ -225,6 +225,7 @@ private func runExecCommand(
             cwd: cwd,
             conversationID: session.conversationID,
             history: responseHistory,
+            rolloutPath: URL(fileURLWithPath: session.path),
             baseInstructionsOverride: baseInstructionsOverride
         )
     }
@@ -288,6 +289,7 @@ private func runNonInteractiveExec(
     cwd: URL,
     conversationID: ConversationId = ConversationId(),
     history: [ResponseItem] = [],
+    rolloutPath: URL? = nil,
     baseInstructionsOverride: String? = nil
 ) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
@@ -352,12 +354,24 @@ private func runNonInteractiveExec(
         )
     }
 
+    let recorder = try createExecRolloutRecorder(
+        codexHome: codexHome,
+        cwd: cwd,
+        conversationID: conversationID,
+        modelProviderID: providerResolution.id,
+        rolloutPath: rolloutPath
+    )
+    defer { try? recorder.shutdown() }
+    if let newUserItem = prompt.input.last {
+        try recorder.recordItems([.responseItem(newUserItem)])
+    }
+
     let client = ResponsesClient(
         transport: URLSessionAPITransport(),
         provider: provider,
         auth: authResolution.auth
     )
-    let events = await NonInteractiveExec.runResponsesLoop(
+    let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
         streamPrompt: { nextPrompt in
             await client.streamPrompt(
@@ -385,9 +399,10 @@ private func runNonInteractiveExec(
             )
         }
     )
+    try recorder.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
 
     let result = NonInteractiveExec.finish(
-        responseEvents: events,
+        responseEvents: loopResult.events,
         outputMode: options.json ? .jsonLines : .human,
         conversationID: conversationID,
         lastMessageFile: options.lastMessageFile
@@ -402,6 +417,29 @@ private func runNonInteractiveExec(
         exitCode: result.exitCode,
         stdoutMessage: result.stdoutMessage,
         stderrMessage: stderrMessages.isEmpty ? nil : stderrMessages.joined(separator: "\n")
+    )
+}
+
+private func createExecRolloutRecorder(
+    codexHome: URL,
+    cwd: URL,
+    conversationID: ConversationId,
+    modelProviderID: String,
+    rolloutPath: URL?
+) throws -> RolloutRecorder {
+    if let rolloutPath {
+        return try RolloutRecorder.resume(path: rolloutPath)
+    }
+
+    return try RolloutRecorder.create(
+        codexHome: codexHome,
+        cwd: cwd,
+        conversationID: conversationID,
+        instructions: nil,
+        source: .exec,
+        originator: "codex_swift",
+        cliVersion: CodexCLI.version,
+        modelProvider: modelProviderID
     )
 }
 
