@@ -1432,6 +1432,22 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func appListResult(params: [String: Any]?) throws -> [String: Any] {
+        let total = 0
+        if let cursor = stringParam(params?["cursor"]) {
+            guard let start = Int(cursor), start >= 0 else {
+                throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+            }
+            guard start <= total else {
+                throw AppServerError.invalidRequest("cursor \(start) exceeds total apps \(total)")
+            }
+        }
+        return [
+            "data": [],
+            "nextCursor": NSNull()
+        ]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -5078,6 +5094,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try fsUnwatchResult(params: params)
+                    )
+                case "app/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.appListResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

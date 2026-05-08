@@ -1289,6 +1289,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["changedPaths"] as? [String], [watched.path])
     }
 
+    func testAppListReturnsEmptyPageWhenConnectorsUnavailable() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"app/list","params":{"limit":50,"cursor":null,"threadId":null,"forceRefetch":false}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual((result["data"] as? [Any])?.count, 0)
+        XCTAssertTrue(result["nextCursor"] is NSNull)
+    }
+
+    func testAppListRejectsInvalidAndOutOfRangeCursor() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"app/list","params":{"cursor":"abc"}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidError["message"] as? String, "invalid cursor: abc")
+
+        let beyond = try appServerResponse(
+            #"{"id":2,"method":"app/list","params":{"cursor":"1"}}"#,
+            codexHome: temp.url
+        )
+        let beyondError = try XCTUnwrap(beyond["error"] as? [String: Any])
+        XCTAssertEqual(beyondError["code"] as? Int, -32600)
+        XCTAssertEqual(beyondError["message"] as? String, "cursor 1 exceeds total apps 0")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
