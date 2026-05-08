@@ -496,17 +496,20 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
     public let transport: Transport
     public let provider: APIProvider
     public let auth: Auth
+    public let attestationProvider: (any AttestationProvider)?
     public var requestTelemetry: RequestTelemetry?
 
     public init(
         transport: Transport,
         provider: APIProvider,
         auth: Auth,
+        attestationProvider: (any AttestationProvider)? = nil,
         requestTelemetry: RequestTelemetry? = nil
     ) {
         self.transport = transport
         self.provider = provider
         self.auth = auth
+        self.attestationProvider = attestationProvider
         self.requestTelemetry = requestTelemetry
     }
 
@@ -514,6 +517,16 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
         var copy = self
         copy.requestTelemetry = telemetry
         return copy
+    }
+
+    public func withAttestationProvider(_ attestationProvider: (any AttestationProvider)?) -> CompactClient {
+        CompactClient(
+            transport: transport,
+            provider: provider,
+            auth: auth,
+            attestationProvider: attestationProvider,
+            requestTelemetry: requestTelemetry
+        )
     }
 
     public func compactInput(
@@ -537,13 +550,14 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
         } catch {
             return .failure(.stream(String(describing: error)))
         }
+        let attestedHeaders = await headersWithAttestation(extraHeaders)
 
         let result: Result<APIResponse, TransportError> = await TransportRetry.runWithRequestTelemetry(
             policy: provider.retry.toPolicy(),
             telemetry: requestTelemetry,
             makeRequest: {
                 var request = provider.buildRequest(method: .post, path: path).withJSON(body)
-                for (name, value) in extraHeaders {
+                for (name, value) in attestedHeaders {
                     request.headers[name] = value
                 }
                 return request.addingAuthHeaders(from: auth)
@@ -563,6 +577,14 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
         case let .failure(error):
             return .failure(.transport(error))
         }
+    }
+
+    private func headersWithAttestation(_ headers: [String: String]) async -> [String: String] {
+        await AttestationRequestHeaders.addAttestationHeader(
+            to: headers,
+            auth: auth,
+            provider: attestationProvider
+        )
     }
 }
 
@@ -597,23 +619,61 @@ public struct ResponsesOptions: Equatable, Sendable {
     }
 }
 
+private enum AttestationRequestHeaders {
+    static func addAttestationHeader<Auth: APIAuthProvider>(
+        to headers: [String: String],
+        auth: Auth,
+        provider: (any AttestationProvider)?
+    ) async -> [String: String] {
+        guard auth.accountID != nil,
+              let provider,
+              let threadID = headers["conversation_id"] ?? headers["session_id"],
+              let headerValue = await provider.header(for: Attestation.Context(threadID: threadID))
+        else {
+            return headers
+        }
+
+        var copy = headers
+        copy[Attestation.headerName] = headerValue
+        return copy
+    }
+}
+
 public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     public let streaming: StreamingAPIClient<Transport, Auth>
+    public let attestationProvider: (any AttestationProvider)?
 
-    public init(transport: Transport, provider: APIProvider, auth: Auth) {
+    public init(
+        transport: Transport,
+        provider: APIProvider,
+        auth: Auth,
+        attestationProvider: (any AttestationProvider)? = nil
+    ) {
         self.streaming = StreamingAPIClient(transport: transport, provider: provider, auth: auth)
+        self.attestationProvider = attestationProvider
     }
 
-    private init(streaming: StreamingAPIClient<Transport, Auth>) {
+    private init(
+        streaming: StreamingAPIClient<Transport, Auth>,
+        attestationProvider: (any AttestationProvider)?
+    ) {
         self.streaming = streaming
+        self.attestationProvider = attestationProvider
     }
 
     public func withTelemetry(_ telemetry: RequestTelemetry?) -> ResponsesClient {
-        ResponsesClient(streaming: streaming.withTelemetry(telemetry))
+        ResponsesClient(streaming: streaming.withTelemetry(telemetry), attestationProvider: attestationProvider)
     }
 
     public func withTelemetry(request: RequestTelemetry?, sse: SseTelemetry?) -> ResponsesClient {
-        ResponsesClient(streaming: streaming.withTelemetry(request: request, sse: sse))
+        ResponsesClient(
+            streaming: streaming.withTelemetry(request: request, sse: sse),
+            attestationProvider: attestationProvider
+        )
+    }
+
+    public func withAttestationProvider(_ provider: (any AttestationProvider)?) -> ResponsesClient {
+        ResponsesClient(streaming: streaming, attestationProvider: provider)
     }
 
     public func streamRequest(_ request: ResponsesRequest) async -> Result<ResponseEventResults, APIError> {
@@ -672,10 +732,11 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         body: JSONValue,
         extraHeaders: [String: String] = [:]
     ) async -> Result<ResponseEventStream, APIError> {
-        await streaming.streamEvents(
+        let attestedHeaders = await headersWithAttestation(extraHeaders)
+        return await streaming.streamEvents(
             path: Self.path(for: streaming.provider.wireAPI),
             body: body,
-            extraHeaders: extraHeaders,
+            extraHeaders: attestedHeaders,
             makeParser: ResponsesEventFrameParser.init,
             includeRateLimits: true
         )
@@ -694,6 +755,14 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     private static func toolsJSONValues(_ tools: [Any]) throws -> [JSONValue] {
         let data = try JSONSerialization.data(withJSONObject: tools)
         return try JSONDecoder().decode([JSONValue].self, from: data)
+    }
+
+    private func headersWithAttestation(_ headers: [String: String]) async -> [String: String] {
+        await AttestationRequestHeaders.addAttestationHeader(
+            to: headers,
+            auth: streaming.auth,
+            provider: attestationProvider
+        )
     }
 }
 

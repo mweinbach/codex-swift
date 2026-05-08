@@ -422,6 +422,104 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(transport.streamRequests.first?.url, "https://example.com/v1/chat/completions")
     }
 
+    func testResponsesClientAddsAttestationHeaderForChatGPTAuthAndThread() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let attestation = CountingAttestationProvider()
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: attestation
+        )
+
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: Prompt(input: [.message(role: "user", content: [.inputText(text: "hi")])]),
+            options: ResponsesOptions(conversationID: "thread-123")
+        )
+
+        let request = transport.streamRequests.first
+        XCTAssertEqual(request?.headers[Attestation.headerName], "v1.thread-123.1")
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-123")])
+    }
+
+    func testResponsesClientSkipsAttestationWithoutChatGPTAccount() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let attestation = CountingAttestationProvider()
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key"),
+            attestationProvider: attestation
+        )
+
+        _ = await client.stream(
+            body: .object(["model": .string("gpt-test")]),
+            extraHeaders: ["conversation_id": "thread-123"]
+        )
+
+        XCTAssertNil(transport.streamRequests.first?.headers[Attestation.headerName])
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [])
+    }
+
+    func testCompactClientAddsAttestationHeaderForChatGPTAuthAndThread() async throws {
+        let output: [ResponseItem] = [
+            .message(role: "assistant", content: [.outputText(text: "summary")])
+        ]
+        let transport = CapturingTransport(
+            executeResults: [
+                .success(APIResponse(
+                    statusCode: 200,
+                    body: try JSONEncoder().encode(CompactHistoryResponse(output: output))
+                ))
+            ]
+        )
+        let attestation = CountingAttestationProvider()
+        let client = CompactClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: attestation
+        )
+
+        _ = await client.compactInput(
+            CompactionInput(model: "gpt-test", input: [], instructions: "compact"),
+            extraHeaders: ["session_id": "thread-456"]
+        )
+
+        XCTAssertEqual(transport.executeRequests.first?.headers[Attestation.headerName], "v1.thread-456.1")
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-456")])
+    }
+
+    func testAttestationAppServerEnvelopeMatchesRustStatusShape() {
+        XCTAssertEqual(
+            Attestation.appServerHeaderValue(status: .ok, token: "v1.opaque-client-payload"),
+            #"{"v":1,"s":0,"t":"v1.opaque-client-payload"}"#
+        )
+        XCTAssertEqual(Attestation.appServerHeaderValue(status: .timeout), #"{"v":1,"s":1}"#)
+        XCTAssertEqual(Attestation.appServerHeaderValue(status: .requestFailed), #"{"v":1,"s":2}"#)
+        XCTAssertEqual(Attestation.appServerHeaderValue(status: .requestCanceled), #"{"v":1,"s":3}"#)
+        XCTAssertEqual(Attestation.appServerHeaderValue(status: .malformedResponse), #"{"v":1,"s":4}"#)
+    }
+
     private func provider(
         wireAPI: WireAPI = .responses,
         baseURL: String = "https://example.com/v1",
@@ -532,5 +630,18 @@ private final class CapturingSseTelemetry: SseTelemetry {
 
     func onSSEPoll(result: SsePollResult, duration _: Duration) {
         records.append(Record(result: result))
+    }
+}
+
+private actor CountingAttestationProvider: AttestationProvider {
+    private(set) var calls: [Attestation.Context] = []
+
+    func header(for context: Attestation.Context) async -> String? {
+        calls.append(context)
+        return "v1.\(context.threadID).\(calls.count)"
+    }
+
+    func recordedCalls() -> [Attestation.Context] {
+        calls
     }
 }

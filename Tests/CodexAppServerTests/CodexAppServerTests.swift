@@ -680,6 +680,17 @@ final class CodexAppServerTests: XCTestCase {
         let userAgent = try XCTUnwrap(result["userAgent"] as? String)
         XCTAssertTrue(userAgent.hasPrefix("codex_swift/0.0.0 "))
         XCTAssertTrue(userAgent.hasSuffix(" (test; 0)"))
+        XCTAssertEqual(result["codexHome"] as? String, temp.url.standardizedFileURL.path)
+        XCTAssertEqual(result["platformFamily"] as? String, "unix")
+        #if os(macOS)
+            XCTAssertEqual(result["platformOs"] as? String, "macos")
+        #elseif os(Linux)
+            XCTAssertEqual(result["platformOs"] as? String, "linux")
+        #elseif os(Windows)
+            XCTAssertEqual(result["platformOs"] as? String, "windows")
+        #else
+            XCTAssertEqual(result["platformOs"] as? String, "unknown")
+        #endif
     }
 
     func testRequestsRequireInitializeAndRejectDuplicateInitialize() throws {

@@ -296,6 +296,18 @@ public enum CodexAppServer {
     private static let maxListLimit = 100
     private static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
+    fileprivate static let platformFamily = "unix"
+    fileprivate static var platformOS: String {
+        #if os(macOS)
+            return "macos"
+        #elseif os(Linux)
+            return "linux"
+        #elseif os(Windows)
+            return "windows"
+        #else
+            return "unknown"
+        #endif
+    }
 
     public static func defaultMcpOAuthLoginStarter(
         request: AppServerMcpOAuthLoginStartRequest,
@@ -3053,6 +3065,7 @@ fileprivate struct AppServerReviewStartOutcome {
 
 final class CodexAppServerMessageProcessor {
     private var initialized = false
+    private var requestAttestation = false
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
@@ -3157,9 +3170,13 @@ final class CodexAppServerMessageProcessor {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
                 initialized = true
+                requestAttestation = ((params?["capabilities"] as? [String: Any])?["requestAttestation"] as? Bool) ?? false
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 response = CodexAppServer.responseObject(id: id, result: [
-                    "userAgent": userAgent
+                    "userAgent": userAgent,
+                    "codexHome": configuration.codexHome.standardizedFileURL.path,
+                    "platformFamily": CodexAppServer.platformFamily,
+                    "platformOs": CodexAppServer.platformOS
                 ])
             }
         } else if !initialized {
