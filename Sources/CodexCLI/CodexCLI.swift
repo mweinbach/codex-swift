@@ -70,6 +70,111 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct ExecCommandRequest: Equatable, Sendable {
+        public let arguments: [String]
+        public let configOverrides: CliConfigOverrides
+
+        public init(arguments: [String], configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.arguments = arguments
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public struct ComputerUseCommandRequest: Equatable, Sendable {
+        public let arguments: [String]
+        public let enableGUI: Bool
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            arguments: [String],
+            enableGUI: Bool,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.arguments = arguments
+            self.enableGUI = enableGUI
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public enum ReviewCommandTarget: Equatable, Sendable {
+        case uncommittedChanges
+        case baseBranch(branch: String)
+        case commit(sha: String, title: String?)
+        case custom(instructions: String)
+        case customFromStdin
+
+        public var reviewRequest: ReviewRequest? {
+            switch self {
+            case .uncommittedChanges:
+                return ReviewRequest(target: .uncommittedChanges)
+            case let .baseBranch(branch):
+                return ReviewRequest(target: .baseBranch(branch: branch))
+            case let .commit(sha, title):
+                return ReviewRequest(target: .commit(sha: sha, title: title))
+            case let .custom(instructions):
+                return ReviewRequest(target: .custom(instructions: instructions))
+            case .customFromStdin:
+                return nil
+            }
+        }
+    }
+
+    public struct ReviewCommandRequest: Equatable, Sendable {
+        public let target: ReviewCommandTarget
+        public let configOverrides: CliConfigOverrides
+
+        public init(target: ReviewCommandTarget, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.target = target
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public struct ResumeCommandRequest: Equatable, Sendable {
+        public let sessionID: String?
+        public let last: Bool
+        public let all: Bool
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            sessionID: String?,
+            last: Bool,
+            all: Bool,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.sessionID = sessionID
+            self.last = last
+            self.all = all
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public struct McpServerCommandRequest: Equatable, Sendable {
+        public let configOverrides: CliConfigOverrides
+
+        public init(configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public enum AppServerCommandAction: Equatable, Sendable {
+        case run
+        case generateTS(outDir: String, prettier: String?)
+        case generateJSONSchema(outDir: String)
+    }
+
+    public struct AppServerCommandRequest: Equatable, Sendable {
+        public let action: AppServerCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            action: AppServerCommandAction,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public enum SandboxCommandAction: Equatable, Sendable {
         case macos(fullAuto: Bool, logDenials: Bool, command: [String])
         case linux(fullAuto: Bool, command: [String])
@@ -180,6 +285,12 @@ public struct CodexCLI: Sendable {
     public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
+    public typealias ExecCommandRunner = (ExecCommandRequest) async throws -> CommandExecutionResult
+    public typealias ComputerUseCommandRunner = (ComputerUseCommandRequest) async throws -> CommandExecutionResult
+    public typealias ReviewCommandRunner = (ReviewCommandRequest) async throws -> CommandExecutionResult
+    public typealias ResumeCommandRunner = (ResumeCommandRequest) async throws -> CommandExecutionResult
+    public typealias McpServerCommandRunner = (McpServerCommandRequest) async throws -> CommandExecutionResult
+    public typealias AppServerCommandRunner = (AppServerCommandRequest) async throws -> CommandExecutionResult
     public typealias ExecPolicyCommandRunner = (ExecPolicyCommandRequest) async throws -> CommandExecutionResult
     public typealias SandboxCommandRunner = (SandboxCommandRequest) async throws -> CommandExecutionResult
     public typealias McpCommandRunner = (McpCommandRequest) async throws -> CommandExecutionResult
@@ -294,6 +405,12 @@ public struct CodexCLI: Sendable {
         loginRunner: LoginCommandRunner? = nil,
         logoutRunner: LogoutCommandRunner? = nil,
         featuresRunner: FeaturesCommandRunner? = nil,
+        execRunner: ExecCommandRunner? = nil,
+        computerUseRunner: ComputerUseCommandRunner? = nil,
+        reviewRunner: ReviewCommandRunner? = nil,
+        resumeRunner: ResumeCommandRunner? = nil,
+        mcpServerRunner: McpServerCommandRunner? = nil,
+        appServerRunner: AppServerCommandRunner? = nil,
         execPolicyRunner: ExecPolicyCommandRunner? = nil,
         sandboxRunner: SandboxCommandRunner? = nil,
         mcpRunner: McpCommandRunner? = nil,
@@ -371,6 +488,123 @@ public struct CodexCLI: Sendable {
             } catch {
                 stderr(describe(error))
                 return 1
+            }
+        case let .command(spec, _) where spec.name == "exec":
+            guard let execRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            do {
+                let result = try await execRunner(ExecCommandRequest(
+                    arguments: rawArguments,
+                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                ))
+                emit(result, stdout: stdout, stderr: stderr)
+                return result.exitCode
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, _) where spec.name == "computer-use":
+            guard let computerUseRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseComputerUseCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await computerUseRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "review":
+            guard let reviewRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseReviewCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await reviewRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "resume":
+            guard let resumeRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseResumeCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await resumeRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "mcp-server":
+            guard let mcpServerRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseMcpServerCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await mcpServerRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "app-server":
+            guard let appServerRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseAppServerCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await appServerRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
             }
         case let .command(spec, _) where spec.name == "execpolicy":
             guard let execPolicyRunner else {
@@ -585,6 +819,15 @@ public struct CodexCLI: Sendable {
             "--attempts",
             "--env",
             "--branch",
+            "--base",
+            "--commit",
+            "--title",
+            "--out",
+            "-o",
+            "--prettier",
+            "--output-schema",
+            "--output-last-message",
+            "--color",
             "--url",
             "--bearer-token-env-var",
             "--scopes",
@@ -694,6 +937,395 @@ public struct CodexCLI: Sendable {
 
     private func usesDeprecatedAPIKeyFlag(_ arguments: [String]) -> Bool {
         arguments.contains("--api-key") || arguments.contains { $0.hasPrefix("--api-key=") }
+    }
+
+    private func parseConfigOverrides(from arguments: [String]) -> ParseResult<CliConfigOverrides> {
+        do {
+            return .success(CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments)))
+        } catch {
+            return .failure(describe(error), 1)
+        }
+    }
+
+    private func parseComputerUseCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ComputerUseCommandRequest> {
+        var enableGUI = false
+        var headless = false
+        var execArguments: [String] = []
+
+        for argument in arguments {
+            if argument == "--gui" {
+                guard !headless else {
+                    return .failure("codex-swift: argument conflict for command 'computer-use': --gui conflicts with --headless", 64)
+                }
+                enableGUI = true
+                continue
+            }
+            if argument == "--headless" {
+                guard !enableGUI else {
+                    return .failure("codex-swift: argument conflict for command 'computer-use': --headless conflicts with --gui", 64)
+                }
+                headless = true
+                continue
+            }
+            execArguments.append(argument)
+        }
+
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            var rawOverrides = configOverrides.rawOverrides
+            rawOverrides.append("features.computer_use_gui=\(enableGUI)")
+            return .success(ComputerUseCommandRequest(
+                arguments: execArguments,
+                enableGUI: enableGUI,
+                configOverrides: CliConfigOverrides(rawOverrides: rawOverrides)
+            ))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseReviewCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ReviewCommandRequest> {
+        var target: ReviewCommandTarget?
+        var commitTitle: String?
+        var index = 0
+
+        func setTarget(_ next: ReviewCommandTarget, option: String) -> ParseResult<Void> {
+            guard target == nil else {
+                return .failure("codex-swift: argument conflict for command 'review': \(option) cannot be used with another review target", 64)
+            }
+            target = next
+            return .success(())
+        }
+
+        func parseReviewValue(option: String, at index: Int) -> ParseResult<String> {
+            guard index + 1 < arguments.count else {
+                return .failure("codex-swift: missing value for \(option)", 64)
+            }
+            return .success(arguments[index + 1])
+        }
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--uncommitted" {
+                switch setTarget(.uncommittedChanges, option: argument) {
+                case .success:
+                    index += 1
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument == "--base" {
+                switch parseReviewValue(option: argument, at: index) {
+                case let .success(branch):
+                    switch setTarget(.baseBranch(branch: branch), option: argument) {
+                    case .success:
+                        index += 2
+                        continue
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument.hasPrefix("--base=") {
+                switch setTarget(.baseBranch(branch: String(argument.dropFirst("--base=".count))), option: "--base") {
+                case .success:
+                    index += 1
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument == "--commit" {
+                switch parseReviewValue(option: argument, at: index) {
+                case let .success(sha):
+                    switch setTarget(.commit(sha: sha, title: nil), option: argument) {
+                    case .success:
+                        index += 2
+                        continue
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument.hasPrefix("--commit=") {
+                switch setTarget(.commit(sha: String(argument.dropFirst("--commit=".count)), title: nil), option: "--commit") {
+                case .success:
+                    index += 1
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument == "--title" {
+                switch parseReviewValue(option: argument, at: index) {
+                case let .success(title):
+                    commitTitle = title
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument.hasPrefix("--title=") {
+                commitTitle = String(argument.dropFirst("--title=".count))
+                index += 1
+                continue
+            }
+            if argument == "-" {
+                switch setTarget(.customFromStdin, option: "PROMPT") {
+                case .success:
+                    index += 1
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'review': \(argument)", 64)
+            }
+
+            let trimmed = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                return .failure("Review prompt cannot be empty", 64)
+            }
+            switch setTarget(.custom(instructions: trimmed), option: "PROMPT") {
+            case .success:
+                index += 1
+                continue
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        }
+
+        if let commitTitle {
+            guard case let .commit(sha, _) = target else {
+                return .failure("codex-swift: --title requires --commit", 64)
+            }
+            target = .commit(sha: sha, title: commitTitle)
+        }
+        guard let parsedTarget = target else {
+            return .failure("Specify --uncommitted, --base, --commit, or provide custom review instructions", 64)
+        }
+
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(ReviewCommandRequest(target: parsedTarget, configOverrides: configOverrides))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseResumeCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ResumeCommandRequest> {
+        var sessionID: String?
+        var last = false
+        var all = false
+
+        for argument in arguments {
+            if argument == "--last" {
+                guard sessionID == nil else {
+                    return .failure("codex-swift: argument conflict for command 'resume': --last conflicts with SESSION_ID", 64)
+                }
+                last = true
+                continue
+            }
+            if argument == "--all" {
+                all = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'resume': \(argument)", 64)
+            }
+            guard sessionID == nil else {
+                return .failure("codex-swift: unexpected argument for command 'resume': \(argument)", 64)
+            }
+            guard !last else {
+                return .failure("codex-swift: argument conflict for command 'resume': SESSION_ID conflicts with --last", 64)
+            }
+            sessionID = argument
+        }
+
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(ResumeCommandRequest(
+                sessionID: sessionID,
+                last: last,
+                all: all,
+                configOverrides: configOverrides
+            ))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseMcpServerCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<McpServerCommandRequest> {
+        for argument in arguments {
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp-server': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'mcp-server': \(argument)", 64)
+        }
+
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(McpServerCommandRequest(configOverrides: configOverrides))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseAppServerCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<AppServerCommandRequest> {
+        let action: AppServerCommandAction
+        guard let subcommand = arguments.first else {
+            action = .run
+            return appServerRequest(action: action, rootArguments: rootArguments)
+        }
+
+        switch subcommand {
+        case "generate-ts":
+            switch parseAppServerGenerateTS(Array(arguments.dropFirst())) {
+            case let .success(parsed):
+                action = .generateTS(outDir: parsed.outDir, prettier: parsed.prettier)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "generate-json-schema":
+            switch parseAppServerGenerateJSONSchema(Array(arguments.dropFirst())) {
+            case let .success(outDir):
+                action = .generateJSONSchema(outDir: outDir)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        default:
+            if subcommand.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server': \(subcommand)", 64)
+            }
+            return .failure("codex-swift: unsupported app-server subcommand: \(subcommand)", 64)
+        }
+
+        return appServerRequest(action: action, rootArguments: rootArguments)
+    }
+
+    private func appServerRequest(
+        action: AppServerCommandAction,
+        rootArguments: [String]
+    ) -> ParseResult<AppServerCommandRequest> {
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(AppServerCommandRequest(action: action, configOverrides: configOverrides))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseAppServerGenerateTS(_ arguments: [String]) -> ParseResult<(outDir: String, prettier: String?)> {
+        var outDir: String?
+        var prettier: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--out" || argument == "-o" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                outDir = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--out=") {
+                outDir = String(argument.dropFirst("--out=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                outDir = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument == "--prettier" || argument == "-p" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                prettier = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--prettier=") {
+                prettier = String(argument.dropFirst("--prettier=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
+                prettier = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server generate-ts': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'app-server generate-ts': \(argument)", 64)
+        }
+
+        guard let outDir else {
+            return .failure("codex-swift: missing required option for command 'app-server generate-ts': --out <DIR>", 64)
+        }
+        return .success((outDir: outDir, prettier: prettier))
+    }
+
+    private func parseAppServerGenerateJSONSchema(_ arguments: [String]) -> ParseResult<String> {
+        var outDir: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--out" || argument == "-o" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                outDir = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--out=") {
+                outDir = String(argument.dropFirst("--out=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                outDir = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server generate-json-schema': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'app-server generate-json-schema': \(argument)", 64)
+        }
+
+        guard let outDir else {
+            return .failure("codex-swift: missing required option for command 'app-server generate-json-schema': --out <DIR>", 64)
+        }
+        return .success(outDir)
     }
 
     private func parseExecPolicyCommandAction(_ arguments: [String]) -> ParseResult<ExecPolicyCommandAction> {
