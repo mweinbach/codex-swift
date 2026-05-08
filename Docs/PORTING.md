@@ -367,6 +367,8 @@ Source baseline inspected for this scaffold:
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` experimental thread history pagination
   - `thread/turns/list` now pages reconstructed rollout turns with Rust-shaped JSON cursors, descending default sort, `summary`/`full`/`notLoaded` item views, `nextCursor`/`backwardsCursor`, and invalid-cursor/thread-id errors; `thread/turns/items/list` returns the current Rust unsupported JSON-RPC error.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` loaded-thread listing
+  - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, limit handling, `nextCursor`, and unsubscribe-keeps-loaded behavior.
 
 ## Known Gaps
 

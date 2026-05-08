@@ -36,6 +36,10 @@ actor AppServerThreadStateManager {
         loadedThreadIDs.contains(threadID)
     }
 
+    func listLoadedThreadIDs() -> [String] {
+        loadedThreadIDs.sorted()
+    }
+
     @discardableResult
     func tryAddConnectionToThread(
         threadID: String,

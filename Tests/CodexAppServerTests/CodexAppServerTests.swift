@@ -799,6 +799,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "thread/turns/items/list is not supported yet")
     }
 
+    func testThreadLoadedListPaginatesLoadedThreadIDs() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let firstStart = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let secondStart = try decodeMessages(processor.processLine(
+            Data(#"{"id":2,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let firstID = try XCTUnwrap(((firstStart[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+        let secondID = try XCTUnwrap(((secondStart[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+        let expected = [firstID, secondID].sorted()
+
+        let firstPage = try decode(processor.processLine(
+            Data(#"{"id":3,"method":"thread/loaded/list","params":{"limit":1}}"#.utf8)
+        ))
+        let firstResult = try XCTUnwrap(firstPage["result"] as? [String: Any])
+        XCTAssertEqual(firstResult["data"] as? [String], [expected[0]])
+        XCTAssertEqual(firstResult["nextCursor"] as? String, expected[0])
+
+        let secondPage = try decode(processor.processLine(
+            Data(#"{"id":4,"method":"thread/loaded/list","params":{"limit":1,"cursor":"\#(expected[0])"}}"#.utf8)
+        ))
+        let secondResult = try XCTUnwrap(secondPage["result"] as? [String: Any])
+        XCTAssertEqual(secondResult["data"] as? [String], [expected[1]])
+        XCTAssertEqual(secondResult["nextCursor"] as? NSNull, NSNull())
+    }
+
+    func testThreadLoadedListRejectsInvalidCursorAndKeepsUnsubscribedThreadLoaded() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let unsubscribe = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"thread/unsubscribe","params":{"threadId":"\#(threadID)"}}"#.utf8)
+        ))
+        XCTAssertEqual((unsubscribe["result"] as? [String: Any])?["status"] as? String, "unsubscribed")
+
+        let list = try decode(processor.processLine(
+            Data(#"{"id":3,"method":"thread/loaded/list","params":{}}"#.utf8)
+        ))
+        let result = try XCTUnwrap(list["result"] as? [String: Any])
+        XCTAssertEqual(result["data"] as? [String], [threadID])
+        XCTAssertEqual(result["nextCursor"] as? NSNull, NSNull())
+
+        let invalid = try decode(processor.processLine(
+            Data(#"{"id":4,"method":"thread/loaded/list","params":{"cursor":"bogus"}}"#.utf8)
+        ))
+        let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+    }
+
     func testThreadUnsubscribeReportsSubscriptionStatus() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

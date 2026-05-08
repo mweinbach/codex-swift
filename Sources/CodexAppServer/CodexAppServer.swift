@@ -639,6 +639,43 @@ public enum CodexAppServer {
         return ["status": "notSubscribed"]
     }
 
+    fileprivate static func threadLoadedListResult(
+        params: [String: Any]?,
+        loadedThreadIDs: () -> [String]
+    ) throws -> [String: Any] {
+        let data = loadedThreadIDs().sorted()
+        guard !data.isEmpty else {
+            return [
+                "data": [],
+                "nextCursor": NSNull()
+            ]
+        }
+
+        let start: Int
+        if let cursor = stringParam(params?["cursor"]) {
+            guard let cursorID = try? ConversationId(string: cursor) else {
+                throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+            }
+            let normalizedCursor = cursorID.description
+            if let index = data.firstIndex(of: normalizedCursor) {
+                start = index + 1
+            } else {
+                start = data.firstIndex { $0 >= normalizedCursor } ?? data.count
+            }
+        } else {
+            start = 0
+        }
+
+        let limit = max(intParam(params?["limit"], defaultValue: data.count), 1)
+        let end = min(start + limit, data.count)
+        let page = start < end ? Array(data[start..<end]) : []
+        let nextCursor: Any = end < data.count ? (page.last ?? "") : NSNull()
+        return [
+            "data": page,
+            "nextCursor": nextCursor
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func resumeConversationResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -3299,6 +3336,13 @@ final class CodexAppServerMessageProcessor {
         }) ?? false
     }
 
+    private func listLoadedThreadIDs() -> [String] {
+        let manager = threadStateManager
+        return (try? CodexAppServer.runAsyncBlocking {
+            await manager.listLoadedThreadIDs()
+        }) ?? []
+    }
+
     private func receiveClientResponseIfPresent(_ object: [String: Any]) -> Bool {
         guard let rawID = object["id"],
               let requestID = AppServerRequestIDCodec.requestID(from: rawID)
@@ -3470,6 +3514,14 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
+                    )
+                case "thread/loaded/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadLoadedListResult(
+                            params: params,
+                            loadedThreadIDs: { listLoadedThreadIDs() }
+                        )
                     )
                 case "thread/read":
                     response = CodexAppServer.responseObject(
