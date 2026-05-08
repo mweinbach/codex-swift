@@ -120,7 +120,7 @@ Source baseline inspected for this scaffold:
   - initial native `CodexApplyPatch` target and `apply_patch` executable
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
 - `codex-rs/apply-patch/src/invocation.rs`
-  - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, optional `cd <path> &&` workdir capture, and conservative rejection of extra shell statements
+  - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
 - `codex-rs/utils/git/src/apply.rs`
   - initial native `CodexGit` target for `git apply`, `git apply --check`, diff path extraction, command logging, staging existing paths, and apply-output grouping for clean, skipped, rejected, and conflicted paths
 - `codex-rs/chatgpt/src/get_task.rs` and `codex-rs/chatgpt/src/apply_command.rs`
@@ -305,7 +305,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - platform-specific process hardening
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
-- verified apply-patch invocation actions, shell-intercept runtime execution, and unified diff preview helpers
+- shell-intercept apply-patch runtime execution and full approval/diff event plumbing
 - Windows PowerShell command safety parity
 - execpolicy config-layer file discovery and Starlark-compatible parser completeness
 - keyring storage for `codex apply <task_id>`

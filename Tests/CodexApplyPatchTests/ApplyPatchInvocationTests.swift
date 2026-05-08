@@ -100,6 +100,102 @@ final class ApplyPatchInvocationTests: XCTestCase {
         )
     }
 
+    func testVerifiedRejectsImplicitPatchSingleArg() {
+        XCTAssertEqual(
+            maybeParseApplyPatchVerified([singleAddPatch], cwd: URL(fileURLWithPath: "/tmp/session")),
+            .correctnessError(.implicitInvocation)
+        )
+    }
+
+    func testVerifiedRejectsImplicitPatchShellScript() {
+        XCTAssertEqual(
+            maybeParseApplyPatchVerified(["bash", "-lc", singleAddPatch], cwd: URL(fileURLWithPath: "/tmp/session")),
+            .correctnessError(.implicitInvocation)
+        )
+    }
+
+    func testVerifiedResolvesRelativeUpdatePathsAgainstCWD() throws {
+        let dir = try TemporaryDirectory()
+        let file = dir.url.appendingPathComponent("source.txt")
+        try "session directory content\n".write(to: file, atomically: true, encoding: .utf8)
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: source.txt
+        @@
+        -session directory content
+        +updated session directory content
+        *** End Patch
+        """
+
+        XCTAssertEqual(
+            maybeParseApplyPatchVerified(["apply_patch", patch], cwd: dir.url),
+            .body(ApplyPatchAction(
+                changes: [
+                    file.path: .update(
+                        unifiedDiff: """
+                        @@ -1 +1 @@
+                        -session directory content
+                        +updated session directory content
+
+                        """,
+                        movePath: nil,
+                        newContent: "updated session directory content\n"
+                    )
+                ],
+                patch: patch,
+                cwd: dir.url.path
+            ))
+        )
+    }
+
+    func testVerifiedHeredocCDResolvesEffectiveCWDAndMovePath() throws {
+        let dir = try TemporaryDirectory()
+        let workdir = dir.url.appendingPathComponent("alt", isDirectory: true)
+        try FileManager.default.createDirectory(at: workdir, withIntermediateDirectories: true)
+        let source = workdir.appendingPathComponent("old.txt")
+        let destination = workdir.appendingPathComponent("renamed.txt")
+        try "before\n".write(to: source, atomically: true, encoding: .utf8)
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: old.txt
+        *** Move to: renamed.txt
+        @@
+        -before
+        +after
+        *** End Patch
+        """
+        let script = "cd alt && apply_patch <<'PATCH'\n\(patch)\nPATCH"
+
+        XCTAssertEqual(
+            maybeParseApplyPatchVerified(["bash", "-lc", script], cwd: dir.url),
+            .body(ApplyPatchAction(
+                changes: [
+                    source.path: .update(
+                        unifiedDiff: """
+                        @@ -1 +1 @@
+                        -before
+                        +after
+
+                        """,
+                        movePath: destination.path,
+                        newContent: "after\n"
+                    )
+                ],
+                patch: patch,
+                cwd: workdir.path
+            ))
+        )
+    }
+
+    func testVerifiedNotApplyPatchPassthrough() {
+        XCTAssertEqual(
+            maybeParseApplyPatchVerified(["bash", "-lc", "echo hi"], cwd: URL(fileURLWithPath: "/tmp/session")),
+            .notApplyPatch
+        )
+    }
+
     private var singleAddPatch: String {
         """
         *** Begin Patch
@@ -139,5 +235,18 @@ final class ApplyPatchInvocationTests: XCTestCase {
         line: UInt = #line
     ) {
         XCTAssertEqual(maybeParseApplyPatch(["bash", "-lc", script]), .notApplyPatch, file: file, line: line)
+    }
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

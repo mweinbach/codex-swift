@@ -5,6 +5,7 @@ public enum ApplyPatchError: Error, Equatable, CustomStringConvertible, Sendable
     case invalidHunk(message: String, lineNumber: Int)
     case io(String)
     case computeReplacements(String)
+    case implicitInvocation
 
     public var description: String {
         switch self {
@@ -14,6 +15,8 @@ public enum ApplyPatchError: Error, Equatable, CustomStringConvertible, Sendable
             return "Invalid patch hunk on line \(lineNumber): \(message)"
         case let .io(message), let .computeReplacements(message):
             return message
+        case .implicitInvocation:
+            return #"patch detected without explicit call to apply_patch. Rerun as ["apply_patch", "<patch>"]"#
         }
     }
 }
@@ -49,6 +52,38 @@ public struct ApplyPatchArgs: Equatable, Sendable {
     public let workdir: String?
 }
 
+public struct ApplyPatchFileUpdate: Equatable, Sendable {
+    public let unifiedDiff: String
+    public let content: String
+
+    public init(unifiedDiff: String, content: String) {
+        self.unifiedDiff = unifiedDiff
+        self.content = content
+    }
+}
+
+public enum ApplyPatchFileChange: Equatable, Sendable {
+    case add(content: String)
+    case delete(content: String)
+    case update(unifiedDiff: String, movePath: String?, newContent: String)
+}
+
+public struct ApplyPatchAction: Equatable, Sendable {
+    public let changes: [String: ApplyPatchFileChange]
+    public let patch: String
+    public let cwd: String
+
+    public init(changes: [String: ApplyPatchFileChange], patch: String, cwd: String) {
+        self.changes = changes
+        self.patch = patch
+        self.cwd = cwd
+    }
+
+    public var isEmpty: Bool {
+        changes.isEmpty
+    }
+}
+
 public struct ApplyPatchResult: Equatable, Sendable {
     public var stdout: String
     public var stderr: String
@@ -64,6 +99,13 @@ public enum MaybeApplyPatch: Equatable, Sendable {
     case body(ApplyPatchArgs)
     case shellParseError(ExtractHeredocError)
     case patchParseError(ApplyPatchError)
+    case notApplyPatch
+}
+
+public enum MaybeApplyPatchVerified: Equatable, Sendable {
+    case body(ApplyPatchAction)
+    case shellParseError(ExtractHeredocError)
+    case correctnessError(ApplyPatchError)
     case notApplyPatch
 }
 
@@ -126,6 +168,74 @@ public enum ApplyPatchInvocation {
         case let .failure(error):
             return .shellParseError(error)
         }
+    }
+
+    public static func maybeParseApplyPatchVerified(_ argv: [String], cwd: URL) -> MaybeApplyPatchVerified {
+        if argv.count == 1, (try? ApplyPatch.parsePatch(argv[0])) != nil {
+            return .correctnessError(.implicitInvocation)
+        }
+        if let (_, script) = parseShellScript(argv), (try? ApplyPatch.parsePatch(script)) != nil {
+            return .correctnessError(.implicitInvocation)
+        }
+
+        switch maybeParseApplyPatch(argv) {
+        case let .body(args):
+            return verify(args, cwd: cwd)
+        case let .shellParseError(error):
+            return .shellParseError(error)
+        case let .patchParseError(error):
+            return .correctnessError(error)
+        case .notApplyPatch:
+            return .notApplyPatch
+        }
+    }
+
+    private static func verify(_ args: ApplyPatchArgs, cwd: URL) -> MaybeApplyPatchVerified {
+        let effectiveCwd = effectiveCWD(base: cwd, workdir: args.workdir)
+        var changes: [String: ApplyPatchFileChange] = [:]
+
+        for hunk in args.hunks {
+            switch hunk {
+            case let .addFile(path, contents):
+                let url = ApplyPatch.resolve(path, cwd: effectiveCwd)
+                changes[url.path] = .add(content: contents)
+
+            case let .deleteFile(path):
+                let url = ApplyPatch.resolve(path, cwd: effectiveCwd)
+                do {
+                    changes[url.path] = .delete(content: try String(contentsOf: url, encoding: .utf8))
+                } catch {
+                    return .correctnessError(.io("Failed to read \(url.path): \(error.localizedDescription)"))
+                }
+
+            case let .updateFile(path, movePath, chunks):
+                let sourceURL = ApplyPatch.resolve(path, cwd: effectiveCwd)
+                do {
+                    let update = try ApplyPatch.unifiedDiffFromChunks(path: path, sourceURL: sourceURL, chunks: chunks)
+                    changes[sourceURL.path] = .update(
+                        unifiedDiff: update.unifiedDiff,
+                        movePath: movePath.map { ApplyPatch.resolve($0, cwd: effectiveCwd).path },
+                        newContent: update.content
+                    )
+                } catch let error as ApplyPatchError {
+                    return .correctnessError(error)
+                } catch {
+                    return .correctnessError(.io("\(error)"))
+                }
+            }
+        }
+
+        return .body(ApplyPatchAction(changes: changes, patch: args.patch, cwd: effectiveCwd.path))
+    }
+
+    private static func effectiveCWD(base: URL, workdir: String?) -> URL {
+        guard let workdir else {
+            return base
+        }
+        if workdir.hasPrefix("/") {
+            return URL(fileURLWithPath: workdir)
+        }
+        return base.appendingPathComponent(workdir)
     }
 
     private static func parseShellScript(_ argv: [String]) -> (ShellKind, String)? {
@@ -591,6 +701,29 @@ public enum ApplyPatch {
         return affected
     }
 
+    fileprivate static func unifiedDiffFromChunks(
+        path: String,
+        sourceURL: URL,
+        chunks: [UpdateFileChunk]
+    ) throws -> ApplyPatchFileUpdate {
+        let originalContents: String
+        do {
+            originalContents = try String(contentsOf: sourceURL, encoding: .utf8)
+        } catch {
+            throw ApplyPatchError.io("Failed to read file to update \(path): \(error.localizedDescription)")
+        }
+
+        let newContents = try deriveNewContents(
+            path: path,
+            originalContents: originalContents,
+            chunks: chunks
+        )
+        return ApplyPatchFileUpdate(
+            unifiedDiff: unifiedDiff(originalContents: originalContents, newContents: newContents),
+            content: newContents
+        )
+    }
+
     private static func deriveNewContents(path: String, sourceURL: URL, chunks: [UpdateFileChunk]) throws -> String {
         let originalContents: String
         do {
@@ -599,6 +732,10 @@ public enum ApplyPatch {
             throw ApplyPatchError.io("Failed to read file to update \(path): \(error.localizedDescription)")
         }
 
+        return try deriveNewContents(path: path, originalContents: originalContents, chunks: chunks)
+    }
+
+    private static func deriveNewContents(path: String, originalContents: String, chunks: [UpdateFileChunk]) throws -> String {
         var originalLines = originalContents.components(separatedBy: "\n")
         if originalLines.last == "" {
             originalLines.removeLast()
@@ -610,6 +747,172 @@ public enum ApplyPatch {
             newLines.append("")
         }
         return newLines.joined(separator: "\n")
+    }
+
+    private enum DiffOp: Equatable {
+        case equal(String)
+        case delete(String)
+        case insert(String)
+
+        var consumesOld: Bool {
+            switch self {
+            case .equal, .delete:
+                return true
+            case .insert:
+                return false
+            }
+        }
+
+        var consumesNew: Bool {
+            switch self {
+            case .equal, .insert:
+                return true
+            case .delete:
+                return false
+            }
+        }
+
+        var isChange: Bool {
+            switch self {
+            case .equal:
+                return false
+            case .delete, .insert:
+                return true
+            }
+        }
+    }
+
+    private static func unifiedDiff(originalContents: String, newContents: String, context: Int = 1) -> String {
+        let oldLines = diffLines(originalContents)
+        let newLines = diffLines(newContents)
+        let ops = diffOps(oldLines: oldLines, newLines: newLines)
+        let hunks = diffHunks(ops: ops, context: context)
+
+        var output = ""
+        for hunk in hunks {
+            let hunkOps = Array(ops[hunk.start..<hunk.end])
+            let oldStart = lineStart(in: ops, upTo: hunk.start, consumingOld: true)
+            let newStart = lineStart(in: ops, upTo: hunk.start, consumingOld: false)
+            let oldCount = hunkOps.filter(\.consumesOld).count
+            let newCount = hunkOps.filter(\.consumesNew).count
+            output += "@@ \(rangeHeader(prefix: "-", start: oldStart, count: oldCount)) \(rangeHeader(prefix: "+", start: newStart, count: newCount)) @@\n"
+            for op in hunkOps {
+                switch op {
+                case let .equal(line):
+                    output += " \(line)\n"
+                case let .delete(line):
+                    output += "-\(line)\n"
+                case let .insert(line):
+                    output += "+\(line)\n"
+                }
+            }
+        }
+        return output
+    }
+
+    private static func diffLines(_ contents: String) -> [String] {
+        var lines = contents.components(separatedBy: "\n")
+        if lines.last == "" {
+            lines.removeLast()
+        }
+        return lines
+    }
+
+    private static func diffOps(oldLines: [String], newLines: [String]) -> [DiffOp] {
+        var lcs = Array(
+            repeating: Array(repeating: 0, count: newLines.count + 1),
+            count: oldLines.count + 1
+        )
+
+        if !oldLines.isEmpty, !newLines.isEmpty {
+            for oldIndex in stride(from: oldLines.count - 1, through: 0, by: -1) {
+                for newIndex in stride(from: newLines.count - 1, through: 0, by: -1) {
+                    if oldLines[oldIndex] == newLines[newIndex] {
+                        lcs[oldIndex][newIndex] = lcs[oldIndex + 1][newIndex + 1] + 1
+                    } else {
+                        lcs[oldIndex][newIndex] = max(lcs[oldIndex + 1][newIndex], lcs[oldIndex][newIndex + 1])
+                    }
+                }
+            }
+        }
+
+        var output: [DiffOp] = []
+        var oldIndex = 0
+        var newIndex = 0
+        while oldIndex < oldLines.count, newIndex < newLines.count {
+            if oldLines[oldIndex] == newLines[newIndex] {
+                output.append(.equal(oldLines[oldIndex]))
+                oldIndex += 1
+                newIndex += 1
+            } else if lcs[oldIndex + 1][newIndex] >= lcs[oldIndex][newIndex + 1] {
+                output.append(.delete(oldLines[oldIndex]))
+                oldIndex += 1
+            } else {
+                output.append(.insert(newLines[newIndex]))
+                newIndex += 1
+            }
+        }
+        while oldIndex < oldLines.count {
+            output.append(.delete(oldLines[oldIndex]))
+            oldIndex += 1
+        }
+        while newIndex < newLines.count {
+            output.append(.insert(newLines[newIndex]))
+            newIndex += 1
+        }
+        return output
+    }
+
+    private static func diffHunks(ops: [DiffOp], context: Int) -> [(start: Int, end: Int)] {
+        let changed = ops.indices.filter { ops[$0].isChange }
+        guard !changed.isEmpty else {
+            return []
+        }
+
+        var hunks: [(start: Int, end: Int)] = []
+        var groupStart = changed[0]
+        var groupEnd = changed[0]
+
+        for index in changed.dropFirst() {
+            if index - groupEnd <= context * 2 + 1 {
+                groupEnd = index
+            } else {
+                appendDiffHunk(start: groupStart, end: groupEnd, context: context, count: ops.count, hunks: &hunks)
+                groupStart = index
+                groupEnd = index
+            }
+        }
+        appendDiffHunk(start: groupStart, end: groupEnd, context: context, count: ops.count, hunks: &hunks)
+        return hunks
+    }
+
+    private static func appendDiffHunk(
+        start: Int,
+        end: Int,
+        context: Int,
+        count: Int,
+        hunks: inout [(start: Int, end: Int)]
+    ) {
+        let expanded = (start: max(0, start - context), end: min(count, end + context + 1))
+        if let last = hunks.last, expanded.start <= last.end {
+            hunks[hunks.count - 1] = (start: last.start, end: max(last.end, expanded.end))
+        } else {
+            hunks.append(expanded)
+        }
+    }
+
+    private static func lineStart(in ops: [DiffOp], upTo end: Int, consumingOld: Bool) -> Int {
+        let consumed = ops[..<end].reduce(0) { partial, op in
+            partial + ((consumingOld ? op.consumesOld : op.consumesNew) ? 1 : 0)
+        }
+        return max(consumed, 1)
+    }
+
+    private static func rangeHeader(prefix: String, start: Int, count: Int) -> String {
+        if count == 1 {
+            return "\(prefix)\(start)"
+        }
+        return "\(prefix)\(start),\(count)"
     }
 
     private static func computeReplacements(
@@ -689,7 +992,7 @@ public enum ApplyPatch {
         return nil
     }
 
-    private static func resolve(_ path: String, cwd: URL) -> URL {
+    fileprivate static func resolve(_ path: String, cwd: URL) -> URL {
         if path.hasPrefix("/") {
             return URL(fileURLWithPath: path)
         }
@@ -723,6 +1026,10 @@ public enum ApplyPatch {
 
 public func maybeParseApplyPatch(_ argv: [String]) -> MaybeApplyPatch {
     ApplyPatchInvocation.maybeParseApplyPatch(argv)
+}
+
+public func maybeParseApplyPatchVerified(_ argv: [String], cwd: URL) -> MaybeApplyPatchVerified {
+    ApplyPatchInvocation.maybeParseApplyPatchVerified(argv, cwd: cwd)
 }
 
 private extension String {
