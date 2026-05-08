@@ -224,6 +224,32 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://cli.example/backend-api/")
     }
 
+    func testLegacyManagedConfigWinsOverCLIOverrides() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://user.example/backend-api/""#
+            .write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let managedPath = dir.url.appendingPathComponent("managed_config.toml")
+        try """
+        chatgpt_base_url = "https://managed.example/backend-api/"
+        forced_login_method = "api"
+        """.write(to: managedPath, atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            overrides: CliConfigOverrides(rawOverrides: [
+                "chatgpt_base_url=\"https://cli.example/backend-api/\""
+            ]),
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedPath)
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://managed.example/backend-api/")
+        XCTAssertEqual(config.forcedLoginMethod, .api)
+    }
+
     func testProjectLayerStopsAtDetectedGitRoot() throws {
         let dir = try CoreTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

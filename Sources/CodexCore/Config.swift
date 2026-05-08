@@ -79,7 +79,9 @@ public enum CodexConfigLoader {
         cwd: URL? = nil,
         overrides: CliConfigOverrides = CliConfigOverrides(),
         fileManager: FileManager = .default,
-        systemConfigFile: URL? = defaultSystemConfigFile()
+        systemConfigFile: URL? = defaultSystemConfigFile(),
+        managedConfigOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
         for configFile in baseConfigLayerFiles(
@@ -107,6 +109,13 @@ public enum CodexConfigLoader {
         }
 
         try parsed.apply(overrides: overrides)
+        let managedConfigLayers = try CodexConfigLayerLoader.loadConfigLayers(
+            codexHome: codexHome,
+            overrides: managedConfigOverrides,
+            environment: environment,
+            fileManager: fileManager
+        )
+        try parsed.merge(managedConfigLayers)
         return try parsed.resolvedConfig()
     }
 
@@ -294,6 +303,59 @@ private struct ParsedCodexConfigToml {
                 mergedProfile[key] = value
             }
             profileFeatures[profileName] = mergedProfile
+        }
+    }
+
+    mutating func merge(_ layers: LoadedConfigLayers) throws {
+        if let managedConfig = layers.managedConfig {
+            try merge(managedConfig.managedConfig)
+        }
+        if let managedConfigFromMDM = layers.managedConfigFromMDM {
+            try merge(managedConfigFromMDM)
+        }
+    }
+
+    mutating func merge(_ config: ConfigValue) throws {
+        guard case let .table(table) = config else {
+            return
+        }
+
+        for (key, value) in table where Self.isRelevantTopLevelKey(key) {
+            topLevel[key] = value
+        }
+
+        if case let .table(featureTable) = table["features"] {
+            for (key, value) in featureTable {
+                features[key] = try Self.boolValue(value, key: "features.\(key)")
+            }
+        }
+
+        if case let .table(profileTable) = table["profiles"] {
+            for (profileName, profileValue) in profileTable {
+                guard case let .table(profileValues) = profileValue else {
+                    continue
+                }
+
+                if profiles[profileName] == nil {
+                    profiles[profileName] = [:]
+                }
+
+                for (key, value) in profileValues {
+                    if Self.isRelevantProfileKey(key) {
+                        profiles[profileName, default: [:]][key] = value
+                        continue
+                    }
+
+                    if key == "features", case let .table(featuresTable) = value {
+                        for (featureKey, featureValue) in featuresTable {
+                            profileFeatures[profileName, default: [:]][featureKey] = try Self.boolValue(
+                                featureValue,
+                                key: "profiles.\(profileName).features.\(featureKey)"
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
