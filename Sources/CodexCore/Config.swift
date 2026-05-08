@@ -44,20 +44,91 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
 }
 
 public enum CodexConfigLoader {
+    public static func defaultSystemConfigFile() -> URL? {
+        URL(fileURLWithPath: "/etc/codex/config.toml", isDirectory: false)
+    }
+
     public static func load(
         codexHome: URL,
+        cwd: URL? = nil,
         overrides: CliConfigOverrides = CliConfigOverrides(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        systemConfigFile: URL? = defaultSystemConfigFile()
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
-        let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        if fileManager.fileExists(atPath: configFile.path) {
-            let contents = try String(contentsOf: configFile, encoding: .utf8)
-            parsed = try ParsedCodexConfigToml.parse(contents)
+        for configFile in configLayerFiles(
+            codexHome: codexHome,
+            cwd: cwd,
+            systemConfigFile: systemConfigFile,
+            fileManager: fileManager
+        ) {
+            if fileManager.fileExists(atPath: configFile.path) {
+                let contents = try String(contentsOf: configFile, encoding: .utf8)
+                parsed.merge(try ParsedCodexConfigToml.parse(contents))
+            }
         }
 
         try parsed.apply(overrides: overrides)
         return try parsed.resolvedConfig()
+    }
+
+    private static func configLayerFiles(
+        codexHome: URL,
+        cwd: URL?,
+        systemConfigFile: URL?,
+        fileManager: FileManager
+    ) -> [URL] {
+        var files: [URL] = []
+        if let systemConfigFile {
+            files.append(systemConfigFile)
+        }
+        files.append(codexHome.appendingPathComponent("config.toml", isDirectory: false))
+
+        if let cwd {
+            files.append(contentsOf: projectConfigFiles(cwd: cwd, fileManager: fileManager))
+        }
+        return files
+    }
+
+    private static func projectConfigFiles(cwd: URL, fileManager: FileManager) -> [URL] {
+        let cwdPath = cwd.standardizedFileURL.path
+        let cwdURL = URL(fileURLWithPath: cwdPath, isDirectory: true)
+        let ancestors = ancestorDirectories(from: cwdURL)
+        let projectRoot = ancestors.first { ancestor in
+            fileManager.fileExists(atPath: ancestor.appendingPathComponent(".git").path)
+        } ?? cwdURL
+
+        guard let projectRootIndex = ancestors.firstIndex(of: projectRoot),
+              let cwdIndex = ancestors.firstIndex(of: cwdURL)
+        else {
+            return []
+        }
+
+        let dirs = ancestors[cwdIndex...projectRootIndex].reversed()
+        return dirs.compactMap { directory in
+            let dotCodex = directory.appendingPathComponent(".codex", isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: dotCodex.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else {
+                return nil
+            }
+            return dotCodex.appendingPathComponent("config.toml", isDirectory: false)
+        }
+    }
+
+    private static func ancestorDirectories(from url: URL) -> [URL] {
+        var directories: [URL] = []
+        var current = url.standardizedFileURL
+        while true {
+            directories.append(current)
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path {
+                break
+            }
+            current = parent
+        }
+        return directories
     }
 }
 
@@ -84,6 +155,9 @@ private struct ParsedCodexConfigToml {
             }
 
             guard let equalsIndex = firstEqualsIndex(in: line) else {
+                if case .ignored = section {
+                    continue
+                }
                 throw CodexConfigLoadError.invalidConfigLine(line)
             }
 
@@ -125,6 +199,20 @@ private struct ParsedCodexConfigToml {
             if parts.count == 3, parts[0] == "profiles", Self.isRelevantProfileKey(parts[2]) {
                 profiles[parts[1], default: [:]][parts[2]] = value
             }
+        }
+    }
+
+    mutating func merge(_ overlay: ParsedCodexConfigToml) {
+        for (key, value) in overlay.topLevel {
+            topLevel[key] = value
+        }
+
+        for (profileName, profileValues) in overlay.profiles {
+            var mergedProfile = profiles[profileName] ?? [:]
+            for (key, value) in profileValues {
+                mergedProfile[key] = value
+            }
+            profiles[profileName] = mergedProfile
         }
     }
 

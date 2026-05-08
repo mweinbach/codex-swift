@@ -75,7 +75,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/main.rs` apply dispatch
   - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
 - `codex-rs/core/src/config/mod.rs` apply-relevant config loading
-  - `$CODEX_HOME/config.toml` support for top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
+  - apply-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from git root to cwd, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
 
@@ -97,7 +97,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - local image loading/resizing into data URLs
 - MCP `CallToolResult` conversion into function-call output payloads
 - full Rust command parser parity for complex Bash/Powershell AST cases
-- full layered config loading beyond the apply-relevant `$CODEX_HOME/config.toml` slice
+- full non-apply config loading and managed requirements
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - keyring storage for `codex apply <task_id>`

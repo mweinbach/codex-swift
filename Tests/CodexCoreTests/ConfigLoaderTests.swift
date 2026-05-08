@@ -5,7 +5,7 @@ final class ConfigLoaderTests: XCTestCase {
     func testDefaultsWhenConfigTomlIsAbsent() throws {
         let dir = try CoreTemporaryDirectory()
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url)
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
@@ -19,7 +19,7 @@ final class ConfigLoaderTests: XCTestCase {
         cli_auth_credentials_store = "auto"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url)
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
@@ -35,7 +35,7 @@ final class ConfigLoaderTests: XCTestCase {
         chatgpt_base_url = "https://profile.example/backend-api/"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url)
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.activeProfile, "work")
         XCTAssertEqual(config.chatgptBaseURL, "https://profile.example/backend-api/")
@@ -60,7 +60,8 @@ final class ConfigLoaderTests: XCTestCase {
                 "profile=\"work\"",
                 "profiles.work.chatgpt_base_url=\"https://override.example/backend-api/\"",
                 "cli_auth_credentials_store=\"keyring\""
-            ])
+            ]),
+            systemConfigFile: nil
         )
 
         XCTAssertEqual(config.activeProfile, "work")
@@ -72,7 +73,7 @@ final class ConfigLoaderTests: XCTestCase {
         let dir = try CoreTemporaryDirectory()
         try #"profile = "missing""#.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url)) { error in
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, "config profile `missing` not found")
         }
     }
@@ -87,7 +88,7 @@ final class ConfigLoaderTests: XCTestCase {
         model = "o3"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url)
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.activeProfile, "work")
         XCTAssertEqual(config.chatgptBaseURL, "https://top-level.example/backend-api/")
@@ -109,11 +110,100 @@ final class ConfigLoaderTests: XCTestCase {
 
         let config = try CodexConfigLoader.load(
             codexHome: dir.url,
-            overrides: CliConfigOverrides(rawOverrides: ["profile=\"quoted.profile\""])
+            overrides: CliConfigOverrides(rawOverrides: ["profile=\"quoted.profile\""]),
+            systemConfigFile: nil
         )
 
         XCTAssertEqual(config.activeProfile, "quoted.profile")
         XCTAssertEqual(config.chatgptBaseURL, "https://quoted.example/backend-api/#fragment")
+    }
+
+    func testLayeredConfigUsesSystemUserAndProjectDotCodexOrder() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+
+        let systemConfig = dir.url.appendingPathComponent("system.toml")
+        try """
+        chatgpt_base_url = "https://system.example/backend-api/"
+        cli_auth_credentials_store = "keyring"
+        """.write(to: systemConfig, atomically: true, encoding: .utf8)
+        try """
+        chatgpt_base_url = "https://user.example/backend-api/"
+        cli_auth_credentials_store = "auto"
+        """.write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let rootDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        let childDotCodex = child.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootDotCodex, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: childDotCodex, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://project.example/backend-api/""#
+            .write(to: rootDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try #"chatgpt_base_url = "https://child.example/backend-api/""#
+            .write(to: childDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: systemConfig
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://child.example/backend-api/")
+        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
+    }
+
+    func testCLIOverridesBeatLayeredProjectConfigWhenNoProfileOverridesIt() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let dotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://project.example/backend-api/""#
+            .write(to: dotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: project,
+            overrides: CliConfigOverrides(rawOverrides: ["chatgpt_base_url=\"https://cli.example/backend-api/\""]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://cli.example/backend-api/")
+    }
+
+    func testProjectLayerStopsAtDetectedGitRoot() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let outer = dir.url.appendingPathComponent("outer", isDirectory: true)
+        let project = outer.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+
+        let outerDotCodex = outer.appendingPathComponent(".codex", isDirectory: true)
+        let projectDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: outerDotCodex, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectDotCodex, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://outer.example/backend-api/""#
+            .write(to: outerDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try #"chatgpt_base_url = "https://project.example/backend-api/""#
+            .write(to: projectDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://project.example/backend-api/")
     }
 }
 
