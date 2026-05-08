@@ -66,12 +66,30 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum CloudCommandAction: Equatable, Sendable {
+        case status(taskID: String)
+        case diff(taskID: String, attempt: Int?)
+        case apply(taskID: String, attempt: Int?)
+    }
+
+    public struct CloudCommandRequest: Equatable, Sendable {
+        public let action: CloudCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: CloudCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
+        public let stdoutMessage: String?
         public let stderrMessage: String?
 
-        public init(exitCode: Int32, stderrMessage: String? = nil) {
+        public init(exitCode: Int32, stdoutMessage: String? = nil, stderrMessage: String? = nil) {
             self.exitCode = exitCode
+            self.stdoutMessage = stdoutMessage
             self.stderrMessage = stderrMessage
         }
     }
@@ -81,6 +99,7 @@ public struct CodexCLI: Sendable {
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
+    public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -189,7 +208,8 @@ public struct CodexCLI: Sendable {
         loginRunner: LoginCommandRunner? = nil,
         logoutRunner: LogoutCommandRunner? = nil,
         featuresRunner: FeaturesCommandRunner? = nil,
-        stdioToUDSRunner: StdioToUDSCommandRunner? = nil
+        stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
+        cloudRunner: CloudCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -241,9 +261,7 @@ public struct CodexCLI: Sendable {
                     action: loginAction(arguments: arguments, commandArguments: commandArguments),
                     configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
-                if let message = result.stderrMessage {
-                    stderr(message)
-                }
+                emit(result, stdout: stdout, stderr: stderr)
                 return result.exitCode
             } catch {
                 stderr(describe(error))
@@ -258,9 +276,7 @@ public struct CodexCLI: Sendable {
                 let result = try await logoutRunner(LogoutCommandRequest(
                     configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
-                if let message = result.stderrMessage {
-                    stderr(message)
-                }
+                emit(result, stdout: stdout, stderr: stderr)
                 return result.exitCode
             } catch {
                 stderr(describe(error))
@@ -277,13 +293,38 @@ public struct CodexCLI: Sendable {
             }
             do {
                 let result = try await stdioToUDSRunner(StdioToUDSCommandRequest(socketPath: socketPath))
-                if let message = result.stderrMessage {
-                    stderr(message)
-                }
+                emit(result, stdout: stdout, stderr: stderr)
                 return result.exitCode
             } catch {
                 stderr(describe(error))
                 return 1
+            }
+        case let .command(spec, _) where spec.name == "cloud":
+            guard let cloudRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            guard !rawArguments.isEmpty else {
+                stderr("codex-swift: command 'cloud' TUI runtime is not complete yet.")
+                return 78
+            }
+            switch parseCloudCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await cloudRunner(CloudCommandRequest(
+                        action: action,
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
             }
         case let .command(spec, commandArguments) where spec.name == "features":
             guard let featuresRunner else {
@@ -363,8 +404,36 @@ public struct CodexCLI: Sendable {
             "-c",
             "--config",
             "--enable",
-            "--disable"
+            "--disable",
+            "--attempt",
+            "--attempts",
+            "--env",
+            "--branch"
         ].contains(argument)
+    }
+
+    private func rawCommandArguments(after spec: CommandSpec, in arguments: [String]) -> [String] {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                index += 1
+                continue
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("-") {
+                index += 1
+                continue
+            }
+            if spec.matches(argument) {
+                return Array(arguments.dropFirst(index + 1))
+            }
+            index += 1
+        }
+        return []
     }
 
     private func configOverrideTokens(_ arguments: [String]) throws -> [String] {
@@ -430,7 +499,123 @@ public struct CodexCLI: Sendable {
         arguments.contains("--api-key") || arguments.contains { $0.hasPrefix("--api-key=") }
     }
 
+    private func parseCloudCommandAction(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: command 'cloud' TUI runtime is not complete yet.", 78)
+        }
+
+        switch subcommand {
+        case "status":
+            switch parseCloudRequiredTaskID(Array(arguments.dropFirst()), command: subcommand) {
+            case let .success(taskID):
+                return .success(.status(taskID: taskID))
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "diff", "apply":
+            switch parseCloudTaskAndAttempt(Array(arguments.dropFirst()), command: subcommand) {
+            case let .success(parsed):
+                if subcommand == "diff" {
+                    return .success(.diff(taskID: parsed.taskID, attempt: parsed.attempt))
+                }
+                return .success(.apply(taskID: parsed.taskID, attempt: parsed.attempt))
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "exec":
+            return .failure("codex-swift: command 'cloud exec' runtime is not complete yet.", 78)
+        default:
+            return .failure("codex-swift: unsupported cloud subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private func parseCloudRequiredTaskID(_ arguments: [String], command: String) -> ParseResult<String> {
+        var taskID: String?
+
+        for argument in arguments {
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'cloud \(command)': \(argument)", 64)
+            }
+            if taskID != nil {
+                return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(argument)", 64)
+            }
+            taskID = argument
+        }
+
+        guard let taskID else {
+            return .failure("codex-swift: missing required argument for command 'cloud \(command)': <TASK_ID>", 64)
+        }
+        return .success(taskID)
+    }
+
+    private func parseCloudTaskAndAttempt(_ arguments: [String], command: String) -> ParseResult<(taskID: String, attempt: Int?)> {
+        var taskID: String?
+        var attempt: Int?
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--attempt" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --attempt", 64)
+                }
+                switch parseCloudAttempt(value) {
+                case let .success(parsed):
+                    attempt = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("--attempt=") {
+                let value = String(argument.dropFirst("--attempt=".count))
+                switch parseCloudAttempt(value) {
+                case let .success(parsed):
+                    attempt = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'cloud \(command)': \(argument)", 64)
+            }
+            if taskID != nil {
+                return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(argument)", 64)
+            }
+            taskID = argument
+        }
+
+        guard let taskID else {
+            return .failure("codex-swift: missing required argument for command 'cloud \(command)': <TASK_ID>", 64)
+        }
+        return .success((taskID: taskID, attempt: attempt))
+    }
+
+    private func parseCloudAttempt(_ value: String) -> ParseResult<Int> {
+        guard let attempt = Int(value) else {
+            return .failure("attempts must be an integer between 1 and 4", 64)
+        }
+        guard (1...4).contains(attempt) else {
+            return .failure("attempts must be between 1 and 4", 64)
+        }
+        return .success(attempt)
+    }
+
+    private func emit(_ result: CommandExecutionResult, stdout: (String) -> Void, stderr: (String) -> Void) {
+        if let message = result.stdoutMessage {
+            stdout(message)
+        }
+        if let message = result.stderrMessage {
+            stderr(message)
+        }
+    }
+
     private func describe(_ error: Error) -> String {
         return String(describing: error)
     }
+}
+
+private enum ParseResult<Success> {
+    case success(Success)
+    case failure(String, Int32)
 }

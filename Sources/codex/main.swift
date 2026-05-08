@@ -22,7 +22,8 @@ let exitCode = await cli.runAsync(
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
-    stdioToUDSRunner: runStdioToUDSCommand
+    stdioToUDSRunner: runStdioToUDSCommand,
+    cloudRunner: runCloudCommand
 )
 exit(exitCode)
 
@@ -123,6 +124,35 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
 private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     try StdioToUDS.run(socketPath: request.socketPath)
     return CodexCLI.CommandExecutionResult(exitCode: 0)
+}
+
+private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    let client = CloudTaskClient(configuration: CloudTaskClientConfiguration(
+        chatgptBaseURL: settings.chatgptBaseURL,
+        codexHome: codexHome,
+        authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode
+    ))
+
+    switch request.action {
+    case let .status(taskID):
+        let summary = try await client.taskSummary(taskID: taskID)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: summary.status == .ready ? 0 : 1,
+            stdoutMessage: CloudTaskCommandFormatter.statusLines(task: summary).joined(separator: "\n")
+        )
+    case let .diff(taskID, attempt):
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try await client.taskDiff(taskID: taskID, attempt: attempt)
+        )
+    case let .apply(taskID, attempt):
+        let outcome = try await client.applyTaskOutcome(taskID: taskID, attempt: attempt)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: outcome.status == .success ? 0 : 1,
+            stdoutMessage: outcome.message
+        )
+    }
 }
 
 private struct APIKeyReadResult {

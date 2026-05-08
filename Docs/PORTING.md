@@ -299,6 +299,8 @@ Source baseline inspected for this scaffold:
   - concrete Swift `CodexGit` adapter for cloud task apply/preflight injection without making `CodexCore` depend on the git target
 - `codex-rs/cli/src/main.rs` apply dispatch through cloud task HTTP client
   - executable `codex apply <task_id>` now loads ChatGPT auth, calls the cloud task HTTP client, applies via the Swift `CodexGit` bridge, and exits nonzero for missing auth/account IDs or non-success apply outcomes
+- `codex-rs/cloud-tasks/src/cli.rs` and non-TUI command dispatch from `codex-rs/cloud-tasks/src/lib.rs`
+  - `codex cloud status`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt` validation, status/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection, and cloud-task status/diff summary formatting
 
 ## Known Gaps
 
@@ -315,7 +317,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - MCP server/client management
 - app-server protocol and server runtime
 - apply-patch runtime
-- cloud tasks CLI/TUI list/create/browse runtime integration beyond `codex apply`
+- cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing

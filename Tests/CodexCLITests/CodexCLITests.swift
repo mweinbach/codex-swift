@@ -396,4 +396,128 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 64)
         XCTAssertEqual(stderr, ["codex-swift: missing required argument for command 'stdio-to-uds': <SOCKET_PATH>"])
     }
+
+    func testRunAsyncCloudStatusDelegatesToRunnerAndPrintsOutput() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["-c", "chatgpt_base_url=\"https://example.test\"", "cloud", "status", "https://chatgpt.com/codex/tasks/task_123?x=1"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "[READY] task")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["[READY] task"])
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(receivedRequest?.action, .status(taskID: "https://chatgpt.com/codex/tasks/task_123?x=1"))
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["chatgpt_base_url=\"https://example.test\""])
+    }
+
+    func testRunAsyncCloudStatusRejectsUnsupportedOptionBeforeRunner() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "status", "--attempt", "2", "task_123"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called with invalid status options")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: unsupported option for command 'cloud status': --attempt"])
+    }
+
+    func testRunAsyncCloudDiffParsesAttemptFlag() async {
+        var stdout: [String] = []
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "diff", "--attempt=2", "task_123"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "diff --git\n")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["diff --git\n"])
+        XCTAssertEqual(receivedRequest?.action, .diff(taskID: "task_123", attempt: 2))
+    }
+
+    func testRunAsyncCloudApplyParsesSeparateAttemptFlag() async {
+        var stdout: [String] = []
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "apply", "task_123", "--attempt", "3"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "Applied task task_123 locally (1 files)")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["Applied task task_123 locally (1 files)"])
+        XCTAssertEqual(receivedRequest?.action, .apply(taskID: "task_123", attempt: 3))
+    }
+
+    func testRunAsyncCloudRejectsInvalidAttemptBeforeRunner() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "diff", "--attempt", "5", "task_123"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called with invalid attempt")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["attempts must be between 1 and 4"])
+    }
+
+    func testRunAsyncCloudExecReportsRuntimeIncomplete() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--env", "env_123", "ship it"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called for incomplete cloud exec runtime")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 78)
+        XCTAssertEqual(stderr, ["codex-swift: command 'cloud exec' runtime is not complete yet."])
+    }
+
+    func testRunAsyncCloudWithoutRunnerStillReportsUnimplemented() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "status", "task_123"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(exitCode, 78)
+        XCTAssertEqual(stderr, ["codex-swift: command 'cloud' is registered but its runtime port is not complete yet."])
+    }
 }

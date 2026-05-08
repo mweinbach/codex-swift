@@ -110,6 +110,55 @@ final class CloudTaskClientTests: XCTestCase {
         }
     }
 
+    func testParseTaskIDAcceptsURLsAndRejectsEmptyInput() throws {
+        XCTAssertEqual(try CloudTaskClient<URLSessionAPITransport>.parseTaskID(" task_123 ").rawValue, "task_123")
+        XCTAssertEqual(
+            try CloudTaskClient<URLSessionAPITransport>.parseTaskID("https://chatgpt.com/codex/tasks/task_123?foo=bar#frag").rawValue,
+            "task_123"
+        )
+        XCTAssertThrowsError(try CloudTaskClient<URLSessionAPITransport>.parseTaskID("https://chatgpt.com/codex/tasks/")) { error in
+            XCTAssertEqual((error as? CloudTaskClientError)?.description, "task id must not be empty")
+        }
+    }
+
+    func testStatusFormatterMatchesCloudTasksCLIShape() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let summary = CloudTaskSummary(
+            id: CloudTaskID("task_123"),
+            title: "Fix the thing",
+            status: .ready,
+            updatedAt: now.addingTimeInterval(-125),
+            environmentID: "env-A",
+            environmentLabel: "Env A",
+            summary: CloudDiffSummary(filesChanged: 2, linesAdded: 7, linesRemoved: 3)
+        )
+
+        XCTAssertEqual(CloudTaskCommandFormatter.statusLines(task: summary, now: now), [
+            "[READY] Fix the thing",
+            "Env A  •  2m ago",
+            "+7/-3 • 2 files"
+        ])
+    }
+
+    func testStatusFormatterUsesRustLocalDateShapeForOlderTasks() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let timestamp = try XCTUnwrap(calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: .current,
+            year: 2024,
+            month: 3,
+            day: 5,
+            hour: 9,
+            minute: 7
+        )))
+
+        XCTAssertEqual(
+            CloudTaskCommandFormatter.formatRelativeTime(reference: timestamp.addingTimeInterval(48 * 60 * 60), timestamp: timestamp),
+            "Mar  5 09:07"
+        )
+    }
+
     private static let validDiff = """
     diff --git a/file.txt b/file.txt
     --- a/file.txt
