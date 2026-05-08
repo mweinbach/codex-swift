@@ -952,6 +952,54 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(threadID)")
     }
 
+    func testThreadBackgroundTerminalsCleanRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-05-00",
+            timestamp: "2025-01-06T08:05:00Z",
+            preview: "background terminal",
+            provider: "mock_provider"
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/backgroundTerminals/clean","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "thread/backgroundTerminals/clean requires experimentalApi capability"
+        )
+    }
+
+    func testThreadBackgroundTerminalsCleanReturnsEmptyResultWhenExperimental() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-10-00",
+            timestamp: "2025-01-06T08:10:00Z",
+            preview: "background terminal",
+            provider: "mock_provider"
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"experimentalApi":true}}}"#.utf8)))
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/backgroundTerminals/clean","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+
+        let invalid = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/backgroundTerminals/clean","params":{"threadId":"not-a-thread-id"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("invalid thread id") == true)
+    }
+
     func testThreadGoalMethodsReturnRustDisabledFeatureErrorByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()

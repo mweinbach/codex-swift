@@ -1247,6 +1247,18 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func threadBackgroundTerminalsCleanResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
+    ) throws -> [String: Any] {
+        guard experimentalAPIEnabled else {
+            throw AppServerError.invalidRequest("thread/backgroundTerminals/clean requires experimentalApi capability")
+        }
+        _ = try materializedThreadID(params: params, configuration: configuration)
+        return [:]
+    }
+
     fileprivate static func threadGoalSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -5059,6 +5071,7 @@ final class CodexAppServerMessageProcessor {
     private let connectionID: AppServerConnectionID = 0
     private var initialized = false
     private var requestAttestation = false
+    private var experimentalAPIEnabled = false
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
@@ -5304,7 +5317,9 @@ final class CodexAppServerMessageProcessor {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
                 initialized = true
-                requestAttestation = ((params?["capabilities"] as? [String: Any])?["requestAttestation"] as? Bool) ?? false
+                let capabilities = params?["capabilities"] as? [String: Any]
+                requestAttestation = (capabilities?["requestAttestation"] as? Bool) ?? false
+                experimentalAPIEnabled = (capabilities?["experimentalApi"] as? Bool) ?? false
                 markCurrentConnectionInitialized(requestAttestation: requestAttestation)
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 response = CodexAppServer.responseObject(id: id, result: [
@@ -5463,6 +5478,15 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadShellCommandResult(params: params, configuration: configuration)
+                    )
+                case "thread/backgroundTerminals/clean":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadBackgroundTerminalsCleanResult(
+                            params: params,
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
+                        )
                     )
                 case "thread/goal/set":
                     let result = try CodexAppServer.threadGoalSetResult(params: params, configuration: configuration)
