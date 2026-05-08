@@ -476,7 +476,21 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncNewCommandHooksWithoutRunnersStillReportUnimplemented() async {
-        for command in ["exec", "computer-use", "review", "resume", "mcp-server", "app-server"] {
+        for command in [
+            "exec",
+            "computer-use",
+            "review",
+            "plugin",
+            "mcp-server",
+            "app-server",
+            "remote-control",
+            "app",
+            "update",
+            "debug",
+            "resume",
+            "fork",
+            "exec-server"
+        ] {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: [command],

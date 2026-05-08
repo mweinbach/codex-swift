@@ -52,7 +52,7 @@ final class SandboxCLITests: XCTestCase {
         )
 
         let landlockExitCode = await CodexCLI().runAsync(
-            arguments: ["debug", "landlock", "--full-auto", "echo", "ok"],
+            arguments: ["sandbox", "landlock", "--full-auto", "echo", "ok"],
             stderr: { _ in XCTFail("stderr should not be written") },
             sandboxRunner: { request in
                 receivedActions.append(request.action)

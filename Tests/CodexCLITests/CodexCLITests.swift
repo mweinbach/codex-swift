@@ -10,16 +10,23 @@ final class CodexCLITests: XCTestCase {
             "login",
             "logout",
             "mcp",
+            "plugin",
             "mcp-server",
             "app-server",
+            "remote-control",
+            "app",
             "completion",
+            "update",
             "sandbox",
+            "debug",
             "execpolicy",
             "apply",
             "resume",
+            "fork",
             "cloud",
             "responses-api-proxy",
             "stdio-to-uds",
+            "exec-server",
             "features"
         ])
     }
@@ -27,7 +34,7 @@ final class CodexCLITests: XCTestCase {
     func testAliasesResolveToCanonicalCommands() {
         XCTAssertEqual(CodexCommandRegistry.command(matching: "e")?.name, "exec")
         XCTAssertEqual(CodexCommandRegistry.command(matching: "cu")?.name, "computer-use")
-        XCTAssertEqual(CodexCommandRegistry.command(matching: "debug")?.name, "sandbox")
+        XCTAssertEqual(CodexCommandRegistry.command(matching: "debug")?.name, "debug")
         XCTAssertEqual(CodexCommandRegistry.command(matching: "a")?.name, "apply")
         XCTAssertEqual(CodexCommandRegistry.command(matching: "cloud-tasks")?.name, "cloud")
     }
@@ -36,6 +43,7 @@ final class CodexCLITests: XCTestCase {
         let help = CodexCLI().renderHelp()
         XCTAssertTrue(help.contains("exec [alias: e]"))
         XCTAssertTrue(help.contains("app-server"))
+        XCTAssertTrue(help.contains("exec-server"))
         XCTAssertFalse(help.contains("execpolicy"))
         XCTAssertFalse(help.contains("responses-api-proxy"))
     }
