@@ -3,7 +3,7 @@ import CodexGit
 import Foundation
 
 public struct ChatGPTClientConfiguration: Equatable, Sendable {
-    public static let defaultBaseURL = "https://chatgpt.com/backend-api/"
+    public static let defaultBaseURL = CodexConfigDefaults.chatgptBaseURL
 
     public let chatgptBaseURL: String
     public let codexHome: URL

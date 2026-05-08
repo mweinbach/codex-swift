@@ -74,6 +74,8 @@ Source baseline inspected for this scaffold:
   - file-backed `auth.json` token loading, `CODEX_HOME` discovery, ChatGPT task GET request construction, Rust-matching request headers, default ChatGPT backend URL, and non-2xx/decode error mapping
 - `codex-rs/cli/src/main.rs` apply dispatch
   - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
+- `codex-rs/core/src/config/mod.rs` apply-relevant config loading
+  - `$CODEX_HOME/config.toml` support for top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 
 ## Known Gaps
 
@@ -93,6 +95,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - local image loading/resizing into data URLs
 - MCP `CallToolResult` conversion into function-call output payloads
 - full Rust command parser parity for complex Bash/Powershell AST cases
+- full layered config loading beyond the apply-relevant `$CODEX_HOME/config.toml` slice
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - keyring storage and token refresh for `codex apply <task_id>`
