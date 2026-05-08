@@ -98,7 +98,7 @@ public enum FeatureStage: Equatable, Sendable {
     public var listName: String {
         switch self {
         case .underDevelopment:
-            return "under-development"
+            return "under development"
         case .experimental:
             return "experimental"
         case .stable:
