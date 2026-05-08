@@ -1,6 +1,7 @@
 import CodexChatGPT
 import CodexCLI
 import CodexCore
+import CodexResponsesAPIProxy
 import CodexStdioToUDS
 import Darwin
 import Foundation
@@ -26,7 +27,8 @@ let exitCode = await cli.runAsync(
     sandboxRunner: runSandboxCommand,
     mcpRunner: runMcpCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
-    cloudRunner: runCloudCommand
+    cloudRunner: runCloudCommand,
+    responsesAPIProxyRunner: runResponsesAPIProxyCommand
 )
 exit(exitCode)
 
@@ -447,6 +449,16 @@ private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async thro
             stderrMessage: prompt.stderrMessage
         )
     }
+}
+
+private func runResponsesAPIProxyCommand(_ request: CodexCLI.ResponsesAPIProxyCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try ResponsesAPIProxy.run(options: ResponsesAPIProxyOptions(
+        port: request.port,
+        serverInfoPath: request.serverInfoPath.map { URL(fileURLWithPath: $0) },
+        httpShutdown: request.httpShutdown,
+        upstreamURL: request.upstreamURL
+    ))
+    return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: "server stopped unexpectedly")
 }
 
 private struct CloudExecPrompt {

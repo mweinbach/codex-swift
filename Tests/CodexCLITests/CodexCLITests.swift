@@ -590,4 +590,70 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 78)
         XCTAssertEqual(stderr, ["codex-swift: command 'cloud' is registered but its runtime port is not complete yet."])
     }
+
+    func testRunAsyncResponsesAPIProxyDelegatesToRunnerWithRustFlags() async {
+        var receivedRequest: CodexCLI.ResponsesAPIProxyCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "responses-api-proxy",
+                "--port=4321",
+                "--server-info",
+                "/tmp/proxy.json",
+                "--http-shutdown",
+                "--upstream-url",
+                "https://example.test/v1/responses"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            responsesAPIProxyRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest, CodexCLI.ResponsesAPIProxyCommandRequest(
+            port: 4321,
+            serverInfoPath: "/tmp/proxy.json",
+            httpShutdown: true,
+            upstreamURL: "https://example.test/v1/responses"
+        ))
+    }
+
+    func testRunAsyncResponsesAPIProxyRejectsInvalidArgumentsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["responses-api-proxy", "--port"],
+                "codex-swift: missing value for --port"
+            ),
+            (
+                ["responses-api-proxy", "--port", "70000"],
+                "codex-swift: invalid value for --port: 70000"
+            ),
+            (
+                ["responses-api-proxy", "--bogus"],
+                "codex-swift: unsupported option for command 'responses-api-proxy': --bogus"
+            ),
+            (
+                ["responses-api-proxy", "extra"],
+                "codex-swift: unexpected argument for command 'responses-api-proxy': extra"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                responsesAPIProxyRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
 }

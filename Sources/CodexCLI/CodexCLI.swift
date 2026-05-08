@@ -145,6 +145,25 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct ResponsesAPIProxyCommandRequest: Equatable, Sendable {
+        public let port: UInt16?
+        public let serverInfoPath: String?
+        public let httpShutdown: Bool
+        public let upstreamURL: String
+
+        public init(
+            port: UInt16? = nil,
+            serverInfoPath: String? = nil,
+            httpShutdown: Bool = false,
+            upstreamURL: String = "https://api.openai.com/v1/responses"
+        ) {
+            self.port = port
+            self.serverInfoPath = serverInfoPath
+            self.httpShutdown = httpShutdown
+            self.upstreamURL = upstreamURL
+        }
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
         public let stdoutMessage: String?
@@ -166,6 +185,7 @@ public struct CodexCLI: Sendable {
     public typealias McpCommandRunner = (McpCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
+    public typealias ResponsesAPIProxyCommandRunner = (ResponsesAPIProxyCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -278,7 +298,8 @@ public struct CodexCLI: Sendable {
         sandboxRunner: SandboxCommandRunner? = nil,
         mcpRunner: McpCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
-        cloudRunner: CloudCommandRunner? = nil
+        cloudRunner: CloudCommandRunner? = nil,
+        responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -451,6 +472,26 @@ public struct CodexCLI: Sendable {
                         action: action,
                         configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                     ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "responses-api-proxy":
+            guard let responsesAPIProxyRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseResponsesAPIProxyCommand(rawArguments) {
+            case let .success(request):
+                do {
+                    let result = try await responsesAPIProxyRunner(request)
                     emit(result, stdout: stdout, stderr: stderr)
                     return result.exitCode
                 } catch {
@@ -1194,6 +1235,83 @@ public struct CodexCLI: Sendable {
             return .failure("attempts must be between 1 and 4", 64)
         }
         return .success(attempt)
+    }
+
+    private func parseResponsesAPIProxyCommand(_ arguments: [String]) -> ParseResult<ResponsesAPIProxyCommandRequest> {
+        var port: UInt16?
+        var serverInfoPath: String?
+        var httpShutdown = false
+        var upstreamURL = "https://api.openai.com/v1/responses"
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--port" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --port", 64)
+                }
+                switch parseProxyPort(value) {
+                case let .success(parsed):
+                    port = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("--port=") {
+                let value = String(argument.dropFirst("--port=".count))
+                switch parseProxyPort(value) {
+                case let .success(parsed):
+                    port = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument == "--server-info" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --server-info", 64)
+                }
+                serverInfoPath = value
+                continue
+            }
+            if argument.hasPrefix("--server-info=") {
+                serverInfoPath = String(argument.dropFirst("--server-info=".count))
+                continue
+            }
+            if argument == "--http-shutdown" {
+                httpShutdown = true
+                continue
+            }
+            if argument == "--upstream-url" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --upstream-url", 64)
+                }
+                upstreamURL = value
+                continue
+            }
+            if argument.hasPrefix("--upstream-url=") {
+                upstreamURL = String(argument.dropFirst("--upstream-url=".count))
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'responses-api-proxy': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'responses-api-proxy': \(argument)", 64)
+        }
+
+        return .success(ResponsesAPIProxyCommandRequest(
+            port: port,
+            serverInfoPath: serverInfoPath,
+            httpShutdown: httpShutdown,
+            upstreamURL: upstreamURL
+        ))
+    }
+
+    private func parseProxyPort(_ value: String) -> ParseResult<UInt16> {
+        guard let parsed = UInt16(value) else {
+            return .failure("codex-swift: invalid value for --port: \(value)", 64)
+        }
+        return .success(parsed)
     }
 
     private func emit(_ result: CommandExecutionResult, stdout: (String) -> Void, stderr: (String) -> Void) {
