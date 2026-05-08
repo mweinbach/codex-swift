@@ -701,6 +701,104 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "thread not loaded: \(threadID)")
     }
 
+    func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .agentMessage(AgentMessageEvent(message: "draft")),
+            .agentMessage(AgentMessageEvent(message: "final")),
+            .userMessage(UserMessageEvent(message: "second")),
+            .agentMessage(AgentMessageEvent(message: "second done")),
+            .userMessage(UserMessageEvent(message: "third"))
+        ])
+
+        let firstPage = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":2}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(firstPage["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.map(turnUserText), ["third", "second"])
+        XCTAssertTrue(firstData.allSatisfy { $0["itemsView"] as? String == "summary" })
+        XCTAssertEqual(turnAgentTexts(firstData[0]), [])
+        XCTAssertEqual(turnAgentTexts(firstData[1]), ["second done"])
+        let nextCursor = try XCTUnwrap(firstResult["nextCursor"] as? String)
+        let backwardsCursor = try XCTUnwrap(firstResult["backwardsCursor"] as? String)
+
+        let secondPage = try appServerResponse(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":\#(jsonString(nextCursor)),"limit":10}}"#,
+            codexHome: temp.url
+        )
+        let secondResult = try XCTUnwrap(secondPage["result"] as? [String: Any])
+        let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
+        XCTAssertEqual(secondData.map(turnUserText), ["first"])
+        XCTAssertEqual(turnAgentTexts(secondData[0]), ["final"])
+
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:02Z", events: [
+            .userMessage(UserMessageEvent(message: "fourth"))
+        ])
+        let newerPage = try appServerResponse(
+            #"{"id":3,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":\#(jsonString(backwardsCursor)),"sortDirection":"asc","limit":10}}"#,
+            codexHome: temp.url
+        )
+        let newerResult = try XCTUnwrap(newerPage["result"] as? [String: Any])
+        let newerData = try XCTUnwrap(newerResult["data"] as? [[String: Any]])
+        XCTAssertEqual(newerData.map(turnUserText), ["third", "fourth"])
+    }
+
+    func testThreadTurnsListSupportsItemsViewAndUnsupportedItemsHydration() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .agentMessage(AgentMessageEvent(message: "draft")),
+            .agentMessage(AgentMessageEvent(message: "final"))
+        ])
+
+        let full = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"full"}}"#,
+            codexHome: temp.url
+        )
+        let fullTurn = try XCTUnwrap(((full["result"] as? [String: Any])?["data"] as? [[String: Any]])?.first)
+        XCTAssertEqual(fullTurn["itemsView"] as? String, "full")
+        XCTAssertEqual(turnAgentTexts(fullTurn), ["draft", "final"])
+
+        let notLoaded = try appServerResponse(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"notLoaded"}}"#,
+            codexHome: temp.url
+        )
+        let notLoadedTurn = try XCTUnwrap(((notLoaded["result"] as? [String: Any])?["data"] as? [[String: Any]])?.first)
+        XCTAssertEqual(notLoadedTurn["itemsView"] as? String, "notLoaded")
+        XCTAssertEqual((notLoadedTurn["items"] as? [Any])?.count, 0)
+
+        let unsupported = try appServerResponse(
+            #"{"id":3,"method":"thread/turns/items/list","params":{"threadId":"\#(threadID)","turnId":"turn-1"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(unsupported["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32601)
+        XCTAssertEqual(error["message"] as? String, "thread/turns/items/list is not supported yet")
+    }
+
     func testThreadUnsubscribeReportsSubscriptionStatus() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -2387,6 +2485,32 @@ final class CodexAppServerTests: XCTestCase {
             let lineData = Data(line.utf8)
             return try XCTUnwrap(JSONSerialization.jsonObject(with: lineData) as? [String: Any])
         }
+    }
+
+    private func turnUserText(_ turn: [String: Any]) -> String {
+        let items = turn["items"] as? [[String: Any]] ?? []
+        guard let user = items.first(where: { $0["type"] as? String == "userMessage" }),
+              let content = user["content"] as? [[String: Any]],
+              let textItem = content.first(where: { $0["type"] as? String == "text" })
+        else {
+            return ""
+        }
+        return textItem["text"] as? String ?? ""
+    }
+
+    private func turnAgentTexts(_ turn: [String: Any]) -> [String] {
+        let items = turn["items"] as? [[String: Any]] ?? []
+        return items.compactMap { item in
+            guard item["type"] as? String == "agentMessage" else {
+                return nil
+            }
+            return item["text"] as? String
+        }
+    }
+
+    private func jsonString(_ value: String) -> String {
+        let data = try! JSONEncoder().encode(value)
+        return String(data: data, encoding: .utf8)!
     }
 
     @discardableResult

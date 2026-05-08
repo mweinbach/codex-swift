@@ -573,6 +573,45 @@ public enum CodexAppServer {
         return ["thread": thread]
     }
 
+    fileprivate static func threadTurnsListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        guard let rolloutPath = try RolloutListing.findConversationPathByIDString(
+            codexHome: configuration.codexHome,
+            idString: conversationID.description
+        ) else {
+            throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
+        }
+
+        let itemsView = turnItemsView(params?["itemsView"])
+        let turns = try buildTurnsFromRolloutEvents(at: rolloutPath).map { turn in
+            turnWithItemsView(turn, itemsView: itemsView)
+        }
+        let page = try paginateThreadTurns(
+            turns,
+            cursor: stringParam(params?["cursor"]),
+            limit: listLimit(params?["limit"], defaultValue: 25, maximum: 100),
+            sortDirection: stringParam(params?["sortDirection"])
+        )
+        return [
+            "data": page.turns,
+            "nextCursor": page.nextCursor ?? NSNull(),
+            "backwardsCursor": page.backwardsCursor ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func threadUnsubscribeResult(
         params: [String: Any]?,
         isLoaded: (String) -> Bool,
@@ -1858,6 +1897,10 @@ public enum CodexAppServer {
 
     private static func listLimit(_ value: Any?) -> Int {
         min(max(intParam(value, defaultValue: defaultListLimit), 1), maxListLimit)
+    }
+
+    private static func listLimit(_ value: Any?, defaultValue: Int, maximum: Int) -> Int {
+        min(max(intParam(value, defaultValue: defaultValue), 1), maximum)
     }
 
     private static func modelListStart(cursor: String?, total: Int) throws -> Int {
@@ -3442,6 +3485,17 @@ final class CodexAppServerMessageProcessor {
                             unsubscribe: { unsubscribeCurrentConnection(fromThreadID: $0) }
                         )
                     )
+                case "thread/turns/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadTurnsListResult(params: params, configuration: configuration)
+                    )
+                case "thread/turns/items/list":
+                    response = CodexAppServer.errorObject(
+                        id: id,
+                        code: -32601,
+                        message: "thread/turns/items/list is not supported yet"
+                    )
                 case "thread/resume":
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
@@ -3895,6 +3949,127 @@ private struct AppServerThreadHistoryBuilder {
         }
         return "item-\(nextItemIndex)"
     }
+}
+
+private struct AppServerThreadTurnsPage {
+    let turns: [[String: Any]]
+    let nextCursor: String?
+    let backwardsCursor: String?
+}
+
+private enum AppServerTurnItemsView: String {
+    case notLoaded
+    case summary
+    case full
+}
+
+private func turnItemsView(_ rawValue: Any?) -> AppServerTurnItemsView {
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        return .summary
+    }
+    return AppServerTurnItemsView(rawValue: value) ?? .summary
+}
+
+private func turnWithItemsView(_ turn: [String: Any], itemsView: AppServerTurnItemsView) -> [String: Any] {
+    var updatedTurn = turn
+    let items = (turn["items"] as? [[String: Any]]) ?? []
+    switch itemsView {
+    case .notLoaded:
+        updatedTurn["items"] = []
+    case .summary:
+        let userMessage = items.first { $0["type"] as? String == "userMessage" }
+        let agentMessage = items.reversed().first { $0["type"] as? String == "agentMessage" }
+        switch (userMessage, agentMessage) {
+        case let (user?, agent?) where (user["id"] as? String) != (agent["id"] as? String):
+            updatedTurn["items"] = [user, agent]
+        case let (user?, _):
+            updatedTurn["items"] = [user]
+        case let (nil, agent?):
+            updatedTurn["items"] = [agent]
+        case (nil, nil):
+            updatedTurn["items"] = []
+        }
+    case .full:
+        updatedTurn["items"] = items
+    }
+    updatedTurn["itemsView"] = itemsView.rawValue
+    return updatedTurn
+}
+
+private func paginateThreadTurns(
+    _ turns: [[String: Any]],
+    cursor: String?,
+    limit: Int,
+    sortDirection: String?
+) throws -> AppServerThreadTurnsPage {
+    guard !turns.isEmpty else {
+        return AppServerThreadTurnsPage(turns: [], nextCursor: nil, backwardsCursor: nil)
+    }
+    let anchor = try cursor.map(parseThreadTurnsCursor)
+    let anchorIndex = anchor.flatMap { cursor in
+        turns.firstIndex { $0["id"] as? String == cursor.turnID }
+    }
+    if anchor != nil && anchorIndex == nil {
+        throw AppServerError.invalidRequest("invalid cursor: anchor turn is no longer present")
+    }
+
+    let descending = sortDirection != "asc"
+    var keyedTurns = Array(turns.enumerated())
+    if descending {
+        keyedTurns.reverse()
+    }
+    if let anchor, let anchorIndex {
+        keyedTurns = keyedTurns.filter { index, _ in
+            if descending {
+                return anchor.includeAnchor ? index <= anchorIndex : index < anchorIndex
+            }
+            return anchor.includeAnchor ? index >= anchorIndex : index > anchorIndex
+        }
+    }
+
+    let moreTurnsAvailable = keyedTurns.count > limit
+    keyedTurns = Array(keyedTurns.prefix(limit))
+    let backwardsCursor = try keyedTurns.first.map { _, turn in
+        try serializeThreadTurnsCursor(turnID: turn["id"] as? String ?? "", includeAnchor: true)
+    }
+    let nextCursor: String?
+    if moreTurnsAvailable {
+        nextCursor = try keyedTurns.last.map { _, turn in
+            try serializeThreadTurnsCursor(turnID: turn["id"] as? String ?? "", includeAnchor: false)
+        }
+    } else {
+        nextCursor = nil
+    }
+    return AppServerThreadTurnsPage(
+        turns: keyedTurns.map(\.element),
+        nextCursor: nextCursor,
+        backwardsCursor: backwardsCursor
+    )
+}
+
+private struct AppServerThreadTurnsCursor {
+    let turnID: String
+    let includeAnchor: Bool
+}
+
+private func serializeThreadTurnsCursor(turnID: String, includeAnchor: Bool) throws -> String {
+    let object: [String: Any] = [
+        "turnId": turnID,
+        "includeAnchor": includeAnchor
+    ]
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return String(data: data, encoding: .utf8) ?? "{}"
+}
+
+private func parseThreadTurnsCursor(_ cursor: String) throws -> AppServerThreadTurnsCursor {
+    guard let data = cursor.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let turnID = object["turnId"] as? String,
+          let includeAnchor = object["includeAnchor"] as? Bool
+    else {
+        throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+    }
+    return AppServerThreadTurnsCursor(turnID: turnID, includeAnchor: includeAnchor)
 }
 
 private struct RolloutSummary {
