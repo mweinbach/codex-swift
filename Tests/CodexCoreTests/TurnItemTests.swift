@@ -50,6 +50,50 @@ final class TurnItemTests: XCTestCase {
         ])
     }
 
+    func testAgentMessageItemPreservesPhaseAndMemoryCitationWireShape() throws {
+        let item = AgentMessageItem(
+            id: "agent-1",
+            content: [.text("hello")],
+            phase: .commentary,
+            memoryCitation: MemoryCitation(
+                entries: [
+                    MemoryCitationEntry(
+                        path: "MEMORY.md",
+                        lineStart: 12,
+                        lineEnd: 14,
+                        note: "port checkpoint"
+                    )
+                ],
+                rolloutIDs: ["019cc2ea-1dff-7902-8d40-c8f6e5d83cc4"]
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "id": "agent-1",
+            "content": [
+                [
+                    "type": "Text",
+                    "text": "hello"
+                ]
+            ],
+            "phase": "commentary",
+            "memory_citation": [
+                "entries": [
+                    [
+                        "path": "MEMORY.md",
+                        "lineStart": 12,
+                        "lineEnd": 14,
+                        "note": "port checkpoint"
+                    ]
+                ],
+                "rolloutIds": ["019cc2ea-1dff-7902-8d40-c8f6e5d83cc4"]
+            ]
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(AgentMessageItem.self, from: data), item)
+    }
+
     func testReasoningItemHonorsRawReasoningFlag() {
         let item = ReasoningItem(
             id: "reason-1",
@@ -111,7 +155,11 @@ final class TurnItemTests: XCTestCase {
     }
 
     func testTurnItemWireShapeUsesRustTags() throws {
-        let item = TurnItem.agentMessage(AgentMessageItem(id: "agent-1", content: [.text("hello")]))
+        let item = TurnItem.agentMessage(AgentMessageItem(
+            id: "agent-1",
+            content: [.text("hello")],
+            phase: .finalAnswer
+        ))
 
         try XCTAssertJSONObjectEqual(item, [
             "type": "AgentMessage",
@@ -121,7 +169,8 @@ final class TurnItemTests: XCTestCase {
                     "type": "Text",
                     "text": "hello"
                 ]
-            ]
+            ],
+            "phase": "final_answer"
         ])
 
         let data = try JSONEncoder().encode(item)

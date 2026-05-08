@@ -212,6 +212,8 @@ Source baseline inspected for this scaffold:
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`
   - response-item to turn-item projection for user/assistant/reasoning/web-search/image-generation items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
+- `codex-rs/protocol/src/memory_citation.rs` and `AgentMessageItem` fields from `codex-rs/protocol/src/items.rs`
+  - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
 - `codex-rs/core/src/function_tool.rs`

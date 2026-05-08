@@ -3,12 +3,12 @@ import Foundation
 public enum EventMapping {
     public static func parseTurnItem(_ item: ResponseItem) -> TurnItem? {
         switch item {
-        case let .message(id, role, content, _):
+        case let .message(id, role, content, phase):
             switch role {
             case "user":
                 return parseUserMessage(content).map(TurnItem.userMessage)
             case "assistant":
-                return .agentMessage(parseAgentMessage(id: id, content: content))
+                return .agentMessage(parseAgentMessage(id: id, content: content, phase: phase))
             case "system":
                 return nil
             default:
@@ -90,14 +90,18 @@ public enum EventMapping {
         return UserMessageItem(content: content)
     }
 
-    private static func parseAgentMessage(id: String?, content message: [ContentItem]) -> AgentMessageItem {
+    private static func parseAgentMessage(
+        id: String?,
+        content message: [ContentItem],
+        phase: MessagePhase?
+    ) -> AgentMessageItem {
         let content = message.compactMap { contentItem -> AgentMessageContent? in
             guard case let .outputText(text) = contentItem else {
                 return nil
             }
             return .text(text)
         }
-        return AgentMessageItem(id: id ?? UUID().uuidString.lowercased(), content: content)
+        return AgentMessageItem(id: id ?? UUID().uuidString.lowercased(), content: content, phase: phase)
     }
 
     private static func isSessionPrefix(_ text: String) -> Bool {

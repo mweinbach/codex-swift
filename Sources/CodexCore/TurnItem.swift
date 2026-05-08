@@ -152,10 +152,26 @@ public enum AgentMessageContent: Equatable, Codable, Sendable {
 public struct AgentMessageItem: Equatable, Codable, Sendable {
     public let id: String
     public let content: [AgentMessageContent]
+    public let phase: MessagePhase?
+    public let memoryCitation: MemoryCitation?
 
-    public init(id: String = UUID().uuidString.lowercased(), content: [AgentMessageContent]) {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case phase
+        case memoryCitation = "memory_citation"
+    }
+
+    public init(
+        id: String = UUID().uuidString.lowercased(),
+        content: [AgentMessageContent],
+        phase: MessagePhase? = nil,
+        memoryCitation: MemoryCitation? = nil
+    ) {
         self.id = id
         self.content = content
+        self.phase = phase
+        self.memoryCitation = memoryCitation
     }
 
     public func asLegacyEvents() -> [LegacyEventMessage] {

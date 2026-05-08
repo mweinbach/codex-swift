@@ -55,14 +55,16 @@ final class EventMappingTests: XCTestCase {
         let item = ResponseItem.message(
             id: "msg-1",
             role: "assistant",
-            content: [.outputText(text: "Hello from Codex")]
+            content: [.outputText(text: "Hello from Codex")],
+            phase: .commentary
         )
 
         let turnItem = EventMapping.parseTurnItem(item)
 
         XCTAssertEqual(turnItem, .agentMessage(AgentMessageItem(
             id: "msg-1",
-            content: [.text("Hello from Codex")]
+            content: [.text("Hello from Codex")],
+            phase: .commentary
         )))
     }
 
