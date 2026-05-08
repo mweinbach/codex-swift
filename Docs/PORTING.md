@@ -145,6 +145,8 @@ Source baseline inspected for this scaffold:
   - config layer source wire tags, precedence ordering, layer metadata, deterministic SHA256 layer versions, user-layer replacement, effective config merging, origin tracking, and project-layer root-to-cwd validation
 - `codex-rs/core/src/bash.rs`, `codex-rs/core/src/command_safety/is_safe_command.rs`, and `codex-rs/core/src/command_safety/is_dangerous_command.rs`
   - non-Windows command safety allow-list, dangerous command detection, approval-prompt gating, and conservative `bash`/`zsh -lc` plain-command sequence parsing for safe shell operators
+- `codex-rs/core/src/safety.rs`
+  - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
   - Swift-native prefix-rule policy model, parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, exec approval requirement derivation, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
