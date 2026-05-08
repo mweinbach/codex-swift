@@ -19,7 +19,10 @@ let package = Package(
         .executable(name: "codex-stdio-to-uds", targets: ["codex-stdio-to-uds"])
     ],
     targets: [
-        .target(name: "CodexCore"),
+        .target(
+            name: "CodexCore",
+            resources: [.process("Resources")]
+        ),
         .target(name: "CodexApplyPatch"),
         .target(name: "CodexGit"),
         .target(

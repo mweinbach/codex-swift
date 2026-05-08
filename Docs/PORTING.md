@@ -52,6 +52,8 @@ Source baseline inspected for this scaffold:
   - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, model preset merge/filter/default behavior, and offline/default model selection constants
 - `codex-rs/core/src/models_manager/model_presets.rs`
   - built-in model preset ordering, visibility filtering, default model marker, upgrade prompt metadata, supported reasoning effort labels, and migration config keys
+- `codex-rs/core/src/models_manager/model_family.rs` and model prompt includes from `codex-rs/core/*.md`
+  - model-family slug matching, context window defaults, base instruction prompts, reasoning/verbosity/tool capabilities, remote metadata overrides, config override order, truncation policy conversion, and auto-compact token-limit defaults
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`

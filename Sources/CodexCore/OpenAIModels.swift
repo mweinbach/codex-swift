@@ -226,6 +226,15 @@ public struct TruncationPolicyConfig: Equatable, Codable, Sendable {
     public static func tokens(_ limit: Int64) -> TruncationPolicyConfig {
         TruncationPolicyConfig(mode: .tokens, limit: limit)
     }
+
+    public var runtimePolicy: TruncationPolicy {
+        switch mode {
+        case .bytes:
+            return .bytes(Int(clamping: limit))
+        case .tokens:
+            return .tokens(Int(clamping: limit))
+        }
+    }
 }
 
 public struct ClientVersion: Equatable, Codable, Sendable {
