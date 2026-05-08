@@ -22,7 +22,7 @@ let package = Package(
         .target(name: "CodexGit"),
         .target(
             name: "CodexChatGPT",
-            dependencies: ["CodexGit"]
+            dependencies: ["CodexCore", "CodexGit"]
         ),
         .target(
             name: "CodexCLI",
