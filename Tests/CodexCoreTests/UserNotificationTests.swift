@@ -7,6 +7,7 @@ final class UserNotificationTests: XCTestCase {
             threadID: "b5f6c1c2-1111-2222-3333-444455556666",
             turnID: "12345",
             cwd: "/Users/example/project",
+            client: "codex-tui",
             inputMessages: ["Rename `foo` to `bar` and update the callsites."],
             lastAssistantMessage: "Rename complete and verified `cargo build` succeeds."
         )
@@ -17,6 +18,7 @@ final class UserNotificationTests: XCTestCase {
         XCTAssertEqual(object["thread-id"] as? String, "b5f6c1c2-1111-2222-3333-444455556666")
         XCTAssertEqual(object["turn-id"] as? String, "12345")
         XCTAssertEqual(object["cwd"] as? String, "/Users/example/project")
+        XCTAssertEqual(object["client"] as? String, "codex-tui")
         XCTAssertEqual(
             object["input-messages"] as? [String],
             ["Rename `foo` to `bar` and update the callsites."]
@@ -41,6 +43,7 @@ final class UserNotificationTests: XCTestCase {
 
         let object = try JSONObject(notification)
 
+        XCTAssertFalse(object.keys.contains("client"))
         XCTAssertTrue(object.keys.contains("last-assistant-message"))
         XCTAssertTrue(object["last-assistant-message"] is NSNull)
     }

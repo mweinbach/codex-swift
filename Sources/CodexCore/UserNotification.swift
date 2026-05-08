@@ -5,6 +5,7 @@ public enum UserNotification: Equatable, Codable, Sendable {
         threadID: String,
         turnID: String,
         cwd: String,
+        client: String? = nil,
         inputMessages: [String],
         lastAssistantMessage: String?
     )
@@ -14,6 +15,7 @@ public enum UserNotification: Equatable, Codable, Sendable {
         case threadID = "thread-id"
         case turnID = "turn-id"
         case cwd
+        case client
         case inputMessages = "input-messages"
         case lastAssistantMessage = "last-assistant-message"
     }
@@ -26,6 +28,7 @@ public enum UserNotification: Equatable, Codable, Sendable {
                 threadID: try container.decode(String.self, forKey: .threadID),
                 turnID: try container.decode(String.self, forKey: .turnID),
                 cwd: try container.decode(String.self, forKey: .cwd),
+                client: try container.decodeIfPresent(String.self, forKey: .client),
                 inputMessages: try container.decode([String].self, forKey: .inputMessages),
                 lastAssistantMessage: try container.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
             )
@@ -41,11 +44,12 @@ public enum UserNotification: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .agentTurnComplete(threadID, turnID, cwd, inputMessages, lastAssistantMessage):
+        case let .agentTurnComplete(threadID, turnID, cwd, client, inputMessages, lastAssistantMessage):
             try container.encode("agent-turn-complete", forKey: .type)
             try container.encode(threadID, forKey: .threadID)
             try container.encode(turnID, forKey: .turnID)
             try container.encode(cwd, forKey: .cwd)
+            try container.encodeIfPresent(client, forKey: .client)
             try container.encode(inputMessages, forKey: .inputMessages)
             try container.encode(lastAssistantMessage, forKey: .lastAssistantMessage)
         }
