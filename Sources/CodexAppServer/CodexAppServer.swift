@@ -1,5 +1,6 @@
 import CodexCore
 import CryptoKit
+import Dispatch
 import Foundation
 
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
@@ -1406,6 +1407,31 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func fsWatchParams(_ params: [String: Any]?) throws -> (watchID: String, path: String) {
+        guard let watchID = stringParam(params?["watchId"]) else {
+            throw AppServerError.invalidRequest("missing watchId")
+        }
+        let path = try absolutePathParam(params?["path"], name: "path")
+        return (watchID, path)
+    }
+
+    fileprivate static func fsUnwatchParams(_ params: [String: Any]?) throws -> String {
+        guard let watchID = stringParam(params?["watchId"]) else {
+            throw AppServerError.invalidRequest("missing watchId")
+        }
+        return watchID
+    }
+
+    fileprivate static func fsChangedNotification(watchID: String, changedPaths: [String]) -> [String: Any] {
+        [
+            "method": "fs/changed",
+            "params": [
+                "watchId": watchID,
+                "changedPaths": changedPaths
+            ]
+        ]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -2646,7 +2672,7 @@ public enum CodexAppServer {
         )
     }
 
-    private static func millisecondsSinceEpoch(_ date: Date?) -> Int64 {
+    fileprivate static func millisecondsSinceEpoch(_ date: Date?) -> Int64 {
         guard let date else {
             return 0
         }
@@ -4442,6 +4468,163 @@ fileprivate struct AppServerReviewStartOutcome {
     let startedThread: [String: Any]?
 }
 
+private struct AppServerFSWatchEntry: Equatable {
+    let exists: Bool
+    let isDirectory: Bool
+    let type: String
+    let modifiedAtMs: Int64
+    let size: UInt64
+    let linkDestination: String?
+}
+
+private struct AppServerFSWatchSnapshot: Equatable {
+    let root: AppServerFSWatchEntry
+    let children: [String: AppServerFSWatchEntry]
+}
+
+private final class AppServerFSWatch: @unchecked Sendable {
+    private let watchID: String
+    private let path: String
+    private let notificationSink: AppServerNotificationSink?
+    private let queue: DispatchQueue
+    private let lock = NSLock()
+    private var timer: DispatchSourceTimer?
+    private var lastSnapshot: AppServerFSWatchSnapshot
+    private var canceled = false
+
+    init(watchID: String, path: String, notificationSink: AppServerNotificationSink?) {
+        self.watchID = watchID
+        self.path = path
+        self.notificationSink = notificationSink
+        self.queue = DispatchQueue(label: "codex.app-server.fs-watch.\(watchID)")
+        self.lastSnapshot = Self.snapshot(path: path)
+    }
+
+    deinit {
+        cancel()
+    }
+
+    func start() {
+        guard notificationSink != nil else {
+            return
+        }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(200))
+        timer.setEventHandler { [weak self] in
+            self?.poll()
+        }
+        lock.withLock {
+            guard !canceled else {
+                timer.cancel()
+                return
+            }
+            self.timer = timer
+            timer.resume()
+        }
+    }
+
+    func cancel() {
+        let timer = lock.withLock {
+            canceled = true
+            let timer = self.timer
+            self.timer = nil
+            return timer
+        }
+        timer?.cancel()
+    }
+
+    private func poll() {
+        let previous = lock.withLock { lastSnapshot }
+        let current = Self.snapshot(path: path)
+        guard current != previous else {
+            return
+        }
+        let changedPaths = Self.changedPaths(path: path, previous: previous, current: current)
+        lock.withLock {
+            lastSnapshot = current
+        }
+        guard !changedPaths.isEmpty,
+              let notificationSink,
+              let data = CodexAppServer.encodeMessages([
+                CodexAppServer.fsChangedNotification(watchID: watchID, changedPaths: changedPaths)
+              ])
+        else {
+            return
+        }
+        Task { [weak self] in
+            guard self?.isCanceled == false else {
+                return
+            }
+            await notificationSink(data)
+        }
+    }
+
+    private var isCanceled: Bool {
+        lock.withLock { canceled }
+    }
+
+    private static func snapshot(path: String) -> AppServerFSWatchSnapshot {
+        let root = entry(path: path)
+        var children: [String: AppServerFSWatchEntry] = [:]
+        if root.exists, root.isDirectory {
+            let fileManager = FileManager.default
+            let names = (try? fileManager.contentsOfDirectory(atPath: path)) ?? []
+            for name in names {
+                let childPath = URL(fileURLWithPath: path, isDirectory: true)
+                    .appendingPathComponent(name)
+                    .path
+                children[name] = entry(path: childPath)
+            }
+        }
+        return AppServerFSWatchSnapshot(root: root, children: children)
+    }
+
+    private static func entry(path: String) -> AppServerFSWatchEntry {
+        let fileManager = FileManager.default
+        guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+              let type = attributes[.type] as? FileAttributeType
+        else {
+            return AppServerFSWatchEntry(
+                exists: false,
+                isDirectory: false,
+                type: "",
+                modifiedAtMs: 0,
+                size: 0,
+                linkDestination: nil
+            )
+        }
+        let modifiedAt = attributes[.modificationDate] as? Date
+        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let linkDestination = type == .typeSymbolicLink
+            ? try? fileManager.destinationOfSymbolicLink(atPath: path)
+            : nil
+        return AppServerFSWatchEntry(
+            exists: true,
+            isDirectory: type == .typeDirectory,
+            type: type.rawValue,
+            modifiedAtMs: CodexAppServer.millisecondsSinceEpoch(modifiedAt),
+            size: size,
+            linkDestination: linkDestination
+        )
+    }
+
+    private static func changedPaths(
+        path: String,
+        previous: AppServerFSWatchSnapshot,
+        current: AppServerFSWatchSnapshot
+    ) -> [String] {
+        guard previous.root.isDirectory, current.root.isDirectory else {
+            return previous.root == current.root ? [] : [path]
+        }
+        let names = Set(previous.children.keys).union(current.children.keys)
+        return names.sorted().compactMap { name in
+            previous.children[name] == current.children[name] ? nil : URL(fileURLWithPath: path, isDirectory: true)
+                .appendingPathComponent(name)
+                .path
+        }
+    }
+}
+
 final class CodexAppServerMessageProcessor {
     private let connectionID: AppServerConnectionID = 0
     private var initialized = false
@@ -4453,6 +4636,7 @@ final class CodexAppServerMessageProcessor {
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
     private var runtimeFeatureEnablement: [String: Bool] = [:]
+    private var fsWatches: [String: AppServerFSWatch] = [:]
 
     init(
         configuration: CodexAppServerConfiguration,
@@ -4470,6 +4654,9 @@ final class CodexAppServerMessageProcessor {
     deinit {
         for server in activeChatGPTLogins.values {
             server.cancel()
+        }
+        for watch in fsWatches.values {
+            watch.cancel()
         }
     }
 
@@ -4639,6 +4826,31 @@ final class CodexAppServerMessageProcessor {
             return ["status": "canceled"]
         }
         return ["status": "notFound"]
+    }
+
+    private func fsWatchResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try CodexAppServer.fsWatchParams(params)
+        guard fsWatches[parsed.watchID] == nil else {
+            throw AppServerError.invalidRequest("watchId already exists: \(parsed.watchID)")
+        }
+        let watch = AppServerFSWatch(
+            watchID: parsed.watchID,
+            path: parsed.path,
+            notificationSink: notificationSink
+        )
+        fsWatches[parsed.watchID] = watch
+        watch.start()
+        return [
+            "path": parsed.path
+        ]
+    }
+
+    private func fsUnwatchResult(params: [String: Any]?) throws -> [String: Any] {
+        let watchID = try CodexAppServer.fsUnwatchParams(params)
+        if let watch = fsWatches.removeValue(forKey: watchID) {
+            watch.cancel()
+        }
+        return [:]
     }
 
     func processLine(_ data: Data) -> Data? {
@@ -4856,6 +5068,16 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.fsCopyResult(params: params)
+                    )
+                case "fs/watch":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try fsWatchResult(params: params)
+                    )
+                case "fs/unwatch":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try fsUnwatchResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

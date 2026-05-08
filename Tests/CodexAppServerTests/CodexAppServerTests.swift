@@ -1209,6 +1209,86 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: copiedLink.path), "nested")
     }
 
+    func testFsWatchReportsDirectoryChangesAndUnwatchStopsNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let watched = temp.url.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: watched, withIntermediateDirectories: true)
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let watch = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fs/watch","params":{"watchId":"watch-repo","path":"\#(watched.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((watch["result"] as? [String: Any])?["path"] as? String, watched.path)
+
+        let changedFile = watched.appendingPathComponent("FETCH_HEAD", isDirectory: false)
+        try "updated\n".write(to: changedFile, atomically: true, encoding: .utf8)
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "fs/changed")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["watchId"] as? String, "watch-repo")
+        XCTAssertEqual(params["changedPaths"] as? [String], [changedFile.path])
+
+        let unwatch = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"fs/unwatch","params":{"watchId":"watch-repo"}}"#.utf8
+        )))
+        XCTAssertNotNil(unwatch["result"] as? [String: Any])
+        try "refs\n".write(
+            to: watched.appendingPathComponent("packed-refs", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await Task.sleep(nanoseconds: 600_000_000)
+        let payloadsAfterUnwatch = await notificationCapture.payloadsData()
+        XCTAssertEqual(payloadsAfterUnwatch, [])
+    }
+
+    func testFsWatchAllowsMissingFileTargetsAndRejectsDuplicateOrRelativeWatch() async throws {
+        let temp = try TemporaryDirectory()
+        let watched = temp.url.appendingPathComponent("FETCH_HEAD", isDirectory: false)
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let watch = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fs/watch","params":{"watchId":"watch-fetch","path":"\#(watched.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((watch["result"] as? [String: Any])?["path"] as? String, watched.path)
+
+        let duplicate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"fs/watch","params":{"watchId":"watch-fetch","path":"\#(watched.path)"}}"#.utf8
+        )))
+        XCTAssertEqual(
+            (duplicate["error"] as? [String: Any])?["message"] as? String,
+            "watchId already exists: watch-fetch"
+        )
+
+        let relative = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"fs/watch","params":{"watchId":"watch-relative","path":"relative-path"}}"#.utf8
+        )))
+        XCTAssertEqual(
+            (relative["error"] as? [String: Any])?["message"] as? String,
+            "Invalid request: AbsolutePathBuf deserialized without a base path"
+        )
+
+        try "origin/main\n".write(to: watched, atomically: true, encoding: .utf8)
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["watchId"] as? String, "watch-fetch")
+        XCTAssertEqual(params["changedPaths"] as? [String], [watched.path])
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -3381,6 +3461,24 @@ final class CodexAppServerTests: XCTestCase {
         return processor
     }
 
+    private func nextNotificationPayload(
+        _ capture: AppServerNotificationCapture,
+        timeoutNanoseconds: UInt64 = 2_000_000_000
+    ) async throws -> Data {
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                await capture.nextPayload()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                throw AppServerTestTimeout()
+            }
+            let value = try await group.next()
+            group.cancelAll()
+            return try XCTUnwrap(value)
+        }
+    }
+
     private func testConfiguration(
         codexHome: URL,
         requiresOpenAIAuth: Bool = true,
@@ -3636,6 +3734,8 @@ private actor AppServerMcpOAuthLoginCapture {
         requests.append(request)
     }
 }
+
+private struct AppServerTestTimeout: Error {}
 
 private actor AppServerNotificationCapture {
     private var payloads: [Data] = []
