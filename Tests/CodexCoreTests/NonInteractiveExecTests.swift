@@ -206,6 +206,40 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testResponsesLoopDoesNotExecuteHostedImageGenerationCall() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "generate an image")])
+        ])
+        let counter = ToolCallCounter()
+        let imageItem = ResponseItem.imageGenerationCall(
+            id: "ig-1",
+            status: "completed",
+            revisedPrompt: "A tiny blue square",
+            result: "Zm9v"
+        )
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { _ in
+                .success([
+                    .success(.outputItemDone(imageItem)),
+                    .success(.completed(responseID: "resp-1", tokenUsage: nil))
+                ])
+            },
+            executeFunctionCall: { item in
+                await counter.increment()
+                return .functionCallOutput(
+                    callID: "bad",
+                    output: FunctionCallOutputPayload(content: "\(item)", success: false)
+                )
+            }
+        )
+
+        let toolCallCount = await counter.value()
+        XCTAssertEqual(toolCallCount, 0)
+        XCTAssertEqual(result.transcriptItems, [imageItem])
+    }
+
     func testShellCommandFunctionCallRunsUserShellCommand() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let item = ResponseItem.functionCall(
@@ -672,6 +706,18 @@ private extension NonInteractiveExecTests {
     static func jsonString(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private actor ToolCallCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    func value() -> Int {
+        count
     }
 }
 

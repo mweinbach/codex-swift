@@ -3479,6 +3479,22 @@ private struct AppServerThreadHistoryBuilder {
             }
             ensureTurn()
             appendReasoning(summary: nil, content: payload.text)
+        case let .imageGenerationBegin(payload):
+            upsertImageGeneration(
+                id: payload.callID,
+                status: "",
+                revisedPrompt: nil,
+                result: "",
+                savedPath: nil
+            )
+        case let .imageGenerationEnd(payload):
+            upsertImageGeneration(
+                id: payload.callID,
+                status: payload.status,
+                revisedPrompt: payload.revisedPrompt,
+                result: payload.result,
+                savedPath: payload.savedPath
+            )
         case let .enteredReviewMode(request):
             finishCurrentTurn()
             startTurn()
@@ -3564,6 +3580,34 @@ private struct AppServerThreadHistoryBuilder {
             "summary": summary.map { [$0] } ?? [],
             "content": content.map { [$0] } ?? []
         ])
+    }
+
+    private mutating func upsertImageGeneration(
+        id: String,
+        status: String,
+        revisedPrompt: String?,
+        result: String,
+        savedPath: AbsolutePath?
+    ) {
+        ensureTurn()
+        var item: [String: Any] = [
+            "type": "imageGeneration",
+            "id": id,
+            "status": status,
+            "revisedPrompt": revisedPrompt ?? NSNull(),
+            "result": result
+        ]
+        if let savedPath {
+            item["savedPath"] = savedPath.path
+        }
+
+        if let index = currentItems.firstIndex(where: {
+            $0["type"] as? String == "imageGeneration" && $0["id"] as? String == id
+        }) {
+            currentItems[index] = item
+        } else {
+            currentItems.append(item)
+        }
     }
 
     private mutating func nextTurnID() -> String {

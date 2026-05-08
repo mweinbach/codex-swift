@@ -645,7 +645,7 @@ public enum NonInteractiveExec {
     private static func toolCalls(from items: [ResponseItem]) -> [ResponseItem] {
         items.filter { item in
             switch item {
-            case .functionCall, .customToolCall, .localShellCall, .toolSearchCall, .imageGenerationCall:
+            case .functionCall, .customToolCall, .localShellCall, .toolSearchCall:
                 return true
             case .message,
                  .reasoning,
@@ -653,6 +653,7 @@ public enum NonInteractiveExec {
                  .customToolCallOutput,
                  .toolSearchOutput,
                  .webSearchCall,
+                 .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
                  .knownPersisted,

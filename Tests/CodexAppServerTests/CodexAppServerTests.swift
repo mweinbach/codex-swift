@@ -417,6 +417,54 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondContent[1]["url"] as? String, "https://example.test/image.png")
     }
 
+    func testThreadResumeRebuildsImageGenerationEvents() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Generate an image",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let savedPath = try AbsolutePath(absolutePath: "/tmp/generated.png")
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1")),
+                .imageGenerationEnd(ImageGenerationEndEvent(
+                    callID: "ig-1",
+                    status: "completed",
+                    revisedPrompt: "A tiny blue square",
+                    result: "Zm9v",
+                    savedPath: savedPath
+                ))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        let items = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["type"] as? String }, ["userMessage", "imageGeneration"])
+        let image = items[1]
+        XCTAssertEqual(image["id"] as? String, "ig-1")
+        XCTAssertEqual(image["status"] as? String, "completed")
+        XCTAssertEqual(image["revisedPrompt"] as? String, "A tiny blue square")
+        XCTAssertEqual(image["result"] as? String, "Zm9v")
+        XCTAssertEqual(image["savedPath"] as? String, "/tmp/generated.png")
+    }
+
     func testThreadResumeRejectsMissingRollout() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()

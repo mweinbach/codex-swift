@@ -1,12 +1,51 @@
 import Foundation
 
+public enum ImageGenerationArtifactError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidPayload
+
+    public var description: String {
+        switch self {
+        case .invalidPayload:
+            return "invalid image generation payload"
+        }
+    }
+}
+
 public enum StreamEventUtils {
-    public static func handleNonToolResponseItem(_ item: ResponseItem) -> TurnItem? {
+    private static let generatedImageArtifactsDirectory = "generated_images"
+
+    public static func handleNonToolResponseItem(
+        _ item: ResponseItem,
+        codexHome: URL? = nil,
+        sessionID: String? = nil
+    ) -> TurnItem? {
         switch item {
         case .message,
              .reasoning,
-             .webSearchCall:
-            return EventMapping.parseTurnItem(item)
+             .webSearchCall,
+             .imageGenerationCall:
+            guard var turnItem = EventMapping.parseTurnItem(item) else {
+                return nil
+            }
+            if case let .imageGeneration(imageItem) = turnItem,
+               let codexHome,
+               let sessionID,
+               let savedPath = try? saveImageGenerationResult(
+                   codexHome: codexHome,
+                   sessionID: sessionID,
+                   callID: imageItem.id,
+                   result: imageItem.result
+               )
+            {
+                turnItem = .imageGeneration(ImageGenerationItem(
+                    id: imageItem.id,
+                    status: imageItem.status,
+                    revisedPrompt: imageItem.revisedPrompt,
+                    result: imageItem.result,
+                    savedPath: savedPath
+                ))
+            }
+            return turnItem
         case .functionCallOutput,
              .customToolCallOutput,
              .toolSearchCall,
@@ -14,7 +53,6 @@ public enum StreamEventUtils {
              .localShellCall,
              .functionCall,
              .customToolCall,
-             .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
              .knownPersisted,
@@ -58,6 +96,53 @@ public enum StreamEventUtils {
         case .message:
             return nil
         }
+    }
+
+    public static func imageGenerationArtifactPath(
+        codexHome: URL,
+        sessionID: String,
+        callID: String
+    ) throws -> AbsolutePath {
+        let path = codexHome
+            .appendingPathComponent(generatedImageArtifactsDirectory, isDirectory: true)
+            .appendingPathComponent(sanitizeImageArtifactComponent(sessionID), isDirectory: true)
+            .appendingPathComponent("\(sanitizeImageArtifactComponent(callID)).png", isDirectory: false)
+        return try AbsolutePath(absolutePath: path.standardizedFileURL.path)
+    }
+
+    @discardableResult
+    public static func saveImageGenerationResult(
+        codexHome: URL,
+        sessionID: String,
+        callID: String,
+        result: String,
+        fileManager: FileManager = .default
+    ) throws -> AbsolutePath {
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: trimmed, options: []) else {
+            throw ImageGenerationArtifactError.invalidPayload
+        }
+
+        let path = try imageGenerationArtifactPath(codexHome: codexHome, sessionID: sessionID, callID: callID)
+        let url = URL(fileURLWithPath: path.path, isDirectory: false)
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: url)
+        return path
+    }
+
+    private static func sanitizeImageArtifactComponent(_ value: String) -> String {
+        let sanitized = String(value.map { character in
+            if character.isASCII,
+               character.isLetter || character.isNumber || character == "-" || character == "_"
+            {
+                return character
+            }
+            return "_"
+        })
+        return sanitized.isEmpty ? "generated_image" : sanitized
     }
 }
 
