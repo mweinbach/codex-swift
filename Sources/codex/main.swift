@@ -23,6 +23,7 @@ let exitCode = await cli.runAsync(
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
     execPolicyRunner: runExecPolicyCommand,
+    sandboxRunner: runSandboxCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
     cloudRunner: runCloudCommand
 )
@@ -134,6 +135,28 @@ private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) 
         }
         let output = try ExecPolicyCheck.run(rulePaths: ruleURLs, command: command, pretty: pretty)
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+}
+
+private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    switch request.action {
+    case let .macos(fullAuto, _, command):
+        let exitCode = try SeatbeltSandbox.run(
+            command: command,
+            fullAuto: fullAuto,
+            cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        )
+        return CodexCLI.CommandExecutionResult(exitCode: exitCode)
+    case .linux:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 1,
+            stderrMessage: "Landlock sandbox is only available on Linux"
+        )
+    case .windows:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 1,
+            stderrMessage: "Windows sandbox is only available on Windows"
+        )
     }
 }
 
