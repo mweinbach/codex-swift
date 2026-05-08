@@ -190,6 +190,8 @@ Source baseline inspected for this scaffold:
   - thread-spawn edge status wire values, shared graph-store error display strings, storage-neutral graph-store protocol, and in-memory direct-child/descendant listing semantics with stable thread-id ordering, reparenting on child upsert, missing-child status no-op, and breadth-first traversal with status-filter pruning
 - Initial hook protocol models from `codex-rs/protocol/src/protocol.rs` and `codex-rs/hooks/src/lib.rs`
   - hook event/type/mode/scope/source/trust/run-status/output-entry wire values, run-summary started/completed event shapes with explicit null optionals, hook config-label constants, matcher-capable event list, and persisted hook key formatting
+- Initial realtime conversation protocol models from `codex-rs/protocol/src/protocol.rs`
+  - conversation start/audio/text/list-voices operation wire shapes, double-optional prompt encoding, websocket/WebRTC transport tags, stable builtin voice lists, realtime event external tags, and lifecycle/list-voices response payloads
 - `codex-rs/process-hardening/src/lib.rs`
   - macOS pre-main process hardening for debugger attach denial, core-dump limit disabling, byte-level environment key filtering, and `DYLD_` environment removal before CLI dispatch
 - `codex-rs/core/src/safety.rs`
@@ -368,5 +370,6 @@ The executable is not functionally equivalent yet. Some commands have native run
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
 - persistent SQLite-backed local agent graph store adapter
 - hook discovery, execution, output parsing/spilling, and config-state integration
+- realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

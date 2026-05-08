@@ -17,6 +17,11 @@ public enum ReasoningEffortOverride: Equatable, Sendable {
 
 public enum Op: Equatable, Sendable {
     case interrupt
+    case realtimeConversationStart(ConversationStartParams)
+    case realtimeConversationAudio(ConversationAudioParams)
+    case realtimeConversationText(ConversationTextParams)
+    case realtimeConversationClose
+    case realtimeConversationListVoices
     case userInput(items: [UserInput])
     case userTurn(
         items: [UserInput],
@@ -61,6 +66,12 @@ public enum Op: Equatable, Sendable {
         case effort
         case summary
         case finalOutputJSONSchema = "final_output_json_schema"
+        case outputModality = "output_modality"
+        case prompt
+        case realtimeSessionID = "realtime_session_id"
+        case transport
+        case voice
+        case frame
         case id
         case decision
         case serverName = "server_name"
@@ -76,6 +87,11 @@ public enum Op: Equatable, Sendable {
 
     private enum OperationType: String, Codable {
         case interrupt
+        case realtimeConversationStart = "realtime_conversation_start"
+        case realtimeConversationAudio = "realtime_conversation_audio"
+        case realtimeConversationText = "realtime_conversation_text"
+        case realtimeConversationClose = "realtime_conversation_close"
+        case realtimeConversationListVoices = "realtime_conversation_list_voices"
         case userInput = "user_input"
         case userTurn = "user_turn"
         case overrideTurnContext = "override_turn_context"
@@ -102,6 +118,16 @@ extension Op: Codable {
         switch try container.decode(OperationType.self, forKey: .type) {
         case .interrupt:
             self = .interrupt
+        case .realtimeConversationStart:
+            self = .realtimeConversationStart(try ConversationStartParams(from: decoder))
+        case .realtimeConversationAudio:
+            self = .realtimeConversationAudio(try ConversationAudioParams(from: decoder))
+        case .realtimeConversationText:
+            self = .realtimeConversationText(try ConversationTextParams(from: decoder))
+        case .realtimeConversationClose:
+            self = .realtimeConversationClose
+        case .realtimeConversationListVoices:
+            self = .realtimeConversationListVoices
         case .userInput:
             self = .userInput(items: try container.decode([UserInput].self, forKey: .items))
         case .userTurn:
@@ -176,6 +202,19 @@ extension Op: Codable {
         switch self {
         case .interrupt:
             try container.encode(OperationType.interrupt, forKey: .type)
+        case let .realtimeConversationStart(params):
+            try container.encode(OperationType.realtimeConversationStart, forKey: .type)
+            try params.encode(to: encoder)
+        case let .realtimeConversationAudio(params):
+            try container.encode(OperationType.realtimeConversationAudio, forKey: .type)
+            try params.encode(to: encoder)
+        case let .realtimeConversationText(params):
+            try container.encode(OperationType.realtimeConversationText, forKey: .type)
+            try params.encode(to: encoder)
+        case .realtimeConversationClose:
+            try container.encode(OperationType.realtimeConversationClose, forKey: .type)
+        case .realtimeConversationListVoices:
+            try container.encode(OperationType.realtimeConversationListVoices, forKey: .type)
         case let .userInput(items):
             try container.encode(OperationType.userInput, forKey: .type)
             try container.encode(items, forKey: .items)
