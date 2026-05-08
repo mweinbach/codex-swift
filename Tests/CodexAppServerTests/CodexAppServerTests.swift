@@ -1005,6 +1005,210 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("keep.txt").path))
     }
 
+    func testFsGetMetadataReturnsOnlyUsedFields() throws {
+        let temp = try TemporaryDirectory()
+        let file = temp.url.appendingPathComponent("note.txt", isDirectory: false)
+        try "hello".write(to: file, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fs/getMetadata","params":{"path":"\#(file.path)"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result.keys.sorted(), ["createdAtMs", "isDirectory", "isFile", "isSymlink", "modifiedAtMs"])
+        XCTAssertEqual(result["isDirectory"] as? Bool, false)
+        XCTAssertEqual(result["isFile"] as? Bool, true)
+        XCTAssertEqual(result["isSymlink"] as? Bool, false)
+        XCTAssertGreaterThan(result["modifiedAtMs"] as? Int64 ?? 0, 0)
+    }
+
+    func testFsGetMetadataReportsSymlink() throws {
+        let temp = try TemporaryDirectory()
+        let file = temp.url.appendingPathComponent("note.txt", isDirectory: false)
+        let link = temp.url.appendingPathComponent("note-link.txt", isDirectory: false)
+        try "hello".write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fs/getMetadata","params":{"path":"\#(link.path)"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["isDirectory"] as? Bool, false)
+        XCTAssertEqual(result["isFile"] as? Bool, true)
+        XCTAssertEqual(result["isSymlink"] as? Bool, true)
+    }
+
+    func testFsMethodsCoverCurrentFsUtilsSurface() throws {
+        let temp = try TemporaryDirectory()
+        let source = temp.url.appendingPathComponent("source", isDirectory: true)
+        let nested = source.appendingPathComponent("nested", isDirectory: true)
+        let nestedFile = nested.appendingPathComponent("note.txt", isDirectory: false)
+        let sourceFile = source.appendingPathComponent("root.txt", isDirectory: false)
+        let copiedFile = temp.url.appendingPathComponent("copy.txt", isDirectory: false)
+        let copiedDir = temp.url.appendingPathComponent("copied", isDirectory: true)
+        let nestedPayload = Data("hello from app-server".utf8).base64EncodedString()
+        let sourcePayload = Data("hello from source root".utf8).base64EncodedString()
+
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":1,"method":"fs/createDirectory","params":{"path":"\#(nested.path)"}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":2,"method":"fs/writeFile","params":{"path":"\#(nestedFile.path)","dataBase64":"\#(nestedPayload)"}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":3,"method":"fs/writeFile","params":{"path":"\#(sourceFile.path)","dataBase64":"\#(sourcePayload)"}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+
+        let read = try appServerResponse(
+            #"{"id":4,"method":"fs/readFile","params":{"path":"\#(nestedFile.path)"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((read["result"] as? [String: Any])?["dataBase64"] as? String, nestedPayload)
+
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":5,"method":"fs/copy","params":{"sourcePath":"\#(nestedFile.path)","destinationPath":"\#(copiedFile.path)","recursive":false}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+        XCTAssertEqual(try String(contentsOf: copiedFile, encoding: .utf8), "hello from app-server")
+
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":6,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(copiedDir.path)","recursive":true}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+        XCTAssertEqual(
+            try String(contentsOf: copiedDir.appendingPathComponent("nested/note.txt"), encoding: .utf8),
+            "hello from app-server"
+        )
+
+        let directory = try appServerResponse(
+            #"{"id":7,"method":"fs/readDirectory","params":{"path":"\#(source.path)"}}"#,
+            codexHome: temp.url
+        )
+        let entries = try XCTUnwrap((directory["result"] as? [String: Any])?["entries"] as? [[String: Any]])
+            .sorted { ($0["fileName"] as? String ?? "") < ($1["fileName"] as? String ?? "") }
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0]["fileName"] as? String, "nested")
+        XCTAssertEqual(entries[0]["isDirectory"] as? Bool, true)
+        XCTAssertEqual(entries[0]["isFile"] as? Bool, false)
+        XCTAssertEqual(entries[1]["fileName"] as? String, "root.txt")
+        XCTAssertEqual(entries[1]["isDirectory"] as? Bool, false)
+        XCTAssertEqual(entries[1]["isFile"] as? Bool, true)
+
+        XCTAssertNotNil(try appServerResponse(
+            #"{"id":8,"method":"fs/remove","params":{"path":"\#(copiedDir.path)"}}"#,
+            codexHome: temp.url
+        )["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copiedDir.path))
+    }
+
+    func testFsWriteFileAcceptsBase64BytesAndRejectsInvalidBase64() throws {
+        let temp = try TemporaryDirectory()
+        let file = temp.url.appendingPathComponent("blob.bin", isDirectory: false)
+        let bytes = Data([0, 1, 2, 255])
+
+        let write = try appServerResponse(
+            #"{"id":1,"method":"fs/writeFile","params":{"path":"\#(file.path)","dataBase64":"\#(bytes.base64EncodedString())"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(write["result"] as? [String: Any])
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+
+        let read = try appServerResponse(
+            #"{"id":2,"method":"fs/readFile","params":{"path":"\#(file.path)"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((read["result"] as? [String: Any])?["dataBase64"] as? String, bytes.base64EncodedString())
+
+        let invalid = try appServerResponse(
+            #"{"id":3,"method":"fs/writeFile","params":{"path":"\#(file.path)","dataBase64":"%%%"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.hasPrefix("fs/writeFile requires valid base64 dataBase64:") == true)
+    }
+
+    func testFsMethodsRejectRelativePaths() throws {
+        let temp = try TemporaryDirectory()
+        let absoluteFile = temp.url.appendingPathComponent("absolute.txt", isDirectory: false)
+        try "hello".write(to: absoluteFile, atomically: true, encoding: .utf8)
+        let expected = "Invalid request: AbsolutePathBuf deserialized without a base path"
+
+        let read = try appServerResponse(#"{"id":1,"method":"fs/readFile","params":{"path":"relative.txt"}}"#, codexHome: temp.url)
+        XCTAssertEqual((read["error"] as? [String: Any])?["message"] as? String, expected)
+        let write = try appServerResponse(#"{"id":2,"method":"fs/writeFile","params":{"path":"relative.txt","dataBase64":"aGVsbG8="}}"#, codexHome: temp.url)
+        XCTAssertEqual((write["error"] as? [String: Any])?["message"] as? String, expected)
+        let create = try appServerResponse(#"{"id":3,"method":"fs/createDirectory","params":{"path":"relative-dir","recursive":null}}"#, codexHome: temp.url)
+        XCTAssertEqual((create["error"] as? [String: Any])?["message"] as? String, expected)
+        let metadata = try appServerResponse(#"{"id":4,"method":"fs/getMetadata","params":{"path":"relative.txt"}}"#, codexHome: temp.url)
+        XCTAssertEqual((metadata["error"] as? [String: Any])?["message"] as? String, expected)
+        let directory = try appServerResponse(#"{"id":5,"method":"fs/readDirectory","params":{"path":"relative-dir"}}"#, codexHome: temp.url)
+        XCTAssertEqual((directory["error"] as? [String: Any])?["message"] as? String, expected)
+        let remove = try appServerResponse(#"{"id":6,"method":"fs/remove","params":{"path":"relative.txt","recursive":null,"force":null}}"#, codexHome: temp.url)
+        XCTAssertEqual((remove["error"] as? [String: Any])?["message"] as? String, expected)
+        let copySource = try appServerResponse(
+            #"{"id":7,"method":"fs/copy","params":{"sourcePath":"relative.txt","destinationPath":"\#(absoluteFile.path)","recursive":false}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((copySource["error"] as? [String: Any])?["message"] as? String, expected)
+        let copyDestination = try appServerResponse(
+            #"{"id":8,"method":"fs/copy","params":{"sourcePath":"\#(absoluteFile.path)","destinationPath":"relative-copy.txt","recursive":false}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((copyDestination["error"] as? [String: Any])?["message"] as? String, expected)
+    }
+
+    func testFsCopyRejectsDirectoryWithoutRecursiveAndDescendantCopy() throws {
+        let temp = try TemporaryDirectory()
+        let source = temp.url.appendingPathComponent("source", isDirectory: true)
+        let nested = source.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+
+        let withoutRecursive = try appServerResponse(
+            #"{"id":1,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(temp.url.appendingPathComponent("dest").path)","recursive":false}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (withoutRecursive["error"] as? [String: Any])?["message"] as? String,
+            "fs/copy requires recursive: true when sourcePath is a directory"
+        )
+
+        let descendant = try appServerResponse(
+            #"{"id":2,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(nested.appendingPathComponent("copy").path)","recursive":true}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (descendant["error"] as? [String: Any])?["message"] as? String,
+            "fs/copy cannot copy a directory to itself or one of its descendants"
+        )
+    }
+
+    func testFsCopyPreservesSymlinksInRecursiveCopy() throws {
+        let temp = try TemporaryDirectory()
+        let source = temp.url.appendingPathComponent("source", isDirectory: true)
+        let nested = source.appendingPathComponent("nested", isDirectory: true)
+        let copied = temp.url.appendingPathComponent("copied", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: source.appendingPathComponent("nested-link", isDirectory: false).path,
+            withDestinationPath: "nested"
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(copied.path)","recursive":true}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        let copiedLink = copied.appendingPathComponent("nested-link", isDirectory: false)
+        let attributes = try FileManager.default.attributesOfItem(atPath: copiedLink.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: copiedLink.path), "nested")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

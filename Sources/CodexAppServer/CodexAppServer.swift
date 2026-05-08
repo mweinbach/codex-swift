@@ -1285,6 +1285,127 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func fsReadFileResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        let data = try Data(contentsOf: URL(fileURLWithPath: path, isDirectory: false))
+        return [
+            "dataBase64": data.base64EncodedString()
+        ]
+    }
+
+    fileprivate static func fsWriteFileResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        guard let dataBase64 = stringParam(params?["dataBase64"]) else {
+            throw AppServerError.invalidRequest("missing dataBase64")
+        }
+        guard let data = Data(base64Encoded: dataBase64) else {
+            throw AppServerError.invalidRequest("fs/writeFile requires valid base64 dataBase64: invalid base64 data")
+        }
+        do {
+            try data.write(to: URL(fileURLWithPath: path, isDirectory: false))
+        } catch {
+            throw mapFilesystemError(error)
+        }
+        return [:]
+    }
+
+    fileprivate static func fsCreateDirectoryResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        let recursive = boolParam(params?["recursive"], defaultValue: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: path, isDirectory: true),
+                withIntermediateDirectories: recursive
+            )
+        } catch {
+            throw mapFilesystemError(error)
+        }
+        return [:]
+    }
+
+    fileprivate static func fsGetMetadataResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        do {
+            let metadata = try filesystemMetadata(path: path)
+            return [
+                "isDirectory": metadata.isDirectory,
+                "isFile": metadata.isFile,
+                "isSymlink": metadata.isSymlink,
+                "createdAtMs": metadata.createdAtMs,
+                "modifiedAtMs": metadata.modifiedAtMs
+            ]
+        } catch {
+            throw mapFilesystemError(error)
+        }
+    }
+
+    fileprivate static func fsReadDirectoryResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        do {
+            let contents = try FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: path, isDirectory: true),
+                includingPropertiesForKeys: nil,
+                options: []
+            )
+            let entries = try contents.map { url in
+                let metadata = try filesystemMetadata(path: url.path)
+                return [
+                    "fileName": url.lastPathComponent,
+                    "isDirectory": metadata.isDirectory,
+                    "isFile": metadata.isFile
+                ]
+            }
+            return [
+                "entries": entries
+            ]
+        } catch {
+            throw mapFilesystemError(error)
+        }
+    }
+
+    fileprivate static func fsRemoveResult(params: [String: Any]?) throws -> [String: Any] {
+        let path = try absolutePathParam(params?["path"], name: "path")
+        let recursive = boolParam(params?["recursive"], defaultValue: true)
+        let force = boolParam(params?["force"], defaultValue: true)
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) || isSymlink(path: path) else {
+            if force {
+                return [:]
+            }
+            throw AppServerError.internalError("No such file or directory")
+        }
+        do {
+            if !recursive, isDirectory(path: path) {
+                throw AppServerError.invalidRequest("Directory not empty")
+            }
+            try FileManager.default.removeItem(at: url)
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw mapFilesystemError(error)
+        }
+        return [:]
+    }
+
+    fileprivate static func fsCopyResult(params: [String: Any]?) throws -> [String: Any] {
+        let sourcePath = try absolutePathParam(params?["sourcePath"], name: "sourcePath")
+        let destinationPath = try absolutePathParam(params?["destinationPath"], name: "destinationPath")
+        let recursive = boolParam(params?["recursive"], defaultValue: false)
+        do {
+            try copyFilesystemItem(
+                sourcePath: sourcePath,
+                destinationPath: destinationPath,
+                recursive: recursive,
+                topLevel: true
+            )
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw mapFilesystemError(error)
+        }
+        return [:]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -2473,6 +2594,156 @@ public enum CodexAppServer {
 
     fileprivate static func stringParam(_ value: Any?) -> String? {
         value as? String
+    }
+
+    private static func absolutePathParam(_ value: Any?, name: String) throws -> String {
+        guard let path = stringParam(value) else {
+            throw AppServerError.invalidRequest("missing \(name)")
+        }
+        guard path.hasPrefix("/") else {
+            throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
+        }
+        return path
+    }
+
+    private struct FilesystemMetadata {
+        let isDirectory: Bool
+        let isFile: Bool
+        let isSymlink: Bool
+        let createdAtMs: Int64
+        let modifiedAtMs: Int64
+    }
+
+    private static func filesystemMetadata(path: String) throws -> FilesystemMetadata {
+        let fileManager = FileManager.default
+        let linkAttributes = try fileManager.attributesOfItem(atPath: path)
+        let isSymlink = (linkAttributes[.type] as? FileAttributeType) == .typeSymbolicLink
+        let targetAttributes: [FileAttributeKey: Any]
+        if isSymlink {
+            let destination = try fileManager.destinationOfSymbolicLink(atPath: path)
+            let resolvedPath: String
+            if destination.hasPrefix("/") {
+                resolvedPath = destination
+            } else {
+                resolvedPath = URL(fileURLWithPath: path).deletingLastPathComponent()
+                    .appendingPathComponent(destination)
+                    .standardized
+                    .path
+            }
+            targetAttributes = try fileManager.attributesOfItem(atPath: resolvedPath)
+        } else {
+            targetAttributes = linkAttributes
+        }
+        let type = targetAttributes[.type] as? FileAttributeType
+        let createdAt = targetAttributes[.creationDate] as? Date
+        let modifiedAt = targetAttributes[.modificationDate] as? Date
+        return FilesystemMetadata(
+            isDirectory: type == .typeDirectory,
+            isFile: type == .typeRegular,
+            isSymlink: isSymlink,
+            createdAtMs: millisecondsSinceEpoch(createdAt),
+            modifiedAtMs: millisecondsSinceEpoch(modifiedAt)
+        )
+    }
+
+    private static func millisecondsSinceEpoch(_ date: Date?) -> Int64 {
+        guard let date else {
+            return 0
+        }
+        return Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    private static func isSymlink(path: String) -> Bool {
+        guard let type = try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType else {
+            return false
+        }
+        return type == .typeSymbolicLink
+    }
+
+    private static func isDirectory(path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private static func copyFilesystemItem(
+        sourcePath: String,
+        destinationPath: String,
+        recursive: Bool,
+        topLevel: Bool
+    ) throws {
+        let fileManager = FileManager.default
+        let sourceAttributes = try fileManager.attributesOfItem(atPath: sourcePath)
+        let sourceType = sourceAttributes[.type] as? FileAttributeType
+
+        if sourceType == .typeSymbolicLink {
+            let destination = try fileManager.destinationOfSymbolicLink(atPath: sourcePath)
+            try fileManager.createSymbolicLink(atPath: destinationPath, withDestinationPath: destination)
+            return
+        }
+
+        if sourceType == .typeRegular {
+            try fileManager.copyItem(atPath: sourcePath, toPath: destinationPath)
+            return
+        }
+
+        guard sourceType == .typeDirectory else {
+            if topLevel {
+                throw AppServerError.invalidRequest("fs/copy only supports regular files, directories, and symlinks")
+            }
+            return
+        }
+
+        guard recursive else {
+            throw AppServerError.invalidRequest("fs/copy requires recursive: true when sourcePath is a directory")
+        }
+        if topLevel, isSameOrDescendant(path: destinationPath, of: sourcePath) {
+            throw AppServerError.invalidRequest("fs/copy cannot copy a directory to itself or one of its descendants")
+        }
+
+        try fileManager.createDirectory(
+            atPath: destinationPath,
+            withIntermediateDirectories: false
+        )
+        let childNames = try fileManager.contentsOfDirectory(atPath: sourcePath)
+        for childName in childNames {
+            try copyFilesystemItem(
+                sourcePath: URL(fileURLWithPath: sourcePath, isDirectory: true)
+                    .appendingPathComponent(childName)
+                    .path,
+                destinationPath: URL(fileURLWithPath: destinationPath, isDirectory: true)
+                    .appendingPathComponent(childName)
+                    .path,
+                recursive: true,
+                topLevel: false
+            )
+        }
+    }
+
+    private static func isSameOrDescendant(path: String, of ancestor: String) -> Bool {
+        let standardizedPath = URL(fileURLWithPath: path).standardized.path
+        var standardizedAncestor = URL(fileURLWithPath: ancestor).standardized.path
+        if standardizedPath == standardizedAncestor {
+            return true
+        }
+        if !standardizedAncestor.hasSuffix("/") {
+            standardizedAncestor += "/"
+        }
+        return standardizedPath.hasPrefix(standardizedAncestor)
+    }
+
+    private static func mapFilesystemError(_ error: Error) -> AppServerError {
+        if let error = error as? AppServerError {
+            return error
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain
+            && (
+                nsError.code == CocoaError.fileReadInvalidFileName.rawValue
+                    || nsError.code == CocoaError.fileWriteInvalidFileName.rawValue
+            ) {
+            return .invalidRequest(error.localizedDescription)
+        }
+        return .internalError(error.localizedDescription)
     }
 
     private static func approvalPolicyParam(_ value: Any?) -> AskForApproval? {
@@ -4550,6 +4821,41 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadInjectItemsResult(params: params, configuration: configuration)
+                    )
+                case "fs/readFile":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsReadFileResult(params: params)
+                    )
+                case "fs/writeFile":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsWriteFileResult(params: params)
+                    )
+                case "fs/createDirectory":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsCreateDirectoryResult(params: params)
+                    )
+                case "fs/getMetadata":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsGetMetadataResult(params: params)
+                    )
+                case "fs/readDirectory":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsReadDirectoryResult(params: params)
+                    )
+                case "fs/remove":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsRemoveResult(params: params)
+                    )
+                case "fs/copy":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fsCopyResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(
