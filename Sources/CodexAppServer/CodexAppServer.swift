@@ -226,10 +226,12 @@ public enum CodexAppServer {
 
 final class CodexAppServerMessageProcessor {
     private var initialized = false
+    private var userAgent: String
     private let configuration: CodexAppServerConfiguration
 
     init(configuration: CodexAppServerConfiguration) {
         self.configuration = configuration
+        self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
     }
 
     func processLine(_ data: Data) -> Data? {
@@ -247,8 +249,9 @@ final class CodexAppServerMessageProcessor {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
                 initialized = true
+                userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 response = CodexAppServer.responseObject(id: id, result: [
-                    "userAgent": CodexAppServer.buildUserAgent(configuration: configuration, params: params)
+                    "userAgent": userAgent
                 ])
             }
         } else if !initialized {
@@ -266,6 +269,10 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.listConversationsResult(params: params, configuration: configuration)
                     )
+                case "getUserAgent":
+                    response = CodexAppServer.responseObject(id: id, result: [
+                        "userAgent": userAgent
+                    ])
                 default:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")
                 }

@@ -189,6 +189,19 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateError["message"] as? String, "Already initialized")
     }
 
+    func testGetUserAgentReturnsInitializedUserAgent() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))
+
+        let initialize = try decode(processor.processLine(Data(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-app-server-tests","version":"0.1.0"}}}"#.utf8)))
+        let initializedAgent = try XCTUnwrap((initialize["result"] as? [String: Any])?["userAgent"] as? String)
+        let response = try decode(processor.processLine(Data(#"{"id":2,"method":"getUserAgent"}"#.utf8)))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+
+        XCTAssertEqual(result["userAgent"] as? String, initializedAgent)
+        XCTAssertTrue(initializedAgent.hasSuffix(" (codex-app-server-tests; 0.1.0)"))
+    }
+
     private func appServerResponse(
         _ line: String,
         codexHome: URL,
