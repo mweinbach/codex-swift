@@ -53,7 +53,8 @@ final class OpenAIModelsTests: XCTestCase {
             ],
             "migration_config_key": "gpt-5",
             "model_link": NSNull(),
-            "upgrade_copy": NSNull()
+            "upgrade_copy": NSNull(),
+            "migration_markdown": NSNull()
         ])
 
         let data = try JSONEncoder().encode(upgrade)
@@ -78,7 +79,7 @@ final class OpenAIModelsTests: XCTestCase {
                 ModelServiceTier(id: "priority", name: "Fast", description: "Priority processing.")
             ],
             availabilityNux: ModelAvailabilityNux(message: "Try GPT-5."),
-            upgrade: "gpt-5.1",
+            upgrade: ModelInfoUpgrade(model: "gpt-5.1", migrationMarkdown: "Move to GPT-5.1."),
             supportsReasoningSummaries: true,
             supportVerbosity: true,
             defaultVerbosity: .medium,
@@ -122,7 +123,10 @@ final class OpenAIModelsTests: XCTestCase {
             "availability_nux": [
                 "message": "Try GPT-5."
             ],
-            "upgrade": "gpt-5.1",
+            "upgrade": [
+                "model": "gpt-5.1",
+                "migration_markdown": "Move to GPT-5.1."
+            ],
             "base_instructions": NSNull(),
             "supports_reasoning_summaries": true,
             "support_verbosity": true,
@@ -244,7 +248,7 @@ final class OpenAIModelsTests: XCTestCase {
                 ModelServiceTier(id: "priority", name: "Fast", description: "Priority processing.")
             ],
             availabilityNux: ModelAvailabilityNux(message: "Try it."),
-            upgrade: "gpt-5.1",
+            upgrade: ModelInfoUpgrade(model: "gpt-5.1", migrationMarkdown: "Move to GPT-5.1."),
             baseInstructions: nil,
             supportsReasoningSummaries: true,
             supportVerbosity: false,
@@ -274,6 +278,7 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(preset.upgrade?.migrationConfigKey, "gpt-5")
         XCTAssertNil(preset.upgrade?.modelLink)
         XCTAssertNil(preset.upgrade?.upgradeCopy)
+        XCTAssertEqual(preset.upgrade?.migrationMarkdown, "Move to GPT-5.1.")
         XCTAssertEqual(preset.upgrade?.reasoningEffortMapping, [
             .none: .low,
             .minimal: .low,
@@ -321,7 +326,8 @@ final class OpenAIModelsTests: XCTestCase {
                 ],
                 "migration_config_key": "gpt-5",
                 "model_link": NSNull(),
-                "upgrade_copy": NSNull()
+                "upgrade_copy": NSNull(),
+                "migration_markdown": "Move to GPT-5.1."
             ],
             "show_in_picker": true,
             "availability_nux": [

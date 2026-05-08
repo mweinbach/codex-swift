@@ -45,6 +45,7 @@ public struct ModelUpgrade: Equatable, Sendable {
     public let migrationConfigKey: String
     public let modelLink: String?
     public let upgradeCopy: String?
+    public let migrationMarkdown: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -52,6 +53,7 @@ public struct ModelUpgrade: Equatable, Sendable {
         case migrationConfigKey = "migration_config_key"
         case modelLink = "model_link"
         case upgradeCopy = "upgrade_copy"
+        case migrationMarkdown = "migration_markdown"
     }
 
     public init(
@@ -59,13 +61,15 @@ public struct ModelUpgrade: Equatable, Sendable {
         reasoningEffortMapping: [ReasoningEffort: ReasoningEffort]? = nil,
         migrationConfigKey: String,
         modelLink: String? = nil,
-        upgradeCopy: String? = nil
+        upgradeCopy: String? = nil,
+        migrationMarkdown: String? = nil
     ) {
         self.id = id
         self.reasoningEffortMapping = reasoningEffortMapping
         self.migrationConfigKey = migrationConfigKey
         self.modelLink = modelLink
         self.upgradeCopy = upgradeCopy
+        self.migrationMarkdown = migrationMarkdown
     }
 }
 
@@ -80,6 +84,7 @@ extension ModelUpgrade: Codable {
         self.migrationConfigKey = try container.decode(String.self, forKey: .migrationConfigKey)
         self.modelLink = try container.decodeIfPresent(String.self, forKey: .modelLink)
         self.upgradeCopy = try container.decodeIfPresent(String.self, forKey: .upgradeCopy)
+        self.migrationMarkdown = try container.decodeIfPresent(String.self, forKey: .migrationMarkdown)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -89,6 +94,22 @@ extension ModelUpgrade: Codable {
         try container.encode(migrationConfigKey, forKey: .migrationConfigKey)
         try encodeNullingOptional(modelLink, into: &container, forKey: .modelLink)
         try encodeNullingOptional(upgradeCopy, into: &container, forKey: .upgradeCopy)
+        try encodeNullingOptional(migrationMarkdown, into: &container, forKey: .migrationMarkdown)
+    }
+}
+
+public struct ModelInfoUpgrade: Equatable, Codable, Sendable {
+    public let model: String
+    public let migrationMarkdown: String
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case migrationMarkdown = "migration_markdown"
+    }
+
+    public init(model: String, migrationMarkdown: String) {
+        self.model = model
+        self.migrationMarkdown = migrationMarkdown
     }
 }
 
@@ -173,11 +194,12 @@ public struct ModelPreset: Equatable, Sendable {
             additionalSpeedTiers: info.additionalSpeedTiers,
             serviceTiers: info.serviceTiers,
             isDefault: false,
-            upgrade: info.upgrade.map { upgradeSlug in
+            upgrade: info.upgrade.map { upgrade in
                 ModelUpgrade(
-                    id: upgradeSlug,
+                    id: upgrade.model,
                     reasoningEffortMapping: Self.reasoningEffortMapping(from: info.supportedReasoningLevels),
-                    migrationConfigKey: info.slug
+                    migrationConfigKey: info.slug,
+                    migrationMarkdown: upgrade.migrationMarkdown
                 )
             },
             showInPicker: info.visibility == .list,
@@ -353,7 +375,7 @@ public struct ModelInfo: Equatable, Sendable {
     public let additionalSpeedTiers: [String]
     public let serviceTiers: [ModelServiceTier]
     public let availabilityNux: ModelAvailabilityNux?
-    public let upgrade: String?
+    public let upgrade: ModelInfoUpgrade?
     public let baseInstructions: String?
     public let supportsReasoningSummaries: Bool
     public let supportVerbosity: Bool
@@ -404,7 +426,7 @@ public struct ModelInfo: Equatable, Sendable {
         additionalSpeedTiers: [String] = [],
         serviceTiers: [ModelServiceTier] = [],
         availabilityNux: ModelAvailabilityNux? = nil,
-        upgrade: String? = nil,
+        upgrade: ModelInfoUpgrade? = nil,
         baseInstructions: String? = nil,
         supportsReasoningSummaries: Bool,
         supportVerbosity: Bool,
@@ -468,7 +490,7 @@ extension ModelInfo: Codable {
         self.additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
         self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
         self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
-        self.upgrade = try container.decodeIfPresent(String.self, forKey: .upgrade)
+        self.upgrade = try container.decodeIfPresent(ModelInfoUpgrade.self, forKey: .upgrade)
         self.baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
         self.supportsReasoningSummaries = try container.decode(Bool.self, forKey: .supportsReasoningSummaries)
         self.supportVerbosity = try container.decode(Bool.self, forKey: .supportVerbosity)

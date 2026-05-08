@@ -55,7 +55,7 @@ Source baseline inspected for this scaffold:
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
 - `codex-rs/protocol/src/openai_models.rs`
   - reasoning effort wire values needed by config summaries
-  - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, and remote `ModelInfo` to `ModelPreset` conversion
+  - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, structured upgrade migration markdown, and remote `ModelInfo` to `ModelPreset` conversion
 - `codex-rs/core/src/models_manager/cache.rs` and pure helpers from `codex-rs/core/src/models_manager/manager.rs`
   - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, model preset merge/filter/default behavior, and offline/default model selection constants
 - `codex-rs/core/src/models_manager/model_presets.rs`
