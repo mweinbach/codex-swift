@@ -176,4 +176,28 @@ final class APIErrorTests: XCTestCase {
             "You've hit your usage limit. To continue using Codex, start a free trial of <PLAN> today, or try again later."
         )
     }
+
+    func testUsageLimitReachedErrorFormatsSameDayResetTimeLikeRust() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_704_067_200) // 2024-01-01 00:00:00 UTC
+        let resetsAt = Date(timeIntervalSince1970: 1_704_070_800) // 2024-01-01 01:00:00 UTC
+
+        XCTAssertEqual(
+            UsageLimitReachedError(planType: .team, resetsAt: resetsAt).description(now: now, calendar: calendar),
+            "You've hit your usage limit. To get more access now, send a request to your admin or try again at 1:00 AM."
+        )
+    }
+
+    func testUsageLimitReachedErrorFormatsFutureDateWithOrdinalSuffixLikeRust() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_704_067_200) // 2024-01-01 00:00:00 UTC
+        let resetsAt = Date(timeIntervalSince1970: 1_705_365_300) // 2024-01-16 00:35:00 UTC
+
+        XCTAssertEqual(
+            UsageLimitReachedError(planType: .unknown, resetsAt: resetsAt).description(now: now, calendar: calendar),
+            "You've hit your usage limit. Try again at Jan 16th, 2024 12:35 AM."
+        )
+    }
 }

@@ -220,47 +220,51 @@ public struct UsageLimitReachedError: Error, Equatable, CustomStringConvertible,
     }
 
     public var description: String {
+        description(now: Date(), calendar: .current)
+    }
+
+    public func description(now: Date, calendar: Calendar) -> String {
         if let limitName = rateLimits?.limitName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !limitName.isEmpty,
            limitName.lowercased() != "codex" {
-            return "You've hit your usage limit for \(limitName). Switch to another model now,\(retrySuffixAfterOr)"
+            return "You've hit your usage limit for \(limitName). Switch to another model now,\(retrySuffixAfterOr(now: now, calendar: calendar))"
         }
 
         if let promoMessage {
-            return "You've hit your usage limit. \(promoMessage),\(retrySuffixAfterOr)"
+            return "You've hit your usage limit. \(promoMessage),\(retrySuffixAfterOr(now: now, calendar: calendar))"
         }
 
         switch planType {
         case .plus:
             return """
-            You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr)
+            You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr(now: now, calendar: calendar))
             """
         case .team, .selfServeBusinessUsageBased, .business, .enterpriseCbpUsageBased:
-            return "You've hit your usage limit. To get more access now, send a request to your admin\(retrySuffixAfterOr)"
+            return "You've hit your usage limit. To get more access now, send a request to your admin\(retrySuffixAfterOr(now: now, calendar: calendar))"
         case .free, .go:
-            return "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus),\(retrySuffixAfterOr)"
+            return "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus),\(retrySuffixAfterOr(now: now, calendar: calendar))"
         case .pro, .proLite:
-            return "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr)"
+            return "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr(now: now, calendar: calendar))"
         case .enterprise, .edu, .unknown, nil:
-            return "You've hit your usage limit.\(retrySuffix)"
+            return "You've hit your usage limit.\(retrySuffix(now: now, calendar: calendar))"
         }
     }
 
-    private var retrySuffix: String {
+    private func retrySuffix(now: Date, calendar: Calendar) -> String {
         guard let resetsAt else {
             return " Try again later."
         }
-        return " Try again at \(Self.formatRetryTimestamp(resetsAt))."
+        return " Try again at \(Self.formatRetryTimestamp(resetsAt, now: now, calendar: calendar))."
     }
 
-    private var retrySuffixAfterOr: String {
+    private func retrySuffixAfterOr(now: Date, calendar: Calendar) -> String {
         guard let resetsAt else {
             return " or try again later."
         }
-        return " or try again at \(Self.formatRetryTimestamp(resetsAt))."
+        return " or try again at \(Self.formatRetryTimestamp(resetsAt, now: now, calendar: calendar))."
     }
 
-    static func formatRetryTimestamp(_ resetsAt: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+    private static func formatRetryTimestamp(_ resetsAt: Date, now: Date, calendar: Calendar) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
