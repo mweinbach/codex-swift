@@ -73,6 +73,8 @@ Source baseline inspected for this scaffold:
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper
   - token-count event payloads, rate-limit windows, credits snapshots, explicit null optional serialization, and preservation of omitted credits/plan fields across rate-limit updates
+- `codex-rs/protocol/src/protocol.rs` patch-apply event models
+  - tagged file-change payloads, patch-apply begin/end events with defaulted legacy fields, and turn-diff wire shape
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
