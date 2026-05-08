@@ -131,6 +131,112 @@ final class McpOAuthAuthorizationMetadataTests: XCTestCase {
             "https://example.com/.well-known/oauth-protected-resource/api"
         )
     }
+
+    func testClientRegistrationPostsRustRequestShapeAndFiltersEmptySecret() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/register": .init(
+                statusCode: 201,
+                body: Data(#"{"client_id":"client-id","client_secret":"","client_name":"Codex","redirect_uris":["http://127.0.0.1/callback"]}"#.utf8)
+            )
+        ])
+
+        let config = try await McpOAuthClientRegistration.registerClient(
+            metadata: sampleAuthorizationMetadata(),
+            clientName: "Codex",
+            redirectURI: "http://127.0.0.1/callback",
+            httpHeaders: ["X-Static": "static"],
+            envHttpHeaders: ["X-Env": "TOKEN"],
+            environment: ["TOKEN": "secret"],
+            transport: { request in
+                await probe.handle(request)
+            }
+        )
+
+        XCTAssertEqual(config, McpOAuthClientConfig(
+            clientID: "client-id",
+            clientSecret: nil,
+            scopes: [],
+            redirectURI: "http://127.0.0.1/callback"
+        ))
+        let recordedRequests = await probe.requests()
+        let request = try XCTUnwrap(recordedRequests.last)
+        XCTAssertEqual(request.hostPath, "auth.example/register")
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.headers["Content-Type"], "application/json")
+        XCTAssertEqual(request.headers[McpOAuthDiscovery.discoveryHeader], McpOAuthDiscovery.discoveryVersion)
+        XCTAssertEqual(request.headers["X-Static"], "static")
+        XCTAssertEqual(request.headers["X-Env"], "secret")
+        let body = try XCTUnwrap(request.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["client_name"] as? String, "Codex")
+        XCTAssertEqual(json["redirect_uris"] as? [String], ["http://127.0.0.1/callback"])
+        XCTAssertEqual(json["grant_types"] as? [String], ["authorization_code", "refresh_token"])
+        XCTAssertEqual(json["token_endpoint_auth_method"] as? String, "none")
+        XCTAssertEqual(json["response_types"] as? [String], ["code"])
+    }
+
+    func testClientRegistrationRejectsMissingRegistrationEndpoint() async throws {
+        do {
+            _ = try await McpOAuthClientRegistration.registerClient(
+                metadata: sampleAuthorizationMetadata(registrationEndpoint: nil),
+                clientName: "Codex",
+                redirectURI: "http://127.0.0.1/callback",
+                transport: { _ in McpOAuthDiscoveryHTTPResponse(statusCode: 500, body: Data()) }
+            )
+            XCTFail("registration should fail")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "Registration failed: Dynamic client registration not supported"
+            )
+        }
+    }
+
+    func testClientRegistrationValidatesCodeResponseType() async throws {
+        do {
+            _ = try await McpOAuthClientRegistration.registerClient(
+                metadata: sampleAuthorizationMetadata(responseTypesSupported: ["token"]),
+                clientName: "Codex",
+                redirectURI: "http://127.0.0.1/callback",
+                transport: { _ in McpOAuthDiscoveryHTTPResponse(statusCode: 500, body: Data()) }
+            )
+            XCTFail("registration should fail")
+        } catch {
+            XCTAssertEqual(String(describing: error), "Invalid scope: code")
+        }
+    }
+
+    func testClientRegistrationReportsHTTPAndParseFailures() async throws {
+        let httpProbe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/register": .init(statusCode: 400, body: Data("bad request".utf8))
+        ])
+        do {
+            _ = try await McpOAuthClientRegistration.registerClient(
+                metadata: sampleAuthorizationMetadata(),
+                clientName: "Codex",
+                redirectURI: "http://127.0.0.1/callback",
+                transport: { request in await httpProbe.handle(request) }
+            )
+            XCTFail("registration should fail")
+        } catch {
+            XCTAssertEqual(String(describing: error), "Registration failed: HTTP 400: bad request")
+        }
+
+        let parseProbe = OAuthAuthorizationMetadataProbe(responses: [
+            "auth.example/register": .init(statusCode: 200, body: Data(#"{"client_id":42}"#.utf8))
+        ])
+        do {
+            _ = try await McpOAuthClientRegistration.registerClient(
+                metadata: sampleAuthorizationMetadata(),
+                clientName: "Codex",
+                redirectURI: "http://127.0.0.1/callback",
+                transport: { request in await parseProbe.handle(request) }
+            )
+            XCTFail("registration should fail")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("Registration failed: analyze response error:"))
+        }
+    }
 }
 
 private struct RecordedAuthorizationMetadataRequest: Equatable, Sendable {
@@ -138,6 +244,8 @@ private struct RecordedAuthorizationMetadataRequest: Equatable, Sendable {
     let query: String?
     let fragment: String?
     let headers: [String: String]
+    let method: String?
+    let body: Data?
 }
 
 private actor OAuthAuthorizationMetadataProbe {
@@ -155,7 +263,9 @@ private actor OAuthAuthorizationMetadataProbe {
             hostPath: key,
             query: url?.query,
             fragment: url?.fragment,
-            headers: request.allHTTPHeaderFields ?? [:]
+            headers: request.allHTTPHeaderFields ?? [:],
+            method: request.httpMethod,
+            body: request.httpBody
         ))
         return responses[key] ?? McpOAuthDiscoveryHTTPResponse(statusCode: 404, body: Data())
     }
@@ -177,5 +287,17 @@ private func authorizationMetadataJSON() -> Data {
           "client_id_metadata_document_supported": true
         }
         """#.utf8
+    )
+}
+
+private func sampleAuthorizationMetadata(
+    registrationEndpoint: String? = "https://auth.example/register",
+    responseTypesSupported: [String]? = ["code"]
+) -> McpOAuthAuthorizationMetadata {
+    McpOAuthAuthorizationMetadata(
+        authorizationEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        registrationEndpoint: registrationEndpoint,
+        responseTypesSupported: responseTypesSupported
     )
 }

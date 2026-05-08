@@ -42,6 +42,114 @@ public struct McpOAuthAuthorizationMetadata: Codable, Equatable, Sendable {
     }
 }
 
+public struct McpOAuthClientConfig: Equatable, Sendable {
+    public let clientID: String
+    public let clientSecret: String?
+    public let scopes: [String]
+    public let redirectURI: String
+
+    public init(clientID: String, clientSecret: String? = nil, scopes: [String] = [], redirectURI: String) {
+        self.clientID = clientID
+        self.clientSecret = clientSecret
+        self.scopes = scopes
+        self.redirectURI = redirectURI
+    }
+}
+
+public enum McpOAuthAuthorizationError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidScope(String)
+    case registrationFailed(String)
+
+    public var description: String {
+        switch self {
+        case let .invalidScope(scope):
+            return "Invalid scope: \(scope)"
+        case let .registrationFailed(message):
+            return "Registration failed: \(message)"
+        }
+    }
+}
+
+public enum McpOAuthClientRegistration {
+    public static func registerClient(
+        metadata: McpOAuthAuthorizationMetadata,
+        clientName: String,
+        redirectURI: String,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        transport: McpOAuthDiscoveryTransport? = nil
+    ) async throws -> McpOAuthClientConfig {
+        guard let registrationEndpoint = metadata.registrationEndpoint else {
+            throw McpOAuthAuthorizationError.registrationFailed("Dynamic client registration not supported")
+        }
+        if let responseTypes = metadata.responseTypesSupported, !responseTypes.contains("code") {
+            throw McpOAuthAuthorizationError.invalidScope("code")
+        }
+        guard let registrationURL = URL(string: registrationEndpoint) else {
+            throw McpOAuthAuthorizationError.registrationFailed("HTTP request error: invalid registration URL: \(registrationEndpoint)")
+        }
+
+        let requestBody = ClientRegistrationRequest(
+            clientName: clientName,
+            redirectURIs: [redirectURI],
+            grantTypes: ["authorization_code", "refresh_token"],
+            tokenEndpointAuthMethod: "none",
+            responseTypes: ["code"]
+        )
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(requestBody)
+        } catch {
+            throw McpOAuthAuthorizationError.registrationFailed("analyze response error: \(String(describing: error))")
+        }
+
+        let headers = McpOAuthDiscovery.defaultHeaders(
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment
+        )
+        let send = transport ?? McpOAuthDiscovery.urlSessionTransport
+        let response: McpOAuthDiscoveryHTTPResponse
+        do {
+            response = try await send(registrationRequest(url: registrationURL, headers: headers, body: body))
+        } catch {
+            throw McpOAuthAuthorizationError.registrationFailed("HTTP request error: \(String(describing: error))")
+        }
+
+        guard (200..<300).contains(response.statusCode) else {
+            let errorText = String(data: response.body, encoding: .utf8) ?? "cannot get error details"
+            throw McpOAuthAuthorizationError.registrationFailed("HTTP \(response.statusCode): \(errorText)")
+        }
+
+        let registrationResponse: ClientRegistrationResponse
+        do {
+            registrationResponse = try JSONDecoder().decode(ClientRegistrationResponse.self, from: response.body)
+        } catch {
+            throw McpOAuthAuthorizationError.registrationFailed("analyze response error: \(String(describing: error))")
+        }
+
+        return McpOAuthClientConfig(
+            clientID: registrationResponse.clientID,
+            clientSecret: registrationResponse.clientSecret?.isEmpty == true ? nil : registrationResponse.clientSecret,
+            scopes: [],
+            redirectURI: redirectURI
+        )
+    }
+
+    private static func registrationRequest(url: URL, headers: [String: String], body: Data) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: McpOAuthDiscovery.discoveryTimeout)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(McpOAuthDiscovery.discoveryVersion, forHTTPHeaderField: McpOAuthDiscovery.discoveryHeader)
+        return request
+    }
+}
+
 public enum McpOAuthAuthorizationMetadataDiscovery {
     public static func discoverMetadata(
         url: String,
@@ -362,6 +470,36 @@ public enum McpOAuthAuthorizationMetadataDiscoveryError: Error, Equatable, Custo
         case let .metadataParseFailed(message):
             return message
         }
+    }
+}
+
+private struct ClientRegistrationRequest: Encodable {
+    let clientName: String
+    let redirectURIs: [String]
+    let grantTypes: [String]
+    let tokenEndpointAuthMethod: String
+    let responseTypes: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case clientName = "client_name"
+        case redirectURIs = "redirect_uris"
+        case grantTypes = "grant_types"
+        case tokenEndpointAuthMethod = "token_endpoint_auth_method"
+        case responseTypes = "response_types"
+    }
+}
+
+private struct ClientRegistrationResponse: Decodable {
+    let clientID: String
+    let clientSecret: String?
+    let clientName: String?
+    let redirectURIs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case clientSecret = "client_secret"
+        case clientName = "client_name"
+        case redirectURIs = "redirect_uris"
     }
 }
 
