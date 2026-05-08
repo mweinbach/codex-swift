@@ -92,6 +92,8 @@ Source baseline inspected for this scaffold:
   - redacted environment display formatting with sorted explicit env pairs and ordered inherited env vars
 - `codex-rs/common/src/sandbox_summary.rs`
   - sandbox policy summaries for danger-full-access, read-only, external-sandbox, and workspace-write policies
+- `codex-rs/cli/src/wsl_paths.rs` and `codex-rs/core/src/env.rs`
+  - WSL detection and Windows drive path normalization for update command execution
 
 ## Known Gaps
 
