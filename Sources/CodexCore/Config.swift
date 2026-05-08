@@ -33,6 +33,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var features: FeatureStates
     public var mcpServers: [String: McpServerConfig]
     public var mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
+    public var mcpOAuthCallbackPort: UInt16?
+    public var mcpOAuthCallbackURL: String?
     public var activeProfile: String?
     public var projectRootMarkers: [String]
     public var projectDocMaxBytes: Int
@@ -66,6 +68,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         features: FeatureStates = .withDefaults(),
         mcpServers: [String: McpServerConfig] = [:],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
+        mcpOAuthCallbackPort: UInt16? = nil,
+        mcpOAuthCallbackURL: String? = nil,
         activeProfile: String? = nil,
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
@@ -98,6 +102,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.features = features
         self.mcpServers = mcpServers
         self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
+        self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
+        self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
         self.activeProfile = activeProfile
         self.projectRootMarkers = projectRootMarkers
         self.projectDocMaxBytes = projectDocMaxBytes
@@ -612,6 +618,20 @@ private struct ParsedCodexConfigToml {
             )
         }
 
+        if let callbackPort = topLevel["mcp_oauth_callback_port"] {
+            config.mcpOAuthCallbackPort = try Self.uint16Value(
+                callbackPort,
+                key: "mcp_oauth_callback_port"
+            )
+        }
+
+        if let callbackURL = topLevel["mcp_oauth_callback_url"] {
+            config.mcpOAuthCallbackURL = try Self.stringValue(
+                callbackURL,
+                key: "mcp_oauth_callback_url"
+            )
+        }
+
         if let toolOutputTokenLimit = topLevel["tool_output_token_limit"] {
             config.toolOutputTokenLimit = try Self.nonNegativeIntValue(
                 toolOutputTokenLimit,
@@ -833,6 +853,8 @@ private struct ParsedCodexConfigToml {
             || key == "tools_web_search"
             || key == "tools_view_image"
             || key == "mcp_oauth_credentials_store"
+            || key == "mcp_oauth_callback_port"
+            || key == "mcp_oauth_callback_url"
             || key == "profile"
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
@@ -939,6 +961,16 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidStringValue(key)
         }
         return Int(integer)
+    }
+
+    private static func uint16Value(_ value: ConfigValue, key: String) throws -> UInt16 {
+        guard case let .integer(integer) = value,
+              integer >= 0,
+              integer <= Int64(UInt16.max)
+        else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return UInt16(integer)
     }
 
     private static func parseSectionHeader(_ line: String) throws -> ConfigSection {

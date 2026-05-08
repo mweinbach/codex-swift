@@ -317,21 +317,80 @@ public struct FreeformTool: Equatable, Codable, Sendable {
     }
 }
 
+public enum WebSearchContextSize: String, Codable, Equatable, Sendable {
+    case low
+    case medium
+    case high
+}
+
+public struct ResponsesAPIWebSearchFilters: Equatable, Codable, Sendable {
+    public let allowedDomains: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case allowedDomains = "allowed_domains"
+    }
+
+    public init(allowedDomains: [String]? = nil) {
+        self.allowedDomains = allowedDomains
+    }
+}
+
+public enum WebSearchUserLocationType: String, Codable, Equatable, Sendable {
+    case approximate
+}
+
+public struct ResponsesAPIWebSearchUserLocation: Equatable, Codable, Sendable {
+    public let type: WebSearchUserLocationType
+    public let country: String?
+    public let region: String?
+    public let city: String?
+    public let timezone: String?
+
+    public init(
+        type: WebSearchUserLocationType = .approximate,
+        country: String? = nil,
+        region: String? = nil,
+        city: String? = nil,
+        timezone: String? = nil
+    ) {
+        self.type = type
+        self.country = country
+        self.region = region
+        self.city = city
+        self.timezone = timezone
+    }
+}
+
 public enum ToolSpec: Equatable, Codable, Sendable {
     case function(ResponsesAPITool)
     case namespace(ResponsesAPINamespace)
+    case toolSearch(execution: String, description: String, parameters: JSONSchema)
     case localShell
-    case webSearch
+    case imageGeneration(outputFormat: String)
+    case webSearch(
+        externalWebAccess: Bool? = nil,
+        filters: ResponsesAPIWebSearchFilters? = nil,
+        userLocation: ResponsesAPIWebSearchUserLocation? = nil,
+        searchContextSize: WebSearchContextSize? = nil,
+        searchContentTypes: [String]? = nil
+    )
     case freeform(FreeformTool)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case name
         case description
+        case execution
         case strict
         case deferLoading = "defer_loading"
         case parameters
         case tools
+        case outputFormat = "output_format"
+        case externalWebAccess = "external_web_access"
+        case filters
+        case userLocation = "user_location"
+        case searchContextSize = "search_context_size"
+        case searchContentTypes = "search_content_types"
         case format
     }
 
@@ -341,8 +400,12 @@ public enum ToolSpec: Equatable, Codable, Sendable {
             return tool.name
         case let .namespace(namespace):
             return namespace.name
+        case .toolSearch:
+            return "tool_search"
         case .localShell:
             return "local_shell"
+        case .imageGeneration:
+            return "image_generation"
         case .webSearch:
             return "web_search"
         case let .freeform(tool):
@@ -371,10 +434,27 @@ public enum ToolSpec: Equatable, Codable, Sendable {
                     tools: try container.decode([ResponsesAPINamespaceTool].self, forKey: .tools)
                 )
             )
+        case "tool_search":
+            self = .toolSearch(
+                execution: try container.decode(String.self, forKey: .execution),
+                description: try container.decode(String.self, forKey: .description),
+                parameters: try container.decode(JSONSchema.self, forKey: .parameters)
+            )
         case "local_shell":
             self = .localShell
+        case "image_generation":
+            self = .imageGeneration(outputFormat: try container.decode(String.self, forKey: .outputFormat))
         case "web_search":
-            self = .webSearch
+            self = .webSearch(
+                externalWebAccess: try container.decodeIfPresent(Bool.self, forKey: .externalWebAccess),
+                filters: try container.decodeIfPresent(ResponsesAPIWebSearchFilters.self, forKey: .filters),
+                userLocation: try container.decodeIfPresent(
+                    ResponsesAPIWebSearchUserLocation.self,
+                    forKey: .userLocation
+                ),
+                searchContextSize: try container.decodeIfPresent(WebSearchContextSize.self, forKey: .searchContextSize),
+                searchContentTypes: try container.decodeIfPresent([String].self, forKey: .searchContentTypes)
+            )
         case "custom":
             self = .freeform(
                 FreeformTool(
@@ -407,10 +487,29 @@ public enum ToolSpec: Equatable, Codable, Sendable {
             try container.encode(namespace.name, forKey: .name)
             try container.encode(namespace.description, forKey: .description)
             try container.encode(namespace.tools, forKey: .tools)
+        case let .toolSearch(execution, description, parameters):
+            try container.encode("tool_search", forKey: .type)
+            try container.encode(execution, forKey: .execution)
+            try container.encode(description, forKey: .description)
+            try container.encode(parameters, forKey: .parameters)
         case .localShell:
             try container.encode("local_shell", forKey: .type)
-        case .webSearch:
+        case let .imageGeneration(outputFormat):
+            try container.encode("image_generation", forKey: .type)
+            try container.encode(outputFormat, forKey: .outputFormat)
+        case let .webSearch(
+            externalWebAccess,
+            filters,
+            userLocation,
+            searchContextSize,
+            searchContentTypes
+        ):
             try container.encode("web_search", forKey: .type)
+            try container.encodeIfPresent(externalWebAccess, forKey: .externalWebAccess)
+            try container.encodeIfPresent(filters, forKey: .filters)
+            try container.encodeIfPresent(userLocation, forKey: .userLocation)
+            try container.encodeIfPresent(searchContextSize, forKey: .searchContextSize)
+            try container.encodeIfPresent(searchContentTypes, forKey: .searchContentTypes)
         case let .freeform(tool):
             try container.encode("custom", forKey: .type)
             try container.encode(tool.name, forKey: .name)
@@ -504,7 +603,7 @@ public enum ToolSpecFactory {
         }
 
         if config.webSearchRequest {
-            specs.append(ConfiguredToolSpec(spec: .webSearch, supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(spec: .webSearch(), supportsParallelToolCalls: false))
         }
 
         if config.includeViewImageTool {

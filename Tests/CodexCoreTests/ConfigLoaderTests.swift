@@ -36,6 +36,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertEqual(config.mcpServers, [:])
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .auto)
+        XCTAssertNil(config.mcpOAuthCallbackPort)
+        XCTAssertNil(config.mcpOAuthCallbackURL)
         XCTAssertNil(config.activeProfile)
         XCTAssertEqual(config.projectRootMarkers, [".git"])
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
@@ -72,6 +74,8 @@ final class ConfigLoaderTests: XCTestCase {
         tools_web_search = true
         tools_view_image = false
         mcp_oauth_credentials_store = "file"
+        mcp_oauth_callback_port = 5678
+        mcp_oauth_callback_url = "https://example.com/callback"
         tool_output_token_limit = 12000
         oss_provider = "ollama"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
@@ -101,6 +105,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, false)
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
+        XCTAssertEqual(config.mcpOAuthCallbackPort, 5678)
+        XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
     }
@@ -473,6 +479,19 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for mcp_oauth_credentials_store")
+        }
+    }
+
+    func testInvalidMcpOAuthCallbackPortMatchesRustU16Limit() throws {
+        let dir = try CoreTemporaryDirectory()
+        try "mcp_oauth_callback_port = 70000"
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                (error as? CodexConfigLoadError)?.description,
+                "Invalid value for mcp_oauth_callback_port: expected string"
+            )
         }
     }
 

@@ -134,7 +134,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/main.rs` apply dispatch
   - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
 - `codex-rs/core/src/config/mod.rs` apply-relevant config loading
-  - apply/auth-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from detected project root to cwd, `project_root_markers`, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, top-level `forced_login_method`, top-level `forced_chatgpt_workspace_id`, `developer_instructions`, `compact_prompt`, `tool_output_token_limit`, prompt-file path resolution/loading for `experimental_instructions_file` and `experimental_compact_prompt_file`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
+  - apply/auth-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from detected project root to cwd, `project_root_markers`, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, top-level `forced_login_method`, top-level `forced_chatgpt_workspace_id`, MCP OAuth callback port/URL, `developer_instructions`, `compact_prompt`, `tool_output_token_limit`, prompt-file path resolution/loading for `experimental_instructions_file` and `experimental_compact_prompt_file`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 - `codex-rs/core/src/config/profile.rs`
   - profile option wire shape, feature-table flattening, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
@@ -173,7 +173,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
-  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP tool conversion to Responses function tools, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
+  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP namespace/function conversion, hosted `tool_search`/`image_generation`/rich `web_search` wire shapes, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`

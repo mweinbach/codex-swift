@@ -137,6 +137,89 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testWebSearchToolSpecSerializesExpectedWireShape() throws {
+        let spec = ToolSpec.webSearch(
+            externalWebAccess: true,
+            filters: ResponsesAPIWebSearchFilters(allowedDomains: ["example.com"]),
+            userLocation: ResponsesAPIWebSearchUserLocation(
+                country: "US",
+                region: "California",
+                city: "San Francisco",
+                timezone: "America/Los_Angeles"
+            ),
+            searchContextSize: .high,
+            searchContentTypes: ["text", "image"]
+        )
+
+        try XCTAssertJSONObjectEqual(spec, [
+            "type": "web_search",
+            "external_web_access": true,
+            "filters": [
+                "allowed_domains": ["example.com"]
+            ],
+            "user_location": [
+                "type": "approximate",
+                "country": "US",
+                "region": "California",
+                "city": "San Francisco",
+                "timezone": "America/Los_Angeles"
+            ],
+            "search_context_size": "high",
+            "search_content_types": ["text", "image"]
+        ])
+    }
+
+    func testToolSearchToolSpecSerializesExpectedWireShape() throws {
+        let spec = ToolSpec.toolSearch(
+            execution: "sync",
+            description: "Search app tools",
+            parameters: .object(
+                properties: [
+                    "query": .string(description: "Tool search query")
+                ],
+                required: ["query"],
+                additionalProperties: .boolean(false)
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(spec, [
+            "type": "tool_search",
+            "execution": "sync",
+            "description": "Search app tools",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "query": [
+                        "type": "string",
+                        "description": "Tool search query"
+                    ]
+                ],
+                "required": ["query"],
+                "additionalProperties": false
+            ]
+        ])
+    }
+
+    func testImageGenerationToolSpecSerializesExpectedWireShape() throws {
+        try XCTAssertJSONObjectEqual(ToolSpec.imageGeneration(outputFormat: "png"), [
+            "type": "image_generation",
+            "output_format": "png"
+        ])
+    }
+
+    func testToolSpecNameCoversHostedVariantsLikeRust() {
+        XCTAssertEqual(
+            ToolSpec.toolSearch(
+                execution: "sync",
+                description: "Search",
+                parameters: .object(properties: [:], required: nil, additionalProperties: nil)
+            ).name,
+            "tool_search"
+        )
+        XCTAssertEqual(ToolSpec.imageGeneration(outputFormat: "png").name, "image_generation")
+        XCTAssertEqual(ToolSpec.webSearch(externalWebAccess: true).name, "web_search")
+    }
+
     func testFreeformApplyPatchToolShapeIncludesGrammar() throws {
         let tool = ToolSpecFactory.createApplyPatchFreeformTool()
         let object = try JSONObject(tool)
@@ -240,7 +323,13 @@ final class ToolSpecTests: XCTestCase {
     func testChatCompletionsJSONWrapsFunctionToolsOnly() throws {
         let tools: [ToolSpec] = [
             ToolSpecFactory.createViewImageTool(),
-            .webSearch,
+            .webSearch(),
+            .toolSearch(
+                execution: "client",
+                description: "Search tools",
+                parameters: .object(properties: [:], required: nil, additionalProperties: nil)
+            ),
+            .imageGeneration(outputFormat: "png"),
             ToolSpecFactory.createApplyPatchFreeformTool()
         ]
         let chatTools = try ToolSpecFactory.createToolsJSONForChatCompletionsAPI(tools)
