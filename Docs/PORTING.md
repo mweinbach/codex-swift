@@ -124,6 +124,8 @@ Source baseline inspected for this scaffold:
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`
   - review target tagged wire shape, review request hints, prompt generation for uncommitted/base/commit/custom targets, merge-base prompt injection seam, and user-facing hint formatting
+- `codex-rs/protocol/src/protocol.rs` review output models and `codex-rs/core/src/review_format.rs`
+  - review output/finding/location wire shapes, review delivery wire values, exited-review payload shape, findings block formatting, selection markers, and fallback summary rendering
 - `codex-rs/core/src/text_encoding.rs`
   - smart shell-output byte decoding for UTF-8, Cyrillic legacy code pages, Windows-1252 punctuation collisions, Latin-1, ANSI-preserving output, and lossy fallback behavior
 - `codex-rs/core/src/user_instructions.rs`
@@ -134,6 +136,8 @@ Source baseline inspected for this scaffold:
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 - `codex-rs/common/src/config_summary.rs`
   - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
+- `codex-rs/tui/src/additional_dirs.rs`
+  - read-only sandbox warning for ignored `--add-dir` writable roots
 
 ## Known Gaps
 
