@@ -194,6 +194,41 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func mcpServerStatusListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to load MCP server config: \(error)")
+        }
+
+        let serverNames = runtimeConfig.mcpServers.keys.sorted()
+        let total = serverNames.count
+        let start = try mcpServerStatusStart(cursor: stringParam(params?["cursor"]), total: total)
+        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
+        let end = min(start + effectiveLimit, total)
+        let statuses = McpAuthStatusResolver.authStatuses(
+            for: runtimeConfig.mcpServers,
+            codexHome: configuration.codexHome,
+            storeMode: runtimeConfig.mcpOAuthCredentialsStoreMode
+        )
+        let data = (start < end ? Array(serverNames[start..<end]) : []).map { name in
+            mcpServerStatusObject(name: name, authStatus: statuses[name] ?? .unsupported)
+        }
+
+        return [
+            "data": data,
+            "nextCursor": (end < total ? String(end) : nil) as Any
+        ].nullStripped()
+    }
+
     fileprivate static func skillsListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -640,6 +675,19 @@ public enum CodexAppServer {
         return start
     }
 
+    private static func mcpServerStatusStart(cursor: String?, total: Int) throws -> Int {
+        guard let cursor else {
+            return 0
+        }
+        guard let start = Int(cursor) else {
+            throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+        }
+        guard start <= total else {
+            throw AppServerError.invalidRequest("cursor \(start) exceeds total MCP servers \(total)")
+        }
+        return start
+    }
+
     private static func intParam(_ value: Any?, defaultValue: Int) -> Int {
         if let int = value as? Int {
             return int
@@ -695,6 +743,16 @@ public enum CodexAppServer {
             },
             "defaultReasoningEffort": preset.defaultReasoningEffort.rawValue,
             "isDefault": preset.isDefault
+        ]
+    }
+
+    private static func mcpServerStatusObject(name: String, authStatus: McpAuthStatus) -> [String: Any] {
+        [
+            "name": name,
+            "tools": [String: Any](),
+            "resources": [Any](),
+            "resourceTemplates": [Any](),
+            "authStatus": authStatus.rawValue
         ]
     }
 
@@ -1826,6 +1884,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                    )
+                case "mcpServerStatus/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.mcpServerStatusListResult(params: params, configuration: configuration)
                     )
                 case "skills/list":
                     response = CodexAppServer.responseObject(

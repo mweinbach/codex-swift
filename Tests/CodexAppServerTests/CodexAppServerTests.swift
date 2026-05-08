@@ -499,6 +499,56 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs-mcp"
+        args = ["--stdio"]
+
+        [mcp_servers.github]
+        url = "https://mcp.github.test/mcp"
+        bearer_token_env_var = "GITHUB_TOKEN"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"limit":1}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.count, 1)
+        XCTAssertEqual(firstData[0]["name"] as? String, "docs")
+        XCTAssertEqual(firstData[0]["authStatus"] as? String, "unsupported")
+        XCTAssertEqual((firstData[0]["tools"] as? [String: Any])?.count, 0)
+        XCTAssertEqual((firstData[0]["resources"] as? [Any])?.count, 0)
+        XCTAssertEqual((firstData[0]["resourceTemplates"] as? [Any])?.count, 0)
+        XCTAssertEqual(firstResult["nextCursor"] as? String, "1")
+
+        let second = try appServerResponse(
+            #"{"id":2,"method":"mcpServerStatus/list","params":{"cursor":"1"}}"#,
+            codexHome: temp.url
+        )
+        let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
+        let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
+        XCTAssertEqual(secondData.map { $0["name"] as? String }, ["github"])
+        XCTAssertEqual(secondData[0]["authStatus"] as? String, "bearer_token")
+        XCTAssertNil(secondResult["nextCursor"])
+    }
+
+    func testMcpServerStatusListRejectsInvalidCursor() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"cursor":"bogus"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+    }
+
     func testSkillsListReturnsRepoUserAndSystemSkillsWithPriorityDedupe() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
