@@ -125,6 +125,21 @@ public struct CompactedItem: Equatable, Codable, Sendable {
     }
 }
 
+public struct ConversationPathResponseEvent: Equatable, Codable, Sendable {
+    public let conversationID: ConversationId
+    public let path: String
+
+    private enum CodingKeys: String, CodingKey {
+        case conversationID = "conversation_id"
+        case path
+    }
+
+    public init(conversationID: ConversationId, path: String) {
+        self.conversationID = conversationID
+        self.path = path
+    }
+}
+
 public struct TurnContextItem: Equatable, Codable, Sendable {
     public let cwd: String
     public let approvalPolicy: AskForApproval
@@ -198,6 +213,13 @@ public enum RolloutRecordItem: Equatable, Sendable {
         case turnContext = "turn_context"
         case eventMsg = "event_msg"
     }
+
+    public var eventMessage: EventMessage? {
+        guard case let .eventMsg(event) = self else {
+            return nil
+        }
+        return event
+    }
 }
 
 extension RolloutRecordItem: Codable {
@@ -262,5 +284,93 @@ public struct RolloutLine: Equatable, Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(timestamp, forKey: .timestamp)
         try item.encode(to: encoder)
+    }
+}
+
+public struct ResumedHistory: Equatable, Codable, Sendable {
+    public let conversationID: ConversationId
+    public let history: [RolloutRecordItem]
+    public let rolloutPath: String
+
+    private enum CodingKeys: String, CodingKey {
+        case conversationID = "conversation_id"
+        case history
+        case rolloutPath = "rollout_path"
+    }
+
+    public init(conversationID: ConversationId, history: [RolloutRecordItem], rolloutPath: String) {
+        self.conversationID = conversationID
+        self.history = history
+        self.rolloutPath = rolloutPath
+    }
+}
+
+public enum InitialHistory: Equatable, Sendable {
+    case new
+    case resumed(ResumedHistory)
+    case forked([RolloutRecordItem])
+
+    private enum VariantKey: String, CodingKey {
+        case resumed = "Resumed"
+        case forked = "Forked"
+    }
+
+    public var rolloutItems: [RolloutRecordItem] {
+        switch self {
+        case .new:
+            return []
+        case let .resumed(resumed):
+            return resumed.history
+        case let .forked(items):
+            return items
+        }
+    }
+
+    public var eventMessages: [EventMessage]? {
+        switch self {
+        case .new:
+            return nil
+        case let .resumed(resumed):
+            return resumed.history.compactMap(\.eventMessage)
+        case let .forked(items):
+            return items.compactMap(\.eventMessage)
+        }
+    }
+}
+
+extension InitialHistory: Codable {
+    public init(from decoder: Decoder) throws {
+        if let value = try? decoder.singleValueContainer().decode(String.self), value == "New" {
+            self = .new
+            return
+        }
+
+        let container = try decoder.container(keyedBy: VariantKey.self)
+        if container.contains(.resumed) {
+            self = .resumed(try container.decode(ResumedHistory.self, forKey: .resumed))
+            return
+        }
+        if container.contains(.forked) {
+            self = .forked(try container.decode([RolloutRecordItem].self, forKey: .forked))
+            return
+        }
+
+        throw DecodingError.dataCorrupted(
+            DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown InitialHistory variant")
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .new:
+            var container = encoder.singleValueContainer()
+            try container.encode("New")
+        case let .resumed(history):
+            var container = encoder.container(keyedBy: VariantKey.self)
+            try container.encode(history, forKey: .resumed)
+        case let .forked(items):
+            var container = encoder.container(keyedBy: VariantKey.self)
+            try container.encode(items, forKey: .forked)
+        }
     }
 }

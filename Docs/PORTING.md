@@ -192,6 +192,8 @@ Source baseline inspected for this scaffold:
   - `Submission { id, op }` and Rust `Op` tagged variants for user input, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
+- `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
+  - conversation path response payloads, resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
 - `codex-rs/protocol/src/protocol.rs` session configuration event model
   - session-configured payloads with conversation id, model/provider, approval and sandbox policies, history metadata, optional reasoning effort, optional recursive initial messages, and rollout path
 - `codex-rs/protocol/src/protocol.rs` response-wrapper event models

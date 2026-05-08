@@ -218,4 +218,103 @@ final class RolloutModelsTests: XCTestCase {
         let data = try JSONEncoder().encode(line)
         XCTAssertEqual(try JSONDecoder().decode(RolloutLine.self, from: data), line)
     }
+
+    func testConversationPathResponseWireShape() throws {
+        let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let event = ConversationPathResponseEvent(
+            conversationID: id,
+            path: "/repo/.codex/sessions/session.jsonl"
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "conversation_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "path": "/repo/.codex/sessions/session.jsonl"
+        ])
+
+        let data = try JSONEncoder().encode(event)
+        XCTAssertEqual(try JSONDecoder().decode(ConversationPathResponseEvent.self, from: data), event)
+    }
+
+    func testInitialHistoryUsesRustExternalTagsAndExtractsEvents() throws {
+        let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let eventItem = RolloutRecordItem.eventMsg(.warning(WarningEvent(message: "heads up")))
+        let responseItem = RolloutRecordItem.responseItem(.message(
+            role: "assistant",
+            content: [.outputText(text: "kept")]
+        ))
+        let resumed = ResumedHistory(
+            conversationID: id,
+            history: [eventItem, responseItem],
+            rolloutPath: "/repo/.codex/sessions/session.jsonl"
+        )
+
+        let newData = try JSONEncoder().encode(InitialHistory.new)
+        XCTAssertEqual(String(data: newData, encoding: .utf8), #""New""#)
+        XCTAssertEqual(try JSONDecoder().decode(InitialHistory.self, from: newData), .new)
+        XCTAssertEqual(InitialHistory.new.rolloutItems, [])
+        XCTAssertNil(InitialHistory.new.eventMessages)
+
+        try XCTAssertJSONObjectEqual(InitialHistory.resumed(resumed), [
+            "Resumed": [
+                "conversation_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                "history": [
+                    [
+                        "type": "event_msg",
+                        "payload": [
+                            "type": "warning",
+                            "message": "heads up"
+                        ]
+                    ],
+                    [
+                        "type": "response_item",
+                        "payload": [
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                [
+                                    "type": "output_text",
+                                    "text": "kept"
+                                ]
+                            ]
+                        ]
+                    ]
+                ],
+                "rollout_path": "/repo/.codex/sessions/session.jsonl"
+            ]
+        ])
+
+        let resumedHistory = InitialHistory.resumed(resumed)
+        XCTAssertEqual(resumedHistory.rolloutItems, [eventItem, responseItem])
+        XCTAssertEqual(resumedHistory.eventMessages, [.warning(WarningEvent(message: "heads up"))])
+
+        let forkedHistory = InitialHistory.forked([responseItem, eventItem])
+        try XCTAssertJSONObjectEqual(forkedHistory, [
+            "Forked": [
+                [
+                    "type": "response_item",
+                    "payload": [
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            [
+                                "type": "output_text",
+                                "text": "kept"
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "type": "event_msg",
+                    "payload": [
+                        "type": "warning",
+                        "message": "heads up"
+                    ]
+                ]
+            ]
+        ])
+
+        let forkedData = try JSONEncoder().encode(forkedHistory)
+        XCTAssertEqual(try JSONDecoder().decode(InitialHistory.self, from: forkedData), forkedHistory)
+        XCTAssertEqual(forkedHistory.eventMessages, [.warning(WarningEvent(message: "heads up"))])
+    }
 }
