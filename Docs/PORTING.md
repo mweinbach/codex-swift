@@ -173,7 +173,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
-  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP namespace/function conversion, hosted `tool_search`/`image_generation`/rich `web_search` wire shapes, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
+  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP namespace/function conversion, hosted `tool_search`/`image_generation`/rich `web_search` wire shapes, deferred MCP `tool_search` indexing/execution, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`

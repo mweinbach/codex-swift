@@ -103,7 +103,8 @@ public enum NonInteractiveExec {
             webSearchRequest: config.toolsWebSearch ?? config.features.isEnabled(.webSearchRequest),
             includeViewImageTool: config.toolsViewImage ?? config.features.isEnabled(.viewImageTool),
             includeComputerUseTools: config.features.isEnabled(.computerUseGui),
-            experimentalSupportedTools: modelFamily.experimentalSupportedTools
+            experimentalSupportedTools: modelFamily.experimentalSupportedTools,
+            toolSearch: config.features.isEnabled(.toolSearch)
         )
     }
 
@@ -208,7 +209,8 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         truncationPolicy: TruncationPolicy,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        toolSearchIndex: ToolSearchIndex? = nil
     ) async -> ResponseItem {
         switch item {
         case let .functionCall(_, name, arguments, callID):
@@ -257,6 +259,24 @@ public enum NonInteractiveExec {
                 environment: environment,
                 responseFormat: .structured
             )
+
+        case let .toolSearchCall(_, callID, _, execution, arguments):
+            guard let callID, execution == "client" else {
+                return .toolSearchOutput(callID: callID, status: "completed", execution: execution, tools: [])
+            }
+            guard let toolSearchIndex else {
+                return .toolSearchOutput(callID: callID, status: "completed", execution: "client", tools: [])
+            }
+            do {
+                return .toolSearchOutput(
+                    callID: callID,
+                    status: "completed",
+                    execution: "client",
+                    tools: try toolSearchIndex.search(arguments: arguments)
+                )
+            } catch {
+                return functionOutput(callID: callID, content: String(describing: error), success: false)
+            }
 
         default:
             return functionOutput(
@@ -645,8 +665,10 @@ public enum NonInteractiveExec {
     private static func toolCalls(from items: [ResponseItem]) -> [ResponseItem] {
         items.filter { item in
             switch item {
-            case .functionCall, .customToolCall, .localShellCall, .toolSearchCall:
+            case .functionCall, .customToolCall, .localShellCall:
                 return true
+            case let .toolSearchCall(_, callID, _, execution, _):
+                return callID != nil && execution == "client"
             case .message,
                  .reasoning,
                  .functionCallOutput,

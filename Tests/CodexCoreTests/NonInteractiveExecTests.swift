@@ -240,6 +240,78 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.transcriptItems, [imageItem])
     }
 
+    func testResponsesLoopExecutesClientToolSearchCallAndContinues() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "find calendar tools")])
+        ])
+        let script = ToolSearchLoopScript()
+        let index = Self.makeToolSearchIndex()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                await NonInteractiveExec.executeFunctionCall(
+                    item,
+                    cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+                    approvalPolicy: .never,
+                    sandboxPolicy: .dangerFullAccess,
+                    shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+                    truncationPolicy: .bytes(10_000),
+                    toolSearchIndex: index
+                )
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].input.contains { item in
+            guard case let .toolSearchOutput(callID, status, execution, tools) = item else {
+                return false
+            }
+            return callID == "search-1"
+                && status == "completed"
+                && execution == "client"
+                && tools.count == 1
+        })
+        XCTAssertEqual(result.transcriptItems.last, .message(role: "assistant", content: [.outputText(text: "done")]))
+    }
+
+    func testResponsesLoopDoesNotExecuteServerToolSearchCall() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "find tools")])
+        ])
+        let counter = ToolCallCounter()
+        let searchItem = ResponseItem.toolSearchCall(
+            callID: nil,
+            execution: "server",
+            arguments: .object(["query": .string("calendar")])
+        )
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { _ in
+                .success([
+                    .success(.outputItemDone(searchItem)),
+                    .success(.completed(responseID: "resp-1", tokenUsage: nil))
+                ])
+            },
+            executeFunctionCall: { item in
+                await counter.increment()
+                return .functionCallOutput(
+                    callID: "bad",
+                    output: FunctionCallOutputPayload(content: "\(item)", success: false)
+                )
+            }
+        )
+
+        let toolCallCount = await counter.value()
+        XCTAssertEqual(toolCallCount, 0)
+        XCTAssertEqual(result.transcriptItems, [searchItem])
+    }
+
     func testShellCommandFunctionCallRunsUserShellCommand() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let item = ResponseItem.functionCall(
@@ -692,6 +764,16 @@ private final class WriteSink: @unchecked Sendable {
 }
 
 private extension NonInteractiveExecTests {
+    static func makeToolSearchIndex() -> ToolSearchIndex {
+        ToolSearchIndex.mcpIndex(from: [
+            "mcp__calendar__create_event": McpTool(
+                name: "create_event",
+                inputSchema: McpToolInputSchema(),
+                description: "Create calendar events"
+            )
+        ])
+    }
+
     static func sessionID(from content: String) -> Int? {
         let prefix = "Process running with session ID "
         guard let line = content
@@ -765,6 +847,36 @@ private actor CustomToolLoopScript {
                     callID: "custom-1",
                     name: "apply_patch",
                     input: "*** Begin Patch\n*** End Patch"
+                ))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
+            .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor ToolSearchLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(.toolSearchCall(
+                    callID: "search-1",
+                    execution: "client",
+                    arguments: .object(["query": .string("calendar")])
                 ))),
                 .success(.completed(responseID: "resp-1", tokenUsage: nil))
             ]

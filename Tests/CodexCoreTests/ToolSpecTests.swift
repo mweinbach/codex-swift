@@ -200,6 +200,36 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testToolSearchToolFactoryMatchesRustDescriptionAndSchema() {
+        let index = ToolSearchIndex(
+            entries: [],
+            sourceInfos: [
+                ToolSearchSourceInfo(
+                    name: "Google Drive",
+                    description: "Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work."
+                ),
+                ToolSearchSourceInfo(name: "Google Drive"),
+                ToolSearchSourceInfo(name: "docs")
+            ]
+        )
+
+        XCTAssertEqual(
+            index.toolSpec(),
+            .toolSearch(
+                execution: "client",
+                description: "# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nYou have access to tools from the following sources:\n- Google Drive: Use Google Drive as the single entrypoint for Drive, Docs, Sheets, and Slides work.\n- docs\nSome of the tools may not have been provided to you upfront, and you should use this tool (`tool_search`) to search for the required tools. For MCP tool discovery, always use `tool_search` instead of `list_mcp_resources` or `list_mcp_resource_templates`.",
+                parameters: .object(
+                    properties: [
+                        "limit": .number(description: "Maximum number of tools to return (defaults to 8)."),
+                        "query": .string(description: "Search query for deferred tools.")
+                    ],
+                    required: ["query"],
+                    additionalProperties: .boolean(false)
+                )
+            )
+        )
+    }
+
     func testImageGenerationToolSpecSerializesExpectedWireShape() throws {
         try XCTAssertJSONObjectEqual(ToolSpec.imageGeneration(outputFormat: "png"), [
             "type": "image_generation",
@@ -304,6 +334,46 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
+        let index = ToolSearchIndex.mcpIndex(from: [
+            "mcp__calendar__create_event": makeMcpTool(name: "create_event", description: "Create events"),
+            "mcp__calendar__list_events": makeMcpTool(name: "list_events", description: "List events")
+        ])
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("calendar events"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(namespace) = tools[0],
+              case let .array(children)? = namespace["tools"]
+        else {
+            return XCTFail("expected namespace result")
+        }
+        XCTAssertEqual(namespace["type"], .string("namespace"))
+        XCTAssertEqual(namespace["name"], .string("mcp__calendar__"))
+        XCTAssertEqual(children.count, 2)
+        XCTAssertEqual(Set(children.compactMap(toolName)), Set(["create_event", "list_events"]))
+        XCTAssertEqual(children.compactMap(deferLoading), [true, true])
+    }
+
+    func testToolSearchIndexRejectsEmptyQueryAndZeroLimitLikeRust() throws {
+        let index = ToolSearchIndex.mcpIndex(from: [
+            "mcp__calendar__create_event": makeMcpTool(name: "create_event")
+        ])
+
+        XCTAssertThrowsError(try index.search(arguments: .object(["query": .string(" ")]))) { error in
+            XCTAssertEqual(error as? ToolSearchError, .emptyQuery)
+        }
+        XCTAssertThrowsError(try index.search(arguments: .object([
+            "query": .string("calendar"),
+            "limit": .integer(0)
+        ]))) { error in
+            XCTAssertEqual(error as? ToolSearchError, .invalidLimit)
+        }
+    }
+
     func testBuildSpecsHidesMCPNamespaceSpecsWhenNamespaceToolsDisabled() {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
@@ -404,8 +474,8 @@ final class ToolSpecTests: XCTestCase {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
     }
 
-    private func makeMcpTool(name: String) -> McpTool {
-        McpTool(name: name, inputSchema: McpToolInputSchema())
+    private func makeMcpTool(name: String, description: String? = nil) -> McpTool {
+        McpTool(name: name, inputSchema: McpToolInputSchema(), description: description)
     }
 
     private func namespaceToolName(_ tool: ResponsesAPINamespaceTool) -> String {
@@ -413,5 +483,23 @@ final class ToolSpecTests: XCTestCase {
         case let .function(function):
             return function.name
         }
+    }
+
+    private func toolName(_ value: JSONValue) -> String? {
+        guard case let .object(tool) = value,
+              case let .string(name)? = tool["name"]
+        else {
+            return nil
+        }
+        return name
+    }
+
+    private func deferLoading(_ value: JSONValue) -> Bool? {
+        guard case let .object(tool) = value,
+              case let .bool(deferLoading)? = tool["defer_loading"]
+        else {
+            return nil
+        }
+        return deferLoading
     }
 }

@@ -21,6 +21,7 @@ final class FeatureTogglesTests: XCTestCase {
             "remote_models",
             "skills",
             "powershell_utf8",
+            "tool_search",
             "tui2"
         ])
         XCTAssertEqual(FeatureRegistry.specs.map(\.stage.listName), [
@@ -41,10 +42,12 @@ final class FeatureTogglesTests: XCTestCase {
             "experimental",
             "experimental",
             "experimental",
+            "stable",
             "experimental"
         ])
         XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.parallel))
         XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.execPolicy))
+        XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.toolSearch))
         XCTAssertFalse(FeatureStates.withDefaults().isEnabled(.webSearchRequest))
     }
 

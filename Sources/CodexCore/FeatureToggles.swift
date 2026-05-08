@@ -29,6 +29,7 @@ public enum FeatureKey: String, CaseIterable, Hashable, Sendable {
     case remoteModels = "remote_models"
     case skills
     case powershellUtf8 = "powershell_utf8"
+    case toolSearch = "tool_search"
     case tui2
 }
 
@@ -151,6 +152,7 @@ public enum FeatureRegistry {
         FeatureSpec(id: .remoteModels, key: "remote_models", stage: .experimental, defaultEnabled: false),
         FeatureSpec(id: .skills, key: "skills", stage: .experimental, defaultEnabled: true),
         FeatureSpec(id: .powershellUtf8, key: "powershell_utf8", stage: .experimental, defaultEnabled: false),
+        FeatureSpec(id: .toolSearch, key: "tool_search", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .tui2, key: "tui2", stage: .experimental, defaultEnabled: false)
     ]
 

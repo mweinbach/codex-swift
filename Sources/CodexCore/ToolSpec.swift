@@ -537,6 +537,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let includeComputerUseTools: Bool
     public let experimentalSupportedTools: [String]
     public let namespaceTools: Bool
+    public let toolSearch: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -545,7 +546,8 @@ public struct ToolsConfig: Equatable, Sendable {
         includeViewImageTool: Bool = true,
         includeComputerUseTools: Bool = false,
         experimentalSupportedTools: [String] = [],
-        namespaceTools: Bool = true
+        namespaceTools: Bool = true,
+        toolSearch: Bool = true
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -554,11 +556,16 @@ public struct ToolsConfig: Equatable, Sendable {
         self.includeComputerUseTools = includeComputerUseTools
         self.experimentalSupportedTools = experimentalSupportedTools
         self.namespaceTools = namespaceTools
+        self.toolSearch = toolSearch
     }
 }
 
 public enum ToolSpecFactory {
-    public static func buildSpecs(config: ToolsConfig, mcpTools: [String: McpTool]? = nil) -> [ConfiguredToolSpec] {
+    public static func buildSpecs(
+        config: ToolsConfig,
+        mcpTools: [String: McpTool]? = nil,
+        deferredMcpTools: [String: McpTool]? = nil
+    ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
         switch config.shellType {
@@ -579,6 +586,11 @@ public enum ToolSpecFactory {
         specs.append(ConfiguredToolSpec(spec: createListMCPResourceTemplatesTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createReadMCPResourceTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createPlanTool(), supportsParallelToolCalls: false))
+
+        if config.toolSearch, let deferredMcpTools, !deferredMcpTools.isEmpty, config.namespaceTools {
+            let index = ToolSearchIndex.mcpIndex(from: deferredMcpTools)
+            specs.append(ConfiguredToolSpec(spec: index.toolSpec(), supportsParallelToolCalls: true))
+        }
 
         switch config.applyPatchToolType {
         case .freeform:
@@ -693,7 +705,11 @@ public enum ToolSpecFactory {
         }
     }
 
-    private static func createMCPResponsesAPITool(name: String, tool: McpTool) -> ResponsesAPITool {
+    static func createMCPResponsesAPITool(
+        name: String,
+        tool: McpTool,
+        deferLoading: Bool? = nil
+    ) -> ResponsesAPITool {
         var inputSchema: [String: Any] = ["type": tool.inputSchema.type]
         if let properties = tool.inputSchema.properties {
             inputSchema["properties"] = jsonCompatibleValue(properties)
@@ -708,6 +724,7 @@ public enum ToolSpecFactory {
             name: name,
             description: tool.description ?? "",
             strict: false,
+            deferLoading: deferLoading,
             parameters: JSONSchema.sanitized(from: inputSchema)
         )
     }
