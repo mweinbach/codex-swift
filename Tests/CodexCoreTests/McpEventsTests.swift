@@ -214,6 +214,35 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testQualifiedToolNameMatchesRustPrefix() {
+        XCTAssertEqual(
+            McpToolName.qualifiedToolName(serverName: "server1", toolName: "tool1"),
+            "mcp__server1__tool1"
+        )
+    }
+
+    func testQualifiedToolNameTruncatesLongNamesWithRustSHA1Suffix() {
+        let name = McpToolName.qualifiedToolName(
+            serverName: "my_server",
+            toolName: "extremely_lengthy_function_name_that_absolutely_surpasses_all_reasonable_limits"
+        )
+
+        XCTAssertEqual(name.count, 64)
+        XCTAssertEqual(name, "mcp__my_server__extremel119a2b97664e41363932dc84de21e2ff1b93b3e9")
+    }
+
+    func testQualifyToolsSkipsDuplicateQualifiedNamesLikeRust() {
+        let tools = McpToolName.qualifyTools([
+            (serverName: "server1", tool: makeMcpTool(name: "duplicate_tool")),
+            (serverName: "server1", tool: makeMcpTool(name: "duplicate_tool")),
+            (serverName: "server1", tool: makeMcpTool(name: "unique_tool"))
+        ])
+
+        XCTAssertEqual(tools.count, 2)
+        XCTAssertEqual(tools["mcp__server1__duplicate_tool"], makeMcpTool(name: "duplicate_tool"))
+        XCTAssertEqual(tools["mcp__server1__unique_tool"], makeMcpTool(name: "unique_tool"))
+    }
+
     func testToolSchemasDefaultTypeOnDecodeAndAlwaysEncodeType() throws {
         let inputSchema = try JSONDecoder().decode(McpToolInputSchema.self, from: Data("""
         {

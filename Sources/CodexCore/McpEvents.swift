@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public struct McpStartupUpdateEvent: Equatable, Codable, Sendable {
@@ -109,6 +110,20 @@ public struct McpListToolsResponseEvent: Equatable, Codable, Sendable {
 public enum McpToolName {
     public static let prefix = "mcp"
     public static let delimiter = "__"
+    public static let maximumLength = 64
+
+    public static func qualifiedToolName(serverName: String, toolName: String) -> String {
+        var qualifiedName = "\(prefix)\(delimiter)\(serverName)\(delimiter)\(toolName)"
+        guard qualifiedName.utf8.count > maximumLength else {
+            return qualifiedName
+        }
+
+        let digest = Insecure.SHA1.hash(data: Data(qualifiedName.utf8))
+        let suffix = digest.map { String(format: "%02x", $0) }.joined()
+        let prefixLength = maximumLength - suffix.count
+        qualifiedName = String(decoding: qualifiedName.utf8.prefix(prefixLength), as: UTF8.self) + suffix
+        return qualifiedName
+    }
 
     public static func splitQualifiedToolName(_ qualifiedName: String) -> (serverName: String, toolName: String)? {
         let parts = qualifiedName.components(separatedBy: delimiter)
@@ -133,6 +148,20 @@ public enum McpToolName {
             grouped[split.serverName, default: [:]][split.toolName] = tool
         }
         return grouped
+    }
+
+    public static func qualifyTools(_ tools: [(serverName: String, tool: McpTool)]) -> [String: McpTool] {
+        var qualifiedTools: [String: McpTool] = [:]
+        var usedNames = Set<String>()
+        for entry in tools {
+            let qualifiedName = qualifiedToolName(serverName: entry.serverName, toolName: entry.tool.name)
+            guard !usedNames.contains(qualifiedName) else {
+                continue
+            }
+            usedNames.insert(qualifiedName)
+            qualifiedTools[qualifiedName] = entry.tool
+        }
+        return qualifiedTools
     }
 }
 

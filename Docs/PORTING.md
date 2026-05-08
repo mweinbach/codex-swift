@@ -263,7 +263,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` MCP tool-call event models plus `codex-rs/mcp-types/src/lib.rs`
   - MCP invocation payloads, arbitrary JSON arguments/structured content, Rust `Result` Ok/Err encoding, CallToolResult content blocks, Duration-backed tool-call end events, and success classification
 - `codex-rs/protocol/src/protocol.rs` MCP list-tools response plus `codex-rs/mcp-types/src/lib.rs`
-  - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, and camelCase MCP field names
+  - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, camelCase MCP field names, fully qualified MCP tool naming, duplicate qualified-tool skipping, and SHA-1 suffix truncation for OpenAI's 64-character tool-name limit
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
   - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
