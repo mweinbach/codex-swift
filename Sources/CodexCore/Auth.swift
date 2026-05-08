@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import Security
 
 public enum AuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
     case file
@@ -227,6 +229,91 @@ public enum CodexAuthStatus: Equatable, Sendable {
     case notLoggedIn
 }
 
+public protocol AuthKeyringStore: Sendable {
+    func load(service: String, account: String) throws -> String?
+    func save(service: String, account: String, value: String) throws
+    func delete(service: String, account: String) throws -> Bool
+}
+
+public struct SystemAuthKeyringStore: AuthKeyringStore {
+    public init() {}
+
+    public func load(service: String, account: String) throws -> String? {
+        var query = keychainQuery(service: service, account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound {
+            return nil
+        }
+        guard status == errSecSuccess else {
+            throw SystemAuthKeyringError.status(status)
+        }
+        guard let data = result as? Data,
+              let value = String(data: data, encoding: .utf8)
+        else {
+            throw SystemAuthKeyringError.invalidUTF8
+        }
+        return value
+    }
+
+    public func save(service: String, account: String, value: String) throws {
+        let data = Data(value.utf8)
+        var attributes = keychainQuery(service: service, account: account)
+        attributes[kSecValueData as String] = data
+
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        if addStatus == errSecDuplicateItem {
+            let updateStatus = SecItemUpdate(
+                keychainQuery(service: service, account: account) as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary
+            )
+            guard updateStatus == errSecSuccess else {
+                throw SystemAuthKeyringError.status(updateStatus)
+            }
+            return
+        }
+        guard addStatus == errSecSuccess else {
+            throw SystemAuthKeyringError.status(addStatus)
+        }
+    }
+
+    public func delete(service: String, account: String) throws -> Bool {
+        let status = SecItemDelete(keychainQuery(service: service, account: account) as CFDictionary)
+        if status == errSecItemNotFound {
+            return false
+        }
+        guard status == errSecSuccess else {
+            throw SystemAuthKeyringError.status(status)
+        }
+        return true
+    }
+
+    private func keychainQuery(service: String, account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+    }
+}
+
+private enum SystemAuthKeyringError: Error, CustomStringConvertible {
+    case status(OSStatus)
+    case invalidUTF8
+
+    var description: String {
+        switch self {
+        case let .status(status):
+            return SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+        case .invalidUTF8:
+            return "keyring item was not valid UTF-8"
+        }
+    }
+}
+
 public enum CodexHomeError: Error, Equatable, CustomStringConvertible, Sendable {
     case homeDirectoryNotFound
     case codexHomeDoesNotExist(String)
@@ -260,6 +347,7 @@ public enum CodexHome {
 
 public enum CodexAuthStorageError: Error, Equatable, CustomStringConvertible, Sendable {
     case keyringStoreNotAvailable
+    case keyringOperationFailed(String)
     case tokenDataNotAvailable
     case tokenDataNotAvailableAfterRefresh
     case invalidRefreshTokenEndpoint(String)
@@ -272,7 +360,9 @@ public enum CodexAuthStorageError: Error, Equatable, CustomStringConvertible, Se
     public var description: String {
         switch self {
         case .keyringStoreNotAvailable:
-            return "keyring auth storage is not available in codex-swift yet"
+            return "keyring auth storage is not available on this platform"
+        case let .keyringOperationFailed(message):
+            return message
         case .tokenDataNotAvailable:
             return "Token data is not available."
         case .tokenDataNotAvailableAfterRefresh:
@@ -308,24 +398,34 @@ public enum CodexAuthStorage {
     public static let defaultRefreshTokenURL = "https://auth.openai.com/oauth/token"
     public static let refreshClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     public static let tokenRefreshIntervalDays = 8
+    public static let keyringService = "Codex Auth"
 
     public typealias RefreshTransport = (URLRequest) async throws -> AuthRefreshHTTPResponse
 
     public static func loadAuthDotJSON(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
-        decoder: JSONDecoder = JSONDecoder()
+        decoder: JSONDecoder = JSONDecoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws -> AuthDotJSON? {
         switch mode {
-        case .file, .auto:
-            let authFile = codexHome.appendingPathComponent("auth.json", isDirectory: false)
-            guard FileManager.default.fileExists(atPath: authFile.path) else {
-                return nil
-            }
-            let data = try Data(contentsOf: authFile)
-            return try decoder.decode(AuthDotJSON.self, from: data)
+        case .file:
+            return try loadFileAuthDotJSON(codexHome: codexHome, decoder: decoder)
         case .keyring:
-            throw CodexAuthStorageError.keyringStoreNotAvailable
+            return try loadKeyringAuthDotJSON(codexHome: codexHome, decoder: decoder, keyringStore: keyringStore)
+        case .auto:
+            do {
+                if let auth = try loadKeyringAuthDotJSON(
+                    codexHome: codexHome,
+                    decoder: decoder,
+                    keyringStore: keyringStore
+                ) {
+                    return auth
+                }
+            } catch {
+                // Rust logs this and falls back to file-backed auth in auto mode.
+            }
+            return try loadFileAuthDotJSON(codexHome: codexHome, decoder: decoder)
         }
     }
 
@@ -333,79 +433,75 @@ public enum CodexAuthStorage {
         _ auth: AuthDotJSON,
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
-        encoder: JSONEncoder = JSONEncoder()
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws {
         switch mode {
-        case .file, .auto:
-            let authFile = codexHome.appendingPathComponent("auth.json", isDirectory: false)
-            if let parent = authFile.deletingLastPathComponentIfPossible {
-                try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-            }
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(auth)
-            if FileManager.default.fileExists(atPath: authFile.path) {
-                try data.write(to: authFile, options: .atomic)
-            } else {
-                FileManager.default.createFile(
-                    atPath: authFile.path,
-                    contents: data,
-                    attributes: [.posixPermissions: 0o600]
-                )
-            }
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
+        case .file:
+            try saveFileAuthDotJSON(auth, codexHome: codexHome, encoder: encoder)
         case .keyring:
-            throw CodexAuthStorageError.keyringStoreNotAvailable
+            try saveKeyringAuthDotJSON(auth, codexHome: codexHome, encoder: encoder, keyringStore: keyringStore)
+        case .auto:
+            do {
+                try saveKeyringAuthDotJSON(auth, codexHome: codexHome, encoder: encoder, keyringStore: keyringStore)
+            } catch {
+                try saveFileAuthDotJSON(auth, codexHome: codexHome, encoder: encoder)
+            }
         }
     }
 
     public static func loadTokenData(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
-        decoder: JSONDecoder = JSONDecoder()
+        decoder: JSONDecoder = JSONDecoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws -> AuthTokenData? {
-        try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder)?.tokens
+        try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder, keyringStore: keyringStore)?.tokens
     }
 
     public static func loginWithAPIKey(
         codexHome: URL,
         apiKey: String,
         mode: AuthCredentialsStoreMode = .file,
-        encoder: JSONEncoder = JSONEncoder()
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws {
         try saveAuthDotJSON(
             AuthDotJSON(openAIAPIKey: apiKey, tokens: nil, lastRefresh: nil),
             codexHome: codexHome,
             mode: mode,
-            encoder: encoder
+            encoder: encoder,
+            keyringStore: keyringStore
         )
     }
 
     public static func logout(
         codexHome: URL,
-        mode: AuthCredentialsStoreMode = .file
+        mode: AuthCredentialsStoreMode = .file,
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws -> Bool {
         switch mode {
-        case .file, .auto:
-            let authFile = codexHome.appendingPathComponent("auth.json", isDirectory: false)
-            do {
-                try FileManager.default.removeItem(at: authFile)
-                return true
-            } catch let error as CocoaError where error.code == .fileNoSuchFile {
-                return false
-            } catch {
-                throw error
-            }
-        case .keyring:
-            throw CodexAuthStorageError.keyringStoreNotAvailable
+        case .file:
+            return try deleteAuthFile(codexHome: codexHome)
+        case .keyring, .auto:
+            let keyringRemoved = try deleteKeyringAuth(codexHome: codexHome, keyringStore: keyringStore)
+            let fileRemoved = try deleteAuthFile(codexHome: codexHome)
+            return keyringRemoved || fileRemoved
         }
     }
 
     public static func authStatus(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
-        decoder: JSONDecoder = JSONDecoder()
+        decoder: JSONDecoder = JSONDecoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws -> CodexAuthStatus {
-        guard let auth = try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder) else {
+        guard let auth = try loadAuthDotJSON(
+            codexHome: codexHome,
+            mode: mode,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ) else {
             return .notLoggedIn
         }
         if let apiKey = auth.openAIAPIKey {
@@ -424,9 +520,15 @@ public enum CodexAuthStorage {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         refreshTransport: RefreshTransport? = nil,
         decoder: JSONDecoder = JSONDecoder(),
-        encoder: JSONEncoder = JSONEncoder()
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) async throws -> AuthTokenData? {
-        guard let auth = try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder) else {
+        guard let auth = try loadAuthDotJSON(
+            codexHome: codexHome,
+            mode: mode,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ) else {
             return nil
         }
         guard let tokens = auth.tokens,
@@ -454,7 +556,8 @@ public enum CodexAuthStorage {
             mode: mode,
             now: now,
             decoder: decoder,
-            encoder: encoder
+            encoder: encoder,
+            keyringStore: keyringStore
         )
         guard let updatedTokens = updated.tokens else {
             throw CodexAuthStorageError.tokenDataNotAvailableAfterRefresh
@@ -516,9 +619,15 @@ public enum CodexAuthStorage {
         mode: AuthCredentialsStoreMode,
         now: Date,
         decoder: JSONDecoder,
-        encoder: JSONEncoder
+        encoder: JSONEncoder,
+        keyringStore: AuthKeyringStore
     ) throws -> AuthDotJSON {
-        guard let current = try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder),
+        guard let current = try loadAuthDotJSON(
+            codexHome: codexHome,
+            mode: mode,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ),
               let currentTokens = current.tokens
         else {
             throw CodexAuthStorageError.tokenDataNotAvailable
@@ -536,8 +645,136 @@ public enum CodexAuthStorage {
             tokens: updatedTokens,
             lastRefresh: formatDate(now)
         )
-        try saveAuthDotJSON(updated, codexHome: codexHome, mode: mode, encoder: encoder)
+        try saveAuthDotJSON(updated, codexHome: codexHome, mode: mode, encoder: encoder, keyringStore: keyringStore)
         return updated
+    }
+
+    public static func computeKeyringStoreKey(codexHome: URL) -> String {
+        let path = canonicalCodexHomePath(codexHome)
+        let digest = SHA256.hash(data: Data(path.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "cli|\(hex.prefix(16))"
+    }
+
+    private static func loadFileAuthDotJSON(
+        codexHome: URL,
+        decoder: JSONDecoder
+    ) throws -> AuthDotJSON? {
+        let authFile = authFileURL(codexHome: codexHome)
+        guard FileManager.default.fileExists(atPath: authFile.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: authFile)
+        return try decoder.decode(AuthDotJSON.self, from: data)
+    }
+
+    private static func saveFileAuthDotJSON(
+        _ auth: AuthDotJSON,
+        codexHome: URL,
+        encoder: JSONEncoder
+    ) throws {
+        let authFile = authFileURL(codexHome: codexHome)
+        if let parent = authFile.deletingLastPathComponentIfPossible {
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        }
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(auth)
+        if FileManager.default.fileExists(atPath: authFile.path) {
+            try data.write(to: authFile, options: .atomic)
+        } else {
+            FileManager.default.createFile(
+                atPath: authFile.path,
+                contents: data,
+                attributes: [.posixPermissions: 0o600]
+            )
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
+    }
+
+    private static func deleteAuthFile(codexHome: URL) throws -> Bool {
+        let authFile = authFileURL(codexHome: codexHome)
+        do {
+            try FileManager.default.removeItem(at: authFile)
+            return true
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return false
+        } catch {
+            throw error
+        }
+    }
+
+    private static func loadKeyringAuthDotJSON(
+        codexHome: URL,
+        decoder: JSONDecoder,
+        keyringStore: AuthKeyringStore
+    ) throws -> AuthDotJSON? {
+        let serialized: String
+        do {
+            guard let value = try keyringStore.load(service: keyringService, account: computeKeyringStoreKey(codexHome: codexHome)) else {
+                return nil
+            }
+            serialized = value
+        } catch {
+            throw CodexAuthStorageError.keyringOperationFailed(
+                "failed to load CLI auth from keyring: \(String(describing: error))"
+            )
+        }
+
+        do {
+            return try decoder.decode(AuthDotJSON.self, from: Data(serialized.utf8))
+        } catch {
+            throw CodexAuthStorageError.keyringOperationFailed(
+                "failed to deserialize CLI auth from keyring: \(String(describing: error))"
+            )
+        }
+    }
+
+    private static func saveKeyringAuthDotJSON(
+        _ auth: AuthDotJSON,
+        codexHome: URL,
+        encoder: JSONEncoder,
+        keyringStore: AuthKeyringStore
+    ) throws {
+        encoder.outputFormatting = []
+        let data = try encoder.encode(auth)
+        guard let serialized = String(data: data, encoding: .utf8) else {
+            throw CodexAuthStorageError.keyringOperationFailed("failed to serialize CLI auth for keyring")
+        }
+
+        do {
+            try keyringStore.save(
+                service: keyringService,
+                account: computeKeyringStoreKey(codexHome: codexHome),
+                value: serialized
+            )
+        } catch {
+            throw CodexAuthStorageError.keyringOperationFailed(
+                "failed to write OAuth tokens to keyring: \(String(describing: error))"
+            )
+        }
+        _ = try? deleteAuthFile(codexHome: codexHome)
+    }
+
+    private static func deleteKeyringAuth(codexHome: URL, keyringStore: AuthKeyringStore) throws -> Bool {
+        do {
+            return try keyringStore.delete(service: keyringService, account: computeKeyringStoreKey(codexHome: codexHome))
+        } catch {
+            throw CodexAuthStorageError.keyringOperationFailed(
+                "failed to delete auth from keyring: \(String(describing: error))"
+            )
+        }
+    }
+
+    private static func authFileURL(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent("auth.json", isDirectory: false)
+    }
+
+    private static func canonicalCodexHomePath(_ codexHome: URL) -> String {
+        let path = codexHome.path
+        guard FileManager.default.fileExists(atPath: path) else {
+            return path
+        }
+        return codexHome.resolvingSymlinksInPath().path
     }
 
     private static func urlSessionRefreshTransport(_ request: URLRequest) async throws -> AuthRefreshHTTPResponse {

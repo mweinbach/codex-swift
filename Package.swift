@@ -22,7 +22,11 @@ let package = Package(
         .target(
             name: "CodexCore",
             dependencies: ["CodexApplyPatch"],
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            linkerSettings: [
+                .linkedFramework("CryptoKit"),
+                .linkedFramework("Security")
+            ]
         ),
         .target(
             name: "CodexApplyPatch",

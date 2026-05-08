@@ -135,8 +135,10 @@ Source baseline inspected for this scaffold:
   - profile option wire shape, feature-table flattening, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
+- `codex-rs/core/src/auth/storage.rs`
+  - CLI auth credential store modes for file, macOS Keychain-backed keyring, and auto fallback, including Rust-compatible keyring account hashing and fallback `auth.json` cleanup
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
-  - `codex login --with-api-key` stdin handling, file-backed API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
+  - `codex login --with-api-key` stdin handling, file/keyring/auto API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` output with Rust feature order, stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`
 - `codex-rs/stdio-to-uds`
@@ -309,8 +311,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
 - Windows PowerShell safe-command AST allowlist parity
 - Starlark-compatible execpolicy parser completeness
-- keyring storage for `codex apply <task_id>`
-- ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
+- ChatGPT browser login, device-code login, and runtime forced-login-method logout enforcement
 - rollout recorder flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state

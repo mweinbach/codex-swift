@@ -167,8 +167,9 @@ final class AuthTests: XCTestCase {
 
     func testMissingAuthJSONReturnsNil() throws {
         let dir = try AuthTemporaryDirectory()
+        let keyringStore = InMemoryAuthKeyringStore()
         XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
-        XCTAssertNil(try CodexAuthStorage.loadTokenData(codexHome: dir.url, mode: .auto))
+        XCTAssertNil(try CodexAuthStorage.loadTokenData(codexHome: dir.url, mode: .auto, keyringStore: keyringStore))
     }
 
     func testLoginWithAPIKeyClearsChatGPTTokens() throws {
@@ -212,11 +213,108 @@ final class AuthTests: XCTestCase {
         XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url))
     }
 
-    func testKeyringModeReportsUnavailableUntilPorted() throws {
+    func testKeyringStoreKeyMatchesRustHash() {
+        let codexHome = URL(string: "file:~/.codex")!
+        XCTAssertEqual(CodexAuthStorage.computeKeyringStoreKey(codexHome: codexHome), "cli|940db7b1d0e4eb40")
+    }
+
+    func testKeyringModeLoadsSavesAndRemovesFallbackFile() throws {
         let dir = try AuthTemporaryDirectory()
-        XCTAssertThrowsError(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .keyring)) { error in
-            XCTAssertEqual(error as? CodexAuthStorageError, .keyringStoreNotAvailable)
-        }
+        let keyringStore = InMemoryAuthKeyringStore()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+
+        let keyringAuth = AuthDotJSON(openAIAPIKey: "sk-keyring", tokens: nil, lastRefresh: nil)
+        try CodexAuthStorage.saveAuthDotJSON(
+            keyringAuth,
+            codexHome: dir.url,
+            mode: .keyring,
+            keyringStore: keyringStore
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.url.appendingPathComponent("auth.json").path))
+        XCTAssertEqual(
+            try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .keyring, keyringStore: keyringStore),
+            keyringAuth
+        )
+        XCTAssertEqual(
+            try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .keyring, keyringStore: keyringStore),
+            .apiKey("sk-keyring")
+        )
+
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-fallback-file")
+        XCTAssertTrue(try CodexAuthStorage.logout(codexHome: dir.url, mode: .keyring, keyringStore: keyringStore))
+        XCTAssertNil(keyringStore.value(service: CodexAuthStorage.keyringService, account: Self.keyringAccount(for: dir.url)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.url.appendingPathComponent("auth.json").path))
+        XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url, mode: .keyring, keyringStore: keyringStore))
+    }
+
+    func testAutoModePrefersKeyringAndFallsBackToFile() throws {
+        let dir = try AuthTemporaryDirectory()
+        let keyringStore = InMemoryAuthKeyringStore()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+        try CodexAuthStorage.saveAuthDotJSON(
+            AuthDotJSON(openAIAPIKey: "sk-keyring", tokens: nil, lastRefresh: nil),
+            codexHome: dir.url,
+            mode: .keyring,
+            keyringStore: keyringStore
+        )
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+
+        XCTAssertEqual(
+            try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .auto, keyringStore: keyringStore),
+            .apiKey("sk-keyring")
+        )
+
+        keyringStore.set(nil, service: CodexAuthStorage.keyringService, account: Self.keyringAccount(for: dir.url))
+        XCTAssertEqual(
+            try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .auto, keyringStore: keyringStore),
+            .apiKey("sk-file")
+        )
+    }
+
+    func testAutoModeFallsBackToFileWhenKeyringLoadFails() throws {
+        let dir = try AuthTemporaryDirectory()
+        let keyringStore = InMemoryAuthKeyringStore()
+        keyringStore.loadError = KeyringTestError("boom")
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+
+        XCTAssertEqual(
+            try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .auto, keyringStore: keyringStore),
+            .apiKey("sk-file")
+        )
+    }
+
+    func testAutoModeSaveFallsBackToFileWhenKeyringSaveFails() throws {
+        let dir = try AuthTemporaryDirectory()
+        let keyringStore = InMemoryAuthKeyringStore()
+        keyringStore.saveError = KeyringTestError("boom")
+
+        try CodexAuthStorage.loginWithAPIKey(
+            codexHome: dir.url,
+            apiKey: "sk-auto",
+            mode: .auto,
+            keyringStore: keyringStore
+        )
+
+        XCTAssertNil(keyringStore.value(service: CodexAuthStorage.keyringService, account: Self.keyringAccount(for: dir.url)))
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .file), .apiKey("sk-auto"))
+    }
+
+    func testAutoModeDeleteRemovesKeyringAndFile() throws {
+        let dir = try AuthTemporaryDirectory()
+        let keyringStore = InMemoryAuthKeyringStore()
+        try CodexAuthStorage.saveAuthDotJSON(
+            AuthDotJSON(openAIAPIKey: "sk-keyring", tokens: nil, lastRefresh: nil),
+            codexHome: dir.url,
+            mode: .keyring,
+            keyringStore: keyringStore
+        )
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+
+        XCTAssertTrue(try CodexAuthStorage.logout(codexHome: dir.url, mode: .auto, keyringStore: keyringStore))
+        XCTAssertNil(keyringStore.value(service: CodexAuthStorage.keyringService, account: Self.keyringAccount(for: dir.url)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.url.appendingPathComponent("auth.json").path))
+        XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url, mode: .auto, keyringStore: keyringStore))
     }
 
     func testParsesIDTokenEmailPlanAndAccountID() throws {
@@ -332,6 +430,10 @@ final class AuthTests: XCTestCase {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+
+    private static func keyringAccount(for codexHome: URL) -> String {
+        CodexAuthStorage.computeKeyringStoreKey(codexHome: codexHome)
+    }
 }
 
 private struct RefreshRequestBody: Decodable {
@@ -372,5 +474,70 @@ private final class AuthTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private struct KeyringTestError: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
+    }
+}
+
+private final class InMemoryAuthKeyringStore: AuthKeyringStore, @unchecked Sendable {
+    private struct Key: Hashable {
+        let service: String
+        let account: String
+    }
+
+    private let lock = NSLock()
+    private var entries: [Key: String] = [:]
+
+    var loadError: Error?
+    var saveError: Error?
+    var deleteError: Error?
+
+    func load(service: String, account: String) throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let loadError {
+            throw loadError
+        }
+        return entries[Key(service: service, account: account)]
+    }
+
+    func save(service: String, account: String, value: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if let saveError {
+            throw saveError
+        }
+        entries[Key(service: service, account: account)] = value
+    }
+
+    func delete(service: String, account: String) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let deleteError {
+            throw deleteError
+        }
+        return entries.removeValue(forKey: Key(service: service, account: account)) != nil
+    }
+
+    func value(service: String, account: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[Key(service: service, account: account)]
+    }
+
+    func set(_ value: String?, service: String, account: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let value {
+            entries[Key(service: service, account: account)] = value
+        } else {
+            entries.removeValue(forKey: Key(service: service, account: account))
+        }
     }
 }
