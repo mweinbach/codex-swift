@@ -94,6 +94,43 @@ final class ApplyPatchCommandTests: XCTestCase {
             stdin: { Data() }
         ))
     }
+
+    func testPrependPathEntryCreatesAliasesAndPrependsPath() throws {
+        let executable = URL(fileURLWithPath: "/tmp/codex")
+        var capturedPATH: String?
+
+        let aliases = try ApplyPatchCommand.prependPathEntryForCodexAliases(
+            currentExecutable: executable,
+            existingPATH: "/bin:/usr/bin",
+            setPATH: { capturedPATH = $0 }
+        )
+
+        XCTAssertEqual(capturedPATH, "\(aliases.url.path):/bin:/usr/bin")
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(
+                atPath: aliases.url.appendingPathComponent("apply_patch").path
+            ),
+            executable.path
+        )
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(
+                atPath: aliases.url.appendingPathComponent("applypatch").path
+            ),
+            executable.path
+        )
+    }
+
+    func testPrependPathEntryUsesDirectoryOnlyWhenPathIsMissing() throws {
+        var capturedPATH: String?
+
+        let aliases = try ApplyPatchCommand.prependPathEntryForCodexAliases(
+            currentExecutable: URL(fileURLWithPath: "/tmp/codex"),
+            existingPATH: nil,
+            setPATH: { capturedPATH = $0 }
+        )
+
+        XCTAssertEqual(capturedPATH, aliases.url.path)
+    }
 }
 
 private let addFilePatch = """

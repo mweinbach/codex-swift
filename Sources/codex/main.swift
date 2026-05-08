@@ -23,6 +23,14 @@ if let result = ApplyPatchCommand.runForArg0Dispatch(
     exit(result.exitCode)
 }
 
+let codexAliasDirectory: ApplyPatchAliasDirectory?
+do {
+    codexAliasDirectory = try ApplyPatchCommand.prependPathEntryForCodexAliases()
+} catch {
+    codexAliasDirectory = nil
+    fputs("WARNING: proceeding, even though we could not update PATH: \(error)\n", stderr)
+}
+
 ProcessHardening.preMainHardening()
 
 let cli = CodexCLI()

@@ -1,5 +1,17 @@
 import Foundation
 
+public final class ApplyPatchAliasDirectory {
+    public let url: URL
+
+    fileprivate init(url: URL) {
+        self.url = url
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 public struct ApplyPatchCommandResult: Equatable, Sendable {
     public let exitCode: Int32
     public let stdout: String
@@ -16,6 +28,7 @@ public enum ApplyPatchCommand {
     public static let hiddenArgument = "--codex-run-as-apply-patch"
 
     private static let aliasNames: Set<String> = ["apply_patch", "applypatch"]
+    private static let pathSeparator = ":"
 
     public static func runForArg0Dispatch(
         argv0: String,
@@ -85,5 +98,39 @@ public enum ApplyPatchCommand {
             stdout: result.stdout,
             stderr: result.stderr
         )
+    }
+
+    public static func prependPathEntryForCodexAliases(
+        currentExecutable: URL? = Bundle.main.executableURL,
+        existingPATH: String? = ProcessInfo.processInfo.environment["PATH"],
+        setPATH: (String) throws -> Void = { value in setenv("PATH", value, 1) }
+    ) throws -> ApplyPatchAliasDirectory {
+        let executable = currentExecutable ?? URL(fileURLWithPath: CommandLine.arguments.first ?? "")
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        do {
+            for aliasName in aliasNames {
+                try FileManager.default.createSymbolicLink(
+                    at: tempDirectory.appendingPathComponent(aliasName),
+                    withDestinationURL: executable
+                )
+            }
+
+            let updatedPATH: String
+            if let existingPATH, !existingPATH.isEmpty {
+                updatedPATH = "\(tempDirectory.path)\(pathSeparator)\(existingPATH)"
+            } else {
+                updatedPATH = tempDirectory.path
+            }
+            try setPATH(updatedPATH)
+            return ApplyPatchAliasDirectory(url: tempDirectory)
+        } catch {
+            try? FileManager.default.removeItem(at: tempDirectory)
+            throw error
+        }
     }
 }
