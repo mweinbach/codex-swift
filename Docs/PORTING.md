@@ -53,6 +53,8 @@ Source baseline inspected for this scaffold:
   - built-in approval preset ordering and policy pairs
 - `codex-rs/protocol/src/approvals.rs`
   - transparent execpolicy amendment array encoding
+- `codex-rs/protocol/src/protocol.rs` review decision model
+  - approval response wire strings, externally tagged execpolicy-amendment approval payload, and denied default
 - `codex-rs/protocol/src/user_input.rs`
   - tagged user input variants for text, images, local images, and skills
 - `codex-rs/protocol/src/plan_tool.rs`
