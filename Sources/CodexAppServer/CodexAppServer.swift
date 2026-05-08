@@ -1179,6 +1179,59 @@ public enum CodexAppServer {
         return ([:], threadID.description, name)
     }
 
+    fileprivate static func threadMemoryModeSetResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        guard let mode = stringParam(params?["mode"]) else {
+            throw AppServerError.invalidRequest("missing mode")
+        }
+        guard mode == "enabled" || mode == "disabled" else {
+            throw AppServerError.invalidRequest("invalid memory mode: \(mode)")
+        }
+
+        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        let sessionMeta = try readSessionMetaLine(rolloutPath: rolloutPath)
+        guard sessionMeta.meta.id == threadID else {
+            throw AppServerError.internalError(
+                "failed to set thread memory mode: rollout session metadata id mismatch: expected \(threadID), found \(sessionMeta.meta.id)"
+            )
+        }
+
+        let meta = sessionMeta.meta
+        let updatedMeta = SessionMeta(
+            id: meta.id,
+            forkedFromID: meta.forkedFromID,
+            timestamp: meta.timestamp,
+            cwd: meta.cwd,
+            originator: meta.originator,
+            cliVersion: meta.cliVersion,
+            instructions: meta.instructions,
+            source: meta.source,
+            threadSource: meta.threadSource,
+            agentNickname: meta.agentNickname,
+            agentRole: meta.agentRole,
+            agentPath: meta.agentPath,
+            modelProvider: meta.modelProvider,
+            baseInstructions: meta.baseInstructions,
+            dynamicTools: meta.dynamicTools,
+            memoryMode: mode
+        )
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
+        try recorder.recordItems([.sessionMeta(SessionMetaLine(meta: updatedMeta, git: nil))])
+        try recorder.shutdown()
+        return [:]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -3421,6 +3474,20 @@ public enum CodexAppServer {
         codexHome.appendingPathComponent("session_index.jsonl", isDirectory: false)
     }
 
+    private static func readSessionMetaLine(rolloutPath: String) throws -> SessionMetaLine {
+        let text = try String(contentsOf: URL(fileURLWithPath: rolloutPath, isDirectory: false), encoding: .utf8)
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            guard let data = rawLine.data(using: .utf8),
+                  let line = try? JSONDecoder().decode(RolloutLine.self, from: data),
+                  case let .sessionMeta(sessionMeta) = line.item
+            else {
+                continue
+            }
+            return sessionMeta
+        }
+        throw RolloutRecorderError.missingConversationID
+    }
+
     private static func configWriteResult(
         edits: [ConfigWriteEdit],
         filePath: String?,
@@ -4416,6 +4483,11 @@ final class CodexAppServerMessageProcessor {
                         threadID: result.threadID,
                         threadName: result.threadName
                     ))
+                case "thread/memoryMode/set":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadMemoryModeSetResult(params: params, configuration: configuration)
+                    )
                 case "listConversations":
                     response = CodexAppServer.responseObject(
                         id: id,

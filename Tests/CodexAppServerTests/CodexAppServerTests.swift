@@ -815,6 +815,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
     }
 
+    func testThreadMemoryModeSetAppendsSessionMetaMarker() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-30-00",
+            timestamp: "2025-01-06T08:30:00Z",
+            preview: "Stored thread preview",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+
+        for (index, mode) in ["disabled", "enabled"].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"\#(mode)"}}"#,
+                codexHome: temp.url
+            )
+            let result = try XCTUnwrap(response["result"] as? [String: Any])
+            XCTAssertTrue(result.isEmpty)
+        }
+
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""memory_mode":"disabled""#))
+        XCTAssertTrue(rollout.contains(#""memory_mode":"enabled""#))
+        let lines = rollout.split(whereSeparator: \.isNewline)
+        let sessionMetaLines = lines.filter { $0.contains(#""type":"session_meta""#) }
+        XCTAssertEqual(sessionMetaLines.count, 3)
+        XCTAssertTrue(sessionMetaLines.last?.contains(#""memory_mode":"enabled""#) == true)
+    }
+
+    func testThreadMemoryModeSetRejectsInvalidModeAndMissingThread() throws {
+        let temp = try TemporaryDirectory()
+        let missingID = UUID().uuidString.lowercased()
+
+        let invalidMode = try appServerResponse(
+            #"{"id":1,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"paused"}}"#,
+            codexHome: temp.url
+        )
+        let invalidModeError = try XCTUnwrap(invalidMode["error"] as? [String: Any])
+        XCTAssertEqual(invalidModeError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidModeError["message"] as? String, "invalid memory mode: paused")
+
+        let missing = try appServerResponse(
+            #"{"id":2,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"enabled"}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
