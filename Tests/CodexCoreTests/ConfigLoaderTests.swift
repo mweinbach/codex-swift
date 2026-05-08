@@ -704,6 +704,59 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.forcedLoginMethod, .api)
     }
 
+    func testRequirementsTomlRejectsDisallowedRuntimeApprovalPolicyLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_approval_policies = ["never"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        approval_policy = "on-request"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidValue(candidate: "OnRequest", allowed: "[Never]")
+            )
+        }
+    }
+
+    func testRequirementsTomlRejectsDisallowedRuntimeSandboxModeLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_sandbox_modes = ["read-only"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        sandbox_mode = "workspace-write"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidValue(
+                    candidate: "WorkspaceWrite { writable_roots: [], network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false }",
+                    allowed: "[ReadOnly]"
+                )
+            )
+        }
+    }
+
     func testProjectLayerStopsAtDetectedGitRoot() throws {
         let dir = try CoreTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

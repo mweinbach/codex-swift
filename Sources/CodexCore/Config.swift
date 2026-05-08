@@ -203,7 +203,47 @@ public enum CodexConfigLoader {
             fileManager: fileManager
         )
         try parsed.merge(managedConfigLayers)
-        return try parsed.resolvedConfig(environment: environment)
+
+        var requirementsToml = ConfigRequirementsToml()
+        if let requirementsPath = managedConfigOverrides.requirementsPath
+            ?? CodexConfigLayerLoader.defaultRequirementsTomlFile()
+        {
+            try CodexConfigLayerLoader.loadRequirementsToml(
+                into: &requirementsToml,
+                from: requirementsPath,
+                fileManager: fileManager
+            )
+        }
+        try CodexConfigLayerLoader.loadRequirementsFromLegacyScheme(
+            into: &requirementsToml,
+            loadedConfigLayers: managedConfigLayers
+        )
+
+        var config = try parsed.resolvedConfig(environment: environment)
+        try applyRequirements(try requirementsToml.requirements(), to: &config)
+        return config
+    }
+
+    private static func applyRequirements(
+        _ requirements: ConfigRequirements,
+        to config: inout CodexRuntimeConfig
+    ) throws {
+        let approvalPolicy = config.approvalPolicy ?? AskForApproval.defaultValue
+        try requirements.approvalPolicy.canSet(approvalPolicy).get()
+
+        let sandboxPolicy = sandboxPolicy(for: config.sandboxMode ?? .readOnly)
+        try requirements.sandboxPolicy.canSet(sandboxPolicy).get()
+    }
+
+    private static func sandboxPolicy(for mode: SandboxMode) -> SandboxPolicy {
+        switch mode {
+        case .readOnly:
+            return .readOnly
+        case .workspaceWrite:
+            return .newWorkspaceWritePolicy()
+        case .dangerFullAccess:
+            return .dangerFullAccess
+        }
     }
 
     private static func baseConfigLayerFiles(
