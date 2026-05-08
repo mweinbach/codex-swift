@@ -1094,12 +1094,15 @@ final class CodexAppServerTests: XCTestCase {
         )
         let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#,
-            codexHome: temp.url
-        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let messages = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
 
-        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/archived")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: rolloutPath))
         let archivedPath = temp.url
             .appendingPathComponent("archived_sessions", isDirectory: true)
@@ -1117,12 +1120,10 @@ final class CodexAppServerTests: XCTestCase {
             provider: "openai"
         )
         let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
-        _ = try appServerResponse(
-            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#,
-            codexHome: temp.url
-        )
-
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
         let messages = try decodeMessages(processor.processLine(
             Data(#"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(id)"}}"#.utf8)
         ))

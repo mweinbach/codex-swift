@@ -371,6 +371,8 @@ Source baseline inspected for this scaffold:
   - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, limit handling, `nextCursor`, and unsubscribe-keeps-loaded behavior.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread unarchive
   - `thread/unarchive` now restores archived rollout files into the dated sessions tree, returns the restored `thread` object, emits `thread/unarchived`, and matches invalid/missing archived-thread errors.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` thread archive notification
+  - `thread/archive` now emits `thread/archived` after successfully moving the rollout into `archived_sessions`.
 
 ## Known Gaps
 

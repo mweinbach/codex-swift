@@ -1204,6 +1204,15 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadArchivedNotification(threadID: String) -> [String: Any] {
+        [
+            "method": "thread/archived",
+            "params": [
+                "threadId": threadID
+            ]
+        ]
+    }
+
     fileprivate static func turnStartedNotification(threadID: String, turn: [String: Any]) -> [String: Any] {
         [
             "method": "turn/started",
@@ -3696,10 +3705,15 @@ final class CodexAppServerMessageProcessor {
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: reviewThreadID, turn: turn))
                     }
                 case "thread/archive":
+                    let archivedThreadID = CodexAppServer.stringParam(params?["threadId"])
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadArchiveResult(params: params, configuration: configuration)
                     )
+                    if let archivedThreadID,
+                       let normalizedThreadID = (try? ConversationId(string: archivedThreadID))?.description {
+                        notifications.append(CodexAppServer.threadArchivedNotification(threadID: normalizedThreadID))
+                    }
                 case "thread/unarchive":
                     let result = try CodexAppServer.threadUnarchiveResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
