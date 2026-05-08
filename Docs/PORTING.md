@@ -126,6 +126,8 @@ Source baseline inspected for this scaffold:
   - review target tagged wire shape, review request hints, prompt generation for uncommitted/base/commit/custom targets, merge-base prompt injection seam, and user-facing hint formatting
 - `codex-rs/core/src/text_encoding.rs`
   - smart shell-output byte decoding for UTF-8, Cyrillic legacy code pages, Windows-1252 punctuation collisions, Latin-1, ANSI-preserving output, and lossy fallback behavior
+- `codex-rs/core/src/user_instructions.rs`
+  - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 - `codex-rs/common/src/config_summary.rs`
