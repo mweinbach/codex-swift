@@ -2993,6 +2993,18 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testMcpServerReloadReturnsEmptyResult() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/mcpServer/reload"}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+    }
+
     func testMcpServerOAuthLoginRejectsUnknownServer() throws {
         let temp = try TemporaryDirectory()
 

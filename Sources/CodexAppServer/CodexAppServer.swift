@@ -1822,6 +1822,10 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func mcpServerRefreshResult() -> [String: Any] {
+        [:]
+    }
+
     fileprivate static func mcpServerOAuthLoginResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -5600,6 +5604,11 @@ final class CodexAppServerMessageProcessor {
                             configuration: configuration,
                             notificationSink: notificationSink
                         )
+                    )
+                case "config/mcpServer/reload":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.mcpServerRefreshResult()
                     )
                 case "skills/list":
                     response = CodexAppServer.responseObject(
