@@ -160,6 +160,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.map { $0["preview"] as? String }, ["Interactive session"])
     }
 
+    func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
+        let temp = try TemporaryDirectory()
+        let id = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "archive me",
+            provider: "openai"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#,
+            codexHome: temp.url
+        )
+
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rolloutPath))
+        let archivedPath = temp.url
+            .appendingPathComponent("archived_sessions", isDirectory: true)
+            .appendingPathComponent(URL(fileURLWithPath: rolloutPath).lastPathComponent, isDirectory: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
+    }
+
+    func testArchiveConversationMovesExplicitRolloutIntoArchivedDirectory() throws {
+        let temp = try TemporaryDirectory()
+        let id = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "archive legacy",
+            provider: "openai"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"archiveConversation","params":{"conversation_id":"\#(id)","rollout_path":"\#(rolloutPath)"}}"#,
+            codexHome: temp.url
+        )
+
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rolloutPath))
+        let archivedPath = temp.url
+            .appendingPathComponent("archived_sessions", isDirectory: true)
+            .appendingPathComponent(URL(fileURLWithPath: rolloutPath).lastPathComponent, isDirectory: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
+    }
+
+    func testArchiveConversationRejectsRolloutOutsideSessionsDirectory() throws {
+        let temp = try TemporaryDirectory()
+        let id = UUID().uuidString.lowercased()
+        let path = temp.url.appendingPathComponent("rollout-2025-01-02T03-04-05-\(id).jsonl")
+        try "not a session".write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: temp.url.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"archiveConversation","params":{"conversation_id":"\#(id)","rollout_path":"\#(path.path)"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "rollout path `\(path.path)` must be in sessions directory")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+    }
+
     func testInitializeUsesAppServerJSONRPCShapeWithoutJsonrpcField() throws {
         let temp = try TemporaryDirectory()
         let response = try appServerResponse(

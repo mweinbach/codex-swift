@@ -91,6 +91,39 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func threadArchiveResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        let rolloutPath: String
+        do {
+            guard let foundPath = try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: conversationID.description
+            ) else {
+                throw AppServerError.invalidRequest("no rollout found for conversation id \(conversationID)")
+            }
+            rolloutPath = foundPath
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.invalidRequest("failed to locate conversation id \(conversationID): \(error)")
+        }
+
+        try archiveConversation(conversationID: conversationID, rolloutPath: rolloutPath, configuration: configuration)
+        return [:]
+    }
+
     fileprivate static func listConversationsResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -107,6 +140,29 @@ public enum CodexAppServer {
             "items": try page.items.map { try conversationObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
             "nextCursor": page.nextCursor?.token as Any
         ].nullStripped()
+    }
+
+    fileprivate static func archiveConversationResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
+        guard let rawID else {
+            throw AppServerError.invalidRequest("missing conversation_id")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: rawID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid conversation id: \(error)")
+        }
+        let rawPath = stringParam(params?["rolloutPath"]) ?? stringParam(params?["rollout_path"])
+        guard let rawPath else {
+            throw AppServerError.invalidRequest("missing rollout_path")
+        }
+
+        try archiveConversation(conversationID: conversationID, rolloutPath: rawPath, configuration: configuration)
+        return [:]
     }
 
     fileprivate static func modelListResult(
@@ -794,6 +850,57 @@ public enum CodexAppServer {
             return $0.path < $1.path
         }
         return outcome
+    }
+
+    private static func archiveConversation(
+        conversationID: ConversationId,
+        rolloutPath rawRolloutPath: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let fileManager = FileManager.default
+        let sessionsDirectory = configuration.codexHome
+            .appendingPathComponent(RolloutListing.sessionsSubdirectory, isDirectory: true)
+        guard isDirectory(sessionsDirectory) else {
+            throw AppServerError.internalError(
+                "failed to archive conversation: unable to resolve sessions directory: sessions directory does not exist"
+            )
+        }
+
+        let canonicalSessionsDirectory = sessionsDirectory.resolvingSymlinksInPath().standardizedFileURL
+        let rolloutURL = URL(fileURLWithPath: rawRolloutPath, isDirectory: false)
+        let canonicalRolloutPath = rolloutURL.resolvingSymlinksInPath().standardizedFileURL
+        guard canonicalRolloutPath.path.hasPrefix(canonicalSessionsDirectory.path + "/") ||
+            canonicalRolloutPath.path == canonicalSessionsDirectory.path
+        else {
+            throw AppServerError.invalidRequest(
+                "rollout path `\(rawRolloutPath)` must be in sessions directory"
+            )
+        }
+        guard fileManager.fileExists(atPath: canonicalRolloutPath.path) else {
+            throw AppServerError.invalidRequest(
+                "rollout path `\(rawRolloutPath)` must be in sessions directory"
+            )
+        }
+
+        let fileName = canonicalRolloutPath.lastPathComponent
+        guard !fileName.isEmpty else {
+            throw AppServerError.invalidRequest("rollout path `\(rawRolloutPath)` missing file name")
+        }
+        guard fileName.hasSuffix("\(conversationID).jsonl") else {
+            throw AppServerError.invalidRequest(
+                "rollout path `\(rawRolloutPath)` does not match conversation id \(conversationID)"
+            )
+        }
+
+        let archivedDirectory = configuration.codexHome
+            .appendingPathComponent(RolloutErrors.archivedSessionsSubdirectory, isDirectory: true)
+        let archivedPath = archivedDirectory.appendingPathComponent(fileName, isDirectory: false)
+        do {
+            try fileManager.createDirectory(at: archivedDirectory, withIntermediateDirectories: true)
+            try fileManager.moveItem(at: canonicalRolloutPath, to: archivedPath)
+        } catch {
+            throw AppServerError.internalError("failed to archive conversation: \(error)")
+        }
     }
 
     private static func skillRoots(cwd: URL, codexHome: URL) -> [(path: URL, scope: SkillScope)] {
@@ -1681,10 +1788,20 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
                     )
+                case "thread/archive":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadArchiveResult(params: params, configuration: configuration)
+                    )
                 case "listConversations":
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.listConversationsResult(params: params, configuration: configuration)
+                    )
+                case "archiveConversation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.archiveConversationResult(params: params, configuration: configuration)
                     )
                 case "getUserAgent":
                     response = CodexAppServer.responseObject(id: id, result: [
