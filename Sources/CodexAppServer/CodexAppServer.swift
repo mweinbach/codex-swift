@@ -213,6 +213,18 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func loginAccountResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let type = stringParam(params?["type"])
+        guard type == "apiKey" else {
+            throw AppServerError.invalidRequest("ChatGPT login is not yet supported")
+        }
+        _ = try loginApiKeyResult(params: params, configuration: configuration)
+        return ["type": "apiKey"]
+    }
+
     fileprivate static func logoutResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         do {
             _ = try CodexAuthStorage.logout(
@@ -230,6 +242,26 @@ public enum CodexAppServer {
             "method": "authStatusChange",
             "params": [
                 "authMethod": try currentAuth(configuration: configuration)?.method ?? NSNull()
+            ].nullStripped(keepNulls: true)
+        ]
+    }
+
+    fileprivate static func accountLoginCompletedNotification() -> [String: Any] {
+        [
+            "method": "account/login/completed",
+            "params": [
+                "loginId": NSNull(),
+                "success": true,
+                "error": NSNull()
+            ].nullStripped(keepNulls: true)
+        ]
+    }
+
+    fileprivate static func accountUpdatedNotification(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        [
+            "method": "account/updated",
+            "params": [
+                "authMode": try currentAuth(configuration: configuration)?.method ?? NSNull()
             ].nullStripped(keepNulls: true)
         ]
     }
@@ -977,6 +1009,19 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.logoutResult(configuration: configuration)
                     )
                     notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
+                case "account/login/start":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.loginAccountResult(params: params, configuration: configuration)
+                    )
+                    notifications.append(CodexAppServer.accountLoginCompletedNotification())
+                    notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                case "account/logout":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.logoutResult(configuration: configuration)
+                    )
+                    notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
                 case "setDefaultModel":
                     response = CodexAppServer.responseObject(
                         id: id,

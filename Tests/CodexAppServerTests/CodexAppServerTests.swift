@@ -280,6 +280,66 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["authToken"] is NSNull)
     }
 
+    func testAccountLoginAPIKeyPersistsAuthAndEmitsV2Notifications() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"apiKey","apiKey":"sk-test-key"}}"#.utf8)))
+        XCTAssertEqual(messages.count, 3)
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(result["type"] as? String, "apiKey")
+
+        XCTAssertEqual(messages[1]["method"] as? String, "account/login/completed")
+        let completed = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertTrue(completed["loginId"] is NSNull)
+        XCTAssertEqual(completed["success"] as? Bool, true)
+        XCTAssertTrue(completed["error"] is NSNull)
+
+        XCTAssertEqual(messages[2]["method"] as? String, "account/updated")
+        XCTAssertEqual((messages[2]["params"] as? [String: Any])?["authMode"] as? String, "apikey")
+
+        let account = try decode(processor.processLine(Data(#"{"id":2,"method":"account/read","params":{}}"#.utf8)))
+        let accountResult = try XCTUnwrap(account["result"] as? [String: Any])
+        let accountPayload = try XCTUnwrap(accountResult["account"] as? [String: Any])
+        XCTAssertEqual(accountPayload["type"] as? String, "apiKey")
+    }
+
+    func testAccountLoginAPIKeyRejectedWhenForcedChatGPT() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_login_method = "chatgpt""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/login/start","params":{"type":"apiKey","apiKey":"sk-test-key"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "API key login is disabled. Use ChatGPT login instead.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
+    func testAccountLogoutRemovesAuthAndEmitsV2Notification() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"account/logout"}"#.utf8)))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "account/updated")
+        XCTAssertTrue((messages[1]["params"] as? [String: Any])?["authMode"] is NSNull)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+
+        let account = try decode(processor.processLine(Data(#"{"id":2,"method":"account/read","params":{}}"#.utf8)))
+        let result = try XCTUnwrap(account["result"] as? [String: Any])
+        XCTAssertTrue(result["account"] is NSNull)
+    }
+
     func testAccountAndUserInfoReportChatGPTIdentity() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.saveChatGPTTokens(
