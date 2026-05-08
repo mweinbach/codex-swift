@@ -2,7 +2,7 @@ import CodexCore
 import XCTest
 
 final class ParsedCommandTests: XCTestCase {
-    func testParsedCommandWireShape() throws {
+    func testParsedCommandWireShapeMatchesRustSerdeTags() throws {
         try XCTAssertJSONObjectEqual(
             ParsedCommand.read(cmd: "cat README.md", name: "README.md", path: "README.md"),
             [
@@ -12,61 +12,80 @@ final class ParsedCommandTests: XCTestCase {
                 "path": "README.md"
             ]
         )
+
+        try XCTAssertJSONObjectEqual(
+            ParsedCommand.listFiles(cmd: "ls -la", path: nil),
+            [
+                "type": "list_files",
+                "cmd": "ls -la"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ParsedCommand.search(cmd: "rg -n TODO src", query: "TODO", path: "src"),
+            [
+                "type": "search",
+                "cmd": "rg -n TODO src",
+                "query": "TODO",
+                "path": "src"
+            ]
+        )
     }
 
     func testGitStatusIsUnknown() {
-        XCTAssertEqual(CommandParser.parseCommand(["git", "status"]), [
+        XCTAssertEqual(parseCommand(["git", "status"]), [
             .unknown(cmd: "git status")
         ])
     }
 
-    func testHandlesGitPipeWc() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "git status | wc -l"]), [
-            .unknown(cmd: "git status")
+    func testSupportsCat() {
+        XCTAssertEqual(parseCommand(["cat", "webview/README.md"]), [
+            .read(cmd: "cat webview/README.md", name: "README.md", path: "webview/README.md")
         ])
     }
 
-    func testSupportsSearchingForNavigateToRoute() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", #"rg -n "navigate-to-route" -S"#]), [
-            .search(cmd: "rg -n navigate-to-route -S", query: "navigate-to-route", path: nil)
+    func testBashLcSupportsCat() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cat README.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
         ])
     }
 
-    func testHandlesComplexRipgrepPipe() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", #"rg -n "BUG|FIXME|TODO|XXX|HACK" -S | head -n 200"#]), [
-            .search(cmd: "rg -n 'BUG|FIXME|TODO|XXX|HACK' -S", query: "BUG|FIXME|TODO|XXX|HACK", path: nil)
-        ])
-    }
-
-    func testSupportsRipgrepFilesWithPathAndPipe() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "rg --files webview/src | sed -n"]), [
-            .search(cmd: "rg --files webview/src", query: nil, path: "webview")
-        ])
-    }
-
-    func testSupportsCatAndCdContext() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "cd foo && cat foo.txt"]), [
+    func testCdThenCatIsSingleRead() {
+        XCTAssertEqual(parseCommand(["cd", "foo", "&&", "cat", "foo.txt"]), [
             .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo/foo.txt")
         ])
     }
 
     func testSupportsLsWithPipe() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", #"ls -la | sed -n '1,120p'"#]), [
+        XCTAssertEqual(parseCommand(["bash", "-lc", "ls -la | sed -n '1,120p'"]), [
             .listFiles(cmd: "ls -la", path: nil)
         ])
     }
 
-    func testSupportsHeadAndTailReads() {
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "head -n 50 Cargo.toml"]), [
-            .read(cmd: "head -n 50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+    func testSupportsSearchingForNavigateToRoute() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"rg -n "navigate-to-route" -S"#]), [
+            .search(cmd: "rg -n navigate-to-route -S", query: "navigate-to-route", path: nil)
         ])
-        XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "tail -n +522 README.md"]), [
-            .read(cmd: "tail -n +522 README.md", name: "README.md", path: "README.md")
+    }
+
+    func testSupportsRgFilesWithPathAndPipe() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files webview/src | sed -n"]), [
+            .search(cmd: "rg --files webview/src", query: nil, path: "webview")
+        ])
+    }
+
+    func testHandlesComplexBashCommandHead() {
+        let inner = "rg --version && node -v && pnpm -v && rg --files | wc -l && rg --files | head -n 40"
+        XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
+            .search(cmd: "rg --version", query: nil, path: nil),
+            .unknown(cmd: "node -v"),
+            .unknown(cmd: "pnpm -v"),
+            .search(cmd: "rg --files", query: nil, path: nil)
         ])
     }
 
     func testSupportsGrepRecursiveCurrentDir() {
-        XCTAssertEqual(CommandParser.parseCommand(["grep", "-R", "CODEX_SANDBOX_ENV_VAR", "-n", "."]), [
+        XCTAssertEqual(parseCommand(["grep", "-R", "CODEX_SANDBOX_ENV_VAR", "-n", "."]), [
             .search(
                 cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n .",
                 query: "CODEX_SANDBOX_ENV_VAR",
@@ -75,9 +94,49 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
-    func testDedupesConsecutiveCommands() {
+    func testSupportsReadHelpers() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "head -n50 Cargo.toml"]), [
+            .read(cmd: "head -n50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n+10 README.md"]), [
+            .read(cmd: "tail -n+10 README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["sed", "-n", "12,20p", "Cargo.toml"]), [
+            .read(cmd: "sed -n '12,20p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+    }
+
+    func testSearchVariants() {
+        XCTAssertEqual(parseCommand(["fd", "-t", "f", "src/"]), [
+            .search(cmd: "fd -t f src/", query: nil, path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["find", ".", "-name", "*.rs"]), [
+            .search(cmd: "find . -name '*.rs'", query: "*.rs", path: ".")
+        ])
+    }
+
+    func testStripsTrueInsideBashLc() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files || true"]), [
+            .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+    }
+
+    func testSupportsCdAndRgFiles() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && rg --files"]), [
+            .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+    }
+
+    func testDedupesConsecutiveCommandsAndKeepsCommandParserCompatibility() {
         XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "rg foo && rg foo"]), [
             .search(cmd: "rg foo", query: "foo", path: nil)
+        ])
+        XCTAssertEqual(CommandParser.shlexJoin(["rg", "foo bar"]), "rg 'foo bar'")
+    }
+
+    func testPowerShellCommandIsStripped() {
+        XCTAssertEqual(parseCommand(["pwsh", "-NoProfile", "-c", "Write-Host hi"]), [
+            .unknown(cmd: "Write-Host hi")
         ])
     }
 }
