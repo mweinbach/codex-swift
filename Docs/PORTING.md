@@ -194,6 +194,8 @@ Source baseline inspected for this scaffold:
   - conversation start/audio/text/list-voices operation wire shapes, double-optional prompt encoding, websocket/WebRTC transport tags, stable builtin voice lists, realtime event external tags, and lifecycle/list-voices response payloads
 - Additional thread-control operations from `codex-rs/protocol/src/protocol.rs`
   - clean-background-terminals, reload-user-config, set-thread-memory-mode, and thread-rollback operation tags and payloads
+- Agent-path and inter-agent communication models from `codex-rs/protocol/src/agent_path.rs` and `codex-rs/protocol/src/protocol.rs`
+  - absolute `/root`/`/morpheus` path validation, child/relative resolution, string-backed serde, inter-agent message payload defaults, message-content detection, and operation wrapping
 - `codex-rs/process-hardening/src/lib.rs`
   - macOS pre-main process hardening for debugger attach denial, core-dump limit disabling, byte-level environment key filtering, and `DYLD_` environment removal before CLI dispatch
 - `codex-rs/core/src/safety.rs`
@@ -373,5 +375,6 @@ The executable is not functionally equivalent yet. Some commands have native run
 - persistent SQLite-backed local agent graph store adapter
 - hook discovery, execution, output parsing/spilling, and config-state integration
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
+- commentary-phase preservation when converting inter-agent communication into response input history items
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

@@ -39,6 +39,7 @@ public enum Op: Equatable, Sendable {
         summary: ReasoningSummary,
         finalOutputJSONSchema: JSONValue?
     )
+    case interAgentCommunication(communication: InterAgentCommunication)
     case overrideTurnContext(
         cwd: String?,
         approvalPolicy: AskForApproval?,
@@ -81,6 +82,7 @@ public enum Op: Equatable, Sendable {
         case transport
         case voice
         case frame
+        case communication
         case id
         case decision
         case serverName = "server_name"
@@ -106,6 +108,7 @@ public enum Op: Equatable, Sendable {
         case realtimeConversationListVoices = "realtime_conversation_list_voices"
         case userInput = "user_input"
         case userTurn = "user_turn"
+        case interAgentCommunication = "inter_agent_communication"
         case overrideTurnContext = "override_turn_context"
         case execApproval = "exec_approval"
         case patchApproval = "patch_approval"
@@ -157,6 +160,10 @@ extension Op: Codable {
                 effort: try container.decodeIfPresent(ReasoningEffort.self, forKey: .effort),
                 summary: try container.decode(ReasoningSummary.self, forKey: .summary),
                 finalOutputJSONSchema: try container.decodeIfPresent(JSONValue.self, forKey: .finalOutputJSONSchema)
+            )
+        case .interAgentCommunication:
+            self = .interAgentCommunication(
+                communication: try container.decode(InterAgentCommunication.self, forKey: .communication)
             )
         case .overrideTurnContext:
             self = .overrideTurnContext(
@@ -253,6 +260,9 @@ extension Op: Codable {
             try container.encodeIfPresent(effort, forKey: .effort)
             try container.encode(summary, forKey: .summary)
             try container.encode(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
+        case let .interAgentCommunication(communication):
+            try container.encode(OperationType.interAgentCommunication, forKey: .type)
+            try container.encode(communication, forKey: .communication)
         case let .overrideTurnContext(cwd, approvalPolicy, sandboxPolicy, model, effort, summary):
             try container.encode(OperationType.overrideTurnContext, forKey: .type)
             try container.encodeIfPresent(cwd, forKey: .cwd)
