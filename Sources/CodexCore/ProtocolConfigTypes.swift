@@ -7,7 +7,7 @@ public enum ReasoningSummary: String, Codable, CaseIterable, Equatable, Sendable
     case none
 }
 
-public enum ReasoningEffort: String, Codable, CaseIterable, Equatable, Sendable {
+public enum ReasoningEffort: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case none
     case minimal
     case low

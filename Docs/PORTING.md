@@ -47,6 +47,7 @@ Source baseline inspected for this scaffold:
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
 - `codex-rs/protocol/src/openai_models.rs`
   - reasoning effort wire values needed by config summaries
+  - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, and remote `ModelInfo` to `ModelPreset` conversion
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
