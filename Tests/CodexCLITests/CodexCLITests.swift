@@ -230,7 +230,13 @@ final class CodexCLITests: XCTestCase {
             }
         )
         let deviceExitCode = await CodexCLI().runAsync(
-            arguments: ["login", "--device-auth"],
+            arguments: [
+                "login",
+                "--device-auth",
+                "--experimental_issuer",
+                "https://issuer.example",
+                "--experimental_client-id=client-123"
+            ],
             stderr: { _ in },
             loginRunner: { request in
                 receivedActions.append(request.action)
@@ -240,7 +246,10 @@ final class CodexCLITests: XCTestCase {
 
         XCTAssertEqual(defaultExitCode, 78)
         XCTAssertEqual(deviceExitCode, 78)
-        XCTAssertEqual(receivedActions, [.chatGPT, .deviceCode])
+        XCTAssertEqual(receivedActions, [
+            .chatGPT,
+            .deviceCode(issuerBaseURL: "https://issuer.example", clientID: "client-123")
+        ])
     }
 
     func testRunAsyncLoginRejectsDeprecatedAPIKeyFlagBeforeRunner() async {

@@ -499,6 +499,31 @@ public enum CodexAuthStorage {
         )
     }
 
+    public static func saveChatGPTTokens(
+        codexHome: URL,
+        apiKey: String?,
+        idToken: String,
+        accessToken: String,
+        refreshToken: String,
+        mode: AuthCredentialsStoreMode = .file,
+        now: Date = Date(),
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) throws {
+        let parsedIDToken = try IdTokenParser.parse(idToken)
+        let auth = AuthDotJSON(
+            openAIAPIKey: apiKey,
+            tokens: AuthTokenData(
+                idToken: parsedIDToken,
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                accountID: parsedIDToken.chatGPTAccountID
+            ),
+            lastRefresh: formatDate(now)
+        )
+        try saveAuthDotJSON(auth, codexHome: codexHome, mode: mode, encoder: encoder, keyringStore: keyringStore)
+    }
+
     public static func logout(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,

@@ -91,18 +91,35 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
             stderrMessage: "codex-swift: ChatGPT login runtime is not complete yet."
         )
 
-    case .deviceCode:
-        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    case let .deviceCode(issuerBaseURL, clientID):
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
         if settings.forcedLoginMethod == .api {
             return CodexCLI.CommandExecutionResult(
                 exitCode: 1,
                 stderrMessage: "ChatGPT login is disabled. Use API key login instead."
             )
         }
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: device-code login runtime is not complete yet."
-        )
+        do {
+            try await ChatGPTDeviceCodeLogin.run(
+                options: ChatGPTDeviceCodeLoginOptions(
+                    codexHome: codexHome,
+                    issuer: issuerBaseURL ?? ChatGPTDeviceCodeLogin.defaultIssuer,
+                    clientID: clientID ?? CodexAuthStorage.refreshClientID,
+                    forcedChatGPTWorkspaceID: settings.forcedChatGPTWorkspaceID,
+                    authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
+                    cliVersion: CodexCLI.version
+                ),
+                messageSink: { message in
+                    print(message.renderedText)
+                }
+            )
+            return CodexCLI.CommandExecutionResult(exitCode: 0, stderrMessage: "Successfully logged in")
+        } catch {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "Error logging in with device code: \(String(describing: error))"
+            )
+        }
     }
 }
 

@@ -29,7 +29,7 @@ public struct CodexCLI: Sendable {
         case status
         case withAPIKeyFromStdin
         case chatGPT
-        case deviceCode
+        case deviceCode(issuerBaseURL: String?, clientID: String?)
     }
 
     public struct LoginCommandRequest: Equatable, Sendable {
@@ -627,12 +627,28 @@ public struct CodexCLI: Sendable {
             return .status
         }
         if arguments.contains("--device-auth") {
-            return .deviceCode
+            return .deviceCode(
+                issuerBaseURL: optionValue(named: "--experimental_issuer", in: arguments),
+                clientID: optionValue(named: "--experimental_client-id", in: arguments)
+            )
         }
         if arguments.contains("--with-api-key") {
             return .withAPIKeyFromStdin
         }
         return .chatGPT
+    }
+
+    private func optionValue(named option: String, in arguments: [String]) -> String? {
+        var iterator = arguments.makeIterator()
+        while let argument = iterator.next() {
+            if argument == option {
+                return iterator.next()
+            }
+            if argument.hasPrefix("\(option)=") {
+                return String(argument.dropFirst(option.count + 1))
+            }
+        }
+        return nil
     }
 
     private func usesDeprecatedAPIKeyFlag(_ arguments: [String]) -> Bool {
