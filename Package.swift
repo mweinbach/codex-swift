@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "CodexChatGPT", targets: ["CodexChatGPT"]),
         .library(name: "CodexCLI", targets: ["CodexCLI"]),
         .library(name: "CodexCore", targets: ["CodexCore"]),
+        .library(name: "CodexMCPServer", targets: ["CodexMCPServer"]),
         .library(name: "CodexGit", targets: ["CodexGit"]),
         .library(name: "CodexResponsesAPIProxy", targets: ["CodexResponsesAPIProxy"]),
         .library(name: "CodexStdioToUDS", targets: ["CodexStdioToUDS"]),
@@ -43,6 +44,7 @@ let package = Package(
             name: "CodexCLI",
             dependencies: ["CodexCore"]
         ),
+        .target(name: "CodexMCPServer"),
         .target(name: "CodexResponsesAPIProxy"),
         .target(name: "CodexStdioToUDS"),
         .executableTarget(
@@ -59,7 +61,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "codex",
-            dependencies: ["CodexChatGPT", "CodexCLI", "CodexCore", "CodexResponsesAPIProxy", "CodexStdioToUDS"]
+            dependencies: ["CodexChatGPT", "CodexCLI", "CodexCore", "CodexMCPServer", "CodexResponsesAPIProxy", "CodexStdioToUDS"]
         ),
         .testTarget(
             name: "CodexApplyPatchTests",
@@ -80,6 +82,10 @@ let package = Package(
         .testTarget(
             name: "CodexCLITests",
             dependencies: ["CodexCLI"]
+        ),
+        .testTarget(
+            name: "CodexMCPServerTests",
+            dependencies: ["CodexMCPServer"]
         ),
         .testTarget(
             name: "CodexResponsesAPIProxyTests",

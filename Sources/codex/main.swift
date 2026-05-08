@@ -1,6 +1,7 @@
 import CodexChatGPT
 import CodexCLI
 import CodexCore
+import CodexMCPServer
 import CodexResponsesAPIProxy
 import CodexStdioToUDS
 import Darwin
@@ -27,6 +28,7 @@ let exitCode = await cli.runAsync(
     computerUseRunner: runComputerUseCommand,
     reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
+    mcpServerRunner: runMcpServerCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
     mcpRunner: runMcpCommand,
@@ -278,6 +280,115 @@ private func runComputerUseCommand(_ request: CodexCLI.ComputerUseCommandRequest
         configOverrides: request.configOverrides
     )
     return try await runExecCommand(execRequest, baseInstructionsOverride: CodexPrompts.computerUsePrompt)
+}
+
+private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try await CodexMCPServer.run { toolCall in
+        let execRequest = CodexCLI.ExecCommandRequest(
+            arguments: mcpExecArguments(for: toolCall),
+            action: .run(prompt: toolCall.prompt),
+            options: CodexCLI.ExecCommandOptions(),
+            configOverrides: mcpConfigOverrides(for: toolCall, rootOverrides: request.configOverrides)
+        )
+        let result = try await runExecCommand(execRequest, baseInstructionsOverride: toolCall.baseInstructions)
+        return CodexMCPToolResult(
+            text: mcpToolText(for: result),
+            isError: result.exitCode != 0
+        )
+    }
+    return CodexCLI.CommandExecutionResult(exitCode: 0)
+}
+
+private func mcpExecArguments(for toolCall: CodexMCPToolCall) -> [String] {
+    var arguments: [String] = []
+    if let model = toolCall.model {
+        arguments.append(contentsOf: ["--model", model])
+    }
+    if let profile = toolCall.profile {
+        arguments.append(contentsOf: ["--profile", profile])
+    }
+    if let cwd = toolCall.cwd {
+        arguments.append(contentsOf: ["--cd", cwd])
+    }
+    if let approvalPolicy = toolCall.approvalPolicy {
+        arguments.append(contentsOf: ["--ask-for-approval", approvalPolicy])
+    }
+    if let sandbox = toolCall.sandbox {
+        arguments.append(contentsOf: ["--sandbox", sandbox])
+    }
+    return arguments
+}
+
+private func mcpConfigOverrides(
+    for toolCall: CodexMCPToolCall,
+    rootOverrides: CliConfigOverrides
+) -> CliConfigOverrides {
+    var rawOverrides = rootOverrides.rawOverrides
+    if let model = toolCall.model {
+        rawOverrides.append("model=\(tomlString(model))")
+    }
+    if let profile = toolCall.profile {
+        rawOverrides.append("profile=\(tomlString(profile))")
+    }
+    if let approvalPolicy = toolCall.approvalPolicy {
+        rawOverrides.append("approval_policy=\(tomlString(approvalPolicy))")
+    }
+    if let sandbox = toolCall.sandbox {
+        rawOverrides.append("sandbox_mode=\(tomlString(sandbox))")
+    }
+    for (key, value) in toolCall.config.sorted(by: { $0.key < $1.key }) {
+        rawOverrides.append("\(key)=\(tomlLiteral(value))")
+    }
+    return CliConfigOverrides(rawOverrides: rawOverrides)
+}
+
+private func mcpToolText(for result: CodexCLI.CommandExecutionResult) -> String {
+    var parts: [String] = []
+    if let stdout = result.stdoutMessage, !stdout.isEmpty {
+        parts.append(stdout)
+    }
+    if let stderr = result.stderrMessage, !stderr.isEmpty {
+        parts.append(stderr)
+    }
+    return parts.joined(separator: "\n")
+}
+
+private func tomlLiteral(_ value: AnyJSONValue) -> String {
+    switch value {
+    case .null:
+        return "\"\""
+    case let .bool(value):
+        return value ? "true" : "false"
+    case let .integer(value):
+        return String(value)
+    case let .double(value):
+        return String(value)
+    case let .string(value):
+        return tomlString(value)
+    case let .array(values):
+        return "[\(values.map(tomlLiteral).joined(separator: ", "))]"
+    case let .object(values):
+        let entries = values
+            .sorted(by: { $0.key < $1.key })
+            .map { "\(tomlKey($0.key)) = \(tomlLiteral($0.value))" }
+            .joined(separator: ", ")
+        return "{ \(entries) }"
+    }
+}
+
+private func tomlString(_ value: String) -> String {
+    let escaped = value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
+    return "\"\(escaped)\""
+}
+
+private func tomlKey(_ value: String) -> String {
+    if value.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil {
+        return value
+    }
+    return tomlString(value)
 }
 
 private func runNonInteractiveExec(

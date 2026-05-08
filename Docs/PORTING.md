@@ -315,6 +315,8 @@ Source baseline inspected for this scaffold:
   - `codex exec resume ...` now resolves saved rollout targets, reconstructs persisted `ResponseItem` history including compaction replacement/fallback handling, appends the new user prompt after resume history, and continues the Responses tool loop under the saved conversation ID
 - Initial `codex-rs/core/src/codex.rs` exec rollout persistence path
   - non-interactive exec now creates/resumes rollout JSONL files, records turn context, the new user prompt, and completed model/tool transcript items, and durably shuts down the recorder so Swift-created exec sessions become discoverable for later resume
+- Initial `codex-rs/mcp-server` stdio surface
+  - executable `codex mcp-server` now runs a Swift-native newline-delimited JSON-RPC loop with initialize, ping, tools/list, and tools/call handling; the `codex` MCP tool delegates to the existing non-interactive exec runtime with model/profile/cwd/approval/sandbox/config overrides, while `codex-reply` remains a listed but not-yet-wired tool
 
 ## Known Gaps
 
@@ -329,7 +331,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - runtime Responses API tool orchestration
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
-- MCP server/client management
+- Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
 - app-server protocol and server runtime
 - apply-patch runtime
 - cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
