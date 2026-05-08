@@ -101,7 +101,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/message_history.rs`
   - history entry wire shape for conversation id, timestamp, and text
 - `codex-rs/protocol/src/account.rs`
-  - lowercase ChatGPT plan wire values with unknown-plan fallback
+  - lowercase ChatGPT plan wire values, usage-based plan variants, plan family helpers, auth-plan aliases, display names, and unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, optional message phases, content items, function-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, and compaction alias decoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
@@ -218,6 +218,8 @@ Source baseline inspected for this scaffold:
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
 - `codex-rs/core/src/function_tool.rs`
   - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, and fatal errors
+- `codex-rs/exec-server/src/environment_{provider,toml}.rs` and `codex-rs/core/src/environment_selection.rs`
+  - `$CODEX_HOME/environments.toml` loading, legacy `CODEX_EXEC_SERVER_URL` fallback, environment id/default validation, websocket and stdio environment entries, relative stdio cwd resolution, and default-first turn environment selections
 - `codex-rs/core/src/context_manager/normalize.rs`
   - function/custom/local-shell call-output invariant repair, synthetic aborted outputs for missing pairs, orphan output removal, and paired-item removal helpers for transcript trimming
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`
