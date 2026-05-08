@@ -9,6 +9,7 @@ public enum CodexConfigDefaults {
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
+    public var modelProviders: [String: ModelProviderInfo]
     public var approvalPolicy: AskForApproval?
     public var sandboxMode: SandboxMode?
     public var modelReasoningEffort: ReasoningEffort?
@@ -37,6 +38,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public init(
         model: String? = nil,
         modelProvider: String? = nil,
+        modelProviders: [String: ModelProviderInfo] = [:],
         approvalPolicy: AskForApproval? = nil,
         sandboxMode: SandboxMode? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
@@ -64,6 +66,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     ) {
         self.model = model
         self.modelProvider = modelProvider
+        self.modelProviders = modelProviders
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxMode
         self.modelReasoningEffort = modelReasoningEffort
@@ -173,7 +176,7 @@ public enum CodexConfigLoader {
             fileManager: fileManager
         )
         try parsed.merge(managedConfigLayers)
-        return try parsed.resolvedConfig()
+        return try parsed.resolvedConfig(environment: environment)
     }
 
     private static func baseConfigLayerFiles(
@@ -247,6 +250,7 @@ private struct ParsedCodexConfigToml {
     var features: [String: Bool] = [:]
     var profileFeatures: [String: [String: Bool]] = [:]
     var mcpServers: [String: McpServerConfig] = [:]
+    var modelProviders: [String: ConfigValue] = [:]
 
     static func parse(_ contents: String) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -284,11 +288,27 @@ private struct ParsedCodexConfigToml {
 
             switch section {
             case .topLevel:
+                if key == "model_providers" {
+                    try parsed.mergeModelProviders(from: ConfigValueParser.parseTomlLiteral(valueText), key: key)
+                    continue
+                }
                 guard isRelevantTopLevelKey(key) else { continue }
                 parsed.topLevel[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .profile(name):
                 guard isRelevantProfileKey(key) else { continue }
                 parsed.profiles[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .modelProvider(name):
+                parsed.mergeModelProvider(
+                    name: name,
+                    overlay: .table([key: try ConfigValueParser.parseTomlLiteral(valueText)])
+                )
+            case let .modelProviderMap(name, tableKey):
+                parsed.mergeModelProvider(
+                    name: name,
+                    overlay: .table([
+                        tableKey: .table([key: try ConfigValueParser.parseTomlLiteral(valueText)])
+                    ])
+                )
             case .features:
                 parsed.features[key] = try Self.boolValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -320,6 +340,21 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "features" {
                 features[parts[1]] = try Self.boolValue(value, key: path)
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "model_providers" {
+                mergeModelProvider(name: parts[1], overlay: value)
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "model_providers" {
+                mergeModelProvider(name: parts[1], overlay: .table([parts[2]: value]))
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "model_providers", Self.isModelProviderMapKey(parts[2]) {
+                mergeModelProvider(name: parts[1], overlay: .table([parts[2]: .table([parts[3]: value])]))
                 continue
             }
 
@@ -360,6 +395,10 @@ private struct ParsedCodexConfigToml {
             mcpServers[key] = value
         }
 
+        for (key, value) in overlay.modelProviders {
+            mergeModelProvider(name: key, overlay: value)
+        }
+
         for (profileName, profileValues) in overlay.profileFeatures {
             var mergedProfile = profileFeatures[profileName] ?? [:]
             for (key, value) in profileValues {
@@ -391,6 +430,10 @@ private struct ParsedCodexConfigToml {
             for (key, value) in try McpConfigStore.parseMcpServers(from: mcpServersValue) {
                 mcpServers[key] = value
             }
+        }
+
+        if let modelProvidersValue = table["model_providers"] {
+            try mergeModelProviders(from: modelProvidersValue, key: "model_providers")
         }
 
         if case let .table(featureTable) = table["features"] {
@@ -428,7 +471,7 @@ private struct ParsedCodexConfigToml {
         }
     }
 
-    func resolvedConfig() throws -> CodexRuntimeConfig {
+    func resolvedConfig(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> CodexRuntimeConfig {
         var config = CodexRuntimeConfig()
 
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
@@ -502,6 +545,7 @@ private struct ParsedCodexConfigToml {
         config.features = featureStates
         config.mcpServers = mcpServers
         config.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
+        config.modelProviders = try Self.combinedModelProviders(from: modelProviders, environment: environment)
 
         return config
     }
@@ -511,6 +555,50 @@ private struct ParsedCodexConfigToml {
             return CodexConfigDefaults.projectRootMarkers
         }
         return try Self.stringArrayValue(value, key: "project_root_markers")
+    }
+
+    private mutating func mergeModelProviders(from value: ConfigValue, key: String) throws {
+        guard case let .table(providers) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        for (name, providerValue) in providers {
+            mergeModelProvider(name: name, overlay: providerValue)
+        }
+    }
+
+    private mutating func mergeModelProvider(name: String, overlay: ConfigValue) {
+        guard let existing = modelProviders[name] else {
+            modelProviders[name] = overlay
+            return
+        }
+        modelProviders[name] = existing.merging(overlay: overlay)
+    }
+
+    private static func combinedModelProviders(
+        from configuredProviders: [String: ConfigValue],
+        environment: [String: String]
+    ) throws -> [String: ModelProviderInfo] {
+        var providers = ModelProviderInfo.builtInModelProviders(environment: environment)
+        for (name, value) in configuredProviders {
+            let provider = try modelProviderInfoValue(value, key: "model_providers.\(name)")
+            if providers[name] == nil {
+                providers[name] = provider
+            }
+        }
+        return providers
+    }
+
+    private static func modelProviderInfoValue(_ value: ConfigValue, key: String) throws -> ModelProviderInfo {
+        guard case .table = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+
+        let data = try JSONEncoder().encode(value)
+        do {
+            return try JSONDecoder().decode(ModelProviderInfo.self, from: data)
+        } catch {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
     }
 
     private static func applyRuntimeFields(
@@ -649,6 +737,12 @@ private struct ParsedCodexConfigToml {
             || key == "oss_provider"
     }
 
+    private static func isModelProviderMapKey(_ key: String) -> Bool {
+        key == "query_params"
+            || key == "http_headers"
+            || key == "env_http_headers"
+    }
+
     private static func stringValue(_ value: ConfigValue, key: String) throws -> String {
         guard case let .string(string) = value else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -711,6 +805,15 @@ private struct ParsedCodexConfigToml {
         let parts = try parseDottedKey(body)
         if parts.count == 1, parts[0] == "features" {
             return .features
+        }
+        if parts.count == 2, parts[0] == "model_providers" {
+            return .modelProvider(parts[1])
+        }
+        if parts.count == 3,
+           parts[0] == "model_providers",
+           isModelProviderMapKey(parts[2])
+        {
+            return .modelProviderMap(parts[1], parts[2])
         }
         if parts.count == 2, parts[0] == "profiles" {
             return .profile(parts[1])
@@ -850,6 +953,8 @@ private struct ParsedCodexConfigToml {
 private enum ConfigSection {
     case topLevel
     case profile(String)
+    case modelProvider(String)
+    case modelProviderMap(String, String)
     case features
     case profileFeatures(String)
     case ignored

@@ -9,6 +9,8 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertNil(config.model)
         XCTAssertNil(config.modelProvider)
+        XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "ollama", "lmstudio"])
+        XCTAssertTrue(config.modelProviders["openai"]?.requiresOpenAIAuth == true)
         XCTAssertNil(config.approvalPolicy)
         XCTAssertNil(config.sandboxMode)
         XCTAssertNil(config.modelReasoningEffort)
@@ -133,6 +135,69 @@ final class ConfigLoaderTests: XCTestCase {
                 enabledTools: ["search"]
             )
         )
+    }
+
+    func testLoadsModelProvidersIntoRuntimeConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.mock]
+        name = "Mock provider"
+        base_url = "https://mock.example/v1"
+        env_key = "MOCK_API_KEY"
+        env_key_instructions = "Export MOCK_API_KEY."
+        experimental_bearer_token = "mock-token"
+        wire_api = "responses"
+        request_max_retries = 2
+        stream_max_retries = 3
+        stream_idle_timeout_ms = 4000
+        requires_openai_auth = false
+
+        [model_providers.mock.query_params]
+        api-version = "2025-04-01-preview"
+
+        [model_providers.mock.http_headers]
+        X-Static = "static"
+
+        [model_providers.mock.env_http_headers]
+        X-Env = "ENV_VALUE"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(
+            config.modelProviders["mock"],
+            ModelProviderInfo(
+                name: "Mock provider",
+                baseURL: "https://mock.example/v1",
+                envKey: "MOCK_API_KEY",
+                envKeyInstructions: "Export MOCK_API_KEY.",
+                experimentalBearerToken: "mock-token",
+                wireAPI: .responses,
+                queryParams: ["api-version": "2025-04-01-preview"],
+                httpHeaders: ["X-Static": "static"],
+                envHTTPHeaders: ["X-Env": "ENV_VALUE"],
+                requestMaxRetries: 2,
+                streamMaxRetries: 3,
+                streamIdleTimeoutMilliseconds: 4000,
+                requiresOpenAIAuth: false
+            )
+        )
+        XCTAssertNotNil(config.modelProviders["openai"])
+    }
+
+    func testModelProvidersFromConfigDoNotReplaceBuiltIns() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.openai]
+        name = "Shadow OpenAI"
+        base_url = "https://shadow.example/v1"
+        wire_api = "chat"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.modelProviders["openai"]?.name, "OpenAI")
+        XCTAssertEqual(config.modelProviders["openai"]?.wireAPI, .responses)
     }
 
     func testMcpServersMergeAcrossConfigLayersByName() throws {
@@ -285,6 +350,30 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_override")
     }
 
+    func testCLIOverridesCanAddModelProvider() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                "model_providers.mock={ name = \"Mock\", base_url = \"https://mock.example/v1\", env_key = \"MOCK_KEY\", wire_api = \"chat\" }",
+                "model_providers.mock.http_headers.X-Test=\"yes\""
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(
+            config.modelProviders["mock"],
+            ModelProviderInfo(
+                name: "Mock",
+                baseURL: "https://mock.example/v1",
+                envKey: "MOCK_KEY",
+                wireAPI: .chat,
+                httpHeaders: ["X-Test": "yes"]
+            )
+        )
+    }
+
     func testInvalidForcedLoginMethodMatchesRustConfigErrorShape() throws {
         let dir = try CoreTemporaryDirectory()
         try #"forced_login_method = "browser""#
@@ -362,7 +451,7 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         chatgpt_base_url = "https://example.test/backend-api/" # keep this comment out of the value
 
-        [model_providers.openai-chat-completions]
+        [unknown_providers.openai-chat-completions]
         base_url = "https://api.openai.com/v1"
         env_key = "OPENAI_API_KEY"
         wire_api = "chat"
