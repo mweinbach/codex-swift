@@ -57,6 +57,8 @@ Source baseline inspected for this scaffold:
   - custom prompt metadata and `prompts` command prefix
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
+- `codex-rs/protocol/src/protocol.rs` token usage models
+  - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
@@ -94,6 +96,8 @@ Source baseline inspected for this scaffold:
   - sandbox policy summaries for danger-full-access, read-only, external-sandbox, and workspace-write policies
 - `codex-rs/cli/src/wsl_paths.rs` and `codex-rs/core/src/env.rs`
   - WSL detection and Windows drive path normalization for update command execution
+- `codex-rs/tui/src/update_action.rs` and CLI exit-message helpers from `codex-rs/cli/src/main.rs`
+  - update action command argument rendering/detection and token-usage/resume-hint exit message formatting
 
 ## Known Gaps
 
