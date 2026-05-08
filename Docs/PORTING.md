@@ -128,6 +128,8 @@ Source baseline inspected for this scaffold:
   - smart shell-output byte decoding for UTF-8, Cyrillic legacy code pages, Windows-1252 punctuation collisions, Latin-1, ANSI-preserving output, and lossy fallback behavior
 - `codex-rs/core/src/user_instructions.rs`
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
+- `codex-rs/core/src/util.rs`
+  - retry backoff math with jitter seam, server error-message extraction, debug panic/log helper, and relative path resolution
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 - `codex-rs/common/src/config_summary.rs`
