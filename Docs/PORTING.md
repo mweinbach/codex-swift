@@ -237,6 +237,8 @@ Source baseline inspected for this scaffold:
   - session-configured payloads with conversation id, model/provider, approval and sandbox policies, history metadata, optional reasoning effort, optional recursive initial messages, and rollout path
 - `codex-rs/protocol/src/protocol.rs` response-wrapper event models
   - get-history-entry response payloads, custom-prompts response payloads, and raw response item event wrappers around already-ported history/custom-prompt/response item models
+- `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
+  - PNG/JPEG local image loading, bounds-preserving resize to 2048x768, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 
 ## Known Gaps
 
@@ -257,7 +259,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - cloud tasks
 - completion generation
 - platform-specific process hardening
-- local image loading/resizing into data URLs
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - apply-patch invocation detection from arbitrary shell commands/heredocs

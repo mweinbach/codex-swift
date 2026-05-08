@@ -264,6 +264,68 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
     }
 }
 
+public extension ResponseInputItem {
+    init(userInputs: [UserInput]) {
+        let content = userInputs.compactMap(Self.contentItem)
+        self = .message(role: "user", content: content)
+    }
+
+    private static func contentItem(from input: UserInput) -> ContentItem? {
+        switch input {
+        case let .text(text):
+            return .inputText(text: text)
+        case let .image(imageURL):
+            return .inputImage(imageURL: imageURL)
+        case let .localImage(path):
+            return localImageContentItem(path: path)
+        case .skill:
+            return nil
+        }
+    }
+
+    private static func localImageContentItem(path: String) -> ContentItem {
+        do {
+            let image = try LocalImageProcessor.loadAndResizeToFit(path: URL(fileURLWithPath: path))
+            return .inputImage(imageURL: image.dataURL)
+        } catch let error as ImageProcessingError {
+            if case .read = error {
+                return localImageErrorPlaceholder(path: path, error: error.description)
+            }
+            if error.isInvalidImage {
+                return invalidImageErrorPlaceholder(path: path, error: error.description)
+            }
+
+            guard let mime = LocalImageProcessor.mimeType(forPath: path) else {
+                return localImageErrorPlaceholder(
+                    path: path,
+                    error: "unsupported MIME type (unknown)"
+                )
+            }
+            if !mime.hasPrefix("image/") {
+                return localImageErrorPlaceholder(
+                    path: path,
+                    error: "unsupported MIME type `\(mime)`"
+                )
+            }
+            return unsupportedImageErrorPlaceholder(path: path, mime: mime)
+        } catch {
+            return localImageErrorPlaceholder(path: path, error: String(describing: error))
+        }
+    }
+
+    private static func localImageErrorPlaceholder(path: String, error: String) -> ContentItem {
+        .inputText(text: "Codex could not read the local image at `\(path)`: \(error)")
+    }
+
+    private static func invalidImageErrorPlaceholder(path: String, error: String) -> ContentItem {
+        .inputText(text: "Image located at `\(path)` is invalid: \(error)")
+    }
+
+    private static func unsupportedImageErrorPlaceholder(path: String, mime: String) -> ContentItem {
+        .inputText(text: "Codex cannot attach image at `\(path)`: unsupported image format `\(mime)`.")
+    }
+}
+
 public enum LocalShellStatus: String, Codable, Equatable, Sendable {
     case completed
     case inProgress = "in_progress"

@@ -1,4 +1,7 @@
 import CodexCore
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 
 final class ResponseModelsTests: XCTestCase {
@@ -79,6 +82,110 @@ final class ResponseModelsTests: XCTestCase {
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "mcp_tool_call_output")
         XCTAssertEqual(object["call_id"] as? String, "call-mcp")
+    }
+
+    func testUserInputsBecomeMessageAndSkipSkills() throws {
+        let item = ResponseInputItem(userInputs: [
+            .text("hello"),
+            .image(imageURL: "data:image/png;base64,abc"),
+            .skill(name: "sample", path: "/tmp/SKILL.md")
+        ])
+
+        guard case let .message(role, content) = item else {
+            return XCTFail("expected user message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertEqual(content, [
+            .inputText(text: "hello"),
+            .inputImage(imageURL: "data:image/png;base64,abc")
+        ])
+    }
+
+    func testLocalImagePNGBecomesDataURLAndKeepsOriginalWhenSmall() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("small.png")
+        let original = try writePNG(width: 64, height: 32, to: path)
+
+        let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
+
+        guard case let .message(_, content) = item,
+              case let .inputImage(imageURL) = content.first
+        else {
+            return XCTFail("expected local image to become an input image")
+        }
+
+        let prefix = "data:image/png;base64,"
+        XCTAssertTrue(imageURL.hasPrefix(prefix))
+        let encoded = String(imageURL.dropFirst(prefix.count))
+        XCTAssertEqual(Data(base64Encoded: encoded), original)
+    }
+
+    func testLocalImageLargePNGDownscalesToBounds() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("large.png")
+        _ = try writePNG(width: 4_096, height: 2_048, to: path)
+
+        let processed = try LocalImageProcessor.loadAndResizeToFit(path: path)
+        let dimensions = try imageDimensions(processed.bytes)
+
+        XCTAssertLessThanOrEqual(processed.width, LocalImageProcessor.maxWidth)
+        XCTAssertLessThanOrEqual(processed.height, LocalImageProcessor.maxHeight)
+        XCTAssertEqual(dimensions.width, processed.width)
+        XCTAssertEqual(dimensions.height, processed.height)
+        XCTAssertEqual(processed.mime, "image/png")
+    }
+
+    func testLocalImageReadErrorAddsPlaceholder() throws {
+        let temp = try TemporaryDirectory()
+        let missingPath = temp.url.appendingPathComponent("missing-image.png")
+
+        let item = ResponseInputItem(userInputs: [.localImage(path: missingPath.path)])
+
+        guard case let .message(_, content) = item,
+              case let .inputText(text) = content.first
+        else {
+            return XCTFail("expected local image read failure to become placeholder text")
+        }
+
+        XCTAssertTrue(text.contains(missingPath.path))
+        XCTAssertTrue(text.contains("could not read"))
+    }
+
+    func testLocalImageNonImageAddsPlaceholder() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("example.json")
+        try #"{"hello":"world"}"#.write(to: path, atomically: true, encoding: .utf8)
+
+        let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
+
+        guard case let .message(_, content) = item,
+              case let .inputText(text) = content.first
+        else {
+            return XCTFail("expected non-image file to become placeholder text")
+        }
+
+        XCTAssertTrue(text.contains("unsupported MIME type `application/json`"))
+        XCTAssertTrue(text.contains(path.path))
+    }
+
+    func testLocalImageUnsupportedImageFormatAddsPlaceholder() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("example.svg")
+        try #"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"#
+            .write(to: path, atomically: true, encoding: .utf8)
+
+        let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
+
+        guard case let .message(_, content) = item,
+              case let .inputText(text) = content.first
+        else {
+            return XCTFail("expected unsupported image file to become placeholder text")
+        }
+
+        XCTAssertEqual(
+            text,
+            "Codex cannot attach image at `\(path.path)`: unsupported image format `image/svg+xml`."
+        )
     }
 
     func testDeserializesArrayPayloadIntoItems() throws {
@@ -185,5 +292,64 @@ final class ResponseModelsTests: XCTestCase {
     func testSandboxPermissionsWireValues() {
         XCTAssertTrue(SandboxPermissions.requireEscalated.requiresEscalatedPermissions)
         XCTAssertFalse(SandboxPermissions.useDefault.requiresEscalatedPermissions)
+    }
+
+    private func writePNG(width: Int, height: Int, to path: URL) throws -> Data {
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw TestImageError.contextCreation
+        }
+
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let image = context.makeImage(),
+              let destination = CGImageDestinationCreateWithURL(path as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else {
+            throw TestImageError.imageEncoding
+        }
+
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw TestImageError.imageEncoding
+        }
+
+        return try Data(contentsOf: path)
+    }
+
+    private func imageDimensions(_ data: Data) throws -> (width: Int, height: Int) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            throw TestImageError.imageDecoding
+        }
+        return (image.width, image.height)
+    }
+}
+
+private enum TestImageError: Error {
+    case contextCreation
+    case imageEncoding
+    case imageDecoding
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }
