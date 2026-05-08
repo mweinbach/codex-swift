@@ -60,6 +60,8 @@ Source baseline inspected for this scaffold:
   - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, model preset merge/filter/default behavior, and offline/default model selection constants
 - `codex-rs/core/src/models_manager/model_presets.rs`
   - built-in model preset ordering, visibility filtering, default model marker, upgrade prompt metadata, supported reasoning effort labels, and migration config keys
+- `codex-rs/protocol/src/openai_models.rs`, `codex-rs/protocol/src/config_types.rs`, and service-tier request plumbing from `codex-rs/core`
+  - model service-tier metadata, dynamic fast-tier support detection, arbitrary string service-tier config, legacy `fast` to `priority` normalization, and Responses API `service_tier` request encoding
 - `codex-rs/core/src/models_manager/model_family.rs` and model prompt includes from `codex-rs/core/*.md`
   - model-family slug matching, context window defaults, base instruction prompts, reasoning/verbosity/tool capabilities, remote metadata overrides, config override order, truncation policy conversion, and auto-compact token-limit defaults
 - `codex-rs/core/src/client_common.rs` prompt instruction assembly and `codex-rs/apply-patch/apply_patch_tool_instructions.md`
@@ -149,7 +151,7 @@ Source baseline inspected for this scaffold:
   - browser ChatGPT login server flow, device-code login flow with experimental issuer/client-id options, forced workspace validation, token exchange/persistence, and Rust-shaped login success/error messages
   - `codex login --with-api-key` stdin handling, file/keyring/auto API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
 - `codex-rs/cli/src/main.rs` features command
-  - `codex features list` output with Rust feature order, stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
+  - `codex features list` sorted/aligned output with stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
 - `codex-rs/stdio-to-uds`
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
 - `codex-rs/ansi-escape`

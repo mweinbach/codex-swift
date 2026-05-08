@@ -185,9 +185,14 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
     switch request.action {
     case .list:
         let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
-        let output = FeatureRegistry.specs
-            .map { spec in
-                "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
+        let rows = FeatureRegistry.specs
+            .map { spec in (name: spec.key, stage: spec.stage.listName, enabled: settings.features.isEnabled(spec.id)) }
+            .sorted { $0.name < $1.name }
+        let nameWidth = rows.map(\.name.count).max() ?? 0
+        let stageWidth = rows.map(\.stage.count).max() ?? 0
+        let output = rows
+            .map { row in
+                "\(row.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(row.stage.padding(toLength: stageWidth, withPad: " ", startingAt: 0))  \(row.enabled)"
             }
             .joined(separator: "\n")
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
@@ -623,6 +628,7 @@ private func runNonInteractiveExec(
                     reasoningEffort: settings.modelReasoningEffort,
                     reasoningSummary: settings.modelReasoningSummary,
                     verbosity: settings.modelVerbosity,
+                    serviceTier: settings.serviceTier,
                     outputSchema: outputSchema
                 )
             )
