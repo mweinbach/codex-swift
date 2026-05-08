@@ -532,6 +532,43 @@ public enum NonInteractiveExec {
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        switch maybeParseApplyPatchVerified(command, cwd: commandCwd) {
+        case let .body(action):
+            let result = executeApplyPatch(
+                patch: action.patch,
+                cwd: URL(fileURLWithPath: action.cwd, isDirectory: true),
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                environment: environment
+            )
+            let output = ExecToolCallOutput(
+                exitCode: result.success ? 0 : 1,
+                stdout: result.success ? result.content : "",
+                stderr: result.success ? "" : result.content,
+                aggregatedOutput: result.content,
+                duration: 0
+            )
+            return functionOutput(
+                callID: callID,
+                content: formatShellResponse(output, truncationPolicy: truncationPolicy, format: responseFormat),
+                success: result.success
+            )
+        case let .shellParseError(error):
+            return functionOutput(
+                callID: callID,
+                content: "failed to parse apply_patch shell command: \(String(describing: error))",
+                success: false
+            )
+        case let .correctnessError(error):
+            return functionOutput(
+                callID: callID,
+                content: "invalid apply_patch command: \(error.description)",
+                success: false
+            )
+        case .notApplyPatch:
+            break
+        }
+
         let output = await Task.detached(priority: .userInitiated) {
             runCommandSync(
                 command: command,

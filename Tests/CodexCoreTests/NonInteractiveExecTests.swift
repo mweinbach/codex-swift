@@ -359,6 +359,81 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("blocked.txt").path))
     }
 
+    func testApplyPatchShellCommandInterceptAppliesVerifiedHeredoc() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let script = """
+        apply_patch <<'PATCH'
+        *** Begin Patch
+        *** Add File: shell.txt
+        +shell
+        *** End Patch
+        PATCH
+        """
+        let encodedScript = try Self.jsonString(script)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(encodedScript),"login":false}"#,
+            callID: "call-shell-patch"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-patch")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Exit code: 0"))
+        XCTAssertTrue(payload.content.contains("A shell.txt"))
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("shell.txt"), encoding: .utf8),
+            "shell\n"
+        )
+    }
+
+    func testApplyPatchShellCommandInterceptRejectsReadOnlySandboxWithNeverApproval() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let script = """
+        apply_patch <<'PATCH'
+        *** Begin Patch
+        *** Add File: blocked-shell.txt
+        +blocked
+        *** End Patch
+        PATCH
+        """
+        let encodedScript = try Self.jsonString(script)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(encodedScript),"login":false}"#,
+            callID: "call-shell-patch"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"]
+        )
+
+        guard case let .functionCallOutput(_, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(payload.success, false)
+        XCTAssertTrue(payload.content.contains("apply_patch rejected"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("blocked-shell.txt").path))
+    }
+
     func testUnifiedExecCommandPersistsSessionAndWriteStdinContinuesIt() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let start = ResponseItem.functionCall(
