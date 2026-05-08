@@ -118,6 +118,7 @@ final class EndpointClientsTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
             .success(.created),
             .success(.completed(responseID: "resp_1", tokenUsage: nil))
         ]))
@@ -162,6 +163,7 @@ final class EndpointClientsTests: XCTestCase {
         let result = await client.stream(body: .object([:]))
 
         XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
             .success(.outputTextDelta(delta)),
             .success(.completed(responseID: "resp_1", tokenUsage: nil))
         ]))
@@ -188,7 +190,85 @@ final class EndpointClientsTests: XCTestCase {
 
         let result = await client.stream(body: .object([:]))
 
-        XCTAssertEqual(result, .failure(.transport(.network("reset"))))
+        XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .failure(.stream("network error: reset"))
+        ]))
+    }
+
+    func testResponsesClientStreamEventsEmitsRateLimitsBeforeSSEEvents() async {
+        let snapshot = RateLimitSnapshot(
+            primary: RateLimitWindow(usedPercent: 42, windowMinutes: 300, resetsAt: nil),
+            secondary: nil,
+            credits: nil,
+            planType: nil
+        )
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    headers: [
+                        "x-codex-primary-used-percent": "42",
+                        "x-codex-primary-window-minutes": "300"
+                    ],
+                    sseText: """
+                    data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                    """
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.streamEvents(body: .object([:]))
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected event stream, got \(result)")
+        }
+        let events = await collect(stream)
+
+        XCTAssertEqual(events, [
+            .success(.rateLimits(snapshot)),
+            .success(.completed(responseID: "resp_1", tokenUsage: nil))
+        ])
+    }
+
+    func testChatClientStreamEventsDoesNotEmitRateLimits() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    headers: [
+                        "x-codex-primary-used-percent": "42",
+                        "x-codex-primary-window-minutes": "300"
+                    ],
+                    sseText: """
+                    data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+                    """
+                ))
+            ]
+        )
+        let client = ChatClient(
+            transport: transport,
+            provider: provider(wireAPI: .chat),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.streamEvents(body: .object([:]))
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected event stream, got \(result)")
+        }
+        let events = await collect(stream)
+
+        XCTAssertEqual(events, [
+            .success(.completed(responseID: "", tokenUsage: nil))
+        ])
     }
 
     func testResponsesClientUsesChatPathWhenProviderWireIsChat() async {
@@ -301,6 +381,14 @@ private func byteStream(_ chunks: [Data]) -> APIByteStream {
         }
         continuation.finish()
     }
+}
+
+private func collect(_ stream: ResponseEventStream) async -> ResponseEventResults {
+    var events: ResponseEventResults = []
+    for await event in stream {
+        events.append(event)
+    }
+    return events
 }
 
 private final class CapturingRequestTelemetry: RequestTelemetry {

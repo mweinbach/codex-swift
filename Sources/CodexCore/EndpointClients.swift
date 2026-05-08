@@ -6,6 +6,7 @@ public protocol APITransport: Sendable {
 }
 
 public typealias APIByteStream = AsyncStream<Result<Data, TransportError>>
+public typealias ResponseEventStream = AsyncStream<Result<ResponseEvent, APIError>>
 
 public struct APIStreamResponse: Sendable, ResponseWithStatus {
     public let statusCode: Int
@@ -53,6 +54,14 @@ extension APIStreamResponse: Equatable {
 }
 
 public typealias ResponseEventResults = [Result<ResponseEvent, APIError>]
+
+fileprivate func collectResponseEvents(_ stream: ResponseEventStream) async -> ResponseEventResults {
+    var results: ResponseEventResults = []
+    for await event in stream {
+        results.append(event)
+    }
+    return results
+}
 
 public protocol ResponseEventFrameParsing: Sendable {
     mutating func receive(frame: String) -> ResponseEventResults
@@ -131,8 +140,29 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
         path: String,
         body: JSONValue,
         extraHeaders: [String: String] = [:],
-        makeParser: () -> Parser
+        makeParser: @escaping @Sendable () -> Parser
     ) async -> Result<ResponseEventResults, APIError> {
+        switch await streamEvents(
+            path: path,
+            body: body,
+            extraHeaders: extraHeaders,
+            makeParser: makeParser,
+            includeRateLimits: false
+        ) {
+        case let .success(stream):
+            return .success(await collectResponseEvents(stream))
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+
+    public func streamEvents<Parser: ResponseEventFrameParsing>(
+        path: String,
+        body: JSONValue,
+        extraHeaders: [String: String] = [:],
+        makeParser: @escaping @Sendable () -> Parser,
+        includeRateLimits: Bool
+    ) async -> Result<ResponseEventStream, APIError> {
         let result: Result<APIStreamResponse, TransportError> = await TransportRetry.runWithRequestTelemetry(
             policy: provider.retry.toPolicy(),
             telemetry: requestTelemetry,
@@ -146,7 +176,11 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
 
         switch result {
         case let .success(response):
-            return await collectEvents(from: response, makeParser: makeParser)
+            return .success(Self.eventStream(
+                from: response,
+                makeParser: makeParser,
+                includeRateLimits: includeRateLimits
+            ))
         case let .failure(error):
             return .failure(.transport(error))
         }
@@ -165,44 +199,62 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
         return request.addingAuthHeaders(from: auth)
     }
 
-    private func collectEvents<Parser: ResponseEventFrameParsing>(
+    private static func eventStream<Parser: ResponseEventFrameParsing>(
         from response: APIStreamResponse,
-        makeParser: () -> Parser
-    ) async -> Result<ResponseEventResults, APIError> {
-        var parser = makeParser()
-        var textDecoder = UTF8StreamDecoder()
-        var frameDecoder = SSEDataFrameDecoder()
-        var results: ResponseEventResults = []
+        makeParser: @escaping @Sendable () -> Parser,
+        includeRateLimits: Bool
+    ) -> ResponseEventStream {
+        ResponseEventStream { continuation in
+            let task = Task {
+                if includeRateLimits, let snapshot = RateLimitSnapshot.parseRateLimit(headers: response.headers) {
+                    continuation.yield(.success(.rateLimits(snapshot)))
+                }
 
-        for await chunk in response.byteStream {
-            switch chunk {
-            case let .success(data):
+                var parser = makeParser()
+                var textDecoder = UTF8StreamDecoder()
+                var frameDecoder = SSEDataFrameDecoder()
+
+                for await chunk in response.byteStream {
+                    switch chunk {
+                    case let .success(data):
+                        appendEvents(
+                            from: frameDecoder.receive(textDecoder.receive(data)),
+                            using: &parser,
+                            to: continuation
+                        )
+                    case let .failure(error):
+                        continuation.yield(.failure(.stream(String(describing: error))))
+                        continuation.finish()
+                        return
+                    }
+                }
+
                 appendEvents(
-                    from: frameDecoder.receive(textDecoder.receive(data)),
+                    from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
                     using: &parser,
-                    to: &results
+                    to: continuation
                 )
-            case let .failure(error):
-                return .failure(.transport(error))
+                for event in parser.finish() {
+                    continuation.yield(event)
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
             }
         }
-
-        appendEvents(
-            from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
-            using: &parser,
-            to: &results
-        )
-        results.append(contentsOf: parser.finish())
-        return .success(results)
     }
 
-    private func appendEvents<Parser: ResponseEventFrameParsing>(
+    private static func appendEvents<Parser: ResponseEventFrameParsing>(
         from frames: [String],
         using parser: inout Parser,
-        to results: inout ResponseEventResults
+        to continuation: ResponseEventStream.Continuation
     ) {
         for frame in frames {
-            results.append(contentsOf: parser.receive(frame: frame))
+            for event in parser.receive(frame: frame) {
+                continuation.yield(event)
+            }
         }
     }
 }
@@ -408,6 +460,10 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         await stream(body: request.body, extraHeaders: request.headers)
     }
 
+    public func streamEventRequest(_ request: ResponsesRequest) async -> Result<ResponseEventStream, APIError> {
+        await streamEvents(body: request.body, extraHeaders: request.headers)
+    }
+
     public func streamPrompt(
         model: String,
         instructions: String,
@@ -444,11 +500,24 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         body: JSONValue,
         extraHeaders: [String: String] = [:]
     ) async -> Result<ResponseEventResults, APIError> {
-        await streaming.stream(
+        switch await streamEvents(body: body, extraHeaders: extraHeaders) {
+        case let .success(stream):
+            return .success(await collectResponseEvents(stream))
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+
+    public func streamEvents(
+        body: JSONValue,
+        extraHeaders: [String: String] = [:]
+    ) async -> Result<ResponseEventStream, APIError> {
+        await streaming.streamEvents(
             path: Self.path(for: streaming.provider.wireAPI),
             body: body,
             extraHeaders: extraHeaders,
-            makeParser: ResponsesEventFrameParser.init
+            makeParser: ResponsesEventFrameParser.init,
+            includeRateLimits: true
         )
     }
 
@@ -487,6 +556,10 @@ public struct ChatClient<Transport: APITransport, Auth: APIAuthProvider> {
         await stream(body: request.body, extraHeaders: request.headers)
     }
 
+    public func streamEventRequest(_ request: ChatRequest) async -> Result<ResponseEventStream, APIError> {
+        await streamEvents(body: request.body, extraHeaders: request.headers)
+    }
+
     public func streamPrompt(
         model: String,
         instructions: String,
@@ -518,11 +591,24 @@ public struct ChatClient<Transport: APITransport, Auth: APIAuthProvider> {
         body: JSONValue,
         extraHeaders: [String: String] = [:]
     ) async -> Result<ResponseEventResults, APIError> {
-        await streaming.stream(
+        switch await streamEvents(body: body, extraHeaders: extraHeaders) {
+        case let .success(stream):
+            return .success(await collectResponseEvents(stream))
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+
+    public func streamEvents(
+        body: JSONValue,
+        extraHeaders: [String: String] = [:]
+    ) async -> Result<ResponseEventStream, APIError> {
+        await streaming.streamEvents(
             path: Self.path(for: streaming.provider.wireAPI),
             body: body,
             extraHeaders: extraHeaders,
-            makeParser: ChatEventFrameParser.init
+            makeParser: ChatEventFrameParser.init,
+            includeRateLimits: false
         )
     }
 

@@ -265,6 +265,8 @@ Source baseline inspected for this scaffold:
   - chunk-boundary buffering, CRLF normalization, non-data line ignoring, blank-line event flushes, multiline `data:` joins, single-leading-space stripping, and EOF flush of pending frames
 - Incremental UTF-8 and endpoint SSE parsing for `codex-rs/codex-api/src/endpoint/streaming.rs`
   - byte-stream decoding across multibyte scalar boundaries, transport chunk failure propagation, incremental `data:` frame parsing, and Responses/Chat frame parser adapters while preserving the current collected-result client shape
+- Response event stream surface from `codex-rs/codex-api/src/endpoint/{streaming,responses,chat}.rs`
+  - async response-event stream wrapper, Responses/Chat `streamEvents` entrypoints, collected-result compatibility, stream-item error propagation, and Responses-only rate-limit snapshot emission before parsed SSE events
 - Pure Chat Completions SSE parsing from `codex-rs/codex-api/src/sse/chat.rs`
   - chat SSE `choices` traversal, assistant/reasoning delta accumulation, tool-call index/id tracking, argument concatenation, finish-reason handling for stop/length/tool calls, and EOF flush behavior
 - `AggregatedStream` and `AggregateStreamExt` behavior from `codex-rs/codex-api/src/endpoint/chat.rs`
@@ -288,7 +290,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing
-- runtime Responses API event emission and tool orchestration
+- runtime Responses API tool orchestration
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
 - MCP server/client management
