@@ -6,6 +6,16 @@ public enum TruncationPolicy: Equatable, Hashable, Sendable {
     case bytes(Int)
     case tokens(Int)
 
+    private enum CodingKeys: String, CodingKey {
+        case mode
+        case limit
+    }
+
+    private enum Mode: String, Codable {
+        case bytes
+        case tokens
+    }
+
     public func multiplied(by multiplier: Double) -> TruncationPolicy {
         switch self {
         case let .bytes(bytes):
@@ -30,6 +40,31 @@ public enum TruncationPolicy: Equatable, Hashable, Sendable {
             return max(0, bytes)
         case let .tokens(tokens):
             return Truncation.approxBytesForTokens(max(0, tokens))
+        }
+    }
+}
+
+extension TruncationPolicy: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let limit = try container.decode(Int.self, forKey: .limit)
+        switch try container.decode(Mode.self, forKey: .mode) {
+        case .bytes:
+            self = .bytes(limit)
+        case .tokens:
+            self = .tokens(limit)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .bytes(limit):
+            try container.encode(Mode.bytes, forKey: .mode)
+            try container.encode(limit, forKey: .limit)
+        case let .tokens(limit):
+            try container.encode(Mode.tokens, forKey: .mode)
+            try container.encode(limit, forKey: .limit)
         }
     }
 }
