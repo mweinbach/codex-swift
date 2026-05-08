@@ -61,6 +61,8 @@ Source baseline inspected for this scaffold:
   - custom prompt metadata and `prompts` command prefix
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
+- `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
+  - turn item wire tags, user/agent/reasoning/web-search item models, item IDs, legacy message/reasoning/web-search events, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/parse_command.rs`

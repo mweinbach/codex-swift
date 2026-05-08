@@ -1,0 +1,258 @@
+import Foundation
+
+public enum TurnItem: Equatable, Codable, Sendable {
+    case userMessage(UserMessageItem)
+    case agentMessage(AgentMessageItem)
+    case reasoning(ReasoningItem)
+    case webSearch(WebSearchItem)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    private enum ItemType: String, Codable {
+        case userMessage = "UserMessage"
+        case agentMessage = "AgentMessage"
+        case reasoning = "Reasoning"
+        case webSearch = "WebSearch"
+    }
+
+    public var id: String {
+        switch self {
+        case let .userMessage(item):
+            return item.id
+        case let .agentMessage(item):
+            return item.id
+        case let .reasoning(item):
+            return item.id
+        case let .webSearch(item):
+            return item.id
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(ItemType.self, forKey: .type) {
+        case .userMessage:
+            self = .userMessage(try UserMessageItem(from: decoder))
+        case .agentMessage:
+            self = .agentMessage(try AgentMessageItem(from: decoder))
+        case .reasoning:
+            self = .reasoning(try ReasoningItem(from: decoder))
+        case .webSearch:
+            self = .webSearch(try WebSearchItem(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .userMessage(item):
+            try container.encode(ItemType.userMessage, forKey: .type)
+            try item.encode(to: encoder)
+        case let .agentMessage(item):
+            try container.encode(ItemType.agentMessage, forKey: .type)
+            try item.encode(to: encoder)
+        case let .reasoning(item):
+            try container.encode(ItemType.reasoning, forKey: .type)
+            try item.encode(to: encoder)
+        case let .webSearch(item):
+            try container.encode(ItemType.webSearch, forKey: .type)
+            try item.encode(to: encoder)
+        }
+    }
+
+    public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
+        switch self {
+        case let .userMessage(item):
+            return [item.asLegacyEvent()]
+        case let .agentMessage(item):
+            return item.asLegacyEvents()
+        case let .reasoning(item):
+            return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
+        case let .webSearch(item):
+            return [item.asLegacyEvent()]
+        }
+    }
+}
+
+public struct UserMessageItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let content: [UserInput]
+
+    public init(id: String = UUID().uuidString.lowercased(), content: [UserInput]) {
+        self.id = id
+        self.content = content
+    }
+
+    public var message: String {
+        content.map { input in
+            if case let .text(text) = input {
+                return text
+            }
+            return ""
+        }.joined()
+    }
+
+    public var imageURLs: [String] {
+        content.compactMap { input in
+            if case let .image(imageURL) = input {
+                return imageURL
+            }
+            return nil
+        }
+    }
+
+    public func asLegacyEvent() -> LegacyEventMessage {
+        .userMessage(UserMessageEvent(message: message, images: imageURLs))
+    }
+}
+
+public enum AgentMessageContent: Equatable, Codable, Sendable {
+    case text(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+    }
+
+    private enum ContentType: String, Codable {
+        case text = "Text"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(ContentType.self, forKey: .type) {
+        case .text:
+            self = .text(try container.decode(String.self, forKey: .text))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .text(text):
+            try container.encode(ContentType.text, forKey: .type)
+            try container.encode(text, forKey: .text)
+        }
+    }
+}
+
+public struct AgentMessageItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let content: [AgentMessageContent]
+
+    public init(id: String = UUID().uuidString.lowercased(), content: [AgentMessageContent]) {
+        self.id = id
+        self.content = content
+    }
+
+    public func asLegacyEvents() -> [LegacyEventMessage] {
+        content.map { content in
+            switch content {
+            case let .text(text):
+                return .agentMessage(AgentMessageEvent(message: text))
+            }
+        }
+    }
+}
+
+public struct ReasoningItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let summaryText: [String]
+    public let rawContent: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case summaryText = "summary_text"
+        case rawContent = "raw_content"
+    }
+
+    public init(id: String = UUID().uuidString.lowercased(), summaryText: [String], rawContent: [String] = []) {
+        self.id = id
+        self.summaryText = summaryText
+        self.rawContent = rawContent
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.summaryText = try container.decode([String].self, forKey: .summaryText)
+        self.rawContent = try container.decodeIfPresent([String].self, forKey: .rawContent) ?? []
+    }
+
+    public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
+        var events = summaryText.map { summary in
+            LegacyEventMessage.agentReasoning(AgentReasoningEvent(text: summary))
+        }
+
+        if showRawAgentReasoning {
+            events += rawContent.map { entry in
+                LegacyEventMessage.agentReasoningRawContent(AgentReasoningRawContentEvent(text: entry))
+            }
+        }
+
+        return events
+    }
+}
+
+public struct WebSearchItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let query: String
+
+    public init(id: String, query: String) {
+        self.id = id
+        self.query = query
+    }
+
+    public func asLegacyEvent() -> LegacyEventMessage {
+        .webSearchEnd(WebSearchEndEvent(callID: id, query: query))
+    }
+}
+
+public struct ItemStartedEvent: Equatable, Codable, Sendable {
+    public let threadID: ConversationId
+    public let turnID: String
+    public let item: TurnItem
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case item
+    }
+
+    public init(threadID: ConversationId, turnID: String, item: TurnItem) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.item = item
+    }
+
+    public func asLegacyEvents(showRawAgentReasoning _: Bool = false) -> [LegacyEventMessage] {
+        guard case let .webSearch(item) = item else {
+            return []
+        }
+        return [.webSearchBegin(WebSearchBeginEvent(callID: item.id))]
+    }
+}
+
+public struct ItemCompletedEvent: Equatable, Codable, Sendable {
+    public let threadID: ConversationId
+    public let turnID: String
+    public let item: TurnItem
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case item
+    }
+
+    public init(threadID: ConversationId, turnID: String, item: TurnItem) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.item = item
+    }
+
+    public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
+        item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
+    }
+}
