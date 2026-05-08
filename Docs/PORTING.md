@@ -88,6 +88,8 @@ Source baseline inspected for this scaffold:
   - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
 - `codex-rs/core/src/config/mod.rs` apply-relevant config loading
   - apply/auth-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from git root to cwd, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, top-level `forced_login_method`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
+- `codex-rs/core/src/config/profile.rs`
+  - profile option wire shape, feature-table flattening, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
