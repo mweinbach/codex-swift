@@ -552,6 +552,36 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(usage["total_tokens"], .integer(8))
     }
 
+    func testJSONLinesOutputEmitsWebSearchCompletedItem() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [
+                .success(.outputItemDone(.webSearchCall(
+                    id: "web-search-1",
+                    status: "completed",
+                    action: .search(query: "rust async await")
+                ))),
+                .success(.completed(responseID: "resp_1", tokenUsage: nil))
+            ],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 4)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects[2]["type"], .string("item.completed"))
+        guard case let .object(item)? = objects[2]["item"] else {
+            return XCTFail("expected completed item")
+        }
+        XCTAssertEqual(item["id"], .string("item_0"))
+        XCTAssertEqual(item["type"], .string("web_search"))
+        XCTAssertEqual(item["query"], .string("rust async await"))
+        XCTAssertNil(result.lastAgentMessage)
+    }
+
     func testFailureOutputReturnsExitOneAndWritesEmptyLastMessage() throws {
         let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let writes = WriteSink()

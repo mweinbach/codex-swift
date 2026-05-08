@@ -303,30 +303,12 @@ public enum NonInteractiveExec {
                 case let .outputItemDone(item):
                     if let message = StreamEventUtils.lastAssistantMessage(from: item) {
                         lastAgentMessage = message
-                        if outputMode == .jsonLines {
-                            jsonLines.append(encodeJSONLine(
-                                ExecJSONItemCompletedEvent(
-                                    item: CompletedItem(
-                                        id: "item_\(itemIndex)",
-                                        type: "agent_message",
-                                        text: message
-                                    )
-                                ),
-                                using: jsonEncoder
-                            ))
-                            itemIndex += 1
-                        }
-                    } else if outputMode == .jsonLines,
-                              let reasoningText = reasoningText(from: item)
+                    }
+                    if outputMode == .jsonLines,
+                       let completedItem = execJSONCompletedItem(from: item, itemIndex: itemIndex)
                     {
                         jsonLines.append(encodeJSONLine(
-                            ExecJSONItemCompletedEvent(
-                                item: CompletedItem(
-                                    id: "item_\(itemIndex)",
-                                    type: "reasoning",
-                                    text: reasoningText
-                                )
-                            ),
+                            ExecJSONItemCompletedEvent(item: completedItem),
                             using: jsonEncoder
                         ))
                         itemIndex += 1
@@ -385,6 +367,20 @@ public enum NonInteractiveExec {
             lastAgentMessage: lastAgentMessage,
             tokenUsage: tokenUsage
         )
+    }
+
+    private static func execJSONCompletedItem(from item: ResponseItem, itemIndex: Int) -> CompletedItem? {
+        let id = "item_\(itemIndex)"
+        if let message = StreamEventUtils.lastAssistantMessage(from: item) {
+            return CompletedItem(id: id, type: "agent_message", text: message)
+        }
+        if let reasoningText = reasoningText(from: item) {
+            return CompletedItem(id: id, type: "reasoning", text: reasoningText)
+        }
+        if case let .webSearchCall(_, _, .search(query)) = item {
+            return CompletedItem(id: id, type: "web_search", query: query ?? "")
+        }
+        return nil
     }
 
     private enum ShellResponseFormat {
@@ -1352,7 +1348,15 @@ private struct TurnStartedEvent: Encodable {
 private struct CompletedItem: Encodable {
     let id: String
     let type: String
-    let text: String
+    let text: String?
+    let query: String?
+
+    init(id: String, type: String, text: String? = nil, query: String? = nil) {
+        self.id = id
+        self.type = type
+        self.text = text
+        self.query = query
+    }
 }
 
 private struct ExecJSONItemCompletedEvent: Encodable {
