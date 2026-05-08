@@ -60,6 +60,95 @@ final class McpConfigTests: XCTestCase {
         )
     }
 
+    func testLoadGlobalMcpServersAcceptsLegacyStartupTimeoutMsField() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+        try """
+        [mcp_servers.docs]
+        command = "echo"
+        startup_timeout_ms = 2500
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)
+        XCTAssertEqual(servers["docs"]?.startupTimeoutSec, 2.5)
+    }
+
+    func testReplaceGlobalMcpServersRoundTripsRustEditShape() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "stdio": McpServerConfig(
+                transport: .stdio(
+                    command: "cmd",
+                    args: ["--flag"],
+                    env: ["B": "2", "A": "1"],
+                    envVars: ["FOO"],
+                    cwd: nil
+                ),
+                enabledTools: ["one", "two"]
+            ),
+            "http": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com",
+                    bearerTokenEnvVar: "TOKEN",
+                    httpHeaders: ["Z-Header": "z"],
+                    envHttpHeaders: nil
+                ),
+                enabled: false,
+                startupTimeoutSec: 5,
+                disabledTools: ["forbidden"]
+            )
+        ])
+
+        let serialized = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertEqual(serialized, """
+        [mcp_servers.http]
+        url = "https://example.com"
+        bearer_token_env_var = "TOKEN"
+        enabled = false
+        startup_timeout_sec = 5.0
+        disabled_tools = ["forbidden"]
+
+        [mcp_servers.http.http_headers]
+        Z-Header = "z"
+
+        [mcp_servers.stdio]
+        command = "cmd"
+        args = ["--flag"]
+        env_vars = ["FOO"]
+        enabled_tools = ["one", "two"]
+
+        [mcp_servers.stdio.env]
+        A = "1"
+        B = "2"
+
+        """)
+
+        let loaded = try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)
+        XCTAssertEqual(loaded["stdio"], McpServerConfig(
+            transport: .stdio(
+                command: "cmd",
+                args: ["--flag"],
+                env: ["A": "1", "B": "2"],
+                envVars: ["FOO"],
+                cwd: nil
+            ),
+            enabledTools: ["one", "two"]
+        ))
+        XCTAssertEqual(loaded["http"], McpServerConfig(
+            transport: .streamableHttp(
+                url: "https://example.com",
+                bearerTokenEnvVar: "TOKEN",
+                httpHeaders: ["Z-Header": "z"],
+                envHttpHeaders: nil
+            ),
+            enabled: false,
+            startupTimeoutSec: 5,
+            disabledTools: ["forbidden"]
+        ))
+    }
+
     func testReplaceGlobalMcpServersPreservesUnrelatedConfigAndSerializesSorted() throws {
         let temp = try McpConfigTemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml")
@@ -121,6 +210,134 @@ final class McpConfigTests: XCTestCase {
             command: "docs-server",
             args: ["--verbose"],
             env: ["ALPHA_VAR": "1", "ZIG_VAR": "3"],
+            envVars: [],
+            cwd: nil
+        ))
+    }
+
+    func testReplaceGlobalMcpServersSerializesEnvVarsAndCwd() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "docs": McpServerConfig(
+                transport: .stdio(
+                    command: "docs-server",
+                    args: [],
+                    env: nil,
+                    envVars: ["ALPHA", "BETA"],
+                    cwd: "/tmp/codex-mcp"
+                )
+            )
+        ])
+
+        let serialized = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(serialized.contains(#"env_vars = ["ALPHA", "BETA"]"#))
+        XCTAssertTrue(serialized.contains(#"cwd = "/tmp/codex-mcp""#))
+
+        XCTAssertEqual(
+            try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)["docs"]?.transport,
+            .stdio(
+                command: "docs-server",
+                args: [],
+                env: nil,
+                envVars: ["ALPHA", "BETA"],
+                cwd: "/tmp/codex-mcp"
+            )
+        )
+    }
+
+    func testReplaceGlobalMcpServersStreamableHTTPRemovesOptionalSections() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "docs": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "MCP_TOKEN",
+                    httpHeaders: ["X-Doc": "42"],
+                    envHttpHeaders: ["X-Auth": "DOCS_AUTH"]
+                ),
+                startupTimeoutSec: 2
+            )
+        ])
+
+        let serializedWithOptional = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(serializedWithOptional.contains(#"bearer_token_env_var = "MCP_TOKEN""#))
+        XCTAssertTrue(serializedWithOptional.contains("[mcp_servers.docs.http_headers]"))
+        XCTAssertTrue(serializedWithOptional.contains("[mcp_servers.docs.env_http_headers]"))
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "docs": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                )
+            )
+        ])
+
+        let serialized = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertEqual(serialized, """
+        [mcp_servers.docs]
+        url = "https://example.com/mcp"
+
+        """)
+
+        XCTAssertEqual(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)["docs"], McpServerConfig(
+            transport: .streamableHttp(
+                url: "https://example.com/mcp",
+                bearerTokenEnvVar: nil,
+                httpHeaders: nil,
+                envHttpHeaders: nil
+            )
+        ))
+    }
+
+    func testReplaceGlobalMcpServersStreamableHTTPIsolatesHeadersBetweenServers() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "docs": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "MCP_TOKEN",
+                    httpHeaders: ["X-Doc": "42"],
+                    envHttpHeaders: ["X-Auth": "DOCS_AUTH"]
+                ),
+                startupTimeoutSec: 2
+            ),
+            "logs": McpServerConfig(
+                transport: .stdio(
+                    command: "logs-server",
+                    args: ["--follow"],
+                    env: nil,
+                    envVars: [],
+                    cwd: nil
+                )
+            )
+        ])
+
+        let serialized = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(serialized.contains("[mcp_servers.docs.http_headers]"))
+        XCTAssertFalse(serialized.contains("[mcp_servers.logs.http_headers]"))
+        XCTAssertFalse(serialized.contains("[mcp_servers.logs.env_http_headers]"))
+        XCTAssertFalse(serialized.contains("mcp_servers.logs.bearer_token_env_var"))
+
+        let loaded = try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)
+        XCTAssertEqual(loaded["docs"]?.transport, .streamableHttp(
+            url: "https://example.com/mcp",
+            bearerTokenEnvVar: "MCP_TOKEN",
+            httpHeaders: ["X-Doc": "42"],
+            envHttpHeaders: ["X-Auth": "DOCS_AUTH"]
+        ))
+        XCTAssertEqual(loaded["logs"]?.transport, .stdio(
+            command: "logs-server",
+            args: ["--follow"],
+            env: nil,
             envVars: [],
             cwd: nil
         ))

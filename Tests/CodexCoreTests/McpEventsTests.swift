@@ -222,13 +222,19 @@ final class McpEventsTests: XCTestCase {
     }
 
     func testQualifiedToolNameTruncatesLongNamesWithRustSHA1Suffix() {
-        let name = McpToolName.qualifiedToolName(
+        let first = McpToolName.qualifiedToolName(
             serverName: "my_server",
             toolName: "extremely_lengthy_function_name_that_absolutely_surpasses_all_reasonable_limits"
         )
+        let second = McpToolName.qualifiedToolName(
+            serverName: "my_server",
+            toolName: "yet_another_extremely_lengthy_function_name_that_absolutely_surpasses_all_reasonable_limits"
+        )
 
-        XCTAssertEqual(name.count, 64)
-        XCTAssertEqual(name, "mcp__my_server__extremel119a2b97664e41363932dc84de21e2ff1b93b3e9")
+        XCTAssertEqual(first.count, 64)
+        XCTAssertEqual(first, "mcp__my_server__extremel119a2b97664e41363932dc84de21e2ff1b93b3e9")
+        XCTAssertEqual(second.count, 64)
+        XCTAssertEqual(second, "mcp__my_server__yet_anot419a82a89325c1b477274a41f8c65ea5f3a7f341")
     }
 
     func testQualifyToolsSkipsDuplicateQualifiedNamesLikeRust() {
