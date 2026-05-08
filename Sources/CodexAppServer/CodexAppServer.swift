@@ -2083,12 +2083,18 @@ public enum CodexAppServer {
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [FileManager.default.currentDirectoryPath] : rawCwds
+        let configRules = (try? CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )).map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
         return [
             "data": cwds.map { cwd in
-                let outcome = loadSkills(
+                var outcome = loadSkills(
                     cwd: URL(fileURLWithPath: cwd, isDirectory: true),
                     codexHome: configuration.codexHome
                 )
+                outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: configRules) }
                 return [
                     "cwd": cwd,
                     "skills": outcome.skills.map(skillObject),
@@ -2096,6 +2102,31 @@ public enum CodexAppServer {
                 ]
             }
         ]
+    }
+
+    fileprivate static func skillsConfigWriteResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let enabled = params?["enabled"] as? Bool else {
+            throw AppServerError.invalidParams("missing enabled")
+        }
+        let selector: SkillConfigSelector
+        switch (stringParam(params?["path"]), stringParam(params?["name"])) {
+        case let (path?, nil):
+            selector = .path(normalizeSkillConfigPath(path))
+        case let (nil, name?) where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
+            selector = .name(name.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            throw AppServerError.invalidParams("skills/config/write requires exactly one of path or name")
+        }
+
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        setSkillConfig(selector: selector, enabled: enabled, in: &config)
+        try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
+        try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        return ["effectiveEnabled": enabled]
     }
 
     fileprivate static func hooksListResult(
@@ -3845,6 +3876,41 @@ public enum CodexAppServer {
         return outcome
     }
 
+    private static func isSkillEnabled(_ skill: SkillMetadata, rules: [SkillConfigRule]) -> Bool {
+        var enabled = true
+        let normalizedPath = normalizeSkillConfigPath(skill.path)
+        for rule in rules where rule.matches(name: skill.name, path: normalizedPath) {
+            enabled = rule.enabled
+        }
+        return enabled
+    }
+
+    private static func skillConfigRules(from config: ConfigValue) -> [SkillConfigRule] {
+        guard case let .table(root) = config,
+              case let .table(skills)? = root["skills"],
+              case let .array(entries)? = skills["config"]
+        else {
+            return []
+        }
+        return entries.compactMap { entry in
+            guard case let .table(table) = entry,
+                  case let .bool(enabled)? = table["enabled"]
+            else {
+                return nil
+            }
+            if case let .string(path)? = table["path"],
+               table["name"] == nil {
+                return SkillConfigRule(selector: .path(normalizeSkillConfigPath(path)), enabled: enabled)
+            }
+            if case let .string(name)? = table["name"],
+               table["path"] == nil {
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : SkillConfigRule(selector: .name(trimmed), enabled: enabled)
+            }
+            return nil
+        }
+    }
+
     private static func archiveConversation(
         conversationID: ConversationId,
         rolloutPath rawRolloutPath: String,
@@ -4359,6 +4425,106 @@ public enum CodexAppServer {
         ]
     }
 
+    private static func setSkillConfig(selector: SkillConfigSelector, enabled: Bool, in config: inout ConfigValue) {
+        var root: [String: ConfigValue]
+        if case let .table(existing) = config {
+            root = existing
+        } else {
+            root = [:]
+        }
+
+        var skills: [String: ConfigValue]
+        if case let .table(existing)? = root["skills"] {
+            skills = existing
+        } else {
+            if enabled {
+                config = .table(root)
+                return
+            }
+            skills = [:]
+        }
+
+        var entries: [ConfigValue]
+        if case let .array(existing)? = skills["config"] {
+            entries = existing
+        } else {
+            if enabled {
+                config = .table(root)
+                return
+            }
+            entries = []
+        }
+
+        let existingIndex = entries.firstIndex { entry in
+            guard case let .table(table) = entry else {
+                return false
+            }
+            return skillConfigSelector(from: table) == selector
+        }
+
+        if enabled {
+            if let existingIndex {
+                entries.remove(at: existingIndex)
+            }
+        } else {
+            let entry = skillConfigEntry(selector: selector)
+            if let existingIndex {
+                entries[existingIndex] = entry
+            } else {
+                entries.append(entry)
+            }
+        }
+
+        if entries.isEmpty {
+            skills.removeValue(forKey: "config")
+        } else {
+            skills["config"] = .array(entries)
+        }
+
+        if skills.isEmpty {
+            root.removeValue(forKey: "skills")
+        } else {
+            root["skills"] = .table(skills)
+        }
+        config = .table(root)
+    }
+
+    private static func skillConfigEntry(selector: SkillConfigSelector) -> ConfigValue {
+        switch selector {
+        case let .path(path):
+            return .table([
+                "path": .string(path),
+                "enabled": .bool(false)
+            ])
+        case let .name(name):
+            return .table([
+                "name": .string(name),
+                "enabled": .bool(false)
+            ])
+        }
+    }
+
+    private static func skillConfigSelector(from table: [String: ConfigValue]) -> SkillConfigSelector? {
+        if case let .string(path)? = table["path"],
+           table["name"] == nil {
+            return .path(normalizeSkillConfigPath(path))
+        }
+        if case let .string(name)? = table["name"],
+           table["path"] == nil {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : .name(trimmed)
+        }
+        return nil
+    }
+
+    private static func normalizeSkillConfigPath(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path, isDirectory: false)
+        if FileManager.default.fileExists(atPath: url.path) {
+            return url.resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        return url.standardizedFileURL.path
+    }
+
     private static func configWriteValue(_ value: Any?) throws -> ConfigValue? {
         guard let value else {
             throw AppServerError.invalidRequest("missing value")
@@ -4477,17 +4643,44 @@ public enum CodexAppServer {
         }
         var lines: [String] = []
         renderConfigTable(table, path: [], lines: &lines)
+        guard !lines.isEmpty else {
+            return ""
+        }
         return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
     }
 
     private static func renderConfigTable(_ table: [String: ConfigValue], path: [String], lines: inout [String]) {
-        let scalarKeys = table.keys.sorted().filter { key in
+        let scalarKeys = table.keys.sorted { left, right in
+            let leftRank = configScalarSortRank(left, path: path)
+            let rightRank = configScalarSortRank(right, path: path)
+            if leftRank.rank != rightRank.rank {
+                return leftRank.rank < rightRank.rank
+            }
+            return leftRank.key < rightRank.key
+        }.filter { key in
             if case .table = table[key] { return false }
+            if isArrayOfTables(table[key]) { return false }
             return true
         }
         for key in scalarKeys {
             guard let value = table[key] else { continue }
             lines.append("\(tomlKey(key)) = \(tomlLiteral(value))")
+        }
+
+        let arrayTableKeys = table.keys.sorted().filter { key in
+            isArrayOfTables(table[key])
+        }
+        for key in arrayTableKeys {
+            guard case let .array(entries)? = table[key] else { continue }
+            let nextPath = path + [key]
+            for entry in entries {
+                guard case let .table(child) = entry else { continue }
+                if !lines.isEmpty, lines.last?.isEmpty == false {
+                    lines.append("")
+                }
+                lines.append("[[\(nextPath.map(tomlKey).joined(separator: "."))]]")
+                renderConfigTable(child, path: nextPath, lines: &lines)
+            }
         }
 
         let tableKeys = table.keys.sorted().filter { key in
@@ -4496,12 +4689,45 @@ public enum CodexAppServer {
         }
         for key in tableKeys {
             guard case let .table(child)? = table[key] else { continue }
+            let nextPath = path + [key]
+            if !child.isEmpty,
+               child.keys.allSatisfy({ isArrayOfTables(child[$0]) }) {
+                renderConfigTable(child, path: nextPath, lines: &lines)
+                continue
+            }
             if !lines.isEmpty, lines.last?.isEmpty == false {
                 lines.append("")
             }
-            let nextPath = path + [key]
             lines.append("[\(nextPath.map(tomlKey).joined(separator: "."))]")
             renderConfigTable(child, path: nextPath, lines: &lines)
+        }
+    }
+
+    private static func configScalarSortRank(_ key: String, path: [String]) -> (rank: Int, key: String) {
+        if path == ["skills", "config"] {
+            switch key {
+            case "path":
+                return (0, key)
+            case "name":
+                return (1, key)
+            case "enabled":
+                return (2, key)
+            default:
+                return (3, key)
+            }
+        }
+        return (0, key)
+    }
+
+    private static func isArrayOfTables(_ value: ConfigValue?) -> Bool {
+        guard case let .array(values)? = value else {
+            return false
+        }
+        return !values.isEmpty && values.allSatisfy { element in
+            if case .table = element {
+                return true
+            }
+            return false
         }
     }
 
@@ -4929,6 +5155,25 @@ private struct ConfigWriteEdit {
     let keyPath: String
     let value: ConfigValue?
     let mergeStrategy: String
+}
+
+private enum SkillConfigSelector: Equatable {
+    case path(String)
+    case name(String)
+}
+
+private struct SkillConfigRule {
+    let selector: SkillConfigSelector
+    let enabled: Bool
+
+    func matches(name: String, path: String) -> Bool {
+        switch selector {
+        case let .name(ruleName):
+            return ruleName == name
+        case let .path(rulePath):
+            return rulePath == path
+        }
+    }
 }
 
 private struct AppServerStartedConversation {
@@ -5749,6 +5994,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.skillsListResult(params: params, configuration: configuration)
+                    )
+                case "skills/config/write":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.skillsConfigWriteResult(params: params, configuration: configuration)
                     )
                 case "hooks/list":
                     response = CodexAppServer.responseObject(

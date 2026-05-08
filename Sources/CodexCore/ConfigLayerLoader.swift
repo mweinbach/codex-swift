@@ -449,7 +449,7 @@ public enum CodexConfigLayerLoader {
 enum ConfigTomlParser {
     static func parse(_ contents: String) throws -> ConfigValue {
         var root: [String: ConfigValue] = [:]
-        var tablePath: [String] = []
+        var context = ConfigTomlContext.table([])
 
         for rawLine in contents.split(whereSeparator: \.isNewline) {
             let line = stripComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -459,9 +459,17 @@ enum ConfigTomlParser {
                 guard line.hasSuffix("]") else {
                     throw CodexConfigLoadError.invalidTableHeader(line)
                 }
-                let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-                tablePath = try parseDottedKey(body)
-                ensureTable(at: tablePath, in: &root)
+                if line.hasPrefix("[["), line.hasSuffix("]]") {
+                    let body = String(line.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let path = try parseDottedKey(body)
+                    let index = appendTableArrayEntry(at: path, in: &root)
+                    context = .arrayTable(path, index)
+                } else {
+                    let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let path = try parseDottedKey(body)
+                    ensureTable(at: path, in: &root)
+                    context = .table(path)
+                }
                 continue
             }
 
@@ -472,8 +480,14 @@ enum ConfigTomlParser {
             let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
             let valueStart = line.index(after: equalsIndex)
             let valueText = String(line[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let path = tablePath + (try parseDottedKey(key))
-            set(try ConfigValueParser.parseTomlLiteral(valueText), at: path, in: &root)
+            let keyPath = try parseDottedKey(key)
+            let value = try ConfigValueParser.parseTomlLiteral(valueText)
+            switch context {
+            case let .table(tablePath):
+                set(value, at: tablePath + keyPath, in: &root)
+            case let .arrayTable(tablePath, index):
+                setInArrayTable(value, keyPath: keyPath, tablePath: tablePath, index: index, in: &root)
+            }
         }
 
         return .table(root)
@@ -482,6 +496,67 @@ enum ConfigTomlParser {
     private static func ensureTable(at path: [String], in root: inout [String: ConfigValue]) {
         guard !path.isEmpty else { return }
         set(.table([:]), at: path, in: &root, preserveExistingTable: true)
+    }
+
+    private static func appendTableArrayEntry(at path: [String], in root: inout [String: ConfigValue]) -> Int {
+        guard let first = path.first else { return 0 }
+        if path.count == 1 {
+            var array: [ConfigValue]
+            if case let .array(existing) = root[first] {
+                array = existing
+            } else {
+                array = []
+            }
+            array.append(.table([:]))
+            root[first] = .array(array)
+            return array.count - 1
+        }
+
+        var childTable: [String: ConfigValue]
+        if case let .table(existing) = root[first] {
+            childTable = existing
+        } else {
+            childTable = [:]
+        }
+        let index = appendTableArrayEntry(at: Array(path.dropFirst()), in: &childTable)
+        root[first] = .table(childTable)
+        return index
+    }
+
+    private static func setInArrayTable(
+        _ value: ConfigValue,
+        keyPath: [String],
+        tablePath: [String],
+        index: Int,
+        in root: inout [String: ConfigValue]
+    ) {
+        guard let first = tablePath.first else { return }
+        if tablePath.count == 1 {
+            guard case var .array(array) = root[first],
+                  array.indices.contains(index)
+            else {
+                return
+            }
+            var table: [String: ConfigValue]
+            if case let .table(existing) = array[index] {
+                table = existing
+            } else {
+                table = [:]
+            }
+            set(value, at: keyPath, in: &table)
+            array[index] = .table(table)
+            root[first] = .array(array)
+            return
+        }
+
+        var childTable: [String: ConfigValue]
+        if case let .table(existing) = root[first] {
+            childTable = existing
+        } else {
+            childTable = [:]
+        }
+        setInArrayTable(value, keyPath: keyPath, tablePath: Array(tablePath.dropFirst()), index: index, in: &childTable)
+        root[first] = .table(childTable)
     }
 
     private static func set(
@@ -632,5 +707,10 @@ enum ConfigTomlParser {
         }
 
         return nil
+    }
+
+    private enum ConfigTomlContext {
+        case table([String])
+        case arrayTable([String], Int)
     }
 }

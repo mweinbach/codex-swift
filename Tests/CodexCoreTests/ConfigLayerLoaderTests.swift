@@ -41,6 +41,38 @@ final class ConfigLayerLoaderTests: XCTestCase {
         )
     }
 
+    func testReadConfigParsesArrayOfTables() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let file = dir.url.appendingPathComponent("config.toml")
+        try """
+        [[skills.config]]
+        path = "/tmp/skills/demo/SKILL.md"
+        enabled = false
+
+        [[skills.config]]
+        name = "github:yeet"
+        enabled = true
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            try CodexConfigLayerLoader.readConfig(from: file),
+            .table([
+                "skills": .table([
+                    "config": .array([
+                        .table([
+                            "path": .string("/tmp/skills/demo/SKILL.md"),
+                            "enabled": .bool(false)
+                        ]),
+                        .table([
+                            "name": .string("github:yeet"),
+                            "enabled": .bool(true)
+                        ])
+                    ])
+                ])
+            ])
+        )
+    }
+
     func testReadConfigResolvesRelativePathFieldsAndPreservesUnknownFieldsLikeRust() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let file = dir.url.appendingPathComponent("config.toml")

@@ -3342,6 +3342,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(errors[0]["message"] as? String, "missing field `description`")
     }
 
+    func testSkillsConfigWriteTogglesPathSelectorAndAffectsSkillsList() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let skill = codexHome.url.appendingPathComponent("skills/demo/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "demo", description: "user skill").write(to: skill, atomically: true, encoding: .utf8)
+
+        let disable = try appServerResponse(
+            #"{"id":1,"method":"skills/config/write","params":{"path":"\#(skill.path)","enabled":false}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((disable["result"] as? [String: Any])?["effectiveEnabled"] as? Bool, false)
+        XCTAssertEqual(
+            try String(contentsOf: codexHome.url.appendingPathComponent("config.toml"), encoding: .utf8),
+            """
+            [[skills.config]]
+            path = "\(skill.path)"
+            enabled = false
+            """ + "\n"
+        )
+
+        let disabledList = try appServerResponse(
+            #"{"id":2,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let disabledData = try XCTUnwrap((disabledList["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual((disabledData[0]["skills"] as? [[String: Any]])?.count, 0)
+
+        let enable = try appServerResponse(
+            #"{"id":3,"method":"skills/config/write","params":{"path":"\#(skill.path)","enabled":true}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((enable["result"] as? [String: Any])?["effectiveEnabled"] as? Bool, true)
+        XCTAssertEqual(
+            try String(contentsOf: codexHome.url.appendingPathComponent("config.toml"), encoding: .utf8),
+            ""
+        )
+    }
+
+    func testSkillsConfigWriteTogglesNameSelectorAndValidatesSelectors() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let skill = codexHome.url.appendingPathComponent("skills/yeet/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "github:yeet", description: "user skill").write(to: skill, atomically: true, encoding: .utf8)
+
+        let disable = try appServerResponse(
+            #"{"id":1,"method":"skills/config/write","params":{"name":"  github:yeet  ","enabled":false}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((disable["result"] as? [String: Any])?["effectiveEnabled"] as? Bool, false)
+        XCTAssertEqual(
+            try String(contentsOf: codexHome.url.appendingPathComponent("config.toml"), encoding: .utf8),
+            """
+            [[skills.config]]
+            name = "github:yeet"
+            enabled = false
+            """ + "\n"
+        )
+
+        let disabledList = try appServerResponse(
+            #"{"id":2,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let disabledData = try XCTUnwrap((disabledList["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual((disabledData[0]["skills"] as? [[String: Any]])?.count, 0)
+
+        for (index, params) in [
+            #"{"path":"\#(skill.path)","name":"github:yeet","enabled":false}"#,
+            #"{"name":"   ","enabled":false}"#,
+            #"{"enabled":false}"#
+        ].enumerated() {
+            let invalid = try appServerResponse(
+                #"{"id":\#(index + 3),"method":"skills/config/write","params":\#(params)}"#,
+                codexHome: codexHome.url
+            )
+            let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32602)
+            XCTAssertEqual(error["message"] as? String, "skills/config/write requires exactly one of path or name")
+        }
+    }
+
     func testHooksListReturnsUserCommandHooks() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
