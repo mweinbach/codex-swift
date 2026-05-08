@@ -86,6 +86,12 @@ Source baseline inspected for this scaffold:
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
 - `codex-rs/ansi-escape`
   - Swift-native `AnsiText`/`AnsiLine`/`AnsiSpan` model, tab expansion for single-line rendering, ANSI SGR styling, escape-sequence stripping, line splitting, and first-line extraction
+- `codex-rs/common/src/elapsed.rs`
+  - compact elapsed/duration formatting for millisecond, second, and minute displays
+- `codex-rs/common/src/format_env_display.rs`
+  - redacted environment display formatting with sorted explicit env pairs and ordered inherited env vars
+- `codex-rs/common/src/sandbox_summary.rs`
+  - sandbox policy summaries for danger-full-access, read-only, external-sandbox, and workspace-write policies
 
 ## Known Gaps
 
