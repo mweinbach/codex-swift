@@ -8,23 +8,27 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public let chatgptBaseURL: String
     public let cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public let forcedLoginMethod: ForcedLoginMethod?
+    public let features: FeatureStates
     public let activeProfile: String?
 
     public init(
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
+        features: FeatureStates = .withDefaults(),
         activeProfile: String? = nil
     ) {
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
+        self.features = features
         self.activeProfile = activeProfile
     }
 }
 
 public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidStringValue(String)
+    case invalidBoolValue(String)
     case invalidAuthCredentialsStoreMode
     case invalidForcedLoginMethod
     case invalidConfigLine(String)
@@ -35,6 +39,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
         switch self {
         case let .invalidStringValue(key):
             return "Invalid value for \(key): expected string"
+        case let .invalidBoolValue(key):
+            return "Invalid value for \(key): expected bool"
         case .invalidAuthCredentialsStoreMode:
             return "Invalid override value for cli_auth_credentials_store"
         case .invalidForcedLoginMethod:
@@ -141,6 +147,8 @@ public enum CodexConfigLoader {
 private struct ParsedCodexConfigToml {
     var topLevel: [String: ConfigValue] = [:]
     var profiles: [String: [String: ConfigValue]] = [:]
+    var features: [String: Bool] = [:]
+    var profileFeatures: [String: [String: Bool]] = [:]
 
     static func parse(_ contents: String) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -153,6 +161,11 @@ private struct ParsedCodexConfigToml {
             if line.hasPrefix("[") {
                 section = try parseSectionHeader(line)
                 if case let .profile(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
+                if case let .profileFeatures(name) = section {
                     if parsed.profiles[name] == nil {
                         parsed.profiles[name] = [:]
                     }
@@ -178,6 +191,16 @@ private struct ParsedCodexConfigToml {
             case let .profile(name):
                 guard isRelevantProfileKey(key) else { continue }
                 parsed.profiles[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .features:
+                parsed.features[key] = try Self.boolValue(
+                    ConfigValueParser.parseTomlLiteral(valueText),
+                    key: "features.\(key)"
+                )
+            case let .profileFeatures(name):
+                parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
+                    ConfigValueParser.parseTomlLiteral(valueText),
+                    key: "profiles.\(name).features.\(key)"
+                )
             case .ignored:
                 continue
             }
@@ -196,6 +219,11 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "features" {
+                features[parts[1]] = try Self.boolValue(value, key: path)
+                continue
+            }
+
             if parts.count >= 2, parts[0] == "profiles" {
                 if profiles[parts[1]] == nil {
                     profiles[parts[1]] = [:]
@@ -204,6 +232,10 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 3, parts[0] == "profiles", Self.isRelevantProfileKey(parts[2]) {
                 profiles[parts[1], default: [:]][parts[2]] = value
+            }
+
+            if parts.count == 4, parts[0] == "profiles", parts[2] == "features" {
+                profileFeatures[parts[1], default: [:]][parts[3]] = try Self.boolValue(value, key: path)
             }
         }
     }
@@ -220,6 +252,18 @@ private struct ParsedCodexConfigToml {
             }
             profiles[profileName] = mergedProfile
         }
+
+        for (key, value) in overlay.features {
+            features[key] = value
+        }
+
+        for (profileName, profileValues) in overlay.profileFeatures {
+            var mergedProfile = profileFeatures[profileName] ?? [:]
+            for (key, value) in profileValues {
+                mergedProfile[key] = value
+            }
+            profileFeatures[profileName] = mergedProfile
+        }
     }
 
     func resolvedConfig() throws -> CodexRuntimeConfig {
@@ -230,6 +274,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: try Self.stringValue(baseURL, key: "chatgpt_base_url"),
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                features: config.features,
                 activeProfile: config.activeProfile
             )
         }
@@ -243,6 +288,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: mode,
                 forcedLoginMethod: config.forcedLoginMethod,
+                features: config.features,
                 activeProfile: config.activeProfile
             )
         }
@@ -256,6 +302,7 @@ private struct ParsedCodexConfigToml {
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: method,
+                features: config.features,
                 activeProfile: config.activeProfile
             )
         }
@@ -271,6 +318,7 @@ private struct ParsedCodexConfigToml {
                     chatgptBaseURL: try Self.stringValue(baseURL, key: "profiles.\(activeProfile).chatgpt_base_url"),
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
+                    features: config.features,
                     activeProfile: activeProfile
                 )
             } else {
@@ -278,10 +326,24 @@ private struct ParsedCodexConfigToml {
                     chatgptBaseURL: config.chatgptBaseURL,
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
+                    features: config.features,
                     activeProfile: activeProfile
                 )
             }
         }
+
+        var featureStates = FeatureStates.withDefaults()
+        featureStates.apply(featureValues: features)
+        if let activeProfile = config.activeProfile {
+            featureStates.apply(featureValues: profileFeatures[activeProfile] ?? [:])
+        }
+        config = CodexRuntimeConfig(
+            chatgptBaseURL: config.chatgptBaseURL,
+            cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+            forcedLoginMethod: config.forcedLoginMethod,
+            features: featureStates,
+            activeProfile: config.activeProfile
+        )
 
         return config
     }
@@ -304,14 +366,27 @@ private struct ParsedCodexConfigToml {
         return string
     }
 
+    private static func boolValue(_ value: ConfigValue, key: String) throws -> Bool {
+        guard case let .bool(bool) = value else {
+            throw CodexConfigLoadError.invalidBoolValue(key)
+        }
+        return bool
+    }
+
     private static func parseSectionHeader(_ line: String) throws -> ConfigSection {
         guard line.hasSuffix("]") else {
             throw CodexConfigLoadError.invalidTableHeader(line)
         }
         let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = try parseDottedKey(body)
+        if parts.count == 1, parts[0] == "features" {
+            return .features
+        }
         if parts.count == 2, parts[0] == "profiles" {
             return .profile(parts[1])
+        }
+        if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
+            return .profileFeatures(parts[1])
         }
         return .ignored
     }
@@ -445,5 +520,7 @@ private struct ParsedCodexConfigToml {
 private enum ConfigSection {
     case topLevel
     case profile(String)
+    case features
+    case profileFeatures(String)
     case ignored
 }

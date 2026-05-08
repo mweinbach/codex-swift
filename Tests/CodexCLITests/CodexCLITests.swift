@@ -241,4 +241,71 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["Successfully logged out"])
         XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["cli_auth_credentials_store=\"file\""])
     }
+
+    func testRunAsyncFeaturesListDelegatesToRunnerAndPrintsOutput() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.FeaturesCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c",
+                "features.web_search_request=true",
+                "--enable",
+                "skills",
+                "--disable=parallel",
+                "features",
+                "list"
+            ],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            featuresRunner: { request in
+                receivedRequest = request
+                return "web_search_request\tstable\ttrue"
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["web_search_request\tstable\ttrue"])
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [
+            "features.web_search_request=true",
+            "features.skills=true",
+            "features.parallel=false"
+        ])
+    }
+
+    func testRunAsyncReportsUnknownFeatureToggleBeforeRunner() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--enable", "not_real", "features", "list"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            featuresRunner: { _ in
+                XCTFail("runner should not be called when feature toggle validation fails")
+                return ""
+            }
+        )
+
+        XCTAssertEqual(exitCode, 1)
+        XCTAssertEqual(stderr, ["Unknown feature flag: not_real"])
+    }
+
+    func testRunAsyncFeaturesListRequiresListSubcommand() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["features"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            featuresRunner: { _ in
+                XCTFail("runner should not be called without list subcommand")
+                return ""
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list"])
+    }
 }

@@ -18,7 +18,8 @@ let exitCode = await cli.runAsync(
         return "Successfully applied diff"
     },
     loginRunner: runLoginCommand,
-    logoutRunner: runLogoutCommand
+    logoutRunner: runLogoutCommand,
+    featuresRunner: runFeaturesCommand
 )
 exit(exitCode)
 
@@ -105,6 +106,15 @@ private func runLogoutCommand(_ request: CodexCLI.LogoutCommandRequest) async th
         exitCode: 0,
         stderrMessage: removed ? "Successfully logged out" : "Not logged in"
     )
+}
+
+private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) async throws -> String {
+    let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    return FeatureRegistry.specs
+        .map { spec in
+            "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
+        }
+        .joined(separator: "\n")
 }
 
 private struct APIKeyReadResult {

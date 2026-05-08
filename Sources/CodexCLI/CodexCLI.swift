@@ -50,6 +50,14 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct FeaturesCommandRequest: Equatable, Sendable {
+        public let configOverrides: CliConfigOverrides
+
+        public init(configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
         public let stderrMessage: String?
@@ -63,6 +71,7 @@ public struct CodexCLI: Sendable {
     public typealias ApplyCommandRunner = (ApplyCommandRequest) async throws -> String?
     public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
+    public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -161,7 +170,8 @@ public struct CodexCLI: Sendable {
         stderr: (String) -> Void = { fputs($0 + "\n", Darwin.stderr) },
         applyRunner: ApplyCommandRunner? = nil,
         loginRunner: LoginCommandRunner? = nil,
-        logoutRunner: LogoutCommandRunner? = nil
+        logoutRunner: LogoutCommandRunner? = nil,
+        featuresRunner: FeaturesCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -182,7 +192,7 @@ public struct CodexCLI: Sendable {
             do {
                 if let message = try await applyRunner(ApplyCommandRequest(
                     taskID: taskID,
-                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 )) {
                     stdout(message)
                 }
@@ -203,7 +213,7 @@ public struct CodexCLI: Sendable {
             do {
                 let result = try await loginRunner(LoginCommandRequest(
                     action: loginAction(arguments: arguments, commandArguments: commandArguments),
-                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
                 if let message = result.stderrMessage {
                     stderr(message)
@@ -220,12 +230,31 @@ public struct CodexCLI: Sendable {
             }
             do {
                 let result = try await logoutRunner(LogoutCommandRequest(
-                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
                 if let message = result.stderrMessage {
                     stderr(message)
                 }
                 return result.exitCode
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, commandArguments) where spec.name == "features":
+            guard let featuresRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            guard commandArguments == ["list"] else {
+                stderr("codex-swift: missing required subcommand for command 'features': list")
+                return 64
+            }
+            do {
+                let output = try await featuresRunner(FeaturesCommandRequest(
+                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                ))
+                stdout(output)
+                return 0
             } catch {
                 stderr(describe(error))
                 return 1
@@ -293,8 +322,9 @@ public struct CodexCLI: Sendable {
         ].contains(argument)
     }
 
-    private func configOverrideTokens(_ arguments: [String]) -> [String] {
+    private func configOverrideTokens(_ arguments: [String]) throws -> [String] {
         var overrides: [String] = []
+        var featureToggles = FeatureToggles()
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -312,8 +342,29 @@ public struct CodexCLI: Sendable {
                 overrides.append(String(argument.dropFirst("--config=".count)))
                 continue
             }
+            if argument == "--enable" {
+                if let value = iterator.next() {
+                    featureToggles.enable.append(value)
+                }
+                continue
+            }
+            if argument.hasPrefix("--enable=") {
+                featureToggles.enable.append(String(argument.dropFirst("--enable=".count)))
+                continue
+            }
+            if argument == "--disable" {
+                if let value = iterator.next() {
+                    featureToggles.disable.append(value)
+                }
+                continue
+            }
+            if argument.hasPrefix("--disable=") {
+                featureToggles.disable.append(String(argument.dropFirst("--disable=".count)))
+                continue
+            }
         }
 
+        overrides.append(contentsOf: try featureToggles.toOverrides())
         return overrides
     }
 

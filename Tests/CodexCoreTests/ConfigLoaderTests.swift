@@ -10,6 +10,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
+        XCTAssertTrue(config.features.isEnabled(.parallel))
+        XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertNil(config.activeProfile)
     }
 
@@ -82,6 +84,32 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for forced_login_method")
         }
+    }
+
+    func testLoadsFeatureTablesAndCLIOverrides() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [features]
+        web_search_request = true
+        parallel = false
+
+        [profiles.work.features]
+        parallel = true
+        skills = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: ["features.web_search_request=false"]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.activeProfile, "work")
+        XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
+        XCTAssertTrue(config.features.isEnabled(.parallel))
+        XCTAssertFalse(config.features.isEnabled(.skills))
     }
 
     func testMissingProfileMatchesRustError() throws {

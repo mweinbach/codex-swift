@@ -38,7 +38,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/common/src/config_override.rs`
   - `-c key=value` parsing, TOML-like literal fallback, and dotted-path application
 - `codex-rs/core/src/features.rs`
-  - known feature keys used by `--enable` and `--disable`
+  - known feature keys, stages, defaults, `[features]` and `[profiles.<name>.features]` config state, and `--enable`/`--disable` override generation
 - `codex-rs/protocol/src/conversation_id.rs`
   - string-backed Codable conversation IDs with UUIDv7 generation
 - `codex-rs/protocol/src/config_types.rs`
@@ -80,6 +80,8 @@ Source baseline inspected for this scaffold:
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
   - `codex login --with-api-key` stdin handling, file-backed API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
+- `codex-rs/cli/src/main.rs` features command
+  - `codex features list` output with Rust feature order, stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`
 
 ## Known Gaps
 
