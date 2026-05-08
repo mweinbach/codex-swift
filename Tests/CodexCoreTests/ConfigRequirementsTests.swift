@@ -89,6 +89,20 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(SandboxModeRequirement(sandboxMode: .dangerFullAccess), .dangerFullAccess)
         XCTAssertEqual(SandboxModeRequirement(sandboxPolicy: .externalSandbox(networkAccess: .enabled)), .externalSandbox)
     }
+
+    func testAppServerRequirementsObjectMatchesPortedRustFields() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        allowed_approval_policies = ["never"]
+        allowed_sandbox_modes = ["read-only", "danger-full-access", "external-sandbox"]
+        """)
+
+        XCTAssertFalse(config.isEmpty)
+        let object = config.appServerRequirementsObject()
+        XCTAssertEqual(object["allowedApprovalPolicies"] as? [String], ["never"])
+        XCTAssertEqual(object["allowedSandboxModes"] as? [String], ["read-only", "danger-full-access"])
+        XCTAssertTrue(object["allowedApprovalsReviewers"] is NSNull)
+        XCTAssertTrue(ConfigRequirementsToml().isEmpty)
+    }
 }
 
 private func XCTAssertConstraintFailure(

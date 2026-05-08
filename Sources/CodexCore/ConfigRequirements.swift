@@ -47,6 +47,11 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.allowedSandboxModes = allowedSandboxModes
     }
 
+    public var isEmpty: Bool {
+        allowedApprovalPolicies == nil &&
+            allowedSandboxModes == nil
+    }
+
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
         if allowedApprovalPolicies == nil, let value = other.allowedApprovalPolicies {
             allowedApprovalPolicies = value
@@ -189,6 +194,23 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     }
 }
 
+extension ConfigRequirementsToml {
+    public func appServerRequirementsObject() -> [String: Any] {
+        [
+            "allowedApprovalPolicies": allowedApprovalPolicies.map { $0.map(\.rawValue) } as Any? ?? NSNull(),
+            "allowedApprovalsReviewers": NSNull(),
+            "allowedSandboxModes": allowedSandboxModes.map { modes in
+                modes.compactMap(\.appServerSandboxModeValue)
+            } as Any? ?? NSNull(),
+            "allowedWebSearchModes": NSNull(),
+            "featureRequirements": NSNull(),
+            "hooks": NSNull(),
+            "enforceResidency": NSNull(),
+            "network": NSNull()
+        ]
+    }
+}
+
 public enum SandboxModeRequirement: String, Codable, CaseIterable, Equatable, Sendable {
     case readOnly = "read-only"
     case workspaceWrite = "workspace-write"
@@ -229,6 +251,15 @@ public enum SandboxModeRequirement: String, Codable, CaseIterable, Equatable, Se
             return "DangerFullAccess"
         case .externalSandbox:
             return "ExternalSandbox"
+        }
+    }
+
+    public var appServerSandboxModeValue: String? {
+        switch self {
+        case .readOnly, .workspaceWrite, .dangerFullAccess:
+            return rawValue
+        case .externalSandbox:
+            return nil
         }
     }
 

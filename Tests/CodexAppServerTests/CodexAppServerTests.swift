@@ -2327,6 +2327,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["layers"])
     }
 
+    func testConfigRequirementsReadReturnsNullWhenUnset() throws {
+        let temp = try TemporaryDirectory()
+        let missingRequirements = temp.url.appendingPathComponent("missing-requirements.toml", isDirectory: false)
+        let response = try appServerResponse(
+            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: missingRequirements)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result["requirements"] is NSNull)
+    }
+
+    func testConfigRequirementsReadReturnsRustShapeForAllowedPoliciesAndSandboxes() throws {
+        let temp = try TemporaryDirectory()
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allowed_approval_policies = ["untrusted", "on-request"]
+        allowed_sandbox_modes = ["read-only", "workspace-write", "external-sandbox"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let requirements = try XCTUnwrap(result["requirements"] as? [String: Any])
+        XCTAssertEqual(requirements["allowedApprovalPolicies"] as? [String], ["untrusted", "on-request"])
+        XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only", "workspace-write"])
+        XCTAssertTrue(requirements["allowedApprovalsReviewers"] is NSNull)
+        XCTAssertTrue(requirements["allowedWebSearchModes"] is NSNull)
+        XCTAssertTrue(requirements["featureRequirements"] is NSNull)
+        XCTAssertTrue(requirements["hooks"] is NSNull)
+        XCTAssertTrue(requirements["enforceResidency"] is NSNull)
+        XCTAssertTrue(requirements["network"] is NSNull)
+    }
+
     func testConfigValueWriteReplacesValueAndReturnsRustShape() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
@@ -2731,7 +2772,8 @@ final class CodexAppServerTests: XCTestCase {
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
-        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter
+        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) -> CodexAppServerConfiguration {
         CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -2745,7 +2787,8 @@ final class CodexAppServerTests: XCTestCase {
             feedbackUploadTransport: feedbackUploadTransport,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             authRefreshTransport: authRefreshTransport,
-            mcpOAuthLoginStarter: mcpOAuthLoginStarter
+            mcpOAuthLoginStarter: mcpOAuthLoginStarter,
+            configLayerOverrides: configLayerOverrides
         )
     }
 

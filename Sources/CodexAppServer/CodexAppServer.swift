@@ -104,6 +104,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let authRefreshTransport: AppServerAuthRefreshTransport?
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
+    public let configLayerOverrides: ConfigLayerLoaderOverrides
 
     public init(
         codexHome: URL,
@@ -118,7 +119,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
-        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter
+        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -133,6 +135,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.authRefreshTransport = authRefreshTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
+        self.configLayerOverrides = configLayerOverrides
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -143,7 +146,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.requiresOpenAIAuth == rhs.requiresOpenAIAuth &&
             lhs.authCredentialsStoreMode == rhs.authCredentialsStoreMode &&
             lhs.environment == rhs.environment &&
-            lhs.activeProfile == rhs.activeProfile
+            lhs.activeProfile == rhs.activeProfile &&
+            lhs.configLayerOverrides == rhs.configLayerOverrides
     }
 }
 
@@ -1471,6 +1475,7 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
         let includeLayers = boolParam(params?["includeLayers"], defaultValue: false)
@@ -1482,6 +1487,29 @@ public enum CodexAppServer {
             response["layers"] = stack.layersHighToLow().map(layerObject)
         }
         return response
+    }
+
+    fileprivate static func configRequirementsReadResult(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let requirementsPath = configuration.configLayerOverrides.requirementsPath
+            ?? CodexConfigLayerLoader.defaultRequirementsTomlFile()
+        guard let requirementsPath else {
+            return ["requirements": NSNull()]
+        }
+        guard FileManager.default.fileExists(atPath: requirementsPath.path) else {
+            return ["requirements": NSNull()]
+        }
+        let requirements: ConfigRequirementsToml
+        do {
+            let contents = try String(contentsOf: requirementsPath, encoding: .utf8)
+            requirements = try ConfigRequirementsToml.parse(contents)
+        } catch {
+            throw AppServerError.internalError("failed to read config requirements: \(error)")
+        }
+        return [
+            "requirements": requirements.isEmpty ? NSNull() : requirements.appServerRequirementsObject()
+        ]
     }
 
     fileprivate static func configValueWriteResult(
@@ -4075,6 +4103,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
+                    )
+                case "configRequirements/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.configRequirementsReadResult(configuration: configuration)
                     )
                 case "config/value/write":
                     response = CodexAppServer.responseObject(
