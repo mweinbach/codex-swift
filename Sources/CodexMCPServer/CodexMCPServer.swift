@@ -1,3 +1,4 @@
+import CodexCore
 import Foundation
 
 public struct CodexMCPToolCall: Equatable, Sendable {
@@ -186,6 +187,8 @@ public enum CodexMCPServer {
 
         state.initialized = true
         let protocolVersion = params?["protocolVersion"] as? String ?? "2025-06-18"
+        let clientInfo = params?["clientInfo"] as? [String: Any]
+        let userAgent = buildUserAgent(clientInfo: clientInfo)
         return jsonRPCResponse(id: id, result: [
             "capabilities": [
                 "tools": [
@@ -196,9 +199,26 @@ public enum CodexMCPServer {
             "serverInfo": [
                 "name": "codex-mcp-server",
                 "title": "Codex",
-                "version": "0.0.0"
+                "version": "0.0.0",
+                "userAgent": userAgent
             ]
         ])
+    }
+
+    private static func buildUserAgent(
+        clientInfo: [String: Any]?,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let clientName = (clientInfo?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
+        return sanitizeHeaderValue("codex_swift/0.0.0 \(Terminal.userAgent(environment: environment))\(suffix)")
+    }
+
+    private static func sanitizeHeaderValue(_ value: String) -> String {
+        String(value.map { character in
+            character.asciiValue.map { (0x20...0x7E).contains($0) } == true ? character : "_"
+        })
     }
 
     private static func handleToolCall(

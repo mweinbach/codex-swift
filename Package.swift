@@ -49,7 +49,10 @@ let package = Package(
             name: "CodexCLI",
             dependencies: ["CodexCore"]
         ),
-        .target(name: "CodexMCPServer"),
+        .target(
+            name: "CodexMCPServer",
+            dependencies: ["CodexCore"]
+        ),
         .target(name: "CodexResponsesAPIProxy"),
         .target(name: "CodexStdioToUDS"),
         .executableTarget(
