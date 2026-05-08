@@ -176,6 +176,8 @@ Source baseline inspected for this scaffold:
   - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
   - exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
+- `codex-rs/protocol/src/protocol.rs` MCP startup/auth event models
+  - MCP startup update/complete/failure payloads, internally tagged startup status, and auth status wire/display values
 
 ## Known Gaps
 
