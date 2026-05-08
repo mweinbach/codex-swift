@@ -59,6 +59,10 @@ Source baseline inspected for this scaffold:
   - update-plan argument wire shapes
 - `codex-rs/protocol/src/custom_prompts.rs`
   - custom prompt metadata and `prompts` command prefix
+- `codex-rs/protocol/src/message_history.rs`
+  - history entry wire shape for conversation id, timestamp, and text
+- `codex-rs/protocol/src/account.rs`
+  - lowercase ChatGPT plan wire values with unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
