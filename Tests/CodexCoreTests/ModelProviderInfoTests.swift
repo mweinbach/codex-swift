@@ -181,6 +181,84 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(provider.urlForPath(""), "https://example.com/v1?api-version=2025-04-01-preview")
     }
 
+    func testAPIProviderURLRenderingMatchesRustTrimRules() {
+        let provider = APIProvider(
+            name: "test",
+            baseURL: "/proxy/",
+            wireAPI: .responses,
+            retry: ProviderRetryConfig(
+                maxAttempts: 1,
+                baseDelayMilliseconds: 200,
+                retry429: false,
+                retry5xx: true,
+                retryTransport: true
+            ),
+            streamIdleTimeoutMilliseconds: 300_000
+        )
+
+        XCTAssertEqual(provider.urlForPath("/responses/"), "/proxy/responses/")
+        XCTAssertEqual(provider.urlForPath(""), "/proxy")
+    }
+
+    func testAPIProviderBuildRequestMatchesRustDefaults() {
+        let provider = APIProvider(
+            name: "test",
+            baseURL: "https://example.com/v1/",
+            queryParams: ["api-version": "2025-04-01-preview"],
+            wireAPI: .responses,
+            headers: [
+                "authorization": "Bearer token",
+                "content-type": "application/json"
+            ],
+            retry: ProviderRetryConfig(
+                maxAttempts: 2,
+                baseDelayMilliseconds: 200,
+                retry429: true,
+                retry5xx: true,
+                retryTransport: false
+            ),
+            streamIdleTimeoutMilliseconds: 300_000
+        )
+
+        let request = provider.buildRequest(method: .post, path: "/responses")
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.url, "https://example.com/v1/responses?api-version=2025-04-01-preview")
+        XCTAssertEqual(request.headers, [
+            "authorization": "Bearer token",
+            "content-type": "application/json"
+        ])
+        XCTAssertNil(request.body)
+        XCTAssertNil(request.timeoutMilliseconds)
+
+        XCTAssertEqual(
+            request.withJSON(.object(["model": .string("gpt-5.4")])).body,
+            .object(["model": .string("gpt-5.4")])
+        )
+    }
+
+    func testProviderRetryConfigToPolicyMatchesRustShape() {
+        let retry = ProviderRetryConfig(
+            maxAttempts: 4,
+            baseDelayMilliseconds: 200,
+            retry429: false,
+            retry5xx: true,
+            retryTransport: true
+        )
+
+        XCTAssertEqual(
+            retry.toPolicy(),
+            ProviderRetryPolicy(
+                maxAttempts: 4,
+                baseDelayMilliseconds: 200,
+                retryOn: ProviderRetryOn(
+                    retry429: false,
+                    retry5xx: true,
+                    retryTransport: true
+                )
+            )
+        )
+    }
+
     func testCreateOpenAIProviderHonorsBaseURLEnvironment() {
         let provider = ModelProviderInfo.createOpenAIProvider(
             environment: [

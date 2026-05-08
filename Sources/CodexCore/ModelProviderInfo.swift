@@ -25,6 +25,78 @@ public struct ProviderRetryConfig: Equatable, Sendable {
         self.retry5xx = retry5xx
         self.retryTransport = retryTransport
     }
+
+    public func toPolicy() -> ProviderRetryPolicy {
+        ProviderRetryPolicy(
+            maxAttempts: maxAttempts,
+            baseDelayMilliseconds: baseDelayMilliseconds,
+            retryOn: ProviderRetryOn(
+                retry429: retry429,
+                retry5xx: retry5xx,
+                retryTransport: retryTransport
+            )
+        )
+    }
+}
+
+public struct ProviderRetryPolicy: Equatable, Sendable {
+    public let maxAttempts: UInt64
+    public let baseDelayMilliseconds: UInt64
+    public let retryOn: ProviderRetryOn
+
+    public init(maxAttempts: UInt64, baseDelayMilliseconds: UInt64, retryOn: ProviderRetryOn) {
+        self.maxAttempts = maxAttempts
+        self.baseDelayMilliseconds = baseDelayMilliseconds
+        self.retryOn = retryOn
+    }
+}
+
+public struct ProviderRetryOn: Equatable, Sendable {
+    public let retry429: Bool
+    public let retry5xx: Bool
+    public let retryTransport: Bool
+
+    public init(retry429: Bool, retry5xx: Bool, retryTransport: Bool) {
+        self.retry429 = retry429
+        self.retry5xx = retry5xx
+        self.retryTransport = retryTransport
+    }
+}
+
+public enum HTTPMethod: String, Equatable, Sendable {
+    case delete = "DELETE"
+    case get = "GET"
+    case patch = "PATCH"
+    case post = "POST"
+    case put = "PUT"
+}
+
+public struct APIRequest: Equatable, Sendable {
+    public var method: HTTPMethod
+    public var url: String
+    public var headers: [String: String]
+    public var body: JSONValue?
+    public var timeoutMilliseconds: UInt64?
+
+    public init(
+        method: HTTPMethod,
+        url: String,
+        headers: [String: String] = [:],
+        body: JSONValue? = nil,
+        timeoutMilliseconds: UInt64? = nil
+    ) {
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.body = body
+        self.timeoutMilliseconds = timeoutMilliseconds
+    }
+
+    public func withJSON(_ body: JSONValue) -> APIRequest {
+        var copy = self
+        copy.body = body
+        return copy
+    }
 }
 
 public struct APIProvider: Equatable, Sendable {
@@ -55,8 +127,8 @@ public struct APIProvider: Equatable, Sendable {
     }
 
     public func urlForPath(_ path: String) -> String {
-        let base = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let base = Self.trimmingTrailingSlashes(baseURL)
+        let normalizedPath = Self.trimmingLeadingSlashes(path)
         var url = normalizedPath.isEmpty ? base : "\(base)/\(normalizedPath)"
 
         if let queryParams, !queryParams.isEmpty {
@@ -65,6 +137,10 @@ public struct APIProvider: Equatable, Sendable {
         }
 
         return url
+    }
+
+    public func buildRequest(method: HTTPMethod, path: String) -> APIRequest {
+        APIRequest(method: method, url: urlForPath(path), headers: headers)
     }
 
     public func isAzureResponsesEndpoint() -> Bool {
@@ -89,6 +165,22 @@ public struct APIProvider: Equatable, Sendable {
             "azurefd.",
             "windows.net/openai"
         ].contains { lowercasedBaseURL.contains($0) }
+    }
+
+    private static func trimmingTrailingSlashes(_ value: String) -> String {
+        var trimmed = value
+        while trimmed.last == "/" {
+            trimmed.removeLast()
+        }
+        return trimmed
+    }
+
+    private static func trimmingLeadingSlashes(_ value: String) -> String {
+        var trimmed = value
+        while trimmed.first == "/" {
+            trimmed.removeFirst()
+        }
+        return trimmed
     }
 }
 
