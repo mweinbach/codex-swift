@@ -228,10 +228,42 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
         }
         servers[name] = McpServerConfig(transport: serverTransport)
         try McpConfigStore.replaceGlobalMcpServers(codexHome: codexHome, servers: servers)
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 0,
-            stdoutMessage: "Added global MCP server '\(name)'."
-        )
+        let addedMessage = "Added global MCP server '\(name)'."
+
+        if case let .streamableHttp(url, nil, httpHeaders, envHttpHeaders) = serverTransport {
+            let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+            do {
+                if try await McpOAuthDiscovery.supportsOAuthLogin(
+                    url: url,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    environment: ProcessInfo.processInfo.environment
+                ) {
+                    print(addedMessage)
+                    print("Detected OAuth support. Starting OAuth flow…")
+                    try await runMcpOAuthLogin(
+                        serverName: name,
+                        serverURL: url,
+                        codexHome: codexHome,
+                        settings: settings,
+                        httpHeaders: httpHeaders,
+                        envHttpHeaders: envHttpHeaders,
+                        scopes: []
+                    )
+                    return CodexCLI.CommandExecutionResult(
+                        exitCode: 0,
+                        stdoutMessage: "Successfully logged in."
+                    )
+                }
+            } catch {
+                return CodexCLI.CommandExecutionResult(
+                    exitCode: 0,
+                    stdoutMessage: "\(addedMessage)\nMCP server may or may not require login. Run `codex mcp login \(name)` to login."
+                )
+            }
+        }
+
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: addedMessage)
 
     case let .remove(name):
         try McpServerName.validate(name)
@@ -249,23 +281,32 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
             stdoutMessage: "No MCP server named '\(name)' found."
         )
 
-    case let .login(name, _):
-        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    case let .login(name, scopes):
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
         guard let server = settings.mcpServers[name] else {
             return CodexCLI.CommandExecutionResult(
                 exitCode: 1,
                 stderrMessage: "No MCP server named '\(name)' found."
             )
         }
-        guard case .streamableHttp = server.transport else {
+        guard case let .streamableHttp(url, _, httpHeaders, envHttpHeaders) = server.transport else {
             return CodexCLI.CommandExecutionResult(
                 exitCode: 1,
                 stderrMessage: "OAuth login is only supported for streamable HTTP servers."
             )
         }
+        try await runMcpOAuthLogin(
+            serverName: name,
+            serverURL: url,
+            codexHome: codexHome,
+            settings: settings,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            scopes: scopes
+        )
         return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: mcp login runtime is not complete yet."
+            exitCode: 0,
+            stdoutMessage: "Successfully logged in to MCP server '\(name)'."
         )
 
     case let .logout(name):
@@ -302,6 +343,37 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
             )
         }
     }
+}
+
+private func runMcpOAuthLogin(
+    serverName: String,
+    serverURL: String,
+    codexHome: URL,
+    settings: CodexRuntimeConfig,
+    httpHeaders: [String: String]?,
+    envHttpHeaders: [String: String]?,
+    scopes: [String]
+) async throws {
+    try await McpOAuthLogin.perform(
+        request: McpOAuthLoginRequest(
+            serverName: serverName,
+            serverURL: serverURL,
+            codexHome: codexHome,
+            storeMode: settings.mcpOAuthCredentialsStoreMode,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: ProcessInfo.processInfo.environment,
+            scopes: scopes
+        ),
+        messageSink: { message in
+            switch message {
+            case let .authorizationURL(serverName, authURL):
+                print("Authorize `\(serverName)` by opening this URL in your browser:\n\(authURL)\n")
+            case .browserLaunchFailed:
+                print("(Browser launch failed; please copy the URL above manually.)")
+            }
+        }
+    )
 }
 
 private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

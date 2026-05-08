@@ -351,6 +351,9 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
     public func exchangeCodeForToken(
         code: String,
         state: String,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         transport: McpOAuthDiscoveryTransport? = nil
     ) async throws -> McpOAuthTokenResponse {
         guard state == csrfToken else {
@@ -363,7 +366,13 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
         let send = transport ?? McpOAuthDiscovery.urlSessionTransport
         let response: McpOAuthDiscoveryHTTPResponse
         do {
-            response = try await send(tokenRequest(url: tokenURL, code: code))
+            response = try await send(tokenRequest(
+                url: tokenURL,
+                code: code,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: environment
+            ))
         } catch {
             throw McpOAuthAuthorizationError.tokenExchangeFailed(String(describing: error))
         }
@@ -395,9 +404,23 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
         )
     }
 
-    private func tokenRequest(url: URL, code: String) -> URLRequest {
+    private func tokenRequest(
+        url: URL,
+        code: String,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        environment: [String: String]
+    ) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: McpOAuthDiscovery.discoveryTimeout)
         request.httpMethod = "POST"
+        let headers = McpOAuthDiscovery.defaultHeaders(
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment
+        )
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
