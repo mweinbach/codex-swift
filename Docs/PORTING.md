@@ -122,6 +122,8 @@ Source baseline inspected for this scaffold:
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
   - constrained config values, Rust-matching constraint error strings, admin allowed approval policy constraints, sandbox-mode requirement constraints, and unset-field requirements merging
+- `codex-rs/app-server-protocol/src/protocol/v2.rs` config-layer models plus `codex-rs/core/src/config_loader/state.rs` and `codex-rs/core/src/config_loader/fingerprint.rs`
+  - config layer source wire tags, precedence ordering, layer metadata, deterministic SHA256 layer versions, user-layer replacement, effective config merging, origin tracking, and project-layer root-to-cwd validation
 - `codex-rs/core/src/bash.rs`, `codex-rs/core/src/command_safety/is_safe_command.rs`, and `codex-rs/core/src/command_safety/is_dangerous_command.rs`
   - non-Windows command safety allow-list, dangerous command detection, approval-prompt gating, and conservative `bash`/`zsh -lc` plain-command sequence parsing for safe shell operators
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
@@ -172,7 +174,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - local image loading/resizing into data URLs
 - MCP `CallToolResult` conversion into function-call output payloads
 - full Rust command parser parity for complex Bash/Powershell AST cases
-- full non-apply config loading and managed requirements
+- config-layer file IO, full non-apply config loading, and managed requirements
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - Windows PowerShell command safety parity

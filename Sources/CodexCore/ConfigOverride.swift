@@ -34,6 +34,63 @@ public indirect enum ConfigValue: Equatable, Sendable {
     }
 }
 
+extension ConfigValue: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+            return
+        }
+        if let value = try? container.decode(Int64.self) {
+            self = .integer(value)
+            return
+        }
+        if let value = try? container.decode(Double.self) {
+            self = .double(value)
+            return
+        }
+        if let value = try? container.decode(String.self) {
+            self = .string(value)
+            return
+        }
+        if let value = try? container.decode([ConfigValue].self) {
+            self = .array(value)
+            return
+        }
+        if let value = try? container.decode([String: ConfigValue].self) {
+            self = .table(value)
+            return
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unsupported config value"
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case let .string(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .integer(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .double(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .bool(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .array(values):
+            var container = encoder.singleValueContainer()
+            try container.encode(values)
+        case let .table(values):
+            var container = encoder.singleValueContainer()
+            try container.encode(values)
+        }
+    }
+}
+
 public enum ConfigOverrideError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingEquals(String)
     case emptyKey(String)
