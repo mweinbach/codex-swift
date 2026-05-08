@@ -315,6 +315,70 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testConfigReadReturnsEffectiveConfigOriginsAndLayers() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        model = "gpt-user"
+        sandbox_mode = "workspace-write"
+
+        [tools]
+        web_search = true
+        view_image = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"includeLayers":true}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "gpt-user")
+        XCTAssertEqual(config["sandbox_mode"] as? String, "workspace-write")
+        let tools = try XCTUnwrap(config["tools"] as? [String: Any])
+        XCTAssertEqual(tools["web_search"] as? Bool, true)
+        XCTAssertEqual(tools["view_image"] as? Bool, false)
+
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        let modelOrigin = try XCTUnwrap(origins["model"] as? [String: Any])
+        let modelOriginName = try XCTUnwrap(modelOrigin["name"] as? [String: Any])
+        XCTAssertEqual(modelOriginName["type"] as? String, "user")
+        XCTAssertEqual(
+            modelOriginName["file"] as? String,
+            temp.url.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL.path
+        )
+
+        let webSearchOrigin = try XCTUnwrap(origins["tools.web_search"] as? [String: Any])
+        let webSearchOriginName = try XCTUnwrap(webSearchOrigin["name"] as? [String: Any])
+        XCTAssertEqual(webSearchOriginName["type"] as? String, "user")
+        XCTAssertTrue((modelOrigin["version"] as? String)?.hasPrefix("sha256:") == true)
+
+        let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
+        XCTAssertEqual(layers.first?["name"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "user")
+        XCTAssertEqual((layers.first?["config"] as? [String: Any])?["model"] as? String, "gpt-user")
+    }
+
+    func testConfigReadOmitsLayersByDefault() throws {
+        let temp = try TemporaryDirectory()
+        try #"model = "gpt-user""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual((result["config"] as? [String: Any])?["model"] as? String, "gpt-user")
+        XCTAssertNotNil(result["origins"] as? [String: Any])
+        XCTAssertNil(result["layers"])
+    }
+
     private func appServerResponse(
         _ line: String,
         codexHome: URL,
@@ -340,7 +404,11 @@ final class CodexAppServerTests: XCTestCase {
         CodexAppServerConfiguration(
             codexHome: codexHome,
             requiresOpenAIAuth: requiresOpenAIAuth,
-            environment: [:]
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
         )
     }
 

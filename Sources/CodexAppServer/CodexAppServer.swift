@@ -134,6 +134,25 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func configReadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        let includeLayers = boolParam(params?["includeLayers"], defaultValue: false)
+        var response: [String: Any] = [
+            "config": configValueObject(stack.effectiveConfig()),
+            "origins": metadataObjects(stack.origins())
+        ]
+        if includeLayers {
+            response["layers"] = stack.layersHighToLow().map(layerObject)
+        }
+        return response
+    }
+
     fileprivate static func buildUserAgent(
         configuration: CodexAppServerConfiguration,
         params: [String: Any]?,
@@ -365,6 +384,59 @@ public enum CodexAppServer {
         ]
     }
 
+    private static func layerObject(_ layer: ConfigLayerEntry) -> [String: Any] {
+        [
+            "name": sourceObject(layer.name),
+            "version": layer.version,
+            "config": configValueObject(layer.config)
+        ]
+    }
+
+    private static func metadataObjects(_ origins: [String: ConfigLayerMetadata]) -> [String: Any] {
+        origins.mapValues { metadata in
+            [
+                "name": sourceObject(metadata.name),
+                "version": metadata.version
+            ]
+        }
+    }
+
+    private static func sourceObject(_ source: ConfigLayerSource) -> [String: Any] {
+        switch source {
+        case let .mdm(domain, key):
+            return ["type": "mdm", "domain": domain, "key": key]
+        case let .system(file):
+            return ["type": "system", "file": file.path]
+        case let .user(file):
+            return ["type": "user", "file": file.path]
+        case let .project(dotCodexFolder):
+            return ["type": "project", "dotCodexFolder": dotCodexFolder.path]
+        case .sessionFlags:
+            return ["type": "sessionFlags"]
+        case let .legacyManagedConfigTomlFromFile(file):
+            return ["type": "legacyManagedConfigTomlFromFile", "file": file.path]
+        case .legacyManagedConfigTomlFromMdm:
+            return ["type": "legacyManagedConfigTomlFromMdm"]
+        }
+    }
+
+    private static func configValueObject(_ value: ConfigValue) -> Any {
+        switch value {
+        case let .string(string):
+            return string
+        case let .integer(integer):
+            return integer
+        case let .double(double):
+            return double
+        case let .bool(bool):
+            return bool
+        case let .array(array):
+            return array.map(configValueObject)
+        case let .table(table):
+            return table.mapValues(configValueObject)
+        }
+    }
+
     private static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
         if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(configuration.environment)
             ?? CodexAuthStorage.readOpenAIAPIKeyFromEnvironment(configuration.environment) {
@@ -496,6 +568,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                    )
+                case "config/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
                     )
                 default:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")
