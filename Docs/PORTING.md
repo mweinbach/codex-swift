@@ -180,6 +180,8 @@ Source baseline inspected for this scaffold:
   - MCP startup update/complete/failure payloads, internally tagged startup status, and auth status wire/display values
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
   - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
+- `codex-rs/protocol/src/protocol.rs` streaming content delta event models
+  - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content-delta payloads, and legacy-event projection helpers
 
 ## Known Gaps
 

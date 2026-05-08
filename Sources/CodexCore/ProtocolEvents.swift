@@ -35,6 +35,14 @@ public struct UserMessageEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct AgentMessageDeltaEvent: Equatable, Codable, Sendable {
+    public let delta: String
+
+    public init(delta: String) {
+        self.delta = delta
+    }
+}
+
 public struct AgentReasoningEvent: Equatable, Codable, Sendable {
     public let text: String
 
@@ -43,11 +51,48 @@ public struct AgentReasoningEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct AgentReasoningDeltaEvent: Equatable, Codable, Sendable {
+    public let delta: String
+
+    public init(delta: String) {
+        self.delta = delta
+    }
+}
+
 public struct AgentReasoningRawContentEvent: Equatable, Codable, Sendable {
     public let text: String
 
     public init(text: String) {
         self.text = text
+    }
+}
+
+public struct AgentReasoningRawContentDeltaEvent: Equatable, Codable, Sendable {
+    public let delta: String
+
+    public init(delta: String) {
+        self.delta = delta
+    }
+}
+
+public struct AgentReasoningSectionBreakEvent: Equatable, Codable, Sendable {
+    public let itemID: String
+    public let summaryIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case itemID = "item_id"
+        case summaryIndex = "summary_index"
+    }
+
+    public init(itemID: String = "", summaryIndex: Int64 = 0) {
+        self.itemID = itemID
+        self.summaryIndex = summaryIndex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.itemID = try container.decodeIfPresent(String.self, forKey: .itemID) ?? ""
+        self.summaryIndex = try container.decodeIfPresent(Int64.self, forKey: .summaryIndex) ?? 0
     }
 }
 
@@ -78,11 +123,114 @@ public struct WebSearchEndEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct AgentMessageContentDeltaEvent: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case itemID = "item_id"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+
+    public func asLegacyEvents() -> [LegacyEventMessage] {
+        [.agentMessageDelta(AgentMessageDeltaEvent(delta: delta))]
+    }
+}
+
+public struct ReasoningContentDeltaEvent: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+    public let summaryIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case itemID = "item_id"
+        case delta
+        case summaryIndex = "summary_index"
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String, summaryIndex: Int64 = 0) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+        self.summaryIndex = summaryIndex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.threadID = try container.decode(String.self, forKey: .threadID)
+        self.turnID = try container.decode(String.self, forKey: .turnID)
+        self.itemID = try container.decode(String.self, forKey: .itemID)
+        self.delta = try container.decode(String.self, forKey: .delta)
+        self.summaryIndex = try container.decodeIfPresent(Int64.self, forKey: .summaryIndex) ?? 0
+    }
+
+    public func asLegacyEvents() -> [LegacyEventMessage] {
+        [.agentReasoningDelta(AgentReasoningDeltaEvent(delta: delta))]
+    }
+}
+
+public struct ReasoningRawContentDeltaEvent: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+    public let contentIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case itemID = "item_id"
+        case delta
+        case contentIndex = "content_index"
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String, contentIndex: Int64 = 0) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+        self.contentIndex = contentIndex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.threadID = try container.decode(String.self, forKey: .threadID)
+        self.turnID = try container.decode(String.self, forKey: .turnID)
+        self.itemID = try container.decode(String.self, forKey: .itemID)
+        self.delta = try container.decode(String.self, forKey: .delta)
+        self.contentIndex = try container.decodeIfPresent(Int64.self, forKey: .contentIndex) ?? 0
+    }
+
+    public func asLegacyEvents() -> [LegacyEventMessage] {
+        [.agentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent(delta: delta))]
+    }
+}
+
 public enum LegacyEventMessage: Equatable, Codable, Sendable {
     case agentMessage(AgentMessageEvent)
     case userMessage(UserMessageEvent)
+    case agentMessageDelta(AgentMessageDeltaEvent)
     case agentReasoning(AgentReasoningEvent)
+    case agentReasoningDelta(AgentReasoningDeltaEvent)
     case agentReasoningRawContent(AgentReasoningRawContentEvent)
+    case agentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent)
+    case agentReasoningSectionBreak(AgentReasoningSectionBreakEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
 
@@ -93,8 +241,12 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
     private enum EventType: String, Codable {
         case agentMessage = "agent_message"
         case userMessage = "user_message"
+        case agentMessageDelta = "agent_message_delta"
         case agentReasoning = "agent_reasoning"
+        case agentReasoningDelta = "agent_reasoning_delta"
         case agentReasoningRawContent = "agent_reasoning_raw_content"
+        case agentReasoningRawContentDelta = "agent_reasoning_raw_content_delta"
+        case agentReasoningSectionBreak = "agent_reasoning_section_break"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
     }
@@ -106,10 +258,18 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             self = .agentMessage(try AgentMessageEvent(from: decoder))
         case .userMessage:
             self = .userMessage(try UserMessageEvent(from: decoder))
+        case .agentMessageDelta:
+            self = .agentMessageDelta(try AgentMessageDeltaEvent(from: decoder))
         case .agentReasoning:
             self = .agentReasoning(try AgentReasoningEvent(from: decoder))
+        case .agentReasoningDelta:
+            self = .agentReasoningDelta(try AgentReasoningDeltaEvent(from: decoder))
         case .agentReasoningRawContent:
             self = .agentReasoningRawContent(try AgentReasoningRawContentEvent(from: decoder))
+        case .agentReasoningRawContentDelta:
+            self = .agentReasoningRawContentDelta(try AgentReasoningRawContentDeltaEvent(from: decoder))
+        case .agentReasoningSectionBreak:
+            self = .agentReasoningSectionBreak(try AgentReasoningSectionBreakEvent(from: decoder))
         case .webSearchBegin:
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
@@ -126,11 +286,23 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case let .userMessage(event):
             try container.encode(EventType.userMessage, forKey: .type)
             try event.encode(to: encoder)
+        case let .agentMessageDelta(event):
+            try container.encode(EventType.agentMessageDelta, forKey: .type)
+            try event.encode(to: encoder)
         case let .agentReasoning(event):
             try container.encode(EventType.agentReasoning, forKey: .type)
             try event.encode(to: encoder)
+        case let .agentReasoningDelta(event):
+            try container.encode(EventType.agentReasoningDelta, forKey: .type)
+            try event.encode(to: encoder)
         case let .agentReasoningRawContent(event):
             try container.encode(EventType.agentReasoningRawContent, forKey: .type)
+            try event.encode(to: encoder)
+        case let .agentReasoningRawContentDelta(event):
+            try container.encode(EventType.agentReasoningRawContentDelta, forKey: .type)
+            try event.encode(to: encoder)
+        case let .agentReasoningSectionBreak(event):
+            try container.encode(EventType.agentReasoningSectionBreak, forKey: .type)
             try event.encode(to: encoder)
         case let .webSearchBegin(event):
             try container.encode(EventType.webSearchBegin, forKey: .type)
