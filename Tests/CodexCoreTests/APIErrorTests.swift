@@ -39,4 +39,56 @@ final class APIErrorTests: XCTestCase {
             "rate limit: daily limit"
         )
     }
+
+    func testUnexpectedResponseErrorDisplayMatchesRustStatusAndMetadata() {
+        let error = UnexpectedResponseError(
+            statusCode: 500,
+            body: #"{"error":{"message":" server exploded "}}"#,
+            url: "https://api.example.test/responses",
+            cfRay: "ray-1",
+            requestID: "req-1",
+            identityAuthorizationError: "authorization failed",
+            identityErrorCode: "workspace_mismatch"
+        )
+
+        XCTAssertEqual(
+            String(describing: error),
+            """
+            unexpected status 500 Internal Server Error: server exploded, url: https://api.example.test/responses, cf-ray: ray-1, request id: req-1, auth error: authorization failed, auth error code: workspace_mismatch
+            """
+        )
+    }
+
+    func testUnexpectedResponseErrorUsesUnknownErrorForEmptyBody() {
+        XCTAssertEqual(
+            String(describing: UnexpectedResponseError(statusCode: 418, body: " \n\t ")),
+            "unexpected status 418 I'm a teapot: Unknown error"
+        )
+    }
+
+    func testUnexpectedResponseErrorTruncatesBodyAtUTF8BoundaryLikeRust() {
+        let body = String(repeating: "a", count: 999) + "é" + "tail"
+
+        XCTAssertEqual(
+            String(describing: UnexpectedResponseError(statusCode: 400, body: body)),
+            "unexpected status 400 Bad Request: \(String(repeating: "a", count: 999))..."
+        )
+    }
+
+    func testUnexpectedResponseErrorCloudflareBlockedFriendlyMessageMatchesRust() {
+        let error = UnexpectedResponseError(
+            statusCode: 403,
+            body: "<html><body>Cloudflare error: Sorry, you have been blocked</body></html>",
+            url: "https://api.example.test/responses",
+            cfRay: "abc123",
+            requestID: "req-2"
+        )
+
+        XCTAssertEqual(
+            String(describing: error),
+            """
+            Access blocked by Cloudflare. This usually happens when connecting from a restricted region (status 403 Forbidden), url: https://api.example.test/responses, cf-ray: abc123, request id: req-2
+            """
+        )
+    }
 }
