@@ -23,6 +23,7 @@ let exitCode = await cli.runAsync(
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
+    execRunner: runExecCommand,
     resumeRunner: runResumeCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
@@ -156,6 +157,323 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
             "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
         }
         .joined(separator: "\n")
+}
+
+private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    guard case .run = request.action else {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec resume/review runtime is not complete yet."
+        )
+    }
+
+    let operation = try request.resolvedInitialOperation(
+        stdinIsTerminal: isatty(STDIN_FILENO) != 0,
+        readStdin: readUTF8FromStdin,
+        readFile: { path in
+            try Data(contentsOf: URL(fileURLWithPath: path))
+        }
+    )
+    guard case let .userTurn(promptResolution, outputSchema) = operation else {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec resume/review runtime is not complete yet."
+        )
+    }
+
+    let cwd = resolveExecWorkingDirectory(from: request.arguments)
+    try NonInteractiveInput.enforceGitRepository(
+        cwd: cwd,
+        skipGitRepoCheck: request.options.skipGitRepoCheck
+    )
+
+    let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    let environment = ProcessInfo.processInfo.environment
+    try await CodexAuthStorage.enforceLoginRestrictions(
+        codexHome: codexHome,
+        config: settings,
+        environment: environment
+    )
+
+    let providerResolution = try resolveExecModelProvider(settings: settings, environment: environment)
+    guard providerResolution.info.wireAPI == .responses else {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec currently supports Responses API model providers only."
+        )
+    }
+
+    let authResolution = try await resolveExecAuth(
+        codexHome: codexHome,
+        settings: settings,
+        providerInfo: providerResolution.info,
+        environment: environment
+    )
+    let provider = providerResolution.info.toAPIProvider(
+        authMode: authResolution.authMode,
+        environment: environment
+    )
+    let model = execOptionValue(short: "-m", long: "--model", in: request.arguments)
+        ?? settings.model
+        ?? (authResolution.authMode == .chatGPT
+            ? ModelsManager.openAIDefaultChatGPTModel
+            : ModelsManager.openAIDefaultAPIModel)
+    let modelFamily = ModelsManager.constructModelFamilyOffline(model: model)
+    let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: request.arguments)
+    let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: request.arguments)
+    let shell = ShellResolver.defaultUserShell()
+    var prompt = NonInteractiveExec.makePrompt(
+        prompt: promptResolution.prompt,
+        imagePaths: request.options.imagePaths,
+        outputSchema: outputSchema,
+        cwd: cwd,
+        approvalPolicy: approvalPolicy,
+        sandboxPolicy: sandboxPolicy,
+        shell: shell
+    )
+    prompt.baseInstructionsOverride = try readExperimentalInstructionsFile(
+        settings.experimentalInstructionsFile,
+        cwd: cwd
+    )
+
+    let conversationID = ConversationId()
+    let client = ResponsesClient(
+        transport: URLSessionAPITransport(),
+        provider: provider,
+        auth: authResolution.auth
+    )
+    let streamResult = await client.streamPrompt(
+        model: model,
+        instructions: prompt.fullInstructions(for: modelFamily),
+        prompt: prompt,
+        options: NonInteractiveExec.responsesOptions(
+            conversationID: conversationID,
+            modelFamily: modelFamily,
+            reasoningEffort: settings.modelReasoningEffort,
+            reasoningSummary: settings.modelReasoningSummary,
+            verbosity: settings.modelVerbosity,
+            outputSchema: outputSchema
+        )
+    )
+
+    let events: ResponseEventResults
+    switch streamResult {
+    case let .success(results):
+        events = results
+    case let .failure(error):
+        events = [.failure(error)]
+    }
+
+    let result = NonInteractiveExec.finish(
+        responseEvents: events,
+        outputMode: request.options.json ? .jsonLines : .human,
+        conversationID: conversationID,
+        lastMessageFile: request.options.lastMessageFile
+    )
+    var stderrMessages = [String]()
+    if let promptStderr = promptResolution.stderrMessage {
+        stderrMessages.append(promptStderr)
+    }
+    stderrMessages.append(contentsOf: result.stderrMessages)
+
+    return CodexCLI.CommandExecutionResult(
+        exitCode: result.exitCode,
+        stdoutMessage: result.stdoutMessage,
+        stderrMessage: stderrMessages.isEmpty ? nil : stderrMessages.joined(separator: "\n")
+    )
+}
+
+private struct ExecModelProviderResolution {
+    let id: String
+    let info: ModelProviderInfo
+}
+
+private struct ExecAuthResolution {
+    let auth: StaticAPIAuthProvider
+    let authMode: AuthMode?
+}
+
+private struct ExecRuntimeError: Error, CustomStringConvertible {
+    let description: String
+}
+
+private func resolveExecModelProvider(
+    settings: CodexRuntimeConfig,
+    environment: [String: String]
+) throws -> ExecModelProviderResolution {
+    var providers = settings.modelProviders
+    let versionedOpenAI = ModelProviderInfo.createOpenAIProvider(
+        environment: environment,
+        packageVersion: CodexCLI.version
+    )
+    providers["openai"] = versionedOpenAI
+    providers["openai-responses"] = versionedOpenAI
+
+    let providerID = settings.modelProvider ?? "openai"
+    guard let provider = providers[providerID] else {
+        throw ExecRuntimeError(description: "Unknown model provider '\(providerID)'")
+    }
+    return ExecModelProviderResolution(id: providerID, info: provider)
+}
+
+private func resolveExecAuth(
+    codexHome: URL,
+    settings: CodexRuntimeConfig,
+    providerInfo: ModelProviderInfo,
+    environment: [String: String]
+) async throws -> ExecAuthResolution {
+    if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(environment) {
+        return ExecAuthResolution(auth: StaticAPIAuthProvider(bearerToken: apiKey), authMode: .apiKey)
+    }
+
+    let storedAuth = try CodexAuthStorage.loadAuthDotJSON(
+        codexHome: codexHome,
+        mode: settings.cliAuthCredentialsStoreMode
+    )
+
+    if providerInfo.envKey != nil || providerInfo.experimentalBearerToken != nil {
+        let auth = try APIAuthResolver.authProvider(
+            auth: storedAuth,
+            provider: providerInfo,
+            environment: environment
+        )
+        return ExecAuthResolution(
+            auth: auth,
+            authMode: auth.accountID == nil ? .apiKey : .chatGPT
+        )
+    }
+
+    if let apiKey = storedAuth?.openAIAPIKey {
+        return ExecAuthResolution(auth: StaticAPIAuthProvider(bearerToken: apiKey), authMode: .apiKey)
+    }
+
+    if storedAuth?.tokens != nil {
+        guard let tokenData = try await CodexAuthStorage.loadFreshTokenData(
+            codexHome: codexHome,
+            mode: settings.cliAuthCredentialsStoreMode,
+            environment: environment
+        ) else {
+            throw ExecRuntimeError(description: "Stored ChatGPT credentials are missing token data.")
+        }
+        return ExecAuthResolution(
+            auth: StaticAPIAuthProvider(
+                bearerToken: tokenData.accessToken,
+                accountID: tokenData.accountID
+            ),
+            authMode: .chatGPT
+        )
+    }
+
+    if providerInfo.requiresOpenAIAuth {
+        throw ExecRuntimeError(description: "Not logged in. Run `codex login` or set CODEX_API_KEY.")
+    }
+
+    return ExecAuthResolution(auth: StaticAPIAuthProvider(), authMode: nil)
+}
+
+private func readUTF8FromStdin() throws -> String {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    guard let input = String(data: data, encoding: .utf8) else {
+        throw ExecRuntimeError(description: "stream did not contain valid UTF-8")
+    }
+    return input
+}
+
+private func resolveExecWorkingDirectory(from arguments: [String]) -> URL {
+    let base = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    guard let value = execOptionValue(short: "-C", long: "--cd", in: arguments) else {
+        return base
+    }
+    if value.hasPrefix("/") {
+        return URL(fileURLWithPath: value, isDirectory: true).standardizedFileURL
+    }
+    return base.appendingPathComponent(value, isDirectory: true).standardizedFileURL
+}
+
+private func resolveExecApprovalPolicy(
+    settings: CodexRuntimeConfig,
+    arguments: [String]
+) -> AskForApproval {
+    if execHasFlag("--dangerously-bypass-approvals-and-sandbox", in: arguments)
+        || execHasFlag("--yolo", in: arguments)
+    {
+        return .never
+    }
+    if execHasFlag("--full-auto", in: arguments) {
+        return .onFailure
+    }
+    if let raw = execOptionValue(short: "-a", long: "--ask-for-approval", in: arguments),
+       let mode = ApprovalModeCLIArgument(rawValue: raw)
+    {
+        return mode.approvalMode
+    }
+    return settings.approvalPolicy ?? .never
+}
+
+private func resolveExecSandboxPolicy(
+    settings: CodexRuntimeConfig,
+    arguments: [String]
+) -> SandboxPolicy {
+    if execHasFlag("--dangerously-bypass-approvals-and-sandbox", in: arguments)
+        || execHasFlag("--yolo", in: arguments)
+    {
+        return .dangerFullAccess
+    }
+    if execHasFlag("--full-auto", in: arguments) {
+        return SandboxPolicy.newWorkspaceWritePolicy()
+    }
+    let mode = execOptionValue(short: "-s", long: "--sandbox", in: arguments)
+        .flatMap(SandboxModeCLIArgument.init(rawValue:))?
+        .sandboxMode
+        ?? settings.sandboxMode
+        ?? .readOnly
+    return sandboxPolicy(from: mode)
+}
+
+private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
+    switch mode {
+    case .readOnly:
+        return .readOnly
+    case .workspaceWrite:
+        return SandboxPolicy.newWorkspaceWritePolicy()
+    case .dangerFullAccess:
+        return .dangerFullAccess
+    }
+}
+
+private func readExperimentalInstructionsFile(_ path: String?, cwd: URL) throws -> String? {
+    guard let path else {
+        return nil
+    }
+    let url = path.hasPrefix("/")
+        ? URL(fileURLWithPath: path)
+        : cwd.appendingPathComponent(path)
+    return try String(contentsOf: url, encoding: .utf8)
+}
+
+private func execHasFlag(_ flag: String, in arguments: [String]) -> Bool {
+    arguments.contains(flag)
+}
+
+private func execOptionValue(short: String, long: String, in arguments: [String]) -> String? {
+    var index = 0
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == short || argument == long {
+            guard index + 1 < arguments.count else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+        if argument.hasPrefix("\(long)=") {
+            return String(argument.dropFirst(long.count + 1))
+        }
+        if argument.hasPrefix(short), argument.count > short.count, !short.hasPrefix("--") {
+            return String(argument.dropFirst(short.count))
+        }
+        index += 1
+    }
+    return nil
 }
 
 private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
