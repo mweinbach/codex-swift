@@ -61,6 +61,8 @@ Source baseline inspected for this scaffold:
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
   - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, `cd` context, `rg`, `grep`, `ls`, `cat`, `head`, `tail`, `nl`, and `sed -n`
+- `codex-rs/common/src/fuzzy_match.rs`
+  - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 
 ## Known Gaps
 
