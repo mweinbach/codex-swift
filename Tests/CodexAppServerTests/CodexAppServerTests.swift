@@ -898,6 +898,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(blankError["message"] as? String, "gitInfo.branch must not be empty")
     }
 
+    func testThreadGoalMethodsReturnRustDisabledFeatureErrorByDefault() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = UUID().uuidString.lowercased()
+
+        for (index, method) in ["thread/goal/set", "thread/goal/get", "thread/goal/clear"].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(method)","params":{"threadId":"\#(threadID)"}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "goals feature is disabled")
+        }
+    }
+
+    func testThreadGoalMethodsReportUnsupportedWhenFeatureEnabled() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/goal/get","params":{"threadId":"\#(UUID().uuidString.lowercased())"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32601)
+        XCTAssertEqual(error["message"] as? String, "thread/goal/get is not supported yet")
+    }
+
     func testThreadMemoryModeSetAppendsSessionMetaMarker() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

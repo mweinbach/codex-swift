@@ -1213,6 +1213,17 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadGoalFeatureGateResult(
+        method: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        guard runtimeConfig.features.isEnabled(.goals) else {
+            throw AppServerError.invalidRequest("goals feature is disabled")
+        }
+        throw AppServerError.methodNotFound("\(method) is not supported yet")
+    }
+
     fileprivate static func threadMemoryModeSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -4474,11 +4485,14 @@ private enum SkillParseError: Error, CustomStringConvertible {
 private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
     case invalidRequestWithData(String, data: [String: String])
+    case methodNotFound(String)
     case internalError(String)
 
     var description: String {
         switch self {
         case let .invalidRequest(message), let .invalidRequestWithData(message, _):
+            return message
+        case let .methodNotFound(message):
             return message
         case let .internalError(message):
             return message
@@ -4489,7 +4503,7 @@ private enum AppServerError: Error, CustomStringConvertible {
         switch self {
         case let .invalidRequestWithData(_, data):
             return data
-        case .invalidRequest, .internalError:
+        case .invalidRequest, .methodNotFound, .internalError:
             return nil
         }
     }
@@ -5073,6 +5087,14 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
                     )
+                case "thread/goal/set", "thread/goal/get", "thread/goal/clear":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadGoalFeatureGateResult(
+                            method: method,
+                            configuration: configuration
+                        )
+                    )
                 case "thread/memoryMode/set":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -5376,6 +5398,8 @@ final class CodexAppServerMessageProcessor {
                         message: error.description,
                         data: error.data
                     )
+                case .methodNotFound:
+                    response = CodexAppServer.errorObject(id: id, code: -32601, message: error.description)
                 case .internalError:
                     response = CodexAppServer.errorObject(id: id, code: -32603, message: error.description)
                 }
