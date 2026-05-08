@@ -108,6 +108,62 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.commandMightBeDangerous(["rm", "-f", "/"]))
     }
 
+    func testWindowsShellExecuteURLLaunchesAreDangerous() {
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-NoLogo",
+            "-Command",
+            "Start-Process 'https://example.com'"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Start-Process('https://example.com');"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell.exe",
+            "-Command",
+            "Invoke-Item https://example.com"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "(New-Object -ComObject Shell.Application).ShellExecute('https://example.com')"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "rundll32 url.dll,FileProtocolHandler https://example.com"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "cmd",
+            "/c",
+            "start",
+            "https://example.com"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "msedge.exe",
+            "https://example.com"
+        ]))
+    }
+
+    func testWindowsLocalLaunchesAreNotFlaggedAsDangerous() {
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Start-Process notepad.exe"
+        ]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous([
+            "explorer.exe",
+            "."
+        ]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous([
+            "cmd",
+            "/c",
+            "dir"
+        ]))
+    }
+
     func testExternalSandboxOnlyPromptsForDangerousCommands() {
         let externalPolicy = SandboxPolicy.externalSandbox(networkAccess: .restricted)
         XCTAssertFalse(CommandSafety.requiresInitialApproval(
