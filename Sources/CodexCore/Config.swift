@@ -2,6 +2,7 @@ import Foundation
 
 public enum CodexConfigDefaults {
     public static let chatgptBaseURL = "https://chatgpt.com/backend-api/"
+    public static let projectRootMarkers = [".git"]
 }
 
 public struct CodexRuntimeConfig: Equatable, Sendable {
@@ -10,19 +11,22 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public let forcedLoginMethod: ForcedLoginMethod?
     public let features: FeatureStates
     public let activeProfile: String?
+    public let projectRootMarkers: [String]
 
     public init(
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         features: FeatureStates = .withDefaults(),
-        activeProfile: String? = nil
+        activeProfile: String? = nil,
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers
     ) {
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
         self.features = features
         self.activeProfile = activeProfile
+        self.projectRootMarkers = projectRootMarkers
     }
 }
 
@@ -31,6 +35,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidBoolValue(String)
     case invalidAuthCredentialsStoreMode
     case invalidForcedLoginMethod
+    case invalidProjectRootMarkers
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -45,6 +50,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "Invalid override value for cli_auth_credentials_store"
         case .invalidForcedLoginMethod:
             return "Invalid override value for forced_login_method"
+        case .invalidProjectRootMarkers:
+            return "project_root_markers must be an array of strings"
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -68,11 +75,9 @@ public enum CodexConfigLoader {
         systemConfigFile: URL? = defaultSystemConfigFile()
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
-        for configFile in configLayerFiles(
+        for configFile in baseConfigLayerFiles(
             codexHome: codexHome,
-            cwd: cwd,
-            systemConfigFile: systemConfigFile,
-            fileManager: fileManager
+            systemConfigFile: systemConfigFile
         ) {
             if fileManager.fileExists(atPath: configFile.path) {
                 let contents = try String(contentsOf: configFile, encoding: .utf8)
@@ -80,35 +85,54 @@ public enum CodexConfigLoader {
             }
         }
 
+        if let cwd {
+            let projectRootMarkers = try parsed.projectRootMarkersForDiscovery()
+            for configFile in projectConfigFiles(
+                cwd: cwd,
+                projectRootMarkers: projectRootMarkers,
+                fileManager: fileManager
+            ) {
+                if fileManager.fileExists(atPath: configFile.path) {
+                    let contents = try String(contentsOf: configFile, encoding: .utf8)
+                    parsed.merge(try ParsedCodexConfigToml.parse(contents))
+                }
+            }
+        }
+
         try parsed.apply(overrides: overrides)
         return try parsed.resolvedConfig()
     }
 
-    private static func configLayerFiles(
+    private static func baseConfigLayerFiles(
         codexHome: URL,
-        cwd: URL?,
-        systemConfigFile: URL?,
-        fileManager: FileManager
+        systemConfigFile: URL?
     ) -> [URL] {
         var files: [URL] = []
         if let systemConfigFile {
             files.append(systemConfigFile)
         }
         files.append(codexHome.appendingPathComponent("config.toml", isDirectory: false))
-
-        if let cwd {
-            files.append(contentsOf: projectConfigFiles(cwd: cwd, fileManager: fileManager))
-        }
         return files
     }
 
-    private static func projectConfigFiles(cwd: URL, fileManager: FileManager) -> [URL] {
+    private static func projectConfigFiles(
+        cwd: URL,
+        projectRootMarkers: [String],
+        fileManager: FileManager
+    ) -> [URL] {
         let cwdPath = cwd.standardizedFileURL.path
         let cwdURL = URL(fileURLWithPath: cwdPath, isDirectory: true)
         let ancestors = ancestorDirectories(from: cwdURL)
-        let projectRoot = ancestors.first { ancestor in
-            fileManager.fileExists(atPath: ancestor.appendingPathComponent(".git").path)
-        } ?? cwdURL
+        let projectRoot: URL
+        if projectRootMarkers.isEmpty {
+            projectRoot = cwdURL
+        } else {
+            projectRoot = ancestors.first { ancestor in
+                projectRootMarkers.contains { marker in
+                    fileManager.fileExists(atPath: ancestor.appendingPathComponent(marker).path)
+                }
+            } ?? cwdURL
+        }
 
         guard let projectRootIndex = ancestors.firstIndex(of: projectRoot),
               let cwdIndex = ancestors.firstIndex(of: cwdURL)
@@ -275,7 +299,8 @@ private struct ParsedCodexConfigToml {
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: config.forcedLoginMethod,
                 features: config.features,
-                activeProfile: config.activeProfile
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers
             )
         }
 
@@ -289,7 +314,8 @@ private struct ParsedCodexConfigToml {
                 cliAuthCredentialsStoreMode: mode,
                 forcedLoginMethod: config.forcedLoginMethod,
                 features: config.features,
-                activeProfile: config.activeProfile
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers
             )
         }
 
@@ -303,7 +329,19 @@ private struct ParsedCodexConfigToml {
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                 forcedLoginMethod: method,
                 features: config.features,
-                activeProfile: config.activeProfile
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers
+            )
+        }
+
+        if let projectRootMarkers = topLevel["project_root_markers"] {
+            config = CodexRuntimeConfig(
+                chatgptBaseURL: config.chatgptBaseURL,
+                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: config.forcedLoginMethod,
+                features: config.features,
+                activeProfile: config.activeProfile,
+                projectRootMarkers: try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers")
             )
         }
 
@@ -319,7 +357,8 @@ private struct ParsedCodexConfigToml {
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
                     features: config.features,
-                    activeProfile: activeProfile
+                    activeProfile: activeProfile,
+                    projectRootMarkers: config.projectRootMarkers
                 )
             } else {
                 config = CodexRuntimeConfig(
@@ -327,7 +366,8 @@ private struct ParsedCodexConfigToml {
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
                     forcedLoginMethod: config.forcedLoginMethod,
                     features: config.features,
-                    activeProfile: activeProfile
+                    activeProfile: activeProfile,
+                    projectRootMarkers: config.projectRootMarkers
                 )
             }
         }
@@ -342,10 +382,18 @@ private struct ParsedCodexConfigToml {
             cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
             forcedLoginMethod: config.forcedLoginMethod,
             features: featureStates,
-            activeProfile: config.activeProfile
+            activeProfile: config.activeProfile,
+            projectRootMarkers: config.projectRootMarkers
         )
 
         return config
+    }
+
+    func projectRootMarkersForDiscovery() throws -> [String] {
+        guard let value = topLevel["project_root_markers"] else {
+            return CodexConfigDefaults.projectRootMarkers
+        }
+        return try Self.stringArrayValue(value, key: "project_root_markers")
     }
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
@@ -353,6 +401,7 @@ private struct ParsedCodexConfigToml {
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
             || key == "profile"
+            || key == "project_root_markers"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {
@@ -371,6 +420,27 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidBoolValue(key)
         }
         return bool
+    }
+
+    private static func stringArrayValue(_ value: ConfigValue, key: String) throws -> [String] {
+        guard case let .array(values) = value else {
+            if key == "project_root_markers" {
+                throw CodexConfigLoadError.invalidProjectRootMarkers
+            }
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+
+        var strings: [String] = []
+        for value in values {
+            guard case let .string(string) = value else {
+                if key == "project_root_markers" {
+                    throw CodexConfigLoadError.invalidProjectRootMarkers
+                }
+                throw CodexConfigLoadError.invalidStringValue(key)
+            }
+            strings.append(string)
+        }
+        return strings
     }
 
     private static func parseSectionHeader(_ line: String) throws -> ConfigSection {

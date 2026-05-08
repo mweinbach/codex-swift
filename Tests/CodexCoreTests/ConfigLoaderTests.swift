@@ -13,6 +13,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(config.features.isEnabled(.parallel))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertNil(config.activeProfile)
+        XCTAssertEqual(config.projectRootMarkers, [".git"])
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
@@ -247,6 +248,78 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(config.chatgptBaseURL, "https://project.example/backend-api/")
+    }
+
+    func testProjectRootMarkersSupportAlternateMarkersFromUserConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let outer = dir.url.appendingPathComponent("outer", isDirectory: true)
+        let project = outer.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "hg marker\n".write(to: project.appendingPathComponent(".hg"), atomically: true, encoding: .utf8)
+        try #"project_root_markers = [".hg"]"#
+            .write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let outerDotCodex = outer.appendingPathComponent(".codex", isDirectory: true)
+        let projectDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: outerDotCodex, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectDotCodex, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://outer.example/backend-api/""#
+            .write(to: outerDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try #"chatgpt_base_url = "https://project.example/backend-api/""#
+            .write(to: projectDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://project.example/backend-api/")
+        XCTAssertEqual(config.projectRootMarkers, [".hg"])
+    }
+
+    func testEmptyProjectRootMarkersDisableAncestorProjectSearch() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        chatgpt_base_url = "https://user.example/backend-api/"
+        project_root_markers = []
+        """.write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let projectDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDotCodex, withIntermediateDirectories: true)
+        try #"chatgpt_base_url = "https://project.example/backend-api/""#
+            .write(to: projectDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.chatgptBaseURL, "https://user.example/backend-api/")
+        XCTAssertEqual(config.projectRootMarkers, [])
+    }
+
+    func testInvalidProjectRootMarkersMatchesRustError() throws {
+        let dir = try CoreTemporaryDirectory()
+        try "project_root_markers = [1]\n"
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                (error as? CodexConfigLoadError)?.description,
+                "project_root_markers must be an array of strings"
+            )
+        }
     }
 }
 
