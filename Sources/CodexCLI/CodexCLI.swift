@@ -70,6 +70,22 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum SandboxCommandAction: Equatable, Sendable {
+        case macos(fullAuto: Bool, logDenials: Bool, command: [String])
+        case linux(fullAuto: Bool, command: [String])
+        case windows(fullAuto: Bool, command: [String])
+    }
+
+    public struct SandboxCommandRequest: Equatable, Sendable {
+        public let action: SandboxCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: SandboxCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct StdioToUDSCommandRequest: Equatable, Sendable {
         public let socketPath: String
 
@@ -112,6 +128,7 @@ public struct CodexCLI: Sendable {
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
     public typealias ExecPolicyCommandRunner = (ExecPolicyCommandRequest) async throws -> CommandExecutionResult
+    public typealias SandboxCommandRunner = (SandboxCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
 
@@ -223,6 +240,7 @@ public struct CodexCLI: Sendable {
         logoutRunner: LogoutCommandRunner? = nil,
         featuresRunner: FeaturesCommandRunner? = nil,
         execPolicyRunner: ExecPolicyCommandRunner? = nil,
+        sandboxRunner: SandboxCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil
     ) async -> Int32 {
@@ -307,6 +325,29 @@ public struct CodexCLI: Sendable {
             case let .success(action):
                 do {
                     let result = try await execPolicyRunner(ExecPolicyCommandRequest(action: action))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "sandbox":
+            guard let sandboxRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseSandboxCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await sandboxRunner(SandboxCommandRequest(
+                        action: action,
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
                     emit(result, stdout: stdout, stderr: stderr)
                     return result.exitCode
                 } catch {
@@ -594,6 +635,98 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'execpolicy check': <COMMAND>", 64)
         }
         return .success(.check(rules: rules, pretty: pretty, command: command))
+    }
+
+    private func parseSandboxCommandAction(_ arguments: [String]) -> ParseResult<SandboxCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'sandbox': macos|linux|windows", 64)
+        }
+
+        let subcommandArguments = Array(arguments.dropFirst())
+        switch subcommand {
+        case "macos", "seatbelt":
+            switch parseSandboxSubcommand(subcommandArguments, commandName: "macos", supportsLogDenials: true) {
+            case let .success(parsed):
+                return .success(.macos(
+                    fullAuto: parsed.fullAuto,
+                    logDenials: parsed.logDenials,
+                    command: parsed.command
+                ))
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "linux", "landlock":
+            switch parseSandboxSubcommand(subcommandArguments, commandName: "linux", supportsLogDenials: false) {
+            case let .success(parsed):
+                return .success(.linux(fullAuto: parsed.fullAuto, command: parsed.command))
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "windows":
+            switch parseSandboxSubcommand(subcommandArguments, commandName: "windows", supportsLogDenials: false) {
+            case let .success(parsed):
+                return .success(.windows(fullAuto: parsed.fullAuto, command: parsed.command))
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        default:
+            return .failure("codex-swift: unsupported sandbox subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private struct ParsedSandboxSubcommand {
+        let fullAuto: Bool
+        let logDenials: Bool
+        let command: [String]
+    }
+
+    private func parseSandboxSubcommand(
+        _ arguments: [String],
+        commandName: String,
+        supportsLogDenials: Bool
+    ) -> ParseResult<ParsedSandboxSubcommand> {
+        var fullAuto = false
+        var logDenials = false
+        var command: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                command.append(contentsOf: arguments.dropFirst(index + 1))
+                break
+            }
+            if argument == "--full-auto" {
+                fullAuto = true
+                index += 1
+                continue
+            }
+            if argument == "--log-denials" {
+                guard supportsLogDenials else {
+                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --log-denials", 64)
+                }
+                logDenials = true
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': \(argument)", 64)
+            }
+
+            command.append(argument)
+            command.append(contentsOf: arguments.dropFirst(index + 1))
+            break
+        }
+
+        guard !command.isEmpty else {
+            return .failure("codex-swift: missing required argument for command 'sandbox \(commandName)': <COMMAND>", 64)
+        }
+
+        return .success(ParsedSandboxSubcommand(
+            fullAuto: fullAuto,
+            logDenials: logDenials,
+            command: command
+        ))
     }
 
     private func parseCloudCommandAction(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
