@@ -6,13 +6,140 @@ public enum AuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
     case auto
 }
 
+public enum KnownChatGPTPlan: String, Codable, Equatable, Sendable {
+    case free
+    case plus
+    case pro
+    case team
+    case business
+    case enterprise
+    case edu
+
+    public var rustDebugDescription: String {
+        switch self {
+        case .free: "Free"
+        case .plus: "Plus"
+        case .pro: "Pro"
+        case .team: "Team"
+        case .business: "Business"
+        case .enterprise: "Enterprise"
+        case .edu: "Edu"
+        }
+    }
+}
+
+public enum ChatGPTPlanType: Equatable, Sendable {
+    case known(KnownChatGPTPlan)
+    case unknown(String)
+
+    public var displayValue: String {
+        switch self {
+        case let .known(plan):
+            plan.rustDebugDescription
+        case let .unknown(value):
+            value
+        }
+    }
+}
+
+public struct IdTokenInfo: Equatable, Sendable {
+    public var email: String?
+    public var chatGPTPlanType: ChatGPTPlanType?
+    public var chatGPTAccountID: String?
+    public var rawJWT: String
+
+    public init(
+        email: String? = nil,
+        chatGPTPlanType: ChatGPTPlanType? = nil,
+        chatGPTAccountID: String? = nil,
+        rawJWT: String = ""
+    ) {
+        self.email = email
+        self.chatGPTPlanType = chatGPTPlanType
+        self.chatGPTAccountID = chatGPTAccountID
+        self.rawJWT = rawJWT
+    }
+
+    public func getChatGPTPlanType() -> String? {
+        chatGPTPlanType?.displayValue
+    }
+}
+
+public enum IdTokenInfoError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidFormat
+    case base64DecodeFailed
+    case jsonDecodeFailed(String)
+
+    public var description: String {
+        switch self {
+        case .invalidFormat:
+            return "invalid ID token format"
+        case .base64DecodeFailed:
+            return "invalid ID token base64 payload"
+        case let .jsonDecodeFailed(message):
+            return message
+        }
+    }
+}
+
+public enum IdTokenParser {
+    public static func parse(_ idToken: String) throws -> IdTokenInfo {
+        var parts = idToken.split(separator: ".", omittingEmptySubsequences: false).makeIterator()
+        guard let header = parts.next(),
+              let payload = parts.next(),
+              let signature = parts.next(),
+              !header.isEmpty,
+              !payload.isEmpty,
+              !signature.isEmpty
+        else {
+            throw IdTokenInfoError.invalidFormat
+        }
+
+        let payloadBytes = try base64URLDecode(String(payload))
+        let claims: IdClaims
+        do {
+            claims = try JSONDecoder().decode(IdClaims.self, from: payloadBytes)
+        } catch {
+            throw IdTokenInfoError.jsonDecodeFailed(String(describing: error))
+        }
+
+        return IdTokenInfo(
+            email: claims.email,
+            chatGPTPlanType: claims.auth?.chatGPTPlanType,
+            chatGPTAccountID: claims.auth?.chatGPTAccountID,
+            rawJWT: idToken
+        )
+    }
+
+    private static func base64URLDecode(_ value: String) throws -> Data {
+        var standard = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = standard.count % 4
+        if remainder > 0 {
+            standard.append(String(repeating: "=", count: 4 - remainder))
+        }
+        guard let data = Data(base64Encoded: standard) else {
+            throw IdTokenInfoError.base64DecodeFailed
+        }
+        return data
+    }
+}
+
 public struct AuthTokenData: Codable, Equatable, Sendable {
-    public let idToken: String
+    public let idToken: IdTokenInfo
     public let accessToken: String
     public let refreshToken: String
     public let accountID: String?
 
     public init(idToken: String, accessToken: String, refreshToken: String, accountID: String?) {
+        self.idToken = (try? IdTokenParser.parse(idToken)) ?? IdTokenInfo(rawJWT: idToken)
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.accountID = accountID
+    }
+
+    public init(idToken: IdTokenInfo, accessToken: String, refreshToken: String, accountID: String?) {
         self.idToken = idToken
         self.accessToken = accessToken
         self.refreshToken = refreshToken
@@ -24,6 +151,23 @@ public struct AuthTokenData: Codable, Equatable, Sendable {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case accountID = "account_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawIDToken = try container.decode(String.self, forKey: .idToken)
+        self.idToken = try IdTokenParser.parse(rawIDToken)
+        self.accessToken = try container.decode(String.self, forKey: .accessToken)
+        self.refreshToken = try container.decode(String.self, forKey: .refreshToken)
+        self.accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(idToken.rawJWT, forKey: .idToken)
+        try container.encode(accessToken, forKey: .accessToken)
+        try container.encode(refreshToken, forKey: .refreshToken)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
     }
 }
 
@@ -42,6 +186,38 @@ public struct AuthDotJSON: Codable, Equatable, Sendable {
         case openAIAPIKey = "OPENAI_API_KEY"
         case tokens
         case lastRefresh = "last_refresh"
+    }
+}
+
+private struct IdClaims: Decodable {
+    let email: String?
+    let auth: AuthClaims?
+
+    private enum CodingKeys: String, CodingKey {
+        case email
+        case auth = "https://api.openai.com/auth"
+    }
+}
+
+private struct AuthClaims: Decodable {
+    let chatGPTPlanType: ChatGPTPlanType?
+    let chatGPTAccountID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case chatGPTPlanType = "chatgpt_plan_type"
+        case chatGPTAccountID = "chatgpt_account_id"
+    }
+}
+
+extension ChatGPTPlanType: Decodable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if let known = KnownChatGPTPlan(rawValue: value) {
+            self = .known(known)
+        } else {
+            self = .unknown(value)
+        }
     }
 }
 
@@ -348,8 +524,9 @@ public enum CodexAuthStorage {
             throw CodexAuthStorageError.tokenDataNotAvailable
         }
 
+        let updatedIDToken = try idToken.map { try IdTokenParser.parse($0) } ?? currentTokens.idToken
         let updatedTokens = AuthTokenData(
-            idToken: idToken ?? currentTokens.idToken,
+            idToken: updatedIDToken,
             accessToken: accessToken ?? currentTokens.accessToken,
             refreshToken: refreshToken ?? currentTokens.refreshToken,
             accountID: currentTokens.accountID

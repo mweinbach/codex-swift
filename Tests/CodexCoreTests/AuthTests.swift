@@ -11,11 +11,12 @@ final class AuthTests: XCTestCase {
 
     func testLoadsFileBackedAuthJSONTokenData() throws {
         let dir = try AuthTemporaryDirectory()
+        let jwt = Self.fakeJWT(plan: "pro", accountID: "jwt-account-id")
         let auth = """
         {
           "OPENAI_API_KEY": null,
           "tokens": {
-            "id_token": "header.payload.signature",
+            "id_token": "\(jwt)",
             "access_token": "access-token",
             "refresh_token": "refresh-token",
             "account_id": "account-id"
@@ -28,6 +29,9 @@ final class AuthTests: XCTestCase {
         let loaded = try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file)
         XCTAssertEqual(loaded?.tokens?.accessToken, "access-token")
         XCTAssertEqual(loaded?.tokens?.accountID, "account-id")
+        XCTAssertEqual(loaded?.tokens?.idToken.email, "user@example.com")
+        XCTAssertEqual(loaded?.tokens?.idToken.getChatGPTPlanType(), "Pro")
+        XCTAssertEqual(loaded?.tokens?.idToken.chatGPTAccountID, "jwt-account-id")
         XCTAssertEqual(loaded?.lastRefresh, "2026-05-07T00:00:00Z")
     }
 
@@ -79,7 +83,7 @@ final class AuthTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(token?.idToken, "header.payload.signature")
+        XCTAssertEqual(token?.idToken.rawJWT, Self.fakeJWT())
         XCTAssertEqual(token?.accessToken, "new-access-token")
         XCTAssertEqual(token?.refreshToken, "new-refresh-token")
         XCTAssertEqual(token?.accountID, "account-id")
@@ -215,6 +219,39 @@ final class AuthTests: XCTestCase {
         }
     }
 
+    func testParsesIDTokenEmailPlanAndAccountID() throws {
+        let jwt = Self.fakeJWT(plan: "pro", accountID: "acct-123")
+
+        let info = try IdTokenParser.parse(jwt)
+
+        XCTAssertEqual(info.email, "user@example.com")
+        XCTAssertEqual(info.getChatGPTPlanType(), "Pro")
+        XCTAssertEqual(info.chatGPTAccountID, "acct-123")
+        XCTAssertEqual(info.rawJWT, jwt)
+    }
+
+    func testParsesIDTokenMissingAuthFields() throws {
+        let jwt = Self.fakeJWT(payload: ["sub": "123"])
+
+        let info = try IdTokenParser.parse(jwt)
+
+        XCTAssertNil(info.email)
+        XCTAssertNil(info.getChatGPTPlanType())
+        XCTAssertNil(info.chatGPTAccountID)
+    }
+
+    func testParsesUnknownPlanAsRawString() throws {
+        let jwt = Self.fakeJWT(plan: "mystery-tier", accountID: nil)
+
+        XCTAssertEqual(try IdTokenParser.parse(jwt).getChatGPTPlanType(), "mystery-tier")
+    }
+
+    func testIDTokenRejectsInvalidShape() {
+        XCTAssertThrowsError(try IdTokenParser.parse("header.payload")) { error in
+            XCTAssertEqual(error as? IdTokenInfoError, .invalidFormat)
+        }
+    }
+
     func testCodexHomeHonorsExistingEnvironmentPath() throws {
         let dir = try AuthTemporaryDirectory()
         XCTAssertEqual(try CodexHome.find(environment: ["CODEX_HOME": dir.url.path]).path, dir.url.resolvingSymlinksInPath().path)
@@ -237,7 +274,7 @@ final class AuthTests: XCTestCase {
         {
           "OPENAI_API_KEY": null,
           "tokens": {
-            "id_token": "header.payload.signature",
+            "id_token": "\(Self.fakeJWT())",
             "access_token": "\(accessToken)",
             "refresh_token": "\(refreshToken)",
             "account_id": "account-id"
@@ -252,6 +289,48 @@ final class AuthTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    private static func fakeJWT(
+        plan: String? = "pro",
+        accountID: String? = "jwt-account-id",
+        payload customPayload: [String: Any]? = nil
+    ) -> String {
+        let header: [String: Any] = ["alg": "none", "typ": "JWT"]
+        let payload: [String: Any]
+        if let customPayload {
+            payload = customPayload
+        } else {
+            var auth: [String: Any] = [:]
+            if let plan {
+                auth["chatgpt_plan_type"] = plan
+            }
+            if let accountID {
+                auth["chatgpt_account_id"] = accountID
+            }
+            payload = [
+                "email": "user@example.com",
+                "https://api.openai.com/auth": auth
+            ]
+        }
+
+        return [
+            base64URL(header),
+            base64URL(payload),
+            base64URL(Data("sig".utf8))
+        ].joined(separator: ".")
+    }
+
+    private static func base64URL(_ object: [String: Any]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return base64URL(data)
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

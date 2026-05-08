@@ -106,6 +106,8 @@ Source baseline inspected for this scaffold:
   - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
+- `codex-rs/core/src/token_data.rs`
+  - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 
 ## Known Gaps
 

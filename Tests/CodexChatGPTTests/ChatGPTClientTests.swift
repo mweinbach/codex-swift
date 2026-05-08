@@ -36,10 +36,11 @@ final class ChatGPTClientTests: XCTestCase {
 
     func testGetTaskLoadsFileBackedAuthJSONByDefault() async throws {
         let dir = try ChatGPTTemporaryDirectory()
+        let jwt = Self.fakeJWT()
         try """
         {
           "tokens": {
-            "id_token": "header.payload.signature",
+            "id_token": "\(jwt)",
             "access_token": "file-access-token",
             "refresh_token": "file-refresh-token",
             "account_id": "file-account-id"
@@ -145,6 +146,34 @@ final class ChatGPTClientTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: Date())
+    }
+
+    private static func fakeJWT() -> String {
+        let header: [String: Any] = ["alg": "none", "typ": "JWT"]
+        let payload: [String: Any] = [
+            "email": "user@example.com",
+            "https://api.openai.com/auth": [
+                "chatgpt_plan_type": "pro",
+                "chatgpt_account_id": "jwt-account-id"
+            ]
+        ]
+        return [
+            base64URL(header),
+            base64URL(payload),
+            base64URL(Data("sig".utf8))
+        ].joined(separator: ".")
+    }
+
+    private static func base64URL(_ object: [String: Any]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return base64URL(data)
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 
