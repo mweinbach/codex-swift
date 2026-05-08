@@ -561,6 +561,43 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
     }
 }
 
+public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
+    public let cmd: String
+    public let workdir: String?
+    public let shell: String?
+    public let login: Bool
+    public let yieldTimeMS: UInt64
+    public let maxOutputTokens: Int?
+    public let sandboxPermissions: SandboxPermissions
+    public let justification: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case cmd
+        case workdir
+        case shell
+        case login
+        case yieldTimeMS = "yield_time_ms"
+        case maxOutputTokens = "max_output_tokens"
+        case sandboxPermissions = "sandbox_permissions"
+        case justification
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.cmd = try container.decode(String.self, forKey: .cmd)
+        self.workdir = try container.decodeIfPresent(String.self, forKey: .workdir)
+        self.shell = try container.decodeIfPresent(String.self, forKey: .shell)
+        self.login = try container.decodeIfPresent(Bool.self, forKey: .login) ?? true
+        self.yieldTimeMS = try container.decodeIfPresent(UInt64.self, forKey: .yieldTimeMS) ?? 10_000
+        self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
+        self.sandboxPermissions = try container.decodeIfPresent(
+            SandboxPermissions.self,
+            forKey: .sandboxPermissions
+        ) ?? .useDefault
+        self.justification = try container.decodeIfPresent(String.self, forKey: .justification)
+    }
+}
+
 public enum ResponseItem: Equatable, Codable, Sendable {
     case message(id: String? = nil, role: String, content: [ContentItem])
     case reasoning(

@@ -222,6 +222,7 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
     let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: request.arguments)
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: request.arguments)
     let shell = ShellResolver.defaultUserShell()
+    let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
         imagePaths: request.options.imagePaths,
@@ -229,7 +230,9 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
         cwd: cwd,
         approvalPolicy: approvalPolicy,
         sandboxPolicy: sandboxPolicy,
-        shell: shell
+        shell: shell,
+        tools: configuredTools.map(\.spec),
+        parallelToolCalls: modelFamily.supportsParallelToolCalls
     )
     prompt.baseInstructionsOverride = try readExperimentalInstructionsFile(
         settings.experimentalInstructionsFile,
@@ -242,27 +245,34 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
         provider: provider,
         auth: authResolution.auth
     )
-    let streamResult = await client.streamPrompt(
-        model: model,
-        instructions: prompt.fullInstructions(for: modelFamily),
-        prompt: prompt,
-        options: NonInteractiveExec.responsesOptions(
-            conversationID: conversationID,
-            modelFamily: modelFamily,
-            reasoningEffort: settings.modelReasoningEffort,
-            reasoningSummary: settings.modelReasoningSummary,
-            verbosity: settings.modelVerbosity,
-            outputSchema: outputSchema
-        )
+    let events = await NonInteractiveExec.runResponsesLoop(
+        initialPrompt: prompt,
+        streamPrompt: { nextPrompt in
+            await client.streamPrompt(
+                model: model,
+                instructions: nextPrompt.fullInstructions(for: modelFamily),
+                prompt: nextPrompt,
+                options: NonInteractiveExec.responsesOptions(
+                    conversationID: conversationID,
+                    modelFamily: modelFamily,
+                    reasoningEffort: settings.modelReasoningEffort,
+                    reasoningSummary: settings.modelReasoningSummary,
+                    verbosity: settings.modelVerbosity,
+                    outputSchema: outputSchema
+                )
+            )
+        },
+        executeFunctionCall: { item in
+            await NonInteractiveExec.executeFunctionCall(
+                item,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                shell: shell,
+                truncationPolicy: modelFamily.truncationPolicy
+            )
+        }
     )
-
-    let events: ResponseEventResults
-    switch streamResult {
-    case let .success(results):
-        events = results
-    case let .failure(error):
-        events = [.failure(error)]
-    }
 
     let result = NonInteractiveExec.finish(
         responseEvents: events,

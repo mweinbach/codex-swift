@@ -303,16 +303,18 @@ Source baseline inspected for this scaffold:
   - executable `codex apply <task_id>` now loads ChatGPT auth, calls the cloud task HTTP client, applies via the Swift `CodexGit` bridge, and exits nonzero for missing auth/account IDs or non-success apply outcomes
 - `codex-rs/cloud-tasks/src/cli.rs` and non-TUI command dispatch from `codex-rs/cloud-tasks/src/lib.rs`
   - `codex cloud status`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt` validation, status/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection, and cloud-task status/diff summary formatting
+- Initial `codex-rs/exec/src/lib.rs` non-interactive run path
+  - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, and `--output-last-message` writes
 
 ## Known Gaps
 
 The executable is not functionally equivalent yet. Some commands have native runtime slices, while most registered commands still return a clear unimplemented status. The remaining major areas include:
 
 - interactive TUI runtime
-- non-interactive `exec`
+- non-interactive `exec` resume/review continuation and live tool orchestration
 - full resume continuation after rollout target resolution
-- exec runtime event emission
-- model provider configuration and auth
+- Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
+- model-provider parity beyond the initial Responses/OpenAI provider/auth path
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - runtime Responses API tool orchestration
 - sandbox execution
