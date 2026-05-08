@@ -85,15 +85,57 @@ final class CodexMCPServerTests: XCTestCase {
         XCTAssertTrue(content.isError)
     }
 
+    func testCodexReplyToolCallDecodesArgumentsAndReturnsTextContent() async throws {
+        var state = CodexMCPServerState()
+        let receivedReply = ReplyCapture()
+
+        let result = try await response(
+            for: #"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"codex-reply","arguments":{"conversationId":"123e4567-e89b-12d3-a456-426614174000","prompt":"continue"}}}"#,
+            state: &state,
+            codexReplyRunner: { reply in
+                await receivedReply.set(reply)
+                return CodexMCPToolResult(text: "continued")
+            }
+        )
+
+        let capturedReply = await receivedReply.value
+        XCTAssertEqual(capturedReply, CodexMCPToolReply(
+            conversationID: "123e4567-e89b-12d3-a456-426614174000",
+            prompt: "continue"
+        ))
+        let content = try textContent(from: result)
+        XCTAssertEqual(content.text, "continued")
+        XCTAssertFalse(content.isError)
+    }
+
+    func testCodexReplyToolReportsMissingArgumentsAsToolError() async throws {
+        var state = CodexMCPServerState()
+
+        let result = try await response(
+            for: #"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"codex-reply","arguments":{"prompt":"continue"}}}"#,
+            state: &state,
+            codexReplyRunner: { _ in
+                XCTFail("reply runner should not be called when conversationId is missing")
+                return CodexMCPToolResult(text: "unused")
+            }
+        )
+
+        let content = try textContent(from: result)
+        XCTAssertEqual(content.text, "Missing arguments for codex-reply tool-call; the `conversation_id` and `prompt` fields are required.")
+        XCTAssertTrue(content.isError)
+    }
+
     private func response(
         for line: String,
         state: inout CodexMCPServerState,
-        codexToolRunner: @escaping CodexMCPServer.CodexToolRunner = { _ in CodexMCPToolResult(text: "") }
+        codexToolRunner: @escaping CodexMCPServer.CodexToolRunner = { _ in CodexMCPToolResult(text: "") },
+        codexReplyRunner: CodexMCPServer.CodexReplyRunner? = nil
     ) async throws -> [String: Any] {
         let output = await CodexMCPServer.processLine(
             Data(line.utf8),
             state: &state,
-            codexToolRunner: codexToolRunner
+            codexToolRunner: codexToolRunner,
+            codexReplyRunner: codexReplyRunner
         )
         XCTAssertEqual(output.count, 1)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: output[0]) as? [String: Any])
@@ -111,6 +153,14 @@ private actor CallCapture {
     var value: CodexMCPToolCall?
 
     func set(_ value: CodexMCPToolCall) {
+        self.value = value
+    }
+}
+
+private actor ReplyCapture {
+    var value: CodexMCPToolReply?
+
+    func set(_ value: CodexMCPToolReply) {
         self.value = value
     }
 }

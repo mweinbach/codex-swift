@@ -285,19 +285,38 @@ private func runComputerUseCommand(_ request: CodexCLI.ComputerUseCommandRequest
 }
 
 private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
-    try await CodexMCPServer.run { toolCall in
-        let execRequest = CodexCLI.ExecCommandRequest(
-            arguments: mcpExecArguments(for: toolCall),
-            action: .run(prompt: toolCall.prompt),
-            options: CodexCLI.ExecCommandOptions(),
-            configOverrides: mcpConfigOverrides(for: toolCall, rootOverrides: request.configOverrides)
-        )
-        let result = try await runExecCommand(execRequest, baseInstructionsOverride: toolCall.baseInstructions)
-        return CodexMCPToolResult(
-            text: mcpToolText(for: result),
-            isError: result.exitCode != 0
-        )
-    }
+    try await CodexMCPServer.run(
+        codexToolRunner: { toolCall in
+            let execRequest = CodexCLI.ExecCommandRequest(
+                arguments: mcpExecArguments(for: toolCall),
+                action: .run(prompt: toolCall.prompt),
+                options: CodexCLI.ExecCommandOptions(),
+                configOverrides: mcpConfigOverrides(for: toolCall, rootOverrides: request.configOverrides)
+            )
+            let result = try await runExecCommand(execRequest, baseInstructionsOverride: toolCall.baseInstructions)
+            return CodexMCPToolResult(
+                text: mcpToolText(for: result),
+                isError: result.exitCode != 0
+            )
+        },
+        codexReplyRunner: { reply in
+            let execRequest = CodexCLI.ExecCommandRequest(
+                arguments: ["resume", reply.conversationID, reply.prompt],
+                action: .resume(CodexCLI.ExecResumeCommand(
+                    sessionID: reply.conversationID,
+                    last: false,
+                    prompt: reply.prompt
+                )),
+                options: CodexCLI.ExecCommandOptions(),
+                configOverrides: request.configOverrides
+            )
+            let result = try await runExecCommand(execRequest, baseInstructionsOverride: nil)
+            return CodexMCPToolResult(
+                text: mcpToolText(for: result),
+                isError: result.exitCode != 0
+            )
+        }
+    )
     return CodexCLI.CommandExecutionResult(exitCode: 0)
 }
 
