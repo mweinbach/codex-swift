@@ -11,9 +11,21 @@ public struct CodexCLI: Sendable {
         case help
         case version
         case interactive(prompt: String?)
-        case command(CommandSpec)
+        case command(CommandSpec, arguments: [String])
         case unknown(String)
     }
+
+    public struct ApplyCommandRequest: Equatable, Sendable {
+        public let taskID: String
+        public let configOverrides: CliConfigOverrides
+
+        public init(taskID: String, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.taskID = taskID
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public typealias ApplyCommandRunner = (ApplyCommandRequest) async throws -> String?
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -25,7 +37,7 @@ public struct CodexCLI: Sendable {
 
         let positionals = positionalTokens(arguments)
         if let commandToken = positionals.first, let spec = CodexCommandRegistry.command(matching: commandToken) {
-            return .command(spec)
+            return .command(spec, arguments: Array(positionals.dropFirst()))
         }
 
         if let first = positionals.first {
@@ -38,7 +50,7 @@ public struct CodexCLI: Sendable {
     }
 
     public func command(for arguments: [String]) -> CommandSpec? {
-        if case let .command(spec) = parseInvocation(arguments: arguments) {
+        if case let .command(spec, _) = parseInvocation(arguments: arguments) {
             return spec
         }
         return nil
@@ -94,7 +106,53 @@ public struct CodexCLI: Sendable {
         case .help:
             stdout(renderHelp())
             return 0
-        case let .command(spec):
+        case let .command(spec, _):
+            stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+            return 78
+        case .interactive:
+            stderr("codex-swift: interactive TUI runtime is not complete yet.")
+            return 78
+        case let .unknown(argument):
+            stderr("codex-swift: unknown command or unsupported argument: \(argument)")
+            return 64
+        }
+    }
+
+    public func runAsync(
+        arguments: [String],
+        stdout: (String) -> Void = { print($0) },
+        stderr: (String) -> Void = { fputs($0 + "\n", Darwin.stderr) },
+        applyRunner: ApplyCommandRunner? = nil
+    ) async -> Int32 {
+        switch parseInvocation(arguments: arguments) {
+        case .version:
+            stdout(renderVersion())
+            return 0
+        case .help:
+            stdout(renderHelp())
+            return 0
+        case let .command(spec, commandArguments) where spec.name == "apply":
+            guard let applyRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            guard commandArguments.count == 1, let taskID = commandArguments.first else {
+                stderr("codex-swift: missing required argument for command 'apply': <TASK_ID>")
+                return 64
+            }
+            do {
+                if let message = try await applyRunner(ApplyCommandRequest(
+                    taskID: taskID,
+                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                )) {
+                    stdout(message)
+                }
+                return 0
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, _):
             stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
             return 78
         case .interactive:
@@ -155,5 +213,33 @@ public struct CodexCLI: Sendable {
             "--enable",
             "--disable"
         ].contains(argument)
+    }
+
+    private func configOverrideTokens(_ arguments: [String]) -> [String] {
+        var overrides: [String] = []
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "-c" || argument == "--config" {
+                if let value = iterator.next() {
+                    overrides.append(value)
+                }
+                continue
+            }
+            if argument.hasPrefix("-c=") {
+                overrides.append(String(argument.dropFirst(3)))
+                continue
+            }
+            if argument.hasPrefix("--config=") {
+                overrides.append(String(argument.dropFirst("--config=".count)))
+                continue
+            }
+        }
+
+        return overrides
+    }
+
+    private func describe(_ error: Error) -> String {
+        return String(describing: error)
     }
 }

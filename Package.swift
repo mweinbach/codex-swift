@@ -34,7 +34,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "codex",
-            dependencies: ["CodexCLI"]
+            dependencies: ["CodexChatGPT", "CodexCLI", "CodexCore"]
         ),
         .testTarget(
             name: "CodexApplyPatchTests",

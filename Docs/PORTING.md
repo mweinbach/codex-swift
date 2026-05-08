@@ -72,6 +72,8 @@ Source baseline inspected for this scaffold:
   - task response models, PR diff extraction, local `git apply` path, and Rust-matching missing diff/PR error cases
 - `codex-rs/chatgpt/src/chatgpt_client.rs`, `codex-rs/chatgpt/src/chatgpt_token.rs`, and auth/config support from `codex-rs/core`
   - file-backed `auth.json` token loading, `CODEX_HOME` discovery, ChatGPT task GET request construction, Rust-matching request headers, default ChatGPT backend URL, and non-2xx/decode error mapping
+- `codex-rs/cli/src/main.rs` apply dispatch
+  - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
 
 ## Known Gaps
 
@@ -93,6 +95,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
-- CLI wiring, keyring storage, and token refresh for `codex apply <task_id>`
+- keyring storage and token refresh for `codex apply <task_id>`
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
