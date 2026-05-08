@@ -1,9 +1,9 @@
 import Foundation
 
-public enum SandboxMode: String, Equatable, Sendable {
-    case readOnly
-    case workspaceWrite
-    case dangerFullAccess
+public enum SandboxMode: String, Codable, Equatable, Sendable {
+    case readOnly = "read-only"
+    case workspaceWrite = "workspace-write"
+    case dangerFullAccess = "danger-full-access"
 }
 
 public enum SandboxModeCLIArgument: String, CaseIterable, Equatable, Sendable {

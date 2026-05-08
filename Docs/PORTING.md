@@ -39,6 +39,16 @@ Source baseline inspected for this scaffold:
   - `-c key=value` parsing, TOML-like literal fallback, and dotted-path application
 - `codex-rs/core/src/features.rs`
   - known feature keys used by `--enable` and `--disable`
+- `codex-rs/protocol/src/conversation_id.rs`
+  - string-backed Codable conversation IDs with UUIDv7 generation
+- `codex-rs/protocol/src/config_types.rs`
+  - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
+- `codex-rs/protocol/src/protocol.rs`
+  - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers
+- `codex-rs/common/src/approval_presets.rs`
+  - built-in approval preset ordering and policy pairs
+- `codex-rs/protocol/src/approvals.rs`
+  - transparent execpolicy amendment array encoding
 
 ## Known Gaps
 

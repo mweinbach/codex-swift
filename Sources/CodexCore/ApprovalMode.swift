@@ -1,9 +1,9 @@
 import Foundation
 
-public enum AskForApproval: String, Equatable, Sendable {
-    case unlessTrusted
-    case onFailure
-    case onRequest
+public enum AskForApproval: String, Codable, Equatable, Sendable {
+    case unlessTrusted = "untrusted"
+    case onFailure = "on-failure"
+    case onRequest = "on-request"
     case never
 }
 
