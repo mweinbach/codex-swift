@@ -66,6 +66,10 @@ Source baseline inspected for this scaffold:
 - `codex-rs/apply-patch`
   - initial native `CodexApplyPatch` target and `apply_patch` executable
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
+- `codex-rs/utils/git/src/apply.rs`
+  - initial native `CodexGit` target for `git apply`, `git apply --check`, diff path extraction, command logging, staging existing paths, and apply-output grouping for clean, skipped, rejected, and conflicted paths
+- `codex-rs/chatgpt/src/get_task.rs` and `codex-rs/chatgpt/src/apply_command.rs`
+  - task response models, PR diff extraction, local `git apply` path, and Rust-matching missing diff/PR error cases
 
 ## Known Gaps
 
@@ -87,5 +91,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
+- ChatGPT auth and `/wham/tasks/{task_id}` network fetch for `codex apply <task_id>`
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

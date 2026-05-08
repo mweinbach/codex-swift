@@ -11,12 +11,19 @@ let package = Package(
         .executable(name: "codex", targets: ["codex"]),
         .executable(name: "apply_patch", targets: ["apply_patch"]),
         .library(name: "CodexApplyPatch", targets: ["CodexApplyPatch"]),
+        .library(name: "CodexChatGPT", targets: ["CodexChatGPT"]),
         .library(name: "CodexCLI", targets: ["CodexCLI"]),
-        .library(name: "CodexCore", targets: ["CodexCore"])
+        .library(name: "CodexCore", targets: ["CodexCore"]),
+        .library(name: "CodexGit", targets: ["CodexGit"])
     ],
     targets: [
         .target(name: "CodexCore"),
         .target(name: "CodexApplyPatch"),
+        .target(name: "CodexGit"),
+        .target(
+            name: "CodexChatGPT",
+            dependencies: ["CodexGit"]
+        ),
         .target(
             name: "CodexCLI",
             dependencies: ["CodexCore"]
@@ -36,6 +43,14 @@ let package = Package(
         .testTarget(
             name: "CodexCoreTests",
             dependencies: ["CodexCore"]
+        ),
+        .testTarget(
+            name: "CodexGitTests",
+            dependencies: ["CodexGit"]
+        ),
+        .testTarget(
+            name: "CodexChatGPTTests",
+            dependencies: ["CodexChatGPT", "CodexGit"]
         ),
         .testTarget(
             name: "CodexCLITests",
