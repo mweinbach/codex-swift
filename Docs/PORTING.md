@@ -123,6 +123,8 @@ Source baseline inspected for this scaffold:
   - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
 - `codex-rs/arg0/src/lib.rs` apply-patch dispatch path
   - `codex` executable dispatch for `apply_patch`/`applypatch` argv0 aliases, hidden `--codex-run-as-apply-patch` argument execution, Rust-matching standalone empty-stdin/extra-argument failures, temporary `apply_patch`/`applypatch` symlink directory prepended to `PATH`, and shared apply-patch command result routing
+- `codex-rs/arg0/src/lib.rs` startup dotenv loading
+  - startup reads `$CODEX_HOME/.env`, skips malformed dotenv lines, sets non-`CODEX_` environment variables before runtime startup, and filters `CODEX_` keys case-insensitively
 - `codex-rs/utils/git/src/apply.rs`
   - initial native `CodexGit` target for `git apply`, `git apply --check`, diff path extraction, command logging, staging existing paths, and apply-output grouping for clean, skipped, rejected, and conflicted paths
 - `codex-rs/chatgpt/src/get_task.rs` and `codex-rs/chatgpt/src/apply_command.rs`

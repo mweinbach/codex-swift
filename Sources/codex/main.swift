@@ -23,6 +23,8 @@ if let result = ApplyPatchCommand.runForArg0Dispatch(
     exit(result.exitCode)
 }
 
+DotenvLoader.loadCodexDotenv()
+
 let codexAliasDirectory: ApplyPatchAliasDirectory?
 do {
     codexAliasDirectory = try ApplyPatchCommand.prependPathEntryForCodexAliases()
