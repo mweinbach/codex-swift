@@ -106,4 +106,38 @@ final class ResponseEventAggregatorTests: XCTestCase {
             .success(.completed(responseID: "resp", tokenUsage: nil))
         ])
     }
+
+    func testAggregatesAsyncEventStream() async {
+        let stream = responseEventStream([
+            .success(.outputTextDelta("hel")),
+            .success(.outputTextDelta("lo")),
+            .success(.completed(responseID: "resp_stream", tokenUsage: nil))
+        ])
+
+        let events = await collect(ResponseEventAggregator.aggregate(stream, mode: .streaming))
+
+        XCTAssertEqual(events, [
+            .success(.outputTextDelta("hel")),
+            .success(.outputTextDelta("lo")),
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "hello")]))),
+            .success(.completed(responseID: "resp_stream", tokenUsage: nil))
+        ])
+    }
+}
+
+private func responseEventStream(_ events: ResponseEventResults) -> ResponseEventStream {
+    ResponseEventStream { continuation in
+        for event in events {
+            continuation.yield(event)
+        }
+        continuation.finish()
+    }
+}
+
+private func collect(_ stream: ResponseEventStream) async -> ResponseEventResults {
+    var events: ResponseEventResults = []
+    for await event in stream {
+        events.append(event)
+    }
+    return events
 }

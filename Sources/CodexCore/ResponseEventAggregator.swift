@@ -102,6 +102,27 @@ public struct ResponseEventAggregator: Sendable {
         var aggregator = ResponseEventAggregator(mode: mode)
         return results.flatMap { aggregator.receive($0) }
     }
+
+    public static func aggregate(
+        _ stream: ResponseEventStream,
+        mode: ResponseEventAggregateMode = .aggregatedOnly
+    ) -> ResponseEventStream {
+        ResponseEventStream { continuation in
+            let task = Task {
+                var aggregator = ResponseEventAggregator(mode: mode)
+                for await result in stream {
+                    for event in aggregator.receive(result) {
+                        continuation.yield(event)
+                    }
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
 }
 
 private extension ResponseItem {

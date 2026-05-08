@@ -270,7 +270,7 @@ Source baseline inspected for this scaffold:
 - Pure Chat Completions SSE parsing from `codex-rs/codex-api/src/sse/chat.rs`
   - chat SSE `choices` traversal, assistant/reasoning delta accumulation, tool-call index/id tracking, argument concatenation, finish-reason handling for stop/length/tool calls, and EOF flush behavior
 - `AggregatedStream` and `AggregateStreamExt` behavior from `codex-rs/codex-api/src/endpoint/chat.rs`
-  - response-event aggregation modes, assistant/reasoning delta accumulation, created/summary-event filtering, rate-limit/error forwarding, assistant final-item suppression/seed behavior, and aggregate emission before completion
+  - response-event aggregation modes, assistant/reasoning delta accumulation, created/summary-event filtering, rate-limit/error forwarding, assistant final-item suppression/seed behavior, aggregate emission before completion, and async response-event stream aggregation
 - Endpoint client scaffolding from `codex-rs/codex-api/src/endpoint/{streaming,responses,chat,compact,models}.rs`
   - transport protocol seams, auth/header injection, request telemetry retry wrapping, models response execution/decode, compact execution/decode, responses/chat path selection, `Accept: text/event-stream` stream setup, and buffered SSE parser hookup for fake-transport verification
 - URLSession transport behavior from `codex-rs/codex-client/src/{request,transport,error}.rs`
