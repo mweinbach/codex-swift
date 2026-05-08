@@ -428,16 +428,24 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
 }
 
 public enum ResponseItem: Equatable, Codable, Sendable {
-    case message(role: String, content: [ContentItem])
-    case webSearchCall(status: String?, action: WebSearchAction)
+    case message(id: String? = nil, role: String, content: [ContentItem])
+    case reasoning(
+        id: String,
+        summary: [ReasoningItemReasoningSummary],
+        content: [ReasoningItemContent]? = nil,
+        encryptedContent: String? = nil
+    )
+    case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction)
     case compaction(encryptedContent: String)
     case knownPersisted(type: String)
     case other
 
     private enum CodingKeys: String, CodingKey {
         case type
+        case id
         case role
         case content
+        case summary
         case status
         case action
         case encryptedContent = "encrypted_content"
@@ -449,18 +457,32 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         switch type {
         case "message":
             self = .message(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
                 role: try container.decode(String.self, forKey: .role),
                 content: try container.decode([ContentItem].self, forKey: .content)
             )
+        case "reasoning":
+            if let id = try container.decodeIfPresent(String.self, forKey: .id),
+               let summary = try? container.decode([ReasoningItemReasoningSummary].self, forKey: .summary)
+            {
+                self = .reasoning(
+                    id: id,
+                    summary: summary,
+                    content: try container.decodeIfPresent([ReasoningItemContent].self, forKey: .content),
+                    encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent)
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
         case "web_search_call":
             self = .webSearchCall(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
                 status: try container.decodeIfPresent(String.self, forKey: .status),
                 action: try container.decode(WebSearchAction.self, forKey: .action)
             )
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
-        case "reasoning",
-             "local_shell_call",
+        case "local_shell_call",
              "function_call",
              "function_call_output",
              "custom_tool_call",
@@ -475,12 +497,20 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .message(role, content):
+        case let .message(id, role, content):
             try container.encode("message", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
             try container.encode(role, forKey: .role)
             try container.encode(content, forKey: .content)
-        case let .webSearchCall(status, action):
+        case let .reasoning(id, summary, content, encryptedContent):
+            try container.encode("reasoning", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(summary, forKey: .summary)
+            try container.encodeIfPresent(content, forKey: .content)
+            try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
+        case let .webSearchCall(id, status, action):
             try container.encode("web_search_call", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encode(action, forKey: .action)
         case let .compaction(encryptedContent):

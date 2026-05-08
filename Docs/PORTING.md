@@ -153,6 +153,8 @@ Source baseline inspected for this scaffold:
   - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, and default shell fallback ordering
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
+- `codex-rs/core/src/event_mapping.rs`
+  - response-item to turn-item projection for user/assistant/reasoning/web-search items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`
   - review target tagged wire shape, review request hints, prompt generation for uncommitted/base/commit/custom targets, merge-base prompt injection seam, and user-facing hint formatting
 - `codex-rs/protocol/src/protocol.rs` review output models and `codex-rs/core/src/review_format.rs`

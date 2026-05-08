@@ -25,7 +25,7 @@ public enum Compact {
 
     public static func collectUserMessages(_ items: [ResponseItem]) -> [String] {
         items.compactMap { item in
-            guard case let .message(role, content) = item, role == "user" else {
+            guard case let .message(_, role, content) = item, role == "user" else {
                 return nil
             }
             guard shouldKeepUserMessage(content) else {

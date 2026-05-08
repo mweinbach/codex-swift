@@ -79,6 +79,7 @@ public enum RolloutPolicy {
     public static func shouldPersistResponseItem(_ item: ResponseItem) -> Bool {
         switch item {
         case .message,
+             .reasoning,
              .webSearchCall,
              .compaction,
              .knownPersisted:

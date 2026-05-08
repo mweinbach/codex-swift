@@ -53,6 +53,7 @@ final class ResponseModelsTests: XCTestCase {
         let json = #"""
         {
             "type": "web_search_call",
+            "id": "ws_1",
             "status": "completed",
             "action": {
                 "type": "search",
@@ -61,10 +62,43 @@ final class ResponseModelsTests: XCTestCase {
         }
         """#
         let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
-        XCTAssertEqual(item, .webSearchCall(status: "completed", action: .search(query: "weather seattle")))
+        XCTAssertEqual(item, .webSearchCall(id: "ws_1", status: "completed", action: .search(query: "weather seattle")))
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "web_search_call")
+        XCTAssertEqual(object["id"] as? String, "ws_1")
         XCTAssertEqual(object["status"] as? String, "completed")
+    }
+
+    func testDecodesReasoningPayload() throws {
+        let json = #"""
+        {
+            "type": "reasoning",
+            "id": "reasoning_1",
+            "summary": [
+                {"type": "summary_text", "text": "Step 1"}
+            ],
+            "content": [
+                {"type": "reasoning_text", "text": "raw details"},
+                {"type": "text", "text": "final thought"}
+            ],
+            "encrypted_content": "encrypted"
+        }
+        """#
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+
+        XCTAssertEqual(item, .reasoning(
+            id: "reasoning_1",
+            summary: [.summaryText(text: "Step 1")],
+            content: [
+                .reasoningText(text: "raw details"),
+                .text("final thought")
+            ],
+            encryptedContent: "encrypted"
+        ))
+        let object = try JSONObject(item)
+        XCTAssertEqual(object["type"] as? String, "reasoning")
+        XCTAssertEqual(object["id"] as? String, "reasoning_1")
+        XCTAssertEqual(object["encrypted_content"] as? String, "encrypted")
     }
 
     func testShellToolCallParamsAcceptTimeoutAlias() throws {

@@ -4,6 +4,7 @@ import XCTest
 final class RolloutPolicyTests: XCTestCase {
     func testResponseItemPersistenceMatchesRustBuckets() throws {
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.message(role: "assistant", content: [])))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.reasoning(id: "r1", summary: [])))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.webSearchCall(status: "completed", action: .search(query: "weather"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.other))
