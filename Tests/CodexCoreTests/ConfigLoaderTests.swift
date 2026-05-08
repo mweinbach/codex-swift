@@ -13,6 +13,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.forcedChatGPTWorkspaceID)
         XCTAssertTrue(config.features.isEnabled(.parallel))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
+        XCTAssertEqual(config.mcpServers, [:])
+        XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .auto)
         XCTAssertNil(config.activeProfile)
         XCTAssertEqual(config.projectRootMarkers, [".git"])
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
@@ -26,6 +28,7 @@ final class ConfigLoaderTests: XCTestCase {
         cli_auth_credentials_store = "auto"
         forced_login_method = "api"
         forced_chatgpt_workspace_id = "org_workspace"
+        mcp_oauth_credentials_store = "file"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -34,6 +37,94 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
+        XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
+    }
+
+    func testLoadsMcpServersIntoRuntimeConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs-server"
+        args = ["--port", "4000"]
+        startup_timeout_ms = 2500
+
+        [mcp_servers.docs.env]
+        TOKEN = "secret"
+
+        [mcp_servers.github]
+        url = "https://example.com/mcp"
+        bearer_token_env_var = "GITHUB_TOKEN"
+        tool_timeout_sec = 5.5
+        enabled = false
+        enabled_tools = ["search"]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(
+            config.mcpServers["docs"],
+            McpServerConfig(
+                transport: .stdio(
+                    command: "docs-server",
+                    args: ["--port", "4000"],
+                    env: ["TOKEN": "secret"],
+                    envVars: [],
+                    cwd: nil
+                ),
+                startupTimeoutSec: 2.5
+            )
+        )
+        XCTAssertEqual(
+            config.mcpServers["github"],
+            McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "GITHUB_TOKEN",
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                enabled: false,
+                toolTimeoutSec: 5.5,
+                enabledTools: ["search"]
+            )
+        )
+    }
+
+    func testMcpServersMergeAcrossConfigLayersByName() throws {
+        let dir = try CoreTemporaryDirectory()
+        let systemConfig = dir.url.appendingPathComponent("system.toml")
+        try """
+        [mcp_servers.docs]
+        command = "system-docs"
+
+        [mcp_servers.logs]
+        command = "logs-server"
+        """.write(to: systemConfig, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "user-docs"
+        args = ["--verbose"]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: systemConfig
+        )
+
+        XCTAssertEqual(config.mcpServers["docs"]?.transport, .stdio(
+            command: "user-docs",
+            args: ["--verbose"],
+            env: nil,
+            envVars: [],
+            cwd: nil
+        ))
+        XCTAssertEqual(config.mcpServers["logs"]?.transport, .stdio(
+            command: "logs-server",
+            args: [],
+            env: nil,
+            envVars: [],
+            cwd: nil
+        ))
     }
 
     func testProfileChatGPTBaseURLOverridesTopLevelValue() throws {
@@ -91,6 +182,16 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for forced_login_method")
+        }
+    }
+
+    func testInvalidMcpOAuthCredentialsStoreMatchesRustConfigErrorShape() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"mcp_oauth_credentials_store = "browser""#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for mcp_oauth_credentials_store")
         }
     }
 

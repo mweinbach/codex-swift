@@ -8,6 +8,12 @@ public enum AuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
     case auto
 }
 
+public enum OAuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
+    case auto
+    case file
+    case keyring
+}
+
 public enum KnownChatGPTPlan: String, Codable, Equatable, Sendable {
     case free
     case plus

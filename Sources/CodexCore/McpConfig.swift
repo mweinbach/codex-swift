@@ -162,6 +162,31 @@ public enum McpConfigStore {
         return servers
     }
 
+    public static func parseMcpServers(from value: ConfigValue) throws -> [String: McpServerConfig] {
+        guard case let .table(serverTable) = value else {
+            return [:]
+        }
+
+        var servers: [String: McpServerConfig] = [:]
+        for name in serverTable.keys.sorted() {
+            guard case let .table(rawServer) = serverTable[name] else {
+                throw McpConfigError.invalidTransport(name)
+            }
+            var builder = McpServerBuilder()
+            for (key, value) in rawServer {
+                if case let .table(nestedTable) = value, ["env", "http_headers", "env_http_headers"].contains(key) {
+                    for (nestedKey, nestedValue) in nestedTable {
+                        try builder.set(table: key, key: nestedKey, value: nestedValue)
+                    }
+                } else {
+                    try builder.set(key: key, value: value, serverName: name)
+                }
+            }
+            servers[name] = try builder.build(serverName: name)
+        }
+        return servers
+    }
+
     public static func replaceMcpServersSection(
         in contents: String,
         with servers: [String: McpServerConfig]

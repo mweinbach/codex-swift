@@ -12,6 +12,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public let forcedLoginMethod: ForcedLoginMethod?
     public let forcedChatGPTWorkspaceID: String?
     public let features: FeatureStates
+    public let mcpServers: [String: McpServerConfig]
+    public let mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
     public let activeProfile: String?
     public let projectRootMarkers: [String]
     public let projectDocMaxBytes: Int
@@ -23,6 +25,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
         features: FeatureStates = .withDefaults(),
+        mcpServers: [String: McpServerConfig] = [:],
+        mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
         activeProfile: String? = nil,
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
@@ -33,6 +37,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.forcedLoginMethod = forcedLoginMethod
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
         self.features = features
+        self.mcpServers = mcpServers
+        self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
         self.activeProfile = activeProfile
         self.projectRootMarkers = projectRootMarkers
         self.projectDocMaxBytes = projectDocMaxBytes
@@ -44,6 +50,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidStringValue(String)
     case invalidBoolValue(String)
     case invalidAuthCredentialsStoreMode
+    case invalidOAuthCredentialsStoreMode
     case invalidForcedLoginMethod
     case invalidProjectRootMarkers
     case invalidConfigLine(String)
@@ -58,6 +65,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "Invalid value for \(key): expected bool"
         case .invalidAuthCredentialsStoreMode:
             return "Invalid override value for cli_auth_credentials_store"
+        case .invalidOAuthCredentialsStoreMode:
+            return "Invalid override value for mcp_oauth_credentials_store"
         case .invalidForcedLoginMethod:
             return "Invalid override value for forced_login_method"
         case .invalidProjectRootMarkers:
@@ -192,6 +201,7 @@ private struct ParsedCodexConfigToml {
     var profiles: [String: [String: ConfigValue]] = [:]
     var features: [String: Bool] = [:]
     var profileFeatures: [String: [String: Bool]] = [:]
+    var mcpServers: [String: McpServerConfig] = [:]
 
     static func parse(_ contents: String) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -249,6 +259,7 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        parsed.mcpServers = try McpConfigStore.parseMcpServers(from: contents)
         return parsed
     }
 
@@ -300,6 +311,10 @@ private struct ParsedCodexConfigToml {
             features[key] = value
         }
 
+        for (key, value) in overlay.mcpServers {
+            mcpServers[key] = value
+        }
+
         for (profileName, profileValues) in overlay.profileFeatures {
             var mergedProfile = profileFeatures[profileName] ?? [:]
             for (key, value) in profileValues {
@@ -325,6 +340,12 @@ private struct ParsedCodexConfigToml {
 
         for (key, value) in table where Self.isRelevantTopLevelKey(key) {
             topLevel[key] = value
+        }
+
+        if let mcpServersValue = table["mcp_servers"] {
+            for (key, value) in try McpConfigStore.parseMcpServers(from: mcpServersValue) {
+                mcpServers[key] = value
+            }
         }
 
         if case let .table(featureTable) = table["features"] {
@@ -512,12 +533,26 @@ private struct ParsedCodexConfigToml {
         if let activeProfile = config.activeProfile {
             featureStates.apply(featureValues: profileFeatures[activeProfile] ?? [:])
         }
+
+        let mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
+        if let rawStore = topLevel["mcp_oauth_credentials_store"] {
+            let rawMode = try Self.stringValue(rawStore, key: "mcp_oauth_credentials_store")
+            guard let mode = OAuthCredentialsStoreMode(rawValue: rawMode) else {
+                throw CodexConfigLoadError.invalidOAuthCredentialsStoreMode
+            }
+            mcpOAuthCredentialsStoreMode = mode
+        } else {
+            mcpOAuthCredentialsStoreMode = .auto
+        }
+
         config = CodexRuntimeConfig(
             chatgptBaseURL: config.chatgptBaseURL,
             cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
             forcedLoginMethod: config.forcedLoginMethod,
             forcedChatGPTWorkspaceID: config.forcedChatGPTWorkspaceID,
             features: featureStates,
+            mcpServers: mcpServers,
+            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
             activeProfile: config.activeProfile,
             projectRootMarkers: config.projectRootMarkers,
             projectDocMaxBytes: config.projectDocMaxBytes,
@@ -539,6 +574,7 @@ private struct ParsedCodexConfigToml {
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
             || key == "forced_chatgpt_workspace_id"
+            || key == "mcp_oauth_credentials_store"
             || key == "profile"
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
