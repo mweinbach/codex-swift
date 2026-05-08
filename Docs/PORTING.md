@@ -71,6 +71,8 @@ Source baseline inspected for this scaffold:
   - turn item wire tags, user/agent/reasoning/web-search item models, item IDs, legacy message/reasoning/web-search events, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
+- `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper
+  - token-count event payloads, rate-limit windows, credits snapshots, explicit null optional serialization, and preservation of omitted credits/plan fields across rate-limit updates
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
@@ -192,5 +194,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
 - rollout recorder/list flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
+- full session state and `ContextManager` history recording/replacement around token/rate-limit state
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
