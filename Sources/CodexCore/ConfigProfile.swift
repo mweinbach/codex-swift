@@ -151,7 +151,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
             modelReasoningEffort: modelReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
             modelVerbosity: modelVerbosity,
-            serviceTier: serviceTier,
             chatgptBaseURL: chatgptBaseURL
         )
     }
@@ -164,7 +163,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
-    public var serviceTier: String?
     public var chatgptBaseURL: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -174,7 +172,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         case modelReasoningEffort
         case modelReasoningSummary
         case modelVerbosity
-        case serviceTier
         case chatgptBaseURL
     }
 
@@ -185,7 +182,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
-        serviceTier: String? = nil,
         chatgptBaseURL: String? = nil
     ) {
         self.model = model
@@ -194,7 +190,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
-        self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
     }
 
@@ -206,7 +201,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         self.modelReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .modelReasoningEffort)
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
         self.modelVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .modelVerbosity)
-        self.serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         self.chatgptBaseURL = try container.decodeIfPresent(String.self, forKey: .chatgptBaseURL)
     }
 
@@ -218,7 +212,6 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         try encodeOptional(modelReasoningEffort, into: &container, forKey: .modelReasoningEffort)
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
         try encodeOptional(modelVerbosity, into: &container, forKey: .modelVerbosity)
-        try encodeOptional(serviceTier, into: &container, forKey: .serviceTier)
         try encodeOptional(chatgptBaseURL, into: &container, forKey: .chatgptBaseURL)
     }
 }

@@ -128,7 +128,6 @@ final class ConfigProfileTests: XCTestCase {
             modelReasoningEffort: .medium,
             modelReasoningSummary: .concise,
             modelVerbosity: .high,
-            serviceTier: "flex",
             chatgptBaseURL: "https://chatgpt.example/backend-api/"
         ))
 
@@ -139,7 +138,6 @@ final class ConfigProfileTests: XCTestCase {
             "modelReasoningEffort": "medium",
             "modelReasoningSummary": "concise",
             "modelVerbosity": "high",
-            "serviceTier": "flex",
             "chatgptBaseURL": "https://chatgpt.example/backend-api/"
         ])
     }
@@ -154,7 +152,6 @@ final class ConfigProfileTests: XCTestCase {
                 "modelReasoningEffort": NSNull(),
                 "modelReasoningSummary": NSNull(),
                 "modelVerbosity": NSNull(),
-                "serviceTier": NSNull(),
                 "chatgptBaseURL": NSNull()
             ]
         )
