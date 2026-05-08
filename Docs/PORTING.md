@@ -84,6 +84,8 @@ Source baseline inspected for this scaffold:
   - `codex features list` output with Rust feature order, stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`
 - `codex-rs/stdio-to-uds`
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
+- `codex-rs/ansi-escape`
+  - Swift-native `AnsiText`/`AnsiLine`/`AnsiSpan` model, tab expansion for single-line rendering, ANSI SGR styling, escape-sequence stripping, line splitting, and first-line extraction
 
 ## Known Gaps
 
