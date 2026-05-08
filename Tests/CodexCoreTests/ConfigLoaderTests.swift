@@ -32,7 +32,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.experimentalUseFreeformApplyPatch)
         XCTAssertNil(config.toolsWebSearch)
         XCTAssertNil(config.toolsViewImage)
-        XCTAssertTrue(config.features.isEnabled(.parallel))
+        XCTAssertTrue(config.features.isEnabled(.shellTool))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertEqual(config.mcpServers, [:])
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .auto)
@@ -529,11 +529,11 @@ final class ConfigLoaderTests: XCTestCase {
 
         [features]
         web_search_request = true
-        parallel = false
+        shell_tool = false
 
         [profiles.work.features]
-        parallel = true
-        skills = false
+        shell_tool = true
+        memories = false
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(
@@ -544,8 +544,8 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.activeProfile, "work")
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
-        XCTAssertTrue(config.features.isEnabled(.parallel))
-        XCTAssertFalse(config.features.isEnabled(.skills))
+        XCTAssertTrue(config.features.isEnabled(.shellTool))
+        XCTAssertFalse(config.features.isEnabled(.memoryTool))
     }
 
     func testMissingProfileMatchesRustError() throws {

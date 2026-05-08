@@ -313,8 +313,8 @@ final class CodexCLITests: XCTestCase {
                 "-c",
                 "features.web_search_request=true",
                 "--enable",
-                "skills",
-                "--disable=parallel",
+                "memories",
+                "--disable=shell_tool",
                 "features",
                 "list"
             ],
@@ -331,8 +331,8 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(stderr.isEmpty)
         XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [
             "features.web_search_request=true",
-            "features.skills=true",
-            "features.parallel=false"
+            "features.memories=true",
+            "features.shell_tool=false"
         ])
     }
 

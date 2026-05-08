@@ -101,8 +101,8 @@ public enum NonInteractiveExec {
             shellType: shellType,
             applyPatchToolType: applyPatchToolType,
             webSearchRequest: config.toolsWebSearch ?? config.features.isEnabled(.webSearchRequest),
-            includeViewImageTool: config.toolsViewImage ?? config.features.isEnabled(.viewImageTool),
-            includeComputerUseTools: config.features.isEnabled(.computerUseGui),
+            includeViewImageTool: config.toolsViewImage ?? true,
+            includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch)
         )

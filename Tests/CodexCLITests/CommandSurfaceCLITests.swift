@@ -206,7 +206,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         var receivedRequest: CodexCLI.ComputerUseCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["--enable", "skills", "computer-use", "--gui", "--json", "inspect screen"],
+            arguments: ["--enable", "memories", "computer-use", "--gui", "--json", "inspect screen"],
             stderr: { _ in XCTFail("stderr should not be written") },
             computerUseRunner: { request in
                 receivedRequest = request
@@ -219,8 +219,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             arguments: ["--json", "inspect screen"],
             enableGUI: true,
             configOverrides: CliConfigOverrides(rawOverrides: [
-                "features.skills=true",
-                "features.computer_use_gui=true"
+                "features.memories=true",
+                "features.computer_use=true"
             ])
         ))
     }

@@ -1362,7 +1362,7 @@ public struct CodexCLI: Sendable {
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
             var rawOverrides = configOverrides.rawOverrides
-            rawOverrides.append("features.computer_use_gui=\(enableGUI)")
+            rawOverrides.append("features.computer_use=\(enableGUI)")
             return .success(ComputerUseCommandRequest(
                 arguments: execArguments,
                 enableGUI: enableGUI,

@@ -767,9 +767,7 @@ public final class ExecPolicyManager: @unchecked Sendable {
         configStack: ConfigLayerStack,
         fileManager: FileManager = .default
     ) throws -> ExecPolicyManager {
-        guard features.isEnabled(.execPolicy) else {
-            return ExecPolicyManager(policy: .empty())
-        }
+        _ = features
         return ExecPolicyManager(policy: try loadExecPolicy(configStack: configStack, fileManager: fileManager))
     }
 
@@ -858,6 +856,7 @@ public final class ExecPolicyManager: @unchecked Sendable {
         sandboxPolicy: SandboxPolicy,
         sandboxPermissions: SandboxPermissions
     ) -> ExecApprovalRequirement {
+        _ = features
         let commands = BashPlainCommandParser.parseShellLcPlainCommands(command) ?? [command]
         let evaluation = policy.checkMultiple(commands) { commandSlice in
             CommandSafety.requiresInitialApproval(
@@ -879,18 +878,14 @@ public final class ExecPolicyManager: @unchecked Sendable {
             }
             return .needsApproval(
                 reason: Self.derivePromptReason(evaluation),
-                proposedExecPolicyAmendment: features.isEnabled(.execPolicy)
-                    ? Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
-                    : nil
+                proposedExecPolicyAmendment: Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
             )
         case .allow:
             return .skip(
                 bypassSandbox: evaluation.matchedRules.contains {
                     $0.isPolicyMatch && $0.decision == .allow
                 },
-                proposedExecPolicyAmendment: features.isEnabled(.execPolicy)
-                    ? Self.tryDeriveExecPolicyAmendmentForAllowRules(evaluation.matchedRules)
-                    : nil
+                proposedExecPolicyAmendment: Self.tryDeriveExecPolicyAmendmentForAllowRules(evaluation.matchedRules)
             )
         }
     }

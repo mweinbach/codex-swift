@@ -420,35 +420,6 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
-    func testLoadExecPolicyReturnsEmptyWhenFeatureDisabled() throws {
-        let tempDir = try CoreTemporaryDirectory()
-        let policyDir = tempDir.url.appendingPathComponent("rules", isDirectory: true)
-        try FileManager.default.createDirectory(at: policyDir, withIntermediateDirectories: true)
-        try "prefix_rule(pattern=)".write(
-            to: policyDir.appendingPathComponent("invalid.rules"),
-            atomically: true,
-            encoding: .utf8
-        )
-        let stack = try ConfigLayerStack(layers: [
-            ConfigLayerEntry(
-                name: .user(file: try AbsolutePath(absolutePath: tempDir.url.appendingPathComponent("config.toml").path)),
-                config: .table([:])
-            )
-        ])
-        var features = FeatureStates.withDefaults()
-        features.set(.execPolicy, enabled: false)
-
-        let policy = try ExecPolicyManager.load(features: features, configStack: stack).current()
-
-        XCTAssertEqual(
-            policy.check(tokens("rm"), heuristicsFallback: allowAll),
-            PolicyEvaluation(
-                decision: .allow,
-                matchedRules: [.heuristicsRuleMatch(command: tokens("rm"), decision: .allow)]
-            )
-        )
-    }
-
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")
@@ -481,22 +452,6 @@ final class ExecPolicyTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error as? ExecPolicyAmendError, .emptyPrefix)
         }
-    }
-
-    func testProposedExecPolicyAmendmentIsDisabledWhenFeatureDisabled() {
-        var features = FeatureStates.withDefaults()
-        features.set(.execPolicy, enabled: false)
-
-        XCTAssertEqual(
-            ExecPolicyManager().createExecApprovalRequirementForCommand(
-                features: features,
-                command: tokens("cargo", "build"),
-                approvalPolicy: .unlessTrusted,
-                sandboxPolicy: .readOnly,
-                sandboxPermissions: .useDefault
-            ),
-            .needsApproval(reason: nil, proposedExecPolicyAmendment: nil)
-        )
     }
 
     func testProposedExecPolicyAmendmentIsPresentWhenHeuristicsAllow() {

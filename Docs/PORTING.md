@@ -239,7 +239,7 @@ Source baseline inspected for this scaffold:
 - Pure helpers from `codex-rs/code-mode/src/description.rs` and `codex-rs/code-mode/src/response.rs`
   - `exec` pragma parsing, public/nested tool filtering, JavaScript identifier normalization, image detail wire values, and function-call image-output detail serialization
 - `codex-rs/cli/src/main.rs` computer-use dispatch
-  - top-level `codex computer-use ...` now reuses the non-interactive exec parser/runtime with `features.computer_use_gui` overrides and the bundled computer-use prompt as a harness/base-instructions override
+  - top-level `codex computer-use ...` now reuses the non-interactive exec parser/runtime with `features.computer_use` overrides and the bundled computer-use prompt as a harness/base-instructions override
 - `codex-rs/core/src/flags.rs`
   - `CODEX_RS_SSE_FIXTURE` environment flag helper and Responses SSE fixture stream reader for offline SSE fixture wiring
 - `codex-rs/core/src/git_info.rs`
@@ -258,6 +258,8 @@ Source baseline inspected for this scaffold:
   - shell environment inheritance modes, case-insensitive wildcard include/exclude patterns, default sensitive-name filtering, set overrides, include-only post-filtering, and profile-use flag conversion
 - `codex-rs/common/src/config_summary.rs`
   - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
+- `codex-rs/features/src/lib.rs` and `codex-rs/features/src/legacy.rs`
+  - current feature registry ordering, stages, defaults, legacy feature aliases, feature-toggle CLI override validation, and Rust dependency normalization for `enable_fanout -> multi_agent` plus `code_mode_only -> code_mode`
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
