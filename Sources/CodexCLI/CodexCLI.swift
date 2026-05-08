@@ -293,8 +293,8 @@ public struct CodexCLI: Sendable {
 
     public enum AppServerCommandAction: Equatable, Sendable {
         case run
-        case generateTS(outDir: String, prettier: String?)
-        case generateJSONSchema(outDir: String)
+        case generateTS(outDir: String, prettier: String?, experimental: Bool)
+        case generateJSONSchema(outDir: String, experimental: Bool)
     }
 
     public struct AppServerCommandRequest: Equatable, Sendable {
@@ -1647,14 +1647,18 @@ public struct CodexCLI: Sendable {
         case "generate-ts":
             switch parseAppServerGenerateTS(Array(arguments.dropFirst())) {
             case let .success(parsed):
-                action = .generateTS(outDir: parsed.outDir, prettier: parsed.prettier)
+                action = .generateTS(
+                    outDir: parsed.outDir,
+                    prettier: parsed.prettier,
+                    experimental: parsed.experimental
+                )
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
         case "generate-json-schema":
             switch parseAppServerGenerateJSONSchema(Array(arguments.dropFirst())) {
-            case let .success(outDir):
-                action = .generateJSONSchema(outDir: outDir)
+            case let .success(parsed):
+                action = .generateJSONSchema(outDir: parsed.outDir, experimental: parsed.experimental)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
@@ -1680,9 +1684,12 @@ public struct CodexCLI: Sendable {
         }
     }
 
-    private func parseAppServerGenerateTS(_ arguments: [String]) -> ParseResult<(outDir: String, prettier: String?)> {
+    private func parseAppServerGenerateTS(
+        _ arguments: [String]
+    ) -> ParseResult<(outDir: String, prettier: String?, experimental: Bool)> {
         var outDir: String?
         var prettier: String?
+        var experimental = false
         var index = 0
 
         while index < arguments.count {
@@ -1723,6 +1730,11 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
+            if argument == "--experimental" {
+                experimental = true
+                index += 1
+                continue
+            }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'app-server generate-ts': \(argument)", 64)
             }
@@ -1732,11 +1744,12 @@ public struct CodexCLI: Sendable {
         guard let outDir else {
             return .failure("codex-swift: missing required option for command 'app-server generate-ts': --out <DIR>", 64)
         }
-        return .success((outDir: outDir, prettier: prettier))
+        return .success((outDir: outDir, prettier: prettier, experimental: experimental))
     }
 
-    private func parseAppServerGenerateJSONSchema(_ arguments: [String]) -> ParseResult<String> {
+    private func parseAppServerGenerateJSONSchema(_ arguments: [String]) -> ParseResult<(outDir: String, experimental: Bool)> {
         var outDir: String?
+        var experimental = false
         var index = 0
 
         while index < arguments.count {
@@ -1759,6 +1772,11 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
+            if argument == "--experimental" {
+                experimental = true
+                index += 1
+                continue
+            }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'app-server generate-json-schema': \(argument)", 64)
             }
@@ -1768,7 +1786,7 @@ public struct CodexCLI: Sendable {
         guard let outDir else {
             return .failure("codex-swift: missing required option for command 'app-server generate-json-schema': --out <DIR>", 64)
         }
-        return .success(outDir)
+        return .success((outDir: outDir, experimental: experimental))
     }
 
     private func parseExecPolicyCommandAction(_ arguments: [String]) -> ParseResult<ExecPolicyCommandAction> {

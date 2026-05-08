@@ -406,7 +406,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         for arguments in [
             ["app-server"],
             ["app-server", "generate-ts", "-o", "/tmp/ts", "--prettier", "prettier"],
-            ["app-server", "generate-json-schema", "--out=/tmp/schema"]
+            ["app-server", "generate-json-schema", "--out=/tmp/schema", "--experimental"]
         ] {
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -421,9 +421,25 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(actions, [
             .run,
-            .generateTS(outDir: "/tmp/ts", prettier: "prettier"),
-            .generateJSONSchema(outDir: "/tmp/schema")
+            .generateTS(outDir: "/tmp/ts", prettier: "prettier", experimental: false),
+            .generateJSONSchema(outDir: "/tmp/schema", experimental: true)
         ])
+    }
+
+    func testRunAsyncAppServerParsesExperimentalFlags() async {
+        var action: CodexCLI.AppServerCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "generate-ts", "--out", "/tmp/ts", "--experimental"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: { request in
+                action = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(action, .generateTS(outDir: "/tmp/ts", prettier: nil, experimental: true))
     }
 
     func testRunAsyncAppServerRejectsInvalidGeneratorFormsBeforeRunner() async {

@@ -410,13 +410,158 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             activeProfile: settings.activeProfile
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
-    case .generateTS,
-         .generateJSONSchema:
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: app-server protocol generators are not ported yet."
+    case let .generateTS(outDir, prettier, experimental):
+        return try runAppServerGenerator(
+            subcommand: "generate-ts",
+            arguments: buildGeneratorArguments(
+                outDir: outDir,
+                prettier: prettier,
+                experimental: experimental
+            )
+        )
+    case let .generateJSONSchema(outDir, experimental):
+        return try runAppServerGenerator(
+            subcommand: "generate-json-schema",
+            arguments: buildGeneratorArguments(outDir: outDir, experimental: experimental)
         )
     }
+}
+
+private func runAppServerGenerator(
+    subcommand: String,
+    arguments: [String]
+) throws -> CodexCLI.CommandExecutionResult {
+    guard let executable = resolveRustAppServerBinary() else {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 1,
+            stderrMessage: "codex-swift: app-server protocol generators require the Rust codex binary. Set CODEX_RUST_BINARY or run from a workspace checkout with ../codex-rs/target/debug/codex or ../codex/codex-rs/target/debug/codex."
+        )
+    }
+
+    let process = Process()
+    if executable.contains("/") {
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["app-server", subcommand] + arguments
+    } else {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [executable, "app-server", subcommand] + arguments
+    }
+
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    process.environment = ProcessInfo.processInfo.environment
+
+    do {
+        try process.run()
+    } catch {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 1,
+            stderrMessage: "codex-swift: failed to launch app-server generator command: \(error)"
+        )
+    }
+    process.waitUntilExit()
+
+    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    let stdout = String(decoding: stdoutData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    let stderr = String(decoding: stderrData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+
+    return CodexCLI.CommandExecutionResult(
+        exitCode: Int32(process.terminationStatus),
+        stdoutMessage: stdout.isEmpty ? nil : stdout,
+        stderrMessage: stderr.isEmpty ? nil : stderr
+    )
+}
+
+private func buildGeneratorArguments(
+    outDir: String,
+    prettier: String?,
+    experimental: Bool
+) -> [String] {
+    var arguments = ["--out", outDir]
+    if let prettier {
+        arguments += ["--prettier", prettier]
+    }
+    if experimental {
+        arguments.append("--experimental")
+    }
+    return arguments
+}
+
+private func buildGeneratorArguments(outDir: String, experimental: Bool) -> [String] {
+    if experimental {
+        return ["--out", outDir, "--experimental"]
+    }
+    return ["--out", outDir]
+}
+
+private func resolveRustAppServerBinary() -> String? {
+    if let configured = ProcessInfo.processInfo.environment["CODEX_RUST_BINARY"], !configured.isEmpty {
+        if isExecutableBinary(configured) {
+            return configured
+        }
+        return nil
+    }
+
+    if let candidate = resolveCodexRustFromMonorepo() {
+        return candidate
+    }
+
+    let currentExecutable = absoluteExecutablePath()
+    for candidate in pathExecutableCandidates("codex-rs") where candidate != currentExecutable {
+        if isExecutableBinary(candidate) {
+            return candidate
+        }
+    }
+
+    for candidate in pathExecutableCandidates("codex") where candidate != currentExecutable {
+        if isExecutableBinary(candidate) {
+            return candidate
+        }
+    }
+
+    return nil
+}
+
+private func resolveCodexRustFromMonorepo() -> String? {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let relativeCandidates = [
+        "../codex-rs/target/debug/codex",
+        "../codex/codex-rs/target/debug/codex"
+    ]
+    for relativeCandidate in relativeCandidates {
+        let candidate = cwd.appendingPathComponent(relativeCandidate).standardized
+        if isExecutableBinary(candidate.path) {
+            return candidate.path
+        }
+    }
+    return nil
+}
+
+private func pathExecutableCandidates(_ binaryName: String) -> [String] {
+    let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    return pathValue
+        .split(separator: ":", omittingEmptySubsequences: true)
+        .map { String($0) + "/" + binaryName }
+}
+
+private func isExecutableBinary(_ path: String) -> Bool {
+    let normalizedPath = path.hasPrefix("~") ? (path as NSString).expandingTildeInPath : path
+    return FileManager.default.fileExists(atPath: normalizedPath)
+        && FileManager.default.isExecutableFile(atPath: normalizedPath)
+}
+
+private func absoluteExecutablePath() -> String {
+    let executable = CommandLine.arguments.first ?? "codex"
+    if executable.hasPrefix("/") {
+        return URL(fileURLWithPath: executable).standardized.path
+    }
+    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent(executable)
+        .standardized
+        .path
 }
 
 private func mcpExecArguments(for toolCall: CodexMCPToolCall) -> [String] {
