@@ -578,6 +578,30 @@ public enum McpAuthStatusResolver {
         })
     }
 
+    public static func authStatuses(
+        for servers: [String: McpServerConfig],
+        codexHome: URL,
+        storeMode: OAuthCredentialsStoreMode,
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore(),
+        environment: [String: String],
+        discoveryTransport: McpOAuthDiscoveryTransport? = nil
+    ) async -> [String: McpAuthStatus] {
+        var statuses: [String: McpAuthStatus] = [:]
+        for name in servers.keys.sorted() {
+            guard let server = servers[name] else { continue }
+            statuses[name] = await authStatus(
+                name: name,
+                server: server,
+                codexHome: codexHome,
+                storeMode: storeMode,
+                keyringStore: keyringStore,
+                environment: environment,
+                discoveryTransport: discoveryTransport
+            )
+        }
+        return statuses
+    }
+
     public static func authStatus(for server: McpServerConfig) -> McpAuthStatus {
         switch server.transport {
         case .stdio:
@@ -609,6 +633,46 @@ public enum McpAuthStatusResolver {
                     mode: storeMode,
                     keyringStore: keyringStore
                 ) ? .oauth : .unsupported
+            } catch {
+                // Rust falls back to Unsupported when auth-status detection fails.
+                return .unsupported
+            }
+        }
+    }
+
+    public static func authStatus(
+        name: String,
+        server: McpServerConfig,
+        codexHome: URL,
+        storeMode: OAuthCredentialsStoreMode,
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore(),
+        environment: [String: String],
+        discoveryTransport: McpOAuthDiscoveryTransport? = nil
+    ) async -> McpAuthStatus {
+        switch server.transport {
+        case .stdio:
+            return .unsupported
+        case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
+            if bearerTokenEnvVar != nil {
+                return .bearerToken
+            }
+            do {
+                if try McpOAuthCredentialStore.hasOAuthTokens(
+                    serverName: name,
+                    url: url,
+                    codexHome: codexHome,
+                    mode: storeMode,
+                    keyringStore: keyringStore
+                ) {
+                    return .oauth
+                }
+                return try await McpOAuthDiscovery.supportsOAuthLogin(
+                    url: url,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    environment: environment,
+                    transport: discoveryTransport
+                ) ? .notLoggedIn : .unsupported
             } catch {
                 // Rust falls back to Unsupported when auth-status detection fails.
                 return .unsupported

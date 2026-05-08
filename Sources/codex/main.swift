@@ -179,10 +179,11 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
             stdoutMessage: try McpCommandFormatter.list(
                 servers: servers,
                 json: json,
-                authStatuses: McpAuthStatusResolver.authStatuses(
+                authStatuses: await McpAuthStatusResolver.authStatuses(
                     for: servers,
                     codexHome: codexHome,
-                    storeMode: settings.mcpOAuthCredentialsStoreMode
+                    storeMode: settings.mcpOAuthCredentialsStoreMode,
+                    environment: ProcessInfo.processInfo.environment
                 )
             )
         )
