@@ -56,9 +56,18 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data[0]["preview"] as? String, "Hello A")
         XCTAssertEqual(data[0]["modelProvider"] as? String, "openai")
         XCTAssertEqual(data[0]["createdAt"] as? Int, 1_735_819_200)
+        XCTAssertNotNil(data[0]["updatedAt"] as? Int)
+        XCTAssertEqual(data[0]["sessionId"] as? String, newestID)
+        XCTAssertEqual(data[0]["forkedFromId"] as? NSNull, NSNull())
+        XCTAssertEqual(data[0]["ephemeral"] as? Bool, false)
+        XCTAssertEqual((data[0]["status"] as? [String: Any])?["type"] as? String, "notLoaded")
         XCTAssertEqual(data[0]["cwd"] as? String, "/")
         XCTAssertEqual(data[0]["cliVersion"] as? String, "0.0.0")
         XCTAssertEqual(data[0]["source"] as? String, "cli")
+        XCTAssertEqual(data[0]["threadSource"] as? NSNull, NSNull())
+        XCTAssertEqual(data[0]["agentNickname"] as? NSNull, NSNull())
+        XCTAssertEqual(data[0]["agentRole"] as? NSNull, NSNull())
+        XCTAssertEqual(data[0]["name"] as? NSNull, NSNull())
         XCTAssertEqual((data[0]["turns"] as? [Any])?.count, 0)
     }
 
@@ -583,6 +592,113 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondContent[0]["text"] as? String, "Second turn")
         XCTAssertEqual(secondContent[1]["type"] as? String, "image")
         XCTAssertEqual(secondContent[1]["url"] as? String, "https://example.test/image.png")
+    }
+
+    func testThreadReadReturnsMetadataWithoutTurnsByDefault() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [.agentMessage(AgentMessageEvent(message: "Done"))]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertEqual(thread["id"] as? String, threadID)
+        XCTAssertEqual(thread["sessionId"] as? String, threadID)
+        XCTAssertEqual(thread["forkedFromId"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(thread["ephemeral"] as? Bool, false)
+        XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(thread["createdAt"] as? Int, 1_736_078_400)
+        XCTAssertEqual(thread["updatedAt"] as? Int, 1_736_078_400)
+        XCTAssertEqual((thread["status"] as? [String: Any])?["type"] as? String, "notLoaded")
+        XCTAssertEqual(thread["path"] as? String, rolloutPath)
+        XCTAssertEqual(thread["cwd"] as? String, "/")
+        XCTAssertEqual(thread["cliVersion"] as? String, "0.0.0")
+        XCTAssertEqual(thread["source"] as? String, "cli")
+        XCTAssertEqual(thread["threadSource"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["agentNickname"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["agentRole"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["gitInfo"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["name"] as? NSNull, NSNull())
+        XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
+    }
+
+    func testThreadReadCanIncludeTurns() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .agentMessage(AgentMessageEvent(message: "Done")),
+                .userMessage(UserMessageEvent(message: "Second turn")),
+                .turnAborted(TurnAbortedEvent(reason: .interrupted))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 2)
+        XCTAssertEqual(turns[0]["status"] as? String, "completed")
+        XCTAssertEqual(turns[1]["status"] as? String, "interrupted")
+        let firstItems = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(firstItems.map { $0["type"] as? String }, ["userMessage", "agentMessage"])
+        XCTAssertEqual(firstItems[1]["text"] as? String, "Done")
+    }
+
+    func testThreadReadRejectsInvalidThreadIDAndMissingRollout() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"not-a-uuid"}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidError["message"] as? String, "invalid thread id: Invalid conversation id: not-a-uuid")
+
+        let threadID = UUID().uuidString.lowercased()
+        let missing = try appServerResponse(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "thread not loaded: \(threadID)")
     }
 
     func testThreadResumeRebuildsImageGenerationEvents() throws {

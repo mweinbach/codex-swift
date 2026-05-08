@@ -542,6 +542,37 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func threadReadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        guard let rolloutPath = try RolloutListing.findConversationPathByIDString(
+            codexHome: configuration.codexHome,
+            idString: conversationID.description
+        ) else {
+            throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
+        }
+        let includeTurns = boolParam(params?["includeTurns"], defaultValue: false)
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let thread = try threadObject(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : []
+        )
+        return ["thread": thread]
+    }
+
     fileprivate static func resumeConversationResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1680,18 +1711,41 @@ public enum CodexAppServer {
         turns: [[String: Any]] = []
     ) throws -> [String: Any] {
         let summary = try RolloutSummary(path: item.path, defaultProvider: defaultProvider)
+        let updatedAt = item.updatedAt.map(unixSeconds) ?? summary.createdAtUnixSeconds
         return [
             "id": summary.id,
+            "sessionId": summary.id,
+            "forkedFromId": NSNull(),
             "preview": summary.preview,
+            "ephemeral": false,
             "modelProvider": summary.modelProvider,
             "createdAt": summary.createdAtUnixSeconds,
+            "updatedAt": updatedAt,
+            "status": ["type": "notLoaded"],
             "path": item.path,
             "cwd": summary.cwd,
             "cliVersion": summary.cliVersion,
             "source": appServerSource(summary.source),
+            "threadSource": NSNull(),
+            "agentNickname": NSNull(),
+            "agentRole": NSNull(),
             "gitInfo": summary.gitInfo ?? NSNull(),
+            "name": NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func unixSeconds(_ timestamp: String) -> Int {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: timestamp) {
+            return Int(date.timeIntervalSince1970)
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: timestamp) {
+            return Int(date.timeIntervalSince1970)
+        }
+        return 0
     }
 
     private static func buildTurnsFromRolloutEvents(at path: String) throws -> [[String: Any]] {
@@ -3331,6 +3385,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
+                    )
+                case "thread/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadReadResult(params: params, configuration: configuration)
                     )
                 case "thread/resume":
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
