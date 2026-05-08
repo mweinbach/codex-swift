@@ -1,0 +1,171 @@
+import CodexCLI
+import CodexCore
+import XCTest
+
+final class McpCLITests: XCTestCase {
+    func testRunAsyncMcpAddStdioDelegatesToRunnerWithEnvAndOverrides() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.McpCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c",
+                "model=\"gpt-5\"",
+                "mcp",
+                "add",
+                "docs",
+                "--env",
+                "TOKEN=secret",
+                "--",
+                "docs-server",
+                "--port",
+                "4000"
+            ],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            mcpRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "Added global MCP server 'docs'.")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["Added global MCP server 'docs'."])
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(
+            receivedRequest,
+            CodexCLI.McpCommandRequest(
+                action: .add(
+                    name: "docs",
+                    transport: .stdio(
+                        command: ["docs-server", "--port", "4000"],
+                        env: [CodexCLI.McpEnvPair(key: "TOKEN", value: "secret")]
+                    )
+                ),
+                configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5\""])
+            )
+        )
+    }
+
+    func testRunAsyncMcpAddStreamableHTTPDelegatesToRunner() async {
+        var receivedRequest: CodexCLI.McpCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "mcp",
+                "add",
+                "github",
+                "--url",
+                "https://example.com/mcp",
+                "--bearer-token-env-var",
+                "GITHUB_TOKEN"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            mcpRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(
+            receivedRequest?.action,
+            .add(
+                name: "github",
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "GITHUB_TOKEN"
+                )
+            )
+        )
+    }
+
+    func testRunAsyncMcpListGetRemoveLoginLogoutDelegatesToRunner() async {
+        var actions: [CodexCLI.McpCommandAction] = []
+
+        for arguments in [
+            ["mcp", "list", "--json"],
+            ["mcp", "get", "docs", "--json"],
+            ["mcp", "remove", "docs"],
+            ["mcp", "login", "github", "--scopes", "repo,user"],
+            ["mcp", "logout", "github"]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                mcpRunner: { request in
+                    actions.append(request.action)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(actions, [
+            .list(json: true),
+            .get(name: "docs", json: true),
+            .remove(name: "docs"),
+            .login(name: "github", scopes: ["repo", "user"]),
+            .logout(name: "github")
+        ])
+    }
+
+    func testRunAsyncMcpRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["mcp"],
+                "codex-swift: missing required subcommand for command 'mcp': list|get|add|remove|login|logout"
+            ),
+            (
+                ["mcp", "bogus"],
+                "codex-swift: unsupported mcp subcommand: bogus"
+            ),
+            (
+                ["mcp", "get"],
+                "codex-swift: missing required argument for command 'mcp get': <NAME>"
+            ),
+            (
+                ["mcp", "add", "docs"],
+                "codex-swift: missing required argument for command 'mcp add': <COMMAND>"
+            ),
+            (
+                ["mcp", "add", "docs", "--url", "https://example.com/mcp", "--", "echo"],
+                "codex-swift: exactly one of command or --url must be provided"
+            ),
+            (
+                ["mcp", "add", "docs", "--env", "BROKEN"],
+                "environment entries must be in KEY=VALUE form"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                mcpRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
+    func testRunAsyncMcpWithoutRunnerStillReportsUnimplemented() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["mcp", "list"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(exitCode, 78)
+        XCTAssertEqual(stderr, ["codex-swift: command 'mcp' is registered but its runtime port is not complete yet."])
+    }
+}

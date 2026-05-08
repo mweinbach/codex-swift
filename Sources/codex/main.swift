@@ -24,6 +24,7 @@ let exitCode = await cli.runAsync(
     featuresRunner: runFeaturesCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
+    mcpRunner: runMcpCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
     cloudRunner: runCloudCommand
 )
@@ -162,6 +163,92 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
         return CodexCLI.CommandExecutionResult(
             exitCode: 1,
             stderrMessage: "Windows sandbox is only available on Windows"
+        )
+    }
+}
+
+private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let codexHome = try CodexHome.find()
+
+    switch request.action {
+    case let .list(json):
+        let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try McpCommandFormatter.list(servers: servers, json: json)
+        )
+
+    case let .get(name, json):
+        let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
+        guard let server = servers[name] else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "No MCP server named '\(name)' found."
+            )
+        }
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try McpCommandFormatter.get(name: name, server: server, json: json)
+        )
+
+    case let .add(name, transport):
+        try McpServerName.validate(name)
+        var servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
+        let serverTransport: McpServerTransportConfig
+        switch transport {
+        case let .stdio(command, envPairs):
+            guard let commandBin = command.first else {
+                return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: "command is required")
+            }
+            let env = envPairs.isEmpty ? nil : Dictionary(uniqueKeysWithValues: envPairs.map { ($0.key, $0.value) })
+            serverTransport = .stdio(
+                command: commandBin,
+                args: Array(command.dropFirst()),
+                env: env,
+                envVars: [],
+                cwd: nil
+            )
+        case let .streamableHttp(url, bearerTokenEnvVar):
+            serverTransport = .streamableHttp(
+                url: url,
+                bearerTokenEnvVar: bearerTokenEnvVar,
+                httpHeaders: nil,
+                envHttpHeaders: nil
+            )
+        }
+        servers[name] = McpServerConfig(transport: serverTransport)
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: codexHome, servers: servers)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "Added global MCP server '\(name)'."
+        )
+
+    case let .remove(name):
+        try McpServerName.validate(name)
+        var servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
+        let removed = servers.removeValue(forKey: name) != nil
+        if removed {
+            try McpConfigStore.replaceGlobalMcpServers(codexHome: codexHome, servers: servers)
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 0,
+                stdoutMessage: "Removed global MCP server '\(name)'."
+            )
+        }
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "No MCP server named '\(name)' found."
+        )
+
+    case .login:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: mcp login runtime is not complete yet."
+        )
+
+    case .logout:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: mcp logout runtime is not complete yet."
         )
     }
 }

@@ -86,6 +86,40 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum McpCommandAction: Equatable, Sendable {
+        case list(json: Bool)
+        case get(name: String, json: Bool)
+        case add(name: String, transport: McpAddTransport)
+        case remove(name: String)
+        case login(name: String, scopes: [String])
+        case logout(name: String)
+    }
+
+    public enum McpAddTransport: Equatable, Sendable {
+        case stdio(command: [String], env: [McpEnvPair])
+        case streamableHttp(url: String, bearerTokenEnvVar: String?)
+    }
+
+    public struct McpEnvPair: Equatable, Sendable {
+        public let key: String
+        public let value: String
+
+        public init(key: String, value: String) {
+            self.key = key
+            self.value = value
+        }
+    }
+
+    public struct McpCommandRequest: Equatable, Sendable {
+        public let action: McpCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: McpCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct StdioToUDSCommandRequest: Equatable, Sendable {
         public let socketPath: String
 
@@ -129,6 +163,7 @@ public struct CodexCLI: Sendable {
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
     public typealias ExecPolicyCommandRunner = (ExecPolicyCommandRequest) async throws -> CommandExecutionResult
     public typealias SandboxCommandRunner = (SandboxCommandRequest) async throws -> CommandExecutionResult
+    public typealias McpCommandRunner = (McpCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
 
@@ -241,6 +276,7 @@ public struct CodexCLI: Sendable {
         featuresRunner: FeaturesCommandRunner? = nil,
         execPolicyRunner: ExecPolicyCommandRunner? = nil,
         sandboxRunner: SandboxCommandRunner? = nil,
+        mcpRunner: McpCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil
     ) async -> Int32 {
@@ -345,6 +381,29 @@ public struct CodexCLI: Sendable {
             case let .success(action):
                 do {
                     let result = try await sandboxRunner(SandboxCommandRequest(
+                        action: action,
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "mcp":
+            guard let mcpRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseMcpCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await mcpRunner(McpCommandRequest(
                         action: action,
                         configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                     ))
@@ -485,6 +544,9 @@ public struct CodexCLI: Sendable {
             "--attempts",
             "--env",
             "--branch",
+            "--url",
+            "--bearer-token-env-var",
+            "--scopes",
             "--rules",
             "-r"
         ].contains(argument)
@@ -729,6 +791,226 @@ public struct CodexCLI: Sendable {
         ))
     }
 
+    private func parseMcpCommandAction(_ arguments: [String]) -> ParseResult<McpCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'mcp': list|get|add|remove|login|logout", 64)
+        }
+
+        let rest = Array(arguments.dropFirst())
+        switch subcommand {
+        case "list":
+            return parseMcpList(rest)
+        case "get":
+            return parseMcpGet(rest)
+        case "add":
+            return parseMcpAdd(rest)
+        case "remove":
+            return parseMcpNameOnly(rest, subcommand: "remove").map { .remove(name: $0) }
+        case "login":
+            return parseMcpLogin(rest)
+        case "logout":
+            return parseMcpNameOnly(rest, subcommand: "logout").map { .logout(name: $0) }
+        default:
+            return .failure("codex-swift: unsupported mcp subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private func parseMcpList(_ arguments: [String]) -> ParseResult<McpCommandAction> {
+        var json = false
+        for argument in arguments {
+            if argument == "--json" {
+                json = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp list': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'mcp list': \(argument)", 64)
+        }
+        return .success(.list(json: json))
+    }
+
+    private func parseMcpGet(_ arguments: [String]) -> ParseResult<McpCommandAction> {
+        var name: String?
+        var json = false
+        for argument in arguments {
+            if argument == "--json" {
+                json = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp get': \(argument)", 64)
+            }
+            if name != nil {
+                return .failure("codex-swift: unexpected argument for command 'mcp get': \(argument)", 64)
+            }
+            name = argument
+        }
+        guard let name else {
+            return .failure("codex-swift: missing required argument for command 'mcp get': <NAME>", 64)
+        }
+        return .success(.get(name: name, json: json))
+    }
+
+    private func parseMcpAdd(_ arguments: [String]) -> ParseResult<McpCommandAction> {
+        guard let name = arguments.first, !name.hasPrefix("-") else {
+            return .failure("codex-swift: missing required argument for command 'mcp add': <NAME>", 64)
+        }
+
+        var env: [McpEnvPair] = []
+        var url: String?
+        var bearerTokenEnvVar: String?
+        var command: [String] = []
+        var index = 1
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                command.append(contentsOf: arguments.dropFirst(index + 1))
+                break
+            }
+            if argument == "--env" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for --env", 64)
+                }
+                switch parseMcpEnvPair(arguments[index + 1]) {
+                case let .success(pair):
+                    env.append(pair)
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--env=") {
+                switch parseMcpEnvPair(String(argument.dropFirst("--env=".count))) {
+                case let .success(pair):
+                    env.append(pair)
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 1
+                continue
+            }
+            if argument == "--url" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for --url", 64)
+                }
+                url = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--url=") {
+                url = String(argument.dropFirst("--url=".count))
+                index += 1
+                continue
+            }
+            if argument == "--bearer-token-env-var" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for --bearer-token-env-var", 64)
+                }
+                bearerTokenEnvVar = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--bearer-token-env-var=") {
+                bearerTokenEnvVar = String(argument.dropFirst("--bearer-token-env-var=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp add': \(argument)", 64)
+            }
+
+            command.append(argument)
+            command.append(contentsOf: arguments.dropFirst(index + 1))
+            break
+        }
+
+        if let url {
+            guard command.isEmpty else {
+                return .failure("codex-swift: exactly one of command or --url must be provided", 64)
+            }
+            guard env.isEmpty else {
+                return .failure("codex-swift: --env is only valid with stdio MCP servers", 64)
+            }
+            return .success(.add(name: name, transport: .streamableHttp(
+                url: url,
+                bearerTokenEnvVar: bearerTokenEnvVar
+            )))
+        }
+
+        guard bearerTokenEnvVar == nil else {
+            return .failure("codex-swift: --bearer-token-env-var requires --url", 64)
+        }
+        guard !command.isEmpty else {
+            return .failure("codex-swift: missing required argument for command 'mcp add': <COMMAND>", 64)
+        }
+        return .success(.add(name: name, transport: .stdio(command: command, env: env)))
+    }
+
+    private func parseMcpLogin(_ arguments: [String]) -> ParseResult<McpCommandAction> {
+        var name: String?
+        var scopes: [String] = []
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--scopes" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --scopes", 64)
+                }
+                scopes.append(contentsOf: value.split(separator: ",").map(String.init))
+                continue
+            }
+            if argument.hasPrefix("--scopes=") {
+                let value = String(argument.dropFirst("--scopes=".count))
+                scopes.append(contentsOf: value.split(separator: ",").map(String.init))
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp login': \(argument)", 64)
+            }
+            if name != nil {
+                return .failure("codex-swift: unexpected argument for command 'mcp login': \(argument)", 64)
+            }
+            name = argument
+        }
+
+        guard let name else {
+            return .failure("codex-swift: missing required argument for command 'mcp login': <NAME>", 64)
+        }
+        return .success(.login(name: name, scopes: scopes))
+    }
+
+    private func parseMcpNameOnly(_ arguments: [String], subcommand: String) -> ParseResult<String> {
+        var name: String?
+        for argument in arguments {
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'mcp \(subcommand)': \(argument)", 64)
+            }
+            if name != nil {
+                return .failure("codex-swift: unexpected argument for command 'mcp \(subcommand)': \(argument)", 64)
+            }
+            name = argument
+        }
+        guard let name else {
+            return .failure("codex-swift: missing required argument for command 'mcp \(subcommand)': <NAME>", 64)
+        }
+        return .success(name)
+    }
+
+    private func parseMcpEnvPair(_ value: String) -> ParseResult<McpEnvPair> {
+        guard let equalsIndex = value.firstIndex(of: "=") else {
+            return .failure("environment entries must be in KEY=VALUE form", 64)
+        }
+        let key = value[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            return .failure("environment entries must be in KEY=VALUE form", 64)
+        }
+        let rawValue = value[value.index(after: equalsIndex)...]
+        return .success(McpEnvPair(key: String(key), value: String(rawValue)))
+    }
+
     private func parseCloudCommandAction(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
         guard let subcommand = arguments.first else {
             return .failure("codex-swift: command 'cloud' TUI runtime is not complete yet.", 78)
@@ -915,4 +1197,13 @@ public struct CodexCLI: Sendable {
 private enum ParseResult<Success> {
     case success(Success)
     case failure(String, Int32)
+
+    func map<Next>(_ transform: (Success) -> Next) -> ParseResult<Next> {
+        switch self {
+        case let .success(value):
+            return .success(transform(value))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
 }
