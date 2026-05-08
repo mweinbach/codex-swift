@@ -240,6 +240,8 @@ Source baseline inspected for this scaffold:
   - `CODEX_RS_SSE_FIXTURE` environment flag helper and Responses SSE fixture stream reader for offline SSE fixture wiring
 - `codex-rs/core/src/git_info.rs`
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
+- `codex-rs/analytics/src/accepted_lines.rs` plus `codex-rs/git-utils/src/info.rs` remote URL helpers
+  - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, and canonical repository URL normalization
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
   - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`
@@ -287,7 +289,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
   - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
 - `codex-rs/protocol/src/protocol.rs` submission queue model
-  - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user input with bundled turn-context overrides, user turns, turn-context overrides, approvals, elicitation resolution, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
+  - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user input with bundled turn-context overrides, user turns, turn-context overrides, approvals with turn ids, elicitation resolution metadata, Guardian-denied retry approval, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
@@ -377,4 +379,5 @@ The executable is not functionally equivalent yet. Some commands have native run
 - persistent SQLite-backed local agent graph store adapter
 - hook discovery, execution, output parsing/spilling, and config-state integration
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
+- accepted-line analytics reducer/uploader integration with turn-diff retention and isolated analytics requests
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

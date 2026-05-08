@@ -51,24 +51,42 @@ public enum Op: Equatable, Sendable {
         items: [UserInput],
         cwd: String,
         approvalPolicy: AskForApproval,
+        approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy,
+        permissionProfile: JSONValue? = nil,
         model: String,
         effort: ReasoningEffort?,
-        summary: ReasoningSummary,
-        finalOutputJSONSchema: JSONValue?
+        summary: ReasoningSummary?,
+        serviceTier: JSONValue? = nil,
+        finalOutputJSONSchema: JSONValue?,
+        collaborationMode: JSONValue? = nil,
+        personality: JSONValue? = nil,
+        environments: [TurnEnvironmentSelection]? = nil
     )
     case interAgentCommunication(communication: InterAgentCommunication)
     case overrideTurnContext(
         cwd: String?,
         approvalPolicy: AskForApproval?,
+        approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy?,
+        permissionProfile: JSONValue? = nil,
+        windowsSandboxLevel: JSONValue? = nil,
         model: String?,
         effort: ReasoningEffortOverride?,
-        summary: ReasoningSummary?
+        summary: ReasoningSummary?,
+        serviceTier: JSONValue? = nil,
+        collaborationMode: JSONValue? = nil,
+        personality: JSONValue? = nil
     )
-    case execApproval(id: String, decision: ReviewDecision)
+    case execApproval(id: String, turnID: String? = nil, decision: ReviewDecision)
     case patchApproval(id: String, decision: ReviewDecision)
-    case resolveElicitation(serverName: String, requestID: RequestID, decision: ElicitationAction)
+    case resolveElicitation(
+        serverName: String,
+        requestID: RequestID,
+        decision: ElicitationAction,
+        content: JSONValue? = nil,
+        meta: JSONValue? = nil
+    )
     case userInputAnswer(id: String, response: RequestUserInputResponse)
     case requestPermissionsResponse(id: String, response: RequestPermissionsResponse)
     case dynamicToolResponse(id: String, response: DynamicToolResponse)
@@ -84,6 +102,7 @@ public enum Op: Equatable, Sendable {
     case threadRollback(numTurns: UInt32)
     case undo
     case review(reviewRequest: ReviewRequest)
+    case approveGuardianDeniedAction(event: JSONValue)
     case shutdown
     case runUserShellCommand(command: String)
     case listModels
@@ -93,11 +112,17 @@ public enum Op: Equatable, Sendable {
         case items
         case cwd
         case approvalPolicy = "approval_policy"
+        case approvalsReviewer = "approvals_reviewer"
         case sandboxPolicy = "sandbox_policy"
+        case permissionProfile = "permission_profile"
+        case windowsSandboxLevel = "windows_sandbox_level"
         case model
         case effort
         case summary
+        case serviceTier = "service_tier"
         case finalOutputJSONSchema = "final_output_json_schema"
+        case collaborationMode = "collaboration_mode"
+        case personality
         case environments
         case responsesAPIClientMetadata = "responsesapi_client_metadata"
         case outputModality = "output_modality"
@@ -108,9 +133,12 @@ public enum Op: Equatable, Sendable {
         case frame
         case communication
         case id
+        case turnID = "turn_id"
         case decision
         case serverName = "server_name"
         case requestID = "request_id"
+        case content
+        case meta
         case text
         case offset
         case logID = "log_id"
@@ -119,6 +147,7 @@ public enum Op: Equatable, Sendable {
         case mode
         case numTurns = "num_turns"
         case reviewRequest = "review_request"
+        case event
         case command
         case response
         case config
@@ -156,6 +185,7 @@ public enum Op: Equatable, Sendable {
         case threadRollback = "thread_rollback"
         case undo
         case review
+        case approveGuardianDeniedAction = "approve_guardian_denied_action"
         case shutdown
         case runUserShellCommand = "run_user_shell_command"
         case listModels = "list_models"
@@ -197,11 +227,17 @@ extension Op: Codable {
                 items: try container.decode([UserInput].self, forKey: .items),
                 cwd: try container.decode(String.self, forKey: .cwd),
                 approvalPolicy: try container.decode(AskForApproval.self, forKey: .approvalPolicy),
+                approvalsReviewer: try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer),
                 sandboxPolicy: try container.decode(SandboxPolicy.self, forKey: .sandboxPolicy),
+                permissionProfile: try Self.decodeNullableJSON(from: container, forKey: .permissionProfile),
                 model: try container.decode(String.self, forKey: .model),
                 effort: try container.decodeIfPresent(ReasoningEffort.self, forKey: .effort),
-                summary: try container.decode(ReasoningSummary.self, forKey: .summary),
-                finalOutputJSONSchema: try container.decodeIfPresent(JSONValue.self, forKey: .finalOutputJSONSchema)
+                summary: try container.decodeIfPresent(ReasoningSummary.self, forKey: .summary),
+                serviceTier: try Self.decodeNullableJSON(from: container, forKey: .serviceTier),
+                finalOutputJSONSchema: try container.decodeIfPresent(JSONValue.self, forKey: .finalOutputJSONSchema),
+                collaborationMode: try Self.decodeNullableJSON(from: container, forKey: .collaborationMode),
+                personality: try Self.decodeNullableJSON(from: container, forKey: .personality),
+                environments: try container.decodeIfPresent([TurnEnvironmentSelection].self, forKey: .environments)
             )
         case .interAgentCommunication:
             self = .interAgentCommunication(
@@ -211,14 +247,21 @@ extension Op: Codable {
             self = .overrideTurnContext(
                 cwd: try container.decodeIfPresent(String.self, forKey: .cwd),
                 approvalPolicy: try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy),
+                approvalsReviewer: try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer),
                 sandboxPolicy: try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy),
+                permissionProfile: try Self.decodeNullableJSON(from: container, forKey: .permissionProfile),
+                windowsSandboxLevel: try Self.decodeNullableJSON(from: container, forKey: .windowsSandboxLevel),
                 model: try container.decodeIfPresent(String.self, forKey: .model),
                 effort: try Self.decodeEffortOverride(from: container),
-                summary: try container.decodeIfPresent(ReasoningSummary.self, forKey: .summary)
+                summary: try container.decodeIfPresent(ReasoningSummary.self, forKey: .summary),
+                serviceTier: try Self.decodeNullableJSON(from: container, forKey: .serviceTier),
+                collaborationMode: try Self.decodeNullableJSON(from: container, forKey: .collaborationMode),
+                personality: try Self.decodeNullableJSON(from: container, forKey: .personality)
             )
         case .execApproval:
             self = .execApproval(
                 id: try container.decode(String.self, forKey: .id),
+                turnID: try container.decodeIfPresent(String.self, forKey: .turnID),
                 decision: try container.decode(ReviewDecision.self, forKey: .decision)
             )
         case .patchApproval:
@@ -230,7 +273,9 @@ extension Op: Codable {
             self = .resolveElicitation(
                 serverName: try container.decode(String.self, forKey: .serverName),
                 requestID: try container.decode(RequestID.self, forKey: .requestID),
-                decision: try container.decode(ElicitationAction.self, forKey: .decision)
+                decision: try container.decode(ElicitationAction.self, forKey: .decision),
+                content: try Self.decodeNullableJSON(from: container, forKey: .content),
+                meta: try Self.decodeNullableJSON(from: container, forKey: .meta)
             )
         case .userInputAnswer, .requestUserInputResponse:
             self = .userInputAnswer(
@@ -277,6 +322,8 @@ extension Op: Codable {
             self = .undo
         case .review:
             self = .review(reviewRequest: try container.decode(ReviewRequest.self, forKey: .reviewRequest))
+        case .approveGuardianDeniedAction:
+            self = .approveGuardianDeniedAction(event: try container.decode(JSONValue.self, forKey: .event))
         case .shutdown:
             self = .shutdown
         case .runUserShellCommand:
@@ -315,40 +362,83 @@ extension Op: Codable {
         case let .userInputWithTurnContext(params):
             try container.encode(OperationType.userInputWithTurnContext, forKey: .type)
             try params.encode(to: encoder)
-        case let .userTurn(items, cwd, approvalPolicy, sandboxPolicy, model, effort, summary, finalOutputJSONSchema):
+        case let .userTurn(
+            items,
+            cwd,
+            approvalPolicy,
+            approvalsReviewer,
+            sandboxPolicy,
+            permissionProfile,
+            model,
+            effort,
+            summary,
+            serviceTier,
+            finalOutputJSONSchema,
+            collaborationMode,
+            personality,
+            environments
+        ):
             try container.encode(OperationType.userTurn, forKey: .type)
             try container.encode(items, forKey: .items)
             try container.encode(cwd, forKey: .cwd)
             try container.encode(approvalPolicy, forKey: .approvalPolicy)
+            try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
             try container.encode(sandboxPolicy, forKey: .sandboxPolicy)
+            try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
             try container.encode(model, forKey: .model)
             try container.encodeIfPresent(effort, forKey: .effort)
-            try container.encode(summary, forKey: .summary)
+            try container.encodeIfPresent(summary, forKey: .summary)
+            try Self.encodeNullableJSON(serviceTier, into: &container, forKey: .serviceTier)
             try container.encode(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
+            try Self.encodeNullableJSON(collaborationMode, into: &container, forKey: .collaborationMode)
+            try Self.encodeNullableJSON(personality, into: &container, forKey: .personality)
+            try container.encodeIfPresent(environments, forKey: .environments)
         case let .interAgentCommunication(communication):
             try container.encode(OperationType.interAgentCommunication, forKey: .type)
             try container.encode(communication, forKey: .communication)
-        case let .overrideTurnContext(cwd, approvalPolicy, sandboxPolicy, model, effort, summary):
+        case let .overrideTurnContext(
+            cwd,
+            approvalPolicy,
+            approvalsReviewer,
+            sandboxPolicy,
+            permissionProfile,
+            windowsSandboxLevel,
+            model,
+            effort,
+            summary,
+            serviceTier,
+            collaborationMode,
+            personality
+        ):
             try container.encode(OperationType.overrideTurnContext, forKey: .type)
             try container.encodeIfPresent(cwd, forKey: .cwd)
             try container.encodeIfPresent(approvalPolicy, forKey: .approvalPolicy)
+            try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
             try container.encodeIfPresent(sandboxPolicy, forKey: .sandboxPolicy)
+            try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
+            try Self.encodeNullableJSON(windowsSandboxLevel, into: &container, forKey: .windowsSandboxLevel)
             try container.encodeIfPresent(model, forKey: .model)
             try Self.encode(effortOverride: effort, into: &container)
             try container.encodeIfPresent(summary, forKey: .summary)
-        case let .execApproval(id, decision):
+            try Self.encodeNullableJSON(serviceTier, into: &container, forKey: .serviceTier)
+            try Self.encodeNullableJSON(collaborationMode, into: &container, forKey: .collaborationMode)
+            try Self.encodeNullableJSON(personality, into: &container, forKey: .personality)
+        case let .execApproval(id, turnID, decision):
             try container.encode(OperationType.execApproval, forKey: .type)
             try container.encode(id, forKey: .id)
+            try container.encodeIfPresent(turnID, forKey: .turnID)
             try container.encode(decision, forKey: .decision)
         case let .patchApproval(id, decision):
             try container.encode(OperationType.patchApproval, forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(decision, forKey: .decision)
-        case let .resolveElicitation(serverName, requestID, decision):
+        case let .resolveElicitation(serverName, requestID, decision, content, meta):
             try container.encode(OperationType.resolveElicitation, forKey: .type)
             try container.encode(serverName, forKey: .serverName)
             try container.encode(requestID, forKey: .requestID)
             try container.encode(decision, forKey: .decision)
+            try Self.encodeNullableJSON(content, into: &container, forKey: .content)
+            try Self.encodeNullableJSON(meta, into: &container, forKey: .meta)
         case let .userInputAnswer(id, response):
             try container.encode(OperationType.userInputAnswer, forKey: .type)
             try container.encode(id, forKey: .id)
@@ -398,6 +488,9 @@ extension Op: Codable {
         case let .review(reviewRequest):
             try container.encode(OperationType.review, forKey: .type)
             try container.encode(reviewRequest, forKey: .reviewRequest)
+        case let .approveGuardianDeniedAction(event):
+            try container.encode(OperationType.approveGuardianDeniedAction, forKey: .type)
+            try container.encode(event, forKey: .event)
         case .shutdown:
             try container.encode(OperationType.shutdown, forKey: .type)
         case let .runUserShellCommand(command):
@@ -432,6 +525,34 @@ extension Op: Codable {
             try container.encodeNil(forKey: .effort)
         case let .set(effort):
             try container.encode(effort, forKey: .effort)
+        }
+    }
+
+    private static func decodeNullableJSON(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> JSONValue? {
+        guard container.contains(key) else {
+            return nil
+        }
+        if try container.decodeNil(forKey: key) {
+            return .null
+        }
+        return try container.decode(JSONValue.self, forKey: key)
+    }
+
+    private static func encodeNullableJSON(
+        _ value: JSONValue?,
+        into container: inout KeyedEncodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws {
+        guard let value else {
+            return
+        }
+        if value == .null {
+            try container.encodeNil(forKey: key)
+        } else {
+            try container.encode(value, forKey: key)
         }
     }
 }

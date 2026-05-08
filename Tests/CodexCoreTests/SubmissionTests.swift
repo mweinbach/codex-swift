@@ -103,19 +103,27 @@ final class SubmissionTests: XCTestCase {
             items: [.localImage(path: "/tmp/a.png")],
             cwd: "/repo",
             approvalPolicy: .never,
+            approvalsReviewer: .string("native"),
             sandboxPolicy: .workspaceWrite(
                 writableRoots: [try AbsolutePath(absolutePath: "/repo/out")],
                 networkAccess: true,
                 excludeTmpdirEnvVar: false,
                 excludeSlashTmp: true
             ),
+            permissionProfile: .object([
+                "kind": .string("workspace")
+            ]),
             model: "o3",
             effort: .high,
             summary: .detailed,
+            serviceTier: .null,
             finalOutputJSONSchema: .object([
                 "type": .string("object"),
                 "required": .array([.string("answer")])
-            ])
+            ]),
+            collaborationMode: .string("pair"),
+            personality: .string("direct"),
+            environments: [TurnEnvironmentSelection(environmentID: "env-2", cwd: "/repo")]
         )
 
         try XCTAssertJSONObjectEqual(op, [
@@ -128,6 +136,7 @@ final class SubmissionTests: XCTestCase {
             ],
             "cwd": "/repo",
             "approval_policy": "never",
+            "approvals_reviewer": "native",
             "sandbox_policy": [
                 "type": "workspace-write",
                 "writable_roots": ["/repo/out"],
@@ -135,12 +144,24 @@ final class SubmissionTests: XCTestCase {
                 "exclude_tmpdir_env_var": false,
                 "exclude_slash_tmp": true
             ],
+            "permission_profile": [
+                "kind": "workspace"
+            ],
             "model": "o3",
             "effort": "high",
             "summary": "detailed",
+            "service_tier": NSNull(),
             "final_output_json_schema": [
                 "type": "object",
                 "required": ["answer"]
+            ],
+            "collaboration_mode": "pair",
+            "personality": "direct",
+            "environments": [
+                [
+                    "environment_id": "env-2",
+                    "cwd": "/repo"
+                ]
             ]
         ])
 
@@ -235,20 +256,36 @@ final class SubmissionTests: XCTestCase {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: "/repo",
             approvalPolicy: .onFailure,
+            approvalsReviewer: .string("guardian"),
             sandboxPolicy: .readOnly,
+            permissionProfile: .object([
+                "type": .string("readonly")
+            ]),
+            windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
             effort: .set(.low),
-            summary: .concise
+            summary: .concise,
+            serviceTier: .null,
+            collaborationMode: .string("solo"),
+            personality: .string("codex")
         ), [
             "type": "override_turn_context",
             "cwd": "/repo",
             "approval_policy": "on-failure",
+            "approvals_reviewer": "guardian",
             "sandbox_policy": [
                 "type": "read-only"
             ],
+            "permission_profile": [
+                "type": "readonly"
+            ],
+            "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",
             "effort": "low",
-            "summary": "concise"
+            "summary": "concise",
+            "service_tier": NSNull(),
+            "collaboration_mode": "solo",
+            "personality": "codex"
         ])
 
         let clear = Op.overrideTurnContext(
@@ -269,9 +306,10 @@ final class SubmissionTests: XCTestCase {
     }
 
     func testApprovalAndElicitationOperationsWireShape() throws {
-        try XCTAssertJSONObjectEqual(Op.execApproval(id: "exec-1", decision: .approved), [
+        try XCTAssertJSONObjectEqual(Op.execApproval(id: "exec-1", turnID: "turn-1", decision: .approved), [
             "type": "exec_approval",
             "id": "exec-1",
+            "turn_id": "turn-1",
             "decision": "approved"
         ])
 
@@ -284,13 +322,57 @@ final class SubmissionTests: XCTestCase {
         try XCTAssertJSONObjectEqual(Op.resolveElicitation(
             serverName: "mcp",
             requestID: .integer(7),
-            decision: .accept
+            decision: .accept,
+            content: .object([
+                "answer": .string("yes")
+            ]),
+            meta: .null
         ), [
             "type": "resolve_elicitation",
             "server_name": "mcp",
             "request_id": 7,
-            "decision": "accept"
+            "decision": "accept",
+            "content": [
+                "answer": "yes"
+            ],
+            "meta": NSNull()
         ])
+    }
+
+    func testApproveGuardianDeniedActionWireShape() throws {
+        let op = Op.approveGuardianDeniedAction(event: .object([
+            "id": .string("guardian-1"),
+            "turn_id": .string("turn-1"),
+            "started_at_ms": .integer(1_234),
+            "status": .string("denied"),
+            "risk_level": .string("high"),
+            "action": .object([
+                "type": .string("command"),
+                "source": .string("shell"),
+                "command": .string("rm -rf build"),
+                "cwd": .string("/repo")
+            ])
+        ]))
+
+        try XCTAssertJSONObjectEqual(op, [
+            "type": "approve_guardian_denied_action",
+            "event": [
+                "id": "guardian-1",
+                "turn_id": "turn-1",
+                "started_at_ms": 1_234,
+                "status": "denied",
+                "risk_level": "high",
+                "action": [
+                    "type": "command",
+                    "source": "shell",
+                    "command": "rm -rf build",
+                    "cwd": "/repo"
+                ]
+            ]
+        ])
+
+        let data = try JSONEncoder().encode(op)
+        XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
     }
 
     func testHistorySkillsReviewAndShellOperationsWireShape() throws {
