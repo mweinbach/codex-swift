@@ -238,7 +238,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/ollama/src/url.rs` and `codex-rs/ollama/src/parser.rs`
   - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
 - `codex-rs/feedback/src/lib.rs`
-  - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, and temp-file save path
+  - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
 - `codex-rs/core/src/user_notification.rs`
   - agent-turn-complete notification payload wire shape, nullable last assistant message, notifier command argument construction, and fire-and-forget process invocation
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
@@ -297,7 +297,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - exec runtime event emission
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
-- Sentry feedback upload and rollout attachment plumbing
 - runtime Responses API tool orchestration
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
