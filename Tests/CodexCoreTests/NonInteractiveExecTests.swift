@@ -609,6 +609,28 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.stderrMessages.last, "Warning: no last agent message; wrote empty content to /tmp/last.txt")
     }
 
+    func testJSONLinesFailureUsesRustTurnFailedErrorShape() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [.failure(.quotaExceeded)],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 1)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 4)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects[2]["type"], .string("error"))
+        XCTAssertEqual(objects[2]["message"], .string("quota exceeded"))
+        XCTAssertEqual(objects[3]["type"], .string("turn.failed"))
+        guard case let .object(error)? = objects[3]["error"] else {
+            return XCTFail("expected Rust-shaped turn.failed error object")
+        }
+        XCTAssertEqual(error["message"], .string("quota exceeded"))
+    }
+
     private func jsonObject(_ line: String) throws -> [String: JSONValue] {
         let value = try JSONDecoder().decode(JSONValue.self, from: Data(line.utf8))
         guard case let .object(object) = value else {

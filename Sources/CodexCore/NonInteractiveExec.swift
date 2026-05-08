@@ -348,7 +348,10 @@ public enum NonInteractiveExec {
             if errors.isEmpty {
                 jsonLines.append(encodeJSONLine(TurnCompletedEvent(usage: JSONUsage(tokenUsage)), using: jsonEncoder))
             } else {
-                jsonLines.append(encodeJSONLine(TurnFailedEvent(error: errors.last ?? "unknown error"), using: jsonEncoder))
+                jsonLines.append(encodeJSONLine(
+                    TurnFailedEvent(error: ThreadErrorJSONEvent(message: errors.last ?? "unknown error")),
+                    using: jsonEncoder
+                ))
             }
         }
 
@@ -1371,7 +1374,11 @@ private struct TurnCompletedEvent: Encodable {
 
 private struct TurnFailedEvent: Encodable {
     let type = "turn.failed"
-    let error: String
+    let error: ThreadErrorJSONEvent
+}
+
+private struct ThreadErrorJSONEvent: Encodable {
+    let message: String
 }
 
 private struct ErrorJSONEvent: Encodable {
