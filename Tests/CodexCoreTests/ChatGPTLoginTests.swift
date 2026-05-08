@@ -126,7 +126,9 @@ final class ChatGPTLoginTests: XCTestCase {
             pkceGenerator: { PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge") }
         )
 
-        async let firstResult: Void = firstServer.waitUntilDone()
+        let firstTask = Task {
+            try await firstServer.waitUntilDone()
+        }
 
         let secondTemp = try LoginTemporaryDirectory()
         let secondServer = try ChatGPTLoginServer.start(
@@ -142,7 +144,7 @@ final class ChatGPTLoginTests: XCTestCase {
         )
         XCTAssertEqual(secondServer.actualPort, firstServer.actualPort)
 
-        await XCTAssertThrowsErrorAsync(try await firstResult) { error in
+        await XCTAssertThrowsErrorAsync(try await firstTask.value) { error in
             XCTAssertEqual(String(describing: error), "Login cancelled")
         }
 
@@ -262,5 +264,19 @@ private final class LoginTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ errorHandler: (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected expression to throw", file: file, line: line)
+    } catch {
+        errorHandler(error)
     }
 }
