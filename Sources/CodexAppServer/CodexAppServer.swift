@@ -2088,6 +2088,45 @@ public enum CodexAppServer {
         return processID
     }
 
+    fileprivate static func processWriteStdinResult(params: [String: Any]?) throws -> [String: Any] {
+        let processHandle = try processHandle(params: params)
+        let deltaBase64 = stringParam(params?["deltaBase64"])
+        let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
+        guard deltaBase64 != nil || closeStdin else {
+            throw AppServerError.invalidParams("process/writeStdin requires deltaBase64 or closeStdin")
+        }
+        if let deltaBase64, Data(base64Encoded: deltaBase64) == nil {
+            throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        }
+        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+    }
+
+    fileprivate static func processKillResult(params: [String: Any]?) throws -> [String: Any] {
+        let processHandle = try processHandle(params: params)
+        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+    }
+
+    fileprivate static func processResizePtyResult(params: [String: Any]?) throws -> [String: Any] {
+        let processHandle = try processHandle(params: params)
+        guard let size = params?["size"] as? [String: Any],
+              let rows = size["rows"] as? Int,
+              let cols = size["cols"] as? Int
+        else {
+            throw AppServerError.invalidParams("process/resizePty requires size rows and cols")
+        }
+        guard rows > 0, cols > 0 else {
+            throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
+        }
+        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+    }
+
+    private static func processHandle(params: [String: Any]?) throws -> String {
+        guard let processHandle = stringParam(params?["processHandle"]), !processHandle.isEmpty else {
+            throw AppServerError.invalidRequest("missing processHandle")
+        }
+        return processHandle
+    }
+
     fileprivate static func loginApiKeyResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -5383,6 +5422,21 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.commandExecTerminateResult(params: params)
+                    )
+                case "process/writeStdin":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.processWriteStdinResult(params: params)
+                    )
+                case "process/resizePty":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.processResizePtyResult(params: params)
+                    )
+                case "process/kill":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.processKillResult(params: params)
                     )
                 case "loginApiKey":
                     response = CodexAppServer.responseObject(
