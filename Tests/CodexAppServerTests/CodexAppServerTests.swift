@@ -168,6 +168,92 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
     }
 
+    func testReviewStartInlineRecordsReviewMarkerAndEmitsStartedNotification() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"review/start","params":{"threadId":"\#(threadID)","delivery":"inline","target":{"type":"commit","sha":"  1234567deadbeef  ","title":"  Tidy UI colors  "}}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(result["reviewThreadId"] as? String, threadID)
+        let turn = try XCTUnwrap(result["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        XCTAssertEqual(turn["status"] as? String, "inProgress")
+        XCTAssertEqual(turn["error"] as? NSNull, NSNull())
+        let items = try XCTUnwrap(turn["items"] as? [[String: Any]])
+        XCTAssertEqual(items[0]["id"] as? String, turnID)
+        let content = try XCTUnwrap(items[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["text"] as? String, "commit 1234567: Tidy UI colors")
+        XCTAssertEqual(messages[1]["method"] as? String, "turn/started")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(notificationParams["threadId"] as? String, threadID)
+
+        let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        let resumedItems = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(resumedItems[0]["type"] as? String, "enteredReviewMode")
+        XCTAssertEqual(resumedItems[0]["review"] as? String, "commit 1234567: Tidy UI colors")
+    }
+
+    func testReviewStartDetachedCreatesReviewThread() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"review/start","params":{"threadId":"\#(threadID)","delivery":"detached","target":{"type":"custom","instructions":"  inspect parser  "}}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 3)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let reviewThreadID = try XCTUnwrap(result["reviewThreadId"] as? String)
+        XCTAssertNotEqual(reviewThreadID, threadID)
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/started")
+        let threadParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let reviewThread = try XCTUnwrap(threadParams["thread"] as? [String: Any])
+        XCTAssertEqual(reviewThread["id"] as? String, reviewThreadID)
+        XCTAssertEqual(messages[2]["method"] as? String, "turn/started")
+        let turnParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual(turnParams["threadId"] as? String, reviewThreadID)
+
+        let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(reviewThreadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        let items = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(items[0]["review"] as? String, "inspect parser")
+    }
+
+    func testReviewStartRejectsEmptyTargets() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let branchError = try decode(processor.processLine(Data(#"{"id":2,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"baseBranch","branch":"   "}}}"#.utf8)))
+        XCTAssertEqual((branchError["error"] as? [String: Any])?["code"] as? Int, -32600)
+        XCTAssertEqual((branchError["error"] as? [String: Any])?["message"] as? String, "branch must not be empty")
+
+        let shaError = try decode(processor.processLine(Data(#"{"id":3,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"commit","sha":"\t"}}}"#.utf8)))
+        XCTAssertEqual((shaError["error"] as? [String: Any])?["code"] as? Int, -32600)
+        XCTAssertEqual((shaError["error"] as? [String: Any])?["message"] as? String, "sha must not be empty")
+
+        let customError = try decode(processor.processLine(Data(#"{"id":4,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"custom","instructions":"\n\n"}}}"#.utf8)))
+        XCTAssertEqual((customError["error"] as? [String: Any])?["code"] as? Int, -32600)
+        XCTAssertEqual((customError["error"] as? [String: Any])?["message"] as? String, "instructions must not be empty")
+    }
+
     func testThreadResumeReturnsThreadWithRebuiltTurns() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

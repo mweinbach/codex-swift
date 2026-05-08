@@ -548,6 +548,66 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func reviewStartResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerReviewStartOutcome {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let review = try reviewRequestFromTarget(params?["target"])
+        let delivery = stringParam(params?["delivery"]) ?? "inline"
+        guard delivery == "inline" || delivery == "detached" else {
+            throw AppServerError.invalidRequest("unsupported review delivery: \(delivery)")
+        }
+
+        let turnID = UUID().uuidString.lowercased()
+        let turn = reviewTurn(id: turnID, displayText: review.displayText)
+        let reviewThreadID: String
+        var startedThread: [String: Any]?
+        if delivery == "detached" {
+            let reviewConversationID = ConversationId()
+            let recorder = try RolloutRecorder.create(
+                codexHome: configuration.codexHome,
+                cwd: URL(fileURLWithPath: summary.cwd, isDirectory: true),
+                conversationID: reviewConversationID,
+                instructions: nil,
+                source: .mcp,
+                originator: "codex_app_server",
+                cliVersion: configuration.version,
+                modelProvider: summary.modelProvider
+            )
+            try recorder.recordItems([
+                .eventMsg(.enteredReviewMode(review.request))
+            ])
+            try recorder.shutdown()
+            reviewThreadID = reviewConversationID.description
+            let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
+            startedThread = try threadObject(for: item, defaultProvider: configuration.defaultModelProvider)
+        } else {
+            let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+            try recorder.recordItems([
+                .eventMsg(.enteredReviewMode(review.request))
+            ])
+            try recorder.shutdown()
+            reviewThreadID = threadID
+        }
+
+        let result: [String: Any] = [
+            "turn": turn,
+            "reviewThreadId": reviewThreadID
+        ]
+        return AppServerReviewStartOutcome(result: result, startedThread: startedThread)
+    }
+
     fileprivate static func threadArchiveResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -785,6 +845,28 @@ public enum CodexAppServer {
                     "error": NSNull()
                 ]
             ]
+        ]
+    }
+
+    private static func reviewTurn(id: String, displayText: String) -> [String: Any] {
+        let items: [[String: Any]]
+        if displayText.isEmpty {
+            items = []
+        } else {
+            items = [[
+                "type": "userMessage",
+                "id": id,
+                "content": [[
+                    "type": "text",
+                    "text": displayText
+                ]]
+            ]]
+        }
+        return [
+            "id": id,
+            "items": items,
+            "status": "inProgress",
+            "error": NSNull()
         ]
     }
 
@@ -1562,6 +1644,46 @@ public enum CodexAppServer {
             texts.joined(),
             images.isEmpty ? nil : images
         )
+    }
+
+    private static func reviewRequestFromTarget(_ value: Any?) throws -> (request: ReviewRequest, displayText: String) {
+        guard let target = value as? [String: Any],
+              let type = stringParam(target["type"])
+        else {
+            throw AppServerError.invalidRequest("missing review target")
+        }
+
+        let reviewTarget: ReviewTarget
+        switch type {
+        case "uncommittedChanges":
+            reviewTarget = .uncommittedChanges
+        case "baseBranch":
+            let branch = stringParam(target["branch"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !branch.isEmpty else {
+                throw AppServerError.invalidRequest("branch must not be empty")
+            }
+            reviewTarget = .baseBranch(branch: branch)
+        case "commit":
+            let sha = stringParam(target["sha"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !sha.isEmpty else {
+                throw AppServerError.invalidRequest("sha must not be empty")
+            }
+            let trimmedTitle = stringParam(target["title"])?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = trimmedTitle?.isEmpty == true ? nil : trimmedTitle
+            reviewTarget = .commit(sha: sha, title: title)
+        case "custom":
+            let instructions = stringParam(target["instructions"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !instructions.isEmpty else {
+                throw AppServerError.invalidRequest("instructions must not be empty")
+            }
+            reviewTarget = .custom(instructions: instructions)
+        default:
+            throw AppServerError.invalidRequest("unsupported review target: \(type)")
+        }
+
+        let hint = ReviewPrompts.userFacingHint(target: reviewTarget)
+        return (ReviewRequest(target: reviewTarget, userFacingHint: hint), hint)
     }
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
@@ -2680,6 +2802,11 @@ private struct ConfigWriteEdit {
     let mergeStrategy: String
 }
 
+fileprivate struct AppServerReviewStartOutcome {
+    let result: [String: Any]
+    let startedThread: [String: Any]?
+}
+
 final class CodexAppServerMessageProcessor {
     private var initialized = false
     private var userAgent: String
@@ -2753,6 +2880,16 @@ final class CodexAppServerMessageProcessor {
                             turnID: turnID,
                             status: "interrupted"
                         ))
+                    }
+                case "review/start":
+                    let outcome = try CodexAppServer.reviewStartResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: outcome.result)
+                    if let thread = outcome.startedThread {
+                        notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
+                    }
+                    if let reviewThreadID = outcome.result["reviewThreadId"] as? String,
+                       let turn = outcome.result["turn"] as? [String: Any] {
+                        notifications.append(CodexAppServer.turnStartedNotification(threadID: reviewThreadID, turn: turn))
                     }
                 case "thread/archive":
                     response = CodexAppServer.responseObject(
@@ -2971,6 +3108,23 @@ private struct AppServerThreadHistoryBuilder {
             }
             ensureTurn()
             appendReasoning(summary: nil, content: payload.text)
+        case let .enteredReviewMode(request):
+            finishCurrentTurn()
+            startTurn()
+            let review = request.userFacingHint ?? ReviewPrompts.userFacingHint(target: request.target)
+            currentItems.append([
+                "type": "enteredReviewMode",
+                "id": nextItemID(),
+                "review": review
+            ])
+        case let .exitedReviewMode(event):
+            ensureTurn()
+            let review = event.reviewOutput.map(ReviewFormat.renderReviewOutputText) ?? ReviewFormat.fallbackMessage
+            currentItems.append([
+                "type": "exitedReviewMode",
+                "id": nextItemID(),
+                "review": review
+            ])
         case .turnAborted:
             guard currentTurn != nil else {
                 return
