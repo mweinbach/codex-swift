@@ -43,4 +43,15 @@ final class CodexCLITests: XCTestCase {
     func testVersionMatchesWorkspaceVersion() {
         XCTAssertEqual(CodexCLI().renderVersion(), "codex 0.0.0")
     }
+
+    func testInvocationSkipsOptionValuesBeforeCommand() {
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["--model", "gpt-5.4", "exec"]),
+            .command(CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively."))
+        )
+    }
+
+    func testPromptWithoutSubcommandIsInteractiveInvocation() {
+        XCTAssertEqual(CodexCLI().parseInvocation(arguments: ["hello codex"]), .interactive(prompt: "hello codex"))
+    }
 }

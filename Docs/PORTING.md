@@ -31,6 +31,14 @@ Source baseline inspected for this scaffold:
   - slash command names, presentation order, descriptions, and task availability
 - `codex-rs/cli/src/main.rs`
   - top-level command registry, visible aliases, hidden command marking, version
+- `codex-rs/common/src/approval_mode_cli_arg.rs`
+  - approval CLI argument names and protocol mapping
+- `codex-rs/common/src/sandbox_mode_cli_arg.rs`
+  - sandbox CLI argument names and protocol mapping
+- `codex-rs/common/src/config_override.rs`
+  - `-c key=value` parsing, TOML-like literal fallback, and dotted-path application
+- `codex-rs/core/src/features.rs`
+  - known feature keys used by `--enable` and `--disable`
 
 ## Known Gaps
 
