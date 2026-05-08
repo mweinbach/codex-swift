@@ -169,7 +169,7 @@ public struct PrefixRule: Equatable, Sendable, CustomStringConvertible {
     }
 }
 
-public enum RuleMatch: Equatable, Sendable {
+public enum RuleMatch: Equatable, Sendable, Encodable {
     case prefixRuleMatch(matchedPrefix: [String], decision: ExecPolicyDecision)
     case heuristicsRuleMatch(command: [String], decision: ExecPolicyDecision)
 
@@ -186,6 +186,41 @@ public enum RuleMatch: Equatable, Sendable {
             return true
         case .heuristicsRuleMatch:
             return false
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case prefixRuleMatch
+        case heuristicsRuleMatch
+    }
+
+    private enum PrefixRuleMatchCodingKeys: String, CodingKey {
+        case matchedPrefix
+        case decision
+    }
+
+    private enum HeuristicsRuleMatchCodingKeys: String, CodingKey {
+        case command
+        case decision
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .prefixRuleMatch(matchedPrefix, decision):
+            var nested = container.nestedContainer(
+                keyedBy: PrefixRuleMatchCodingKeys.self,
+                forKey: .prefixRuleMatch
+            )
+            try nested.encode(matchedPrefix, forKey: .matchedPrefix)
+            try nested.encode(decision, forKey: .decision)
+        case let .heuristicsRuleMatch(command, decision):
+            var nested = container.nestedContainer(
+                keyedBy: HeuristicsRuleMatchCodingKeys.self,
+                forKey: .heuristicsRuleMatch
+            )
+            try nested.encode(command, forKey: .command)
+            try nested.encode(decision, forKey: .decision)
         }
     }
 }

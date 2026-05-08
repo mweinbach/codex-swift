@@ -22,6 +22,7 @@ let exitCode = await cli.runAsync(
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
+    execPolicyRunner: runExecPolicyCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
     cloudRunner: runCloudCommand
 )
@@ -119,6 +120,21 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
             "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
         }
         .joined(separator: "\n")
+}
+
+private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    switch request.action {
+    case let .check(rules, pretty, command):
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let ruleURLs = rules.map { path -> URL in
+            if path.hasPrefix("/") {
+                return URL(fileURLWithPath: path)
+            }
+            return cwd.appendingPathComponent(path)
+        }
+        let output = try ExecPolicyCheck.run(rulePaths: ruleURLs, command: command, pretty: pretty)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
 }
 
 private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

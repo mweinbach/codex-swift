@@ -58,6 +58,18 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum ExecPolicyCommandAction: Equatable, Sendable {
+        case check(rules: [String], pretty: Bool, command: [String])
+    }
+
+    public struct ExecPolicyCommandRequest: Equatable, Sendable {
+        public let action: ExecPolicyCommandAction
+
+        public init(action: ExecPolicyCommandAction) {
+            self.action = action
+        }
+    }
+
     public struct StdioToUDSCommandRequest: Equatable, Sendable {
         public let socketPath: String
 
@@ -99,6 +111,7 @@ public struct CodexCLI: Sendable {
     public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
+    public typealias ExecPolicyCommandRunner = (ExecPolicyCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
 
@@ -209,6 +222,7 @@ public struct CodexCLI: Sendable {
         loginRunner: LoginCommandRunner? = nil,
         logoutRunner: LogoutCommandRunner? = nil,
         featuresRunner: FeaturesCommandRunner? = nil,
+        execPolicyRunner: ExecPolicyCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil
     ) async -> Int32 {
@@ -282,6 +296,26 @@ public struct CodexCLI: Sendable {
             } catch {
                 stderr(describe(error))
                 return 1
+            }
+        case let .command(spec, _) where spec.name == "execpolicy":
+            guard let execPolicyRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseExecPolicyCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await execPolicyRunner(ExecPolicyCommandRequest(action: action))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
             }
         case let .command(spec, commandArguments) where spec.name == "stdio-to-uds":
             guard let stdioToUDSRunner else {
@@ -409,7 +443,9 @@ public struct CodexCLI: Sendable {
             "--attempt",
             "--attempts",
             "--env",
-            "--branch"
+            "--branch",
+            "--rules",
+            "-r"
         ].contains(argument)
     }
 
@@ -498,6 +534,66 @@ public struct CodexCLI: Sendable {
 
     private func usesDeprecatedAPIKeyFlag(_ arguments: [String]) -> Bool {
         arguments.contains("--api-key") || arguments.contains { $0.hasPrefix("--api-key=") }
+    }
+
+    private func parseExecPolicyCommandAction(_ arguments: [String]) -> ParseResult<ExecPolicyCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'execpolicy': check", 64)
+        }
+        guard subcommand == "check" else {
+            return .failure("codex-swift: unsupported execpolicy subcommand: \(subcommand)", 64)
+        }
+        return parseExecPolicyCheck(Array(arguments.dropFirst()))
+    }
+
+    private func parseExecPolicyCheck(_ arguments: [String]) -> ParseResult<ExecPolicyCommandAction> {
+        var rules: [String] = []
+        var pretty = false
+        var command: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                command.append(contentsOf: arguments.dropFirst(index + 1))
+                break
+            }
+            if argument == "--rules" || argument == "-r" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                rules.append(arguments[index + 1])
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--rules=") {
+                rules.append(String(argument.dropFirst("--rules=".count)))
+                index += 1
+                continue
+            }
+            if argument == "--pretty" {
+                pretty = true
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-r"), argument.count > 2, !argument.hasPrefix("--") {
+                rules.append(String(argument.dropFirst(2)))
+                index += 1
+                continue
+            }
+
+            command.append(argument)
+            command.append(contentsOf: arguments.dropFirst(index + 1))
+            break
+        }
+
+        guard !rules.isEmpty else {
+            return .failure("codex-swift: missing required option for command 'execpolicy check': --rules <PATH>", 64)
+        }
+        guard !command.isEmpty else {
+            return .failure("codex-swift: missing required argument for command 'execpolicy check': <COMMAND>", 64)
+        }
+        return .success(.check(rules: rules, pretty: pretty, command: command))
     }
 
     private func parseCloudCommandAction(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
