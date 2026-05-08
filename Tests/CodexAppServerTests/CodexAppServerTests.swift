@@ -627,6 +627,53 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testFuzzyFileSearchReturnsMatchesWithIndices() throws {
+        let codexHome = try TemporaryDirectory()
+        let root = try TemporaryDirectory()
+        try "x".write(to: root.url.appendingPathComponent("abc"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.url.appendingPathComponent("abcde"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.url.appendingPathComponent("abexy"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.url.appendingPathComponent("zzz.txt"), atomically: true, encoding: .utf8)
+        let subdir = root.url.appendingPathComponent("sub", isDirectory: true)
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try "x".write(to: subdir.appendingPathComponent("abce"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fuzzyFileSearch","params":{"query":"abe","roots":["\#(root.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let files = try XCTUnwrap(result["files"] as? [[String: Any]])
+        XCTAssertEqual(files.map { $0["path"] as? String }, ["abexy", "abcde", "sub/abce"])
+        XCTAssertEqual(files[0]["root"] as? String, root.url.path)
+        XCTAssertEqual(files[0]["file_name"] as? String, "abexy")
+        XCTAssertEqual(files[0]["indices"] as? [Int], [0, 1, 2])
+        XCTAssertEqual(files[1]["indices"] as? [Int], [0, 1, 4])
+        XCTAssertEqual(files[2]["indices"] as? [Int], [4, 5, 7])
+    }
+
+    func testFuzzyFileSearchEmptyQueryReturnsNoFilesAndAcceptsCancellationToken() throws {
+        let codexHome = try TemporaryDirectory()
+        let root = try TemporaryDirectory()
+        try "x".write(to: root.url.appendingPathComponent("alpha.txt"), atomically: true, encoding: .utf8)
+
+        let empty = try appServerResponse(
+            #"{"id":1,"method":"fuzzyFileSearch","params":{"query":"","roots":["\#(root.url.path)"],"cancellationToken":"token"}}"#,
+            codexHome: codexHome.url
+        )
+        let emptyResult = try XCTUnwrap(empty["result"] as? [String: Any])
+        XCTAssertEqual((emptyResult["files"] as? [Any])?.count, 0)
+
+        let response = try appServerResponse(
+            #"{"id":2,"method":"fuzzyFileSearch","params":{"query":"alp","roots":["\#(root.url.path)"],"cancellationToken":"token"}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let files = try XCTUnwrap(result["files"] as? [[String: Any]])
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
+    }
+
     func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

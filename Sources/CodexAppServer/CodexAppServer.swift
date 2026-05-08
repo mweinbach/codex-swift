@@ -35,6 +35,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
 public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
+    private static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
 
     public static func run(
@@ -189,6 +190,29 @@ public enum CodexAppServer {
             "sha": state.sha,
             "diff": state.diff
         ]
+    }
+
+    fileprivate static func fuzzyFileSearchResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let query = stringParam(params?["query"]) else {
+            throw AppServerError.invalidRequest("missing query")
+        }
+        guard !query.isEmpty else {
+            return ["files": []]
+        }
+        let roots = stringArrayParam(params?["roots"]) ?? []
+        let files = roots.flatMap { root in
+            fuzzyFileSearch(query: query, root: root)
+                .prefix(fuzzyFileSearchLimitPerRoot)
+        }
+        .sorted { lhs, rhs in
+            let lhsScore = lhs["score"] as? Int ?? 0
+            let rhsScore = rhs["score"] as? Int ?? 0
+            if lhsScore != rhsScore {
+                return lhsScore > rhsScore
+            }
+            return (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
+        }
+        return ["files": files]
     }
 
     fileprivate static func loginApiKeyResult(
@@ -519,6 +543,88 @@ public enum CodexAppServer {
             "defaultReasoningEffort": preset.defaultReasoningEffort.rawValue,
             "isDefault": preset.isDefault
         ]
+    }
+
+    private static func fuzzyFileSearch(query: String, root: String) -> [[String: Any]] {
+        let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var results: [[String: Any]] = []
+        while let fileURL = enumerator.nextObject() as? URL {
+            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                continue
+            }
+            let path = relativePath(fileURL: fileURL.standardizedFileURL, rootURL: rootURL)
+            guard let indices = fuzzyMatchIndices(query: query, candidate: path) else {
+                continue
+            }
+            results.append([
+                "root": root,
+                "path": path,
+                "file_name": fileName(fromRelativePath: path),
+                "score": fuzzyScore(candidate: path, indices: indices),
+                "indices": indices
+            ])
+        }
+
+        return results.sorted { lhs, rhs in
+            let lhsScore = lhs["score"] as? Int ?? 0
+            let rhsScore = rhs["score"] as? Int ?? 0
+            if lhsScore != rhsScore {
+                return lhsScore > rhsScore
+            }
+            return (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
+        }
+    }
+
+    private static func fuzzyMatchIndices(query: String, candidate: String) -> [Int]? {
+        var indices: [Int] = []
+        var searchStart = candidate.startIndex
+        for needle in query.lowercased() {
+            var found: String.Index?
+            var index = searchStart
+            while index < candidate.endIndex {
+                if Character(String(candidate[index]).lowercased()) == needle {
+                    found = index
+                    break
+                }
+                index = candidate.index(after: index)
+            }
+            guard let found else {
+                return nil
+            }
+            indices.append(candidate.distance(from: candidate.startIndex, to: found))
+            searchStart = candidate.index(after: found)
+        }
+        return indices
+    }
+
+    private static func fuzzyScore(candidate: String, indices: [Int]) -> Int {
+        guard let first = indices.first, let last = indices.last else {
+            return 0
+        }
+        let span = last - first + 1
+        let gaps = max(0, span - indices.count)
+        let basenameBonus = first == 0 || candidate[candidate.index(candidate.startIndex, offsetBy: first - 1)] == "/" ? 12 : 0
+        return max(1, 100 + basenameBonus - candidate.count * 2 - gaps * 7 - first)
+    }
+
+    private static func relativePath(fileURL: URL, rootURL: URL) -> String {
+        let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
+        if fileURL.path.hasPrefix(rootPath) {
+            return String(fileURL.path.dropFirst(rootPath.count))
+        }
+        return fileURL.lastPathComponent
+    }
+
+    private static func fileName(fromRelativePath path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? path
     }
 
     private static func layerObject(_ layer: ConfigLayerEntry) -> [String: Any] {
@@ -996,6 +1102,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.gitDiffToRemoteResult(params: params)
+                    )
+                case "fuzzyFileSearch":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.fuzzyFileSearchResult(params: params)
                     )
                 case "loginApiKey":
                     response = CodexAppServer.responseObject(
