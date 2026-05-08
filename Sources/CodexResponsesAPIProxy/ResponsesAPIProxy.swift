@@ -317,12 +317,14 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
                 return
             }
 
-            switch forward(request: request, upstreamURL: upstreamURL, hostHeader: hostHeader, authHeader: authHeader) {
-            case let .success(response):
-                sendResponse(fd: fd, status: response.statusCode, headers: response.headers, body: response.body)
-            case let .failure(error):
+            switch forward(request: request, upstreamURL: upstreamURL, hostHeader: hostHeader, authHeader: authHeader, downstreamFD: fd) {
+            case .success:
+                break
+            case let .failure(error, responseStarted):
                 fputs("forwarding error: \(error)\n", Darwin.stderr)
-                sendResponse(fd: fd, status: 502, headers: [], body: Data())
+                if !responseStarted {
+                    sendResponse(fd: fd, status: 502, headers: [], body: Data())
+                }
             }
         } catch {
             fputs("forwarding error: \(error)\n", Darwin.stderr)
@@ -417,8 +419,9 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         request: ProxyHTTPRequest,
         upstreamURL: URL,
         hostHeader: String,
-        authHeader: String
-    ) -> Result<ProxyHTTPResponse, Error> {
+        authHeader: String,
+        downstreamFD: Int32
+    ) -> ProxyForwardResult {
         var upstreamRequest = URLRequest(url: upstreamURL)
         upstreamRequest.httpMethod = "POST"
         upstreamRequest.httpBody = request.body
@@ -435,26 +438,21 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         upstreamRequest.setValue(hostHeader, forHTTPHeaderField: "host")
 
         let semaphore = DispatchSemaphore(value: 0)
-        let box = ProxyForwardResultBox()
-        let task = URLSession.shared.dataTask(with: upstreamRequest) { data, response, error in
-            if let error {
-                box.set(.failure(error))
-            } else {
-                let httpResponse = response as? HTTPURLResponse
-                box.set(.success(ProxyHTTPResponse(
-                    statusCode: httpResponse?.statusCode ?? 502,
-                    headers: filteredResponseHeaders(httpResponse),
-                    body: data ?? Data()
-                )))
-            }
-            semaphore.signal()
-        }
+        let delegate = ProxyStreamingForwarder(fd: downstreamFD, completion: semaphore)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = .infinity
+        configuration.timeoutIntervalForResource = .infinity
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
+        let task = session.dataTask(with: upstreamRequest)
         task.resume()
         semaphore.wait()
-        return box.result() ?? .failure(ResponsesAPIProxyError.serverStoppedUnexpectedly)
+        session.invalidateAndCancel()
+        return delegate.result ?? .failure(ResponsesAPIProxyError.serverStoppedUnexpectedly, responseStarted: delegate.responseStarted)
     }
 
-    private static func filteredResponseHeaders(_ response: HTTPURLResponse?) -> [(String, String)] {
+    fileprivate static func filteredResponseHeaders(_ response: HTTPURLResponse?) -> [(String, String)] {
         guard let response else {
             return []
         }
@@ -471,20 +469,35 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
     }
 
     private static func sendResponse(fd: Int32, status: Int, headers: [(String, String)], body: Data) {
+        guard sendResponseHead(fd: fd, status: status, headers: headers, contentLength: body.count) else {
+            return
+        }
+        _ = sendAll(fd: fd, data: body)
+    }
+
+    fileprivate static func sendResponseHead(
+        fd: Int32,
+        status: Int,
+        headers: [(String, String)],
+        contentLength: Int?
+    ) -> Bool {
         var response = Data()
         response.append(Data("HTTP/1.1 \(status) \(reasonPhrase(for: status))\r\n".utf8))
         for (name, value) in headers {
             response.append(Data("\(name): \(value)\r\n".utf8))
         }
-        response.append(Data("Content-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8))
-        response.append(body)
-        sendAll(fd: fd, data: response)
+        if let contentLength {
+            response.append(Data("Content-Length: \(contentLength)\r\n".utf8))
+        }
+        response.append(Data("Connection: close\r\n\r\n".utf8))
+        return sendAll(fd: fd, data: response)
     }
 
-    private static func sendAll(fd: Int32, data: Data) {
+    @discardableResult
+    fileprivate static func sendAll(fd: Int32, data: Data) -> Bool {
         data.withUnsafeBytes { rawBuffer in
             guard var pointer = rawBuffer.baseAddress else {
-                return
+                return true
             }
             var remaining = rawBuffer.count
             while remaining > 0 {
@@ -493,11 +506,12 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
                     if errno == EINTR {
                         continue
                     }
-                    return
+                    return false
                 }
                 pointer = pointer.advanced(by: sent)
                 remaining -= sent
             }
+            return true
         }
     }
 
@@ -522,26 +536,96 @@ private struct ProxyHTTPRequest {
     let body: Data
 }
 
-private struct ProxyHTTPResponse {
-    let statusCode: Int
-    let headers: [(String, String)]
-    let body: Data
+private enum ProxyForwardResult {
+    case success
+    case failure(Error, responseStarted: Bool)
 }
 
-private final class ProxyForwardResultBox: @unchecked Sendable {
+private final class ProxyStreamingForwarder: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let fd: Int32
+    private let completion: DispatchSemaphore
     private let lock = NSLock()
-    private var value: Result<ProxyHTTPResponse, Error>?
+    private(set) var result: ProxyForwardResult?
+    private(set) var responseStarted = false
+    private var writeFailed = false
 
-    func set(_ result: Result<ProxyHTTPResponse, Error>) {
+    init(fd: Int32, completion: DispatchSemaphore) {
+        self.fd = fd
+        self.completion = completion
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            finish(.failure(URLError(.badServerResponse), responseStarted: false))
+            completionHandler(.cancel)
+            return
+        }
+
+        let contentLength = httpResponse.expectedContentLength >= 0
+            && httpResponse.expectedContentLength <= Int.max
+            ? Int(httpResponse.expectedContentLength)
+            : nil
+        let sentHead = ResponsesAPIProxyServer.sendResponseHead(
+            fd: fd,
+            status: httpResponse.statusCode,
+            headers: ResponsesAPIProxyServer.filteredResponseHeaders(httpResponse),
+            contentLength: contentLength
+        )
+        setResponseStarted()
+        if sentHead {
+            completionHandler(.allow)
+        } else {
+            setWriteFailed()
+            completionHandler(.cancel)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard ResponsesAPIProxyServer.sendAll(fd: fd, data: data) else {
+            setWriteFailed()
+            dataTask.cancel()
+            return
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if writeFailed {
+            finish(.success)
+        } else if let error {
+            finish(.failure(error, responseStarted: responseStarted))
+        } else {
+            finish(.success)
+        }
+    }
+
+    private func setResponseStarted() {
         lock.lock()
-        value = result
+        responseStarted = true
         lock.unlock()
     }
 
-    func result() -> Result<ProxyHTTPResponse, Error>? {
+    private func setWriteFailed() {
         lock.lock()
-        defer { lock.unlock() }
-        return value
+        writeFailed = true
+        lock.unlock()
+    }
+
+    private func finish(_ result: ProxyForwardResult) {
+        lock.lock()
+        let shouldSignal = self.result == nil
+        if shouldSignal {
+            self.result = result
+        }
+        lock.unlock()
+
+        if shouldSignal {
+            completion.signal()
+        }
     }
 }
 
