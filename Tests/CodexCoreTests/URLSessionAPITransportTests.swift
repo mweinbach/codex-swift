@@ -94,6 +94,80 @@ final class URLSessionAPITransportTests: XCTestCase {
             sseText: "data: {\"type\":\"response.created\",\"response\":{}}\n\n"
         )))
     }
+
+    func testStreamUsesConfiguredStreamingSenderAndCollectsChunks() async {
+        let transport = URLSessionAPITransport(
+            send: { _ in
+                XCTFail("streaming path should not use the buffered sender")
+                return URLSessionTransportResponse(statusCode: 200)
+            },
+            stream: { request in
+                XCTAssertEqual(request.httpMethod, "POST")
+                return APIStreamResponse(
+                    statusCode: 200,
+                    headers: ["content-type": "text/event-stream"],
+                    byteStream: Self.byteStream([
+                        Data("data: {\"type\":\"response.created\"".utf8),
+                        Data(",\"response\":{}}\n\n".utf8)
+                    ])
+                )
+            }
+        )
+
+        let result = await transport.stream(APIRequest(
+            method: .post,
+            url: "https://example.com/v1/responses",
+            body: .object([:])
+        ))
+
+        guard case let .success(response) = result else {
+            return XCTFail("expected stream response, got \(result)")
+        }
+
+        XCTAssertNil(response.sseText)
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.headers["content-type"], "text/event-stream")
+        let collectedText = await response.collectSSEText()
+        XCTAssertEqual(
+            collectedText,
+            .success("data: {\"type\":\"response.created\",\"response\":{}}\n\n")
+        )
+    }
+
+    func testStreamHTTPFailureCollectsStreamingBody() async {
+        let transport = URLSessionAPITransport(
+            send: { _ in
+                XCTFail("streaming path should not use the buffered sender")
+                return URLSessionTransportResponse(statusCode: 200)
+            },
+            stream: { _ in
+                APIStreamResponse(
+                    statusCode: 503,
+                    headers: ["retry-after": "2"],
+                    byteStream: Self.byteStream([
+                        Data("temporarily ".utf8),
+                        Data("unavailable".utf8)
+                    ])
+                )
+            }
+        )
+
+        let result = await transport.stream(APIRequest(method: .post, url: "https://example.com/v1/responses"))
+
+        XCTAssertEqual(
+            result,
+            .failure(.http(statusCode: 503, headers: ["retry-after": "2"], body: "temporarily unavailable"))
+        )
+    }
+
+    private static func byteStream(_ chunks: [Data]) -> APIByteStream {
+        APIByteStream { continuation in
+            for chunk in chunks {
+                continuation.yield(.success(chunk))
+            }
+            continuation.finish()
+        }
+    }
 }
 
 private final class URLRequestCapture: @unchecked Sendable {

@@ -269,8 +269,8 @@ Source baseline inspected for this scaffold:
   - response-event aggregation modes, assistant/reasoning delta accumulation, created/summary-event filtering, rate-limit/error forwarding, assistant final-item suppression/seed behavior, and aggregate emission before completion
 - Endpoint client scaffolding from `codex-rs/codex-api/src/endpoint/{streaming,responses,chat,compact,models}.rs`
   - transport protocol seams, auth/header injection, request telemetry retry wrapping, models response execution/decode, compact execution/decode, responses/chat path selection, `Accept: text/event-stream` stream setup, and buffered SSE parser hookup for fake-transport verification
-- Buffered URLSession transport behavior from `codex-rs/codex-client/src/{request,transport,error}.rs`
-  - API request to URLRequest conversion, JSON body encoding, content-type defaults, timeout propagation, success response capture, non-2xx HTTP error mapping with headers/body, URL build errors, URL timeout mapping, and buffered stream text response handling
+- URLSession transport behavior from `codex-rs/codex-client/src/{request,transport,error}.rs`
+  - API request to URLRequest conversion, JSON body encoding, content-type defaults, timeout propagation, success response capture, non-2xx HTTP error mapping with headers/body, URL build errors, URL timeout mapping, injectable buffered stream compatibility, and live byte-stream responses via `URLSession.bytes(for:)`
 - `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
   - PNG/JPEG local image loading, bounds-preserving resize to 2048x768, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 - `codex-rs/utils/readiness/src/lib.rs`
@@ -286,7 +286,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing
-- live byte-by-byte Responses API transport streaming and tool orchestration
+- live Responses API event streaming and tool orchestration
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
 - MCP server/client management

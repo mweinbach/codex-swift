@@ -14,15 +14,29 @@ public struct URLSessionTransportResponse: Equatable, Sendable {
 
 public struct URLSessionAPITransport: APITransport {
     public typealias Send = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
+    public typealias Stream = @Sendable (URLRequest) async throws -> APIStreamResponse
 
     private let send: Send
+    private let streamHandler: Stream
 
     public init() {
-        self.init(send: URLSessionAPITransport.urlSessionSend)
+        self.init(send: URLSessionAPITransport.urlSessionSend, stream: URLSessionAPITransport.urlSessionStream)
     }
 
     public init(send: @escaping Send) {
+        self.init(send: send) { request in
+            let response = try await send(request)
+            return APIStreamResponse(
+                statusCode: response.statusCode,
+                headers: response.headers,
+                sseText: String(decoding: response.body, as: UTF8.self)
+            )
+        }
+    }
+
+    public init(send: @escaping Send, stream: @escaping Stream) {
         self.send = send
+        self.streamHandler = stream
     }
 
     public func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
@@ -47,21 +61,24 @@ public struct URLSessionAPITransport: APITransport {
     }
 
     public func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
-        let result = await send(request)
+        let result = await streamSend(request)
         switch result {
         case let .success(response):
             guard (200..<300).contains(response.statusCode) else {
+                let body: String?
+                switch await response.collectSSEText() {
+                case let .success(text):
+                    body = text
+                case .failure:
+                    body = nil
+                }
                 return .failure(.http(
                     statusCode: response.statusCode,
                     headers: response.headers,
-                    body: String(data: response.body, encoding: .utf8)
+                    body: body
                 ))
             }
-            return .success(APIStreamResponse(
-                statusCode: response.statusCode,
-                headers: response.headers,
-                sseText: String(decoding: response.body, as: UTF8.self)
-            ))
+            return .success(response)
         case let .failure(error):
             return .failure(error)
         }
@@ -109,6 +126,19 @@ public struct URLSessionAPITransport: APITransport {
         }
     }
 
+    private func streamSend(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        switch urlRequest(for: request) {
+        case let .failure(error):
+            return .failure(error)
+        case let .success(urlRequest):
+            do {
+                return .success(try await streamHandler(urlRequest))
+            } catch {
+                return .failure(Self.mapError(error))
+            }
+        }
+    }
+
     private static func urlSessionSend(_ request: URLRequest) async throws -> URLSessionTransportResponse {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -119,6 +149,45 @@ public struct URLSessionAPITransport: APITransport {
             statusCode: http.statusCode,
             headers: headers(from: http),
             body: data
+        )
+    }
+
+    private static func urlSessionStream(_ request: URLRequest) async throws -> APIStreamResponse {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLSessionAPITransportError.nonHTTPResponse
+        }
+
+        let byteStream = APIByteStream { continuation in
+            let task = Task {
+                do {
+                    var buffer = Data()
+                    buffer.reserveCapacity(8_192)
+                    for try await byte in bytes {
+                        buffer.append(byte)
+                        if buffer.count >= 8_192 {
+                            continuation.yield(.success(buffer))
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if !buffer.isEmpty {
+                        continuation.yield(.success(buffer))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.yield(.failure(Self.mapError(error)))
+                    continuation.finish()
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+
+        return APIStreamResponse(
+            statusCode: http.statusCode,
+            headers: headers(from: http),
+            byteStream: byteStream
         )
     }
 

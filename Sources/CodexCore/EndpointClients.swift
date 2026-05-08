@@ -5,15 +5,50 @@ public protocol APITransport: Sendable {
     func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError>
 }
 
-public struct APIStreamResponse: Equatable, Sendable, ResponseWithStatus {
+public typealias APIByteStream = AsyncStream<Result<Data, TransportError>>
+
+public struct APIStreamResponse: Sendable, ResponseWithStatus {
     public let statusCode: Int
     public let headers: [String: String]
-    public let sseText: String
+    public let sseText: String?
+    public let byteStream: APIByteStream
 
     public init(statusCode: Int, headers: [String: String] = [:], sseText: String) {
         self.statusCode = statusCode
         self.headers = headers
         self.sseText = sseText
+        self.byteStream = APIByteStream { continuation in
+            continuation.yield(.success(Data(sseText.utf8)))
+            continuation.finish()
+        }
+    }
+
+    public init(statusCode: Int, headers: [String: String] = [:], byteStream: APIByteStream) {
+        self.statusCode = statusCode
+        self.headers = headers
+        self.sseText = nil
+        self.byteStream = byteStream
+    }
+
+    public func collectSSEText() async -> Result<String, TransportError> {
+        var body = Data()
+        for await chunk in byteStream {
+            switch chunk {
+            case let .success(data):
+                body.append(data)
+            case let .failure(error):
+                return .failure(error)
+            }
+        }
+        return .success(String(decoding: body, as: UTF8.self))
+    }
+}
+
+extension APIStreamResponse: Equatable {
+    public static func == (lhs: APIStreamResponse, rhs: APIStreamResponse) -> Bool {
+        lhs.statusCode == rhs.statusCode
+            && lhs.headers == rhs.headers
+            && lhs.sseText == rhs.sseText
     }
 }
 
@@ -62,7 +97,12 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
 
         switch result {
         case let .success(response):
-            return .success(parse(response.sseText))
+            switch await response.collectSSEText() {
+            case let .success(sseText):
+                return .success(parse(sseText))
+            case let .failure(error):
+                return .failure(.transport(error))
+            }
         case let .failure(error):
             return .failure(.transport(error))
         }
