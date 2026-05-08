@@ -245,8 +245,48 @@ public enum GitInfoCollector {
                 }
                 let value = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
                 return value.isEmpty ? nil : value
-            }
+        }
         return uniqueSorted(urls)
+    }
+
+    public static func remoteURLsByName(cwd: URL) -> [String: String]? {
+        guard runGit(["rev-parse", "--git-dir"], cwd: cwd)?.exitCode == 0 else {
+            return nil
+        }
+        return remoteURLsByNameAssumingGitRepo(cwd: cwd)
+    }
+
+    public static func remoteURLsByNameAssumingGitRepo(cwd: URL) -> [String: String]? {
+        guard let output = runGit(["remote", "-v"], cwd: cwd),
+              output.exitCode == 0
+        else {
+            return nil
+        }
+        return parseGitRemoteURLs(output.stdout)
+    }
+
+    public static func canonicalizeGitRemoteURL(_ url: String) -> String? {
+        let trimmed = trimGitSuffix(url.trimmingCharacters(in: .whitespacesAndNewlines).trimmedTrailingSlashes())
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if let schemeSeparator = trimmed.range(of: "://") {
+            let scheme = String(trimmed[..<schemeSeparator.lowerBound])
+            let rest = String(trimmed[schemeSeparator.upperBound...])
+            return canonicalizeGitURLLikeRemote(scheme: scheme, rest: rest)
+        }
+
+        if let (hostPart, path) = parseSCPLikeRemote(trimmed) {
+            return canonicalizeGitRemoteHostPath(hostPart: hostPart, path: path, defaultPort: nil)
+        }
+
+        guard let slash = trimmed.firstIndex(of: "/") else {
+            return nil
+        }
+        let hostPart = String(trimmed[..<slash])
+        let path = String(trimmed[trimmed.index(after: slash)...])
+        return canonicalizeGitRemoteHostPath(hostPart: hostPart, path: path, defaultPort: nil)
     }
 
     private static func gitRemotes(cwd: URL) -> [String]? {
@@ -433,6 +473,153 @@ public enum GitInfoCollector {
         Array(Set(values)).sorted()
     }
 
+    private static func parseGitRemoteURLs(_ stdout: String) -> [String: String]? {
+        var remotes: [String: String] = [:]
+        for line in stdout.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            guard line.hasSuffix(" (fetch)") else {
+                continue
+            }
+
+            let fetchLine = String(line.dropLast(" (fetch)".count))
+            let split: (String, String)?
+            if let tab = fetchLine.firstIndex(of: "\t") {
+                split = (
+                    String(fetchLine[..<tab]),
+                    String(fetchLine[fetchLine.index(after: tab)...])
+                )
+            } else if let space = fetchLine.firstIndex(of: " ") {
+                split = (
+                    String(fetchLine[..<space]),
+                    String(fetchLine[fetchLine.index(after: space)...])
+                )
+            } else {
+                split = nil
+            }
+
+            guard let (name, urlPart) = split else {
+                continue
+            }
+            let url = urlPart.trimmingCharacters(in: .whitespaces)
+            if !url.isEmpty {
+                remotes[name] = url
+            }
+        }
+
+        return remotes.isEmpty ? nil : remotes
+    }
+
+    private static func canonicalizeGitURLLikeRemote(scheme: String, rest: String) -> String? {
+        let defaultPort: String?
+        switch scheme {
+        case "git":
+            defaultPort = "9418"
+        case "http":
+            defaultPort = "80"
+        case "https":
+            defaultPort = "443"
+        case "ssh":
+            defaultPort = "22"
+        default:
+            return nil
+        }
+
+        let trimmedRest: String
+        if let suffixIndex = rest.firstIndex(where: { $0 == "?" || $0 == "#" }) {
+            trimmedRest = String(rest[..<suffixIndex])
+        } else {
+            trimmedRest = rest
+        }
+
+        guard let slash = trimmedRest.firstIndex(of: "/") else {
+            return nil
+        }
+        let hostPart = String(trimmedRest[..<slash])
+        let path = String(trimmedRest[trimmedRest.index(after: slash)...])
+        return canonicalizeGitRemoteHostPath(hostPart: hostPart, path: path, defaultPort: defaultPort)
+    }
+
+    private static func parseSCPLikeRemote(_ remote: String) -> (hostPart: String, path: String)? {
+        if remote.contains("/"),
+           let slash = remote.firstIndex(of: "/"),
+           remote.firstIndex(of: ":").map({ slash < $0 }) ?? true
+        {
+            return nil
+        }
+
+        guard let colon = remote.firstIndex(of: ":") else {
+            return nil
+        }
+        let hostPart = String(remote[..<colon])
+        let path = String(remote[remote.index(after: colon)...])
+        guard !hostPart.isEmpty, !path.isEmpty else {
+            return nil
+        }
+        return (hostPart, path)
+    }
+
+    private static func canonicalizeGitRemoteHostPath(
+        hostPart: String,
+        path: String,
+        defaultPort: String?
+    ) -> String? {
+        let hostWithoutUser = hostPart.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+            .last
+            .map(String.init)
+            ?? hostPart
+        let host = normalizeRemoteHost(
+            hostWithoutUser
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmedTrailingSlashes(),
+            defaultPort: defaultPort
+        )
+        guard !host.isEmpty else {
+            return nil
+        }
+
+        let trimmedPath = trimGitSuffix(
+            path
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        )
+        let components = trimmedPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard components.count >= 2 else {
+            return nil
+        }
+        guard components[0] != ".",
+              components[0] != "..",
+              components[1] != ".",
+              components[1] != ".."
+        else {
+            return nil
+        }
+
+        let normalizedPath = components.joined(separator: "/")
+        if host == "github.com" {
+            return "\(host)/\(normalizedPath.lowercased())"
+        }
+        return "\(host)/\(normalizedPath)"
+    }
+
+    private static func normalizeRemoteHost(_ host: String, defaultPort: String?) -> String {
+        let lowercased = host.lowercased()
+        if let defaultPort,
+           let colon = lowercased.lastIndex(of: ":")
+        {
+            let hostWithoutPort = String(lowercased[..<colon])
+            let port = String(lowercased[lowercased.index(after: colon)...])
+            if port == defaultPort {
+                return hostWithoutPort
+            }
+        }
+        return lowercased
+    }
+
+    private static func trimGitSuffix(_ value: String) -> String {
+        value.hasSuffix(".git") ? String(value.dropLast(4)) : value
+    }
+
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
@@ -475,5 +662,15 @@ public enum GitInfoCollector {
             exitCode: process.terminationStatus,
             stdout: String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         )
+    }
+}
+
+private extension String {
+    func trimmedTrailingSlashes() -> String {
+        var value = self
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
     }
 }

@@ -41,6 +41,51 @@ final class GitInfoCollectorTests: XCTestCase {
         XCTAssertEqual(info.repositoryURL, expectedRemote)
     }
 
+    func testRemoteURLsByNameParsesFetchRemotesLikeRust() throws {
+        let repo = try createRepository()
+        try runGit(["remote", "add", "origin", "https://github.com/OpenAI/Codex.git"], cwd: repo)
+        try runGit(["remote", "add", "fork", "git@ghe.company.com:Org/Repo.git"], cwd: repo)
+
+        XCTAssertEqual(GitInfoCollector.remoteURLsByName(cwd: repo), [
+            "fork": "git@ghe.company.com:Org/Repo.git",
+            "origin": "https://github.com/OpenAI/Codex.git"
+        ])
+    }
+
+    func testCanonicalizeGitRemoteURLNormalizesGitHubVariants() {
+        for remote in [
+            "git@github.com:OpenAI/Codex.git",
+            "ssh://git@github.com/openai/codex.git",
+            "ssh://git@github.com:22/OpenAI/Codex.git",
+            "https://github.com/openai/codex.git",
+            "https://github.com:443/openai/codex.git",
+            "https://token@github.com/openai/codex/",
+            "github.com/OpenAI/Codex.git"
+        ] {
+            XCTAssertEqual(
+                GitInfoCollector.canonicalizeGitRemoteURL(remote),
+                "github.com/openai/codex"
+            )
+        }
+    }
+
+    func testCanonicalizeGitRemoteURLHandlesGHEWithoutLowercasingPath() {
+        XCTAssertEqual(
+            GitInfoCollector.canonicalizeGitRemoteURL("git@ghe.company.com:Org/Repo.git"),
+            "ghe.company.com/Org/Repo"
+        )
+        XCTAssertEqual(
+            GitInfoCollector.canonicalizeGitRemoteURL("ssh://git@ghe.company.com:2222/Org/Repo.git"),
+            "ghe.company.com:2222/Org/Repo"
+        )
+    }
+
+    func testCanonicalizeGitRemoteURLRejectsNonRepositoryValues() {
+        for remote in ["", "file:///tmp/repo", "github.com/openai", "/tmp/repo"] {
+            XCTAssertNil(GitInfoCollector.canonicalizeGitRemoteURL(remote))
+        }
+    }
+
     func testCollectGitInfoOmitsBranchForDetachedHead() throws {
         let repo = try createRepository()
         let head = try runGit(["rev-parse", "HEAD"], cwd: repo).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
