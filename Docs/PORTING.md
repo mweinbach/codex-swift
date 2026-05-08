@@ -263,6 +263,8 @@ Source baseline inspected for this scaffold:
   - SSE `data:` frame extraction, response output/delta/created/completed event mapping, close-time completed/error emission, failed-response fatal/retryable classification, retry-after delay parsing, and token-usage conversion
 - Pure Chat Completions SSE parsing from `codex-rs/codex-api/src/sse/chat.rs`
   - chat SSE `choices` traversal, assistant/reasoning delta accumulation, tool-call index/id tracking, argument concatenation, finish-reason handling for stop/length/tool calls, and EOF flush behavior
+- `AggregatedStream` and `AggregateStreamExt` behavior from `codex-rs/codex-api/src/endpoint/chat.rs`
+  - response-event aggregation modes, assistant/reasoning delta accumulation, created/summary-event filtering, rate-limit/error forwarding, assistant final-item suppression/seed behavior, and aggregate emission before completion
 - `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
   - PNG/JPEG local image loading, bounds-preserving resize to 2048x768, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 - `codex-rs/utils/readiness/src/lib.rs`
