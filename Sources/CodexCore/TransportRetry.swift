@@ -86,6 +86,17 @@ public protocol RequestTelemetry: AnyObject {
     )
 }
 
+public enum SsePollResult: Equatable, Sendable {
+    case event
+    case streamClosed
+    case streamError(TransportError)
+    case idleTimeout
+}
+
+public protocol SseTelemetry: AnyObject {
+    func onSSEPoll(result: SsePollResult, duration: Duration)
+}
+
 public enum TransportRetry {
     public static func runWithRetry<T>(
         policy: ProviderRetryPolicy,

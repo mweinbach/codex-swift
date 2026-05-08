@@ -271,6 +271,65 @@ final class EndpointClientsTests: XCTestCase {
         ])
     }
 
+    func testResponsesClientRecordsSseTelemetryForChunksAndClose() async {
+        let telemetry = CapturingSseTelemetry()
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_telemetry","usage":null}}
+
+                """))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+        .withTelemetry(request: nil, sse: telemetry)
+
+        let result = await client.streamEvents(body: .object([:]))
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected event stream, got \(result)")
+        }
+
+        _ = await collect(stream)
+
+        XCTAssertEqual(telemetry.records.map(\.result), [.event, .streamClosed])
+    }
+
+    func testResponsesClientEmitsIdleTimeoutWhenSsePollStalls() async {
+        let telemetry = CapturingSseTelemetry()
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: APIByteStream { _ in }
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(streamIdleTimeoutMilliseconds: 1),
+            auth: StaticAPIAuthProvider()
+        )
+        .withTelemetry(request: nil, sse: telemetry)
+
+        let result = await client.streamEvents(body: .object([:]))
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected event stream, got \(result)")
+        }
+        let events = await collect(stream)
+
+        XCTAssertEqual(events, [
+            .success(.rateLimits(RateLimitSnapshot(primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .failure(.stream("idle timeout waiting for SSE"))
+        ])
+        XCTAssertEqual(telemetry.records.map(\.result), [.idleTimeout])
+    }
+
     func testResponsesClientUsesChatPathWhenProviderWireIsChat() async {
         let transport = CapturingTransport(
             streamResults: [
@@ -323,7 +382,8 @@ final class EndpointClientsTests: XCTestCase {
         wireAPI: WireAPI = .responses,
         baseURL: String = "https://example.com/v1",
         queryParams: [String: String]? = nil,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        streamIdleTimeoutMilliseconds: UInt64 = 1_000
     ) -> APIProvider {
         APIProvider(
             name: "test",
@@ -338,7 +398,7 @@ final class EndpointClientsTests: XCTestCase {
                 retry5xx: true,
                 retryTransport: true
             ),
-            streamIdleTimeoutMilliseconds: 1_000
+            streamIdleTimeoutMilliseconds: streamIdleTimeoutMilliseconds
         )
     }
 }
@@ -407,5 +467,17 @@ private final class CapturingRequestTelemetry: RequestTelemetry {
         duration _: Duration
     ) {
         records.append(Record(attempt: attempt, statusCode: statusCode, error: error))
+    }
+}
+
+private final class CapturingSseTelemetry: SseTelemetry {
+    struct Record: Equatable {
+        let result: SsePollResult
+    }
+
+    private(set) var records: [Record] = []
+
+    func onSSEPoll(result: SsePollResult, duration _: Duration) {
+        records.append(Record(result: result))
     }
 }

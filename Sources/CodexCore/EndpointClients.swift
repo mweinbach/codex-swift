@@ -101,22 +101,30 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
     public let provider: APIProvider
     public let auth: Auth
     public var requestTelemetry: RequestTelemetry?
+    public var sseTelemetry: SseTelemetry?
 
     public init(
         transport: Transport,
         provider: APIProvider,
         auth: Auth,
-        requestTelemetry: RequestTelemetry? = nil
+        requestTelemetry: RequestTelemetry? = nil,
+        sseTelemetry: SseTelemetry? = nil
     ) {
         self.transport = transport
         self.provider = provider
         self.auth = auth
         self.requestTelemetry = requestTelemetry
+        self.sseTelemetry = sseTelemetry
     }
 
     public func withTelemetry(_ telemetry: RequestTelemetry?) -> StreamingAPIClient {
+        withTelemetry(request: telemetry, sse: sseTelemetry)
+    }
+
+    public func withTelemetry(request: RequestTelemetry?, sse: SseTelemetry?) -> StreamingAPIClient {
         var copy = self
-        copy.requestTelemetry = telemetry
+        copy.requestTelemetry = request
+        copy.sseTelemetry = sse
         return copy
     }
 
@@ -179,7 +187,9 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
             return .success(Self.eventStream(
                 from: response,
                 makeParser: makeParser,
-                includeRateLimits: includeRateLimits
+                includeRateLimits: includeRateLimits,
+                idleTimeoutMilliseconds: provider.streamIdleTimeoutMilliseconds,
+                telemetry: sseTelemetry
             ))
         case let .failure(error):
             return .failure(.transport(error))
@@ -202,9 +212,18 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
     private static func eventStream<Parser: ResponseEventFrameParsing>(
         from response: APIStreamResponse,
         makeParser: @escaping @Sendable () -> Parser,
-        includeRateLimits: Bool
+        includeRateLimits: Bool,
+        idleTimeoutMilliseconds: UInt64,
+        telemetry: SseTelemetry?
     ) -> ResponseEventStream {
         ResponseEventStream { continuation in
+            let taskBox = StreamTaskBox()
+            let timeout = SseIdleTimeout(
+                milliseconds: idleTimeoutMilliseconds,
+                telemetry: telemetry,
+                continuation: continuation,
+                taskBox: taskBox
+            )
             let task = Task {
                 if includeRateLimits, let snapshot = RateLimitSnapshot.parseRateLimit(headers: response.headers) {
                     continuation.yield(.success(.rateLimits(snapshot)))
@@ -213,22 +232,38 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
                 var parser = makeParser()
                 var textDecoder = UTF8StreamDecoder()
                 var frameDecoder = SSEDataFrameDecoder()
+                var pollStart = timeout.startPoll()
 
                 for await chunk in response.byteStream {
+                    guard !Task.isCancelled else {
+                        timeout.cancel()
+                        return
+                    }
+
                     switch chunk {
                     case let .success(data):
+                        guard timeout.finishPoll(.event, startedAt: pollStart) else {
+                            return
+                        }
                         appendEvents(
                             from: frameDecoder.receive(textDecoder.receive(data)),
                             using: &parser,
                             to: continuation
                         )
+                        pollStart = timeout.startPoll()
                     case let .failure(error):
+                        guard timeout.finishPoll(.streamError(error), startedAt: pollStart) else {
+                            return
+                        }
                         continuation.yield(.failure(.stream(String(describing: error))))
                         continuation.finish()
                         return
                     }
                 }
 
+                guard timeout.finishPoll(.streamClosed, startedAt: pollStart) else {
+                    return
+                }
                 appendEvents(
                     from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
                     using: &parser,
@@ -239,8 +274,10 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
                 }
                 continuation.finish()
             }
+            taskBox.task = task
 
             continuation.onTermination = { _ in
+                timeout.cancel()
                 task.cancel()
             }
         }
@@ -256,6 +293,93 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
                 continuation.yield(event)
             }
         }
+    }
+}
+
+private final class StreamTaskBox: @unchecked Sendable {
+    var task: Task<Void, Never>?
+}
+
+private final class SseIdleTimeout: @unchecked Sendable {
+    private let milliseconds: UInt64
+    private let telemetry: SseTelemetry?
+    private let continuation: ResponseEventStream.Continuation
+    private let taskBox: StreamTaskBox
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var timedOut = false
+
+    init(
+        milliseconds: UInt64,
+        telemetry: SseTelemetry?,
+        continuation: ResponseEventStream.Continuation,
+        taskBox: StreamTaskBox
+    ) {
+        self.milliseconds = milliseconds
+        self.telemetry = telemetry
+        self.continuation = continuation
+        self.taskBox = taskBox
+    }
+
+    func startPoll() -> ContinuousClock.Instant {
+        let startedAt = ContinuousClock.now
+        lock.withLock {
+            task?.cancel()
+            timedOut = false
+            task = Task { [self, milliseconds, telemetry, continuation, taskBox] in
+                await Self.sleep(milliseconds: milliseconds)
+                guard !Task.isCancelled else {
+                    return
+                }
+                guard markTimedOut() else {
+                    return
+                }
+                telemetry?.onSSEPoll(result: .idleTimeout, duration: startedAt.duration(to: .now))
+                continuation.yield(.failure(.stream("idle timeout waiting for SSE")))
+                continuation.finish()
+                taskBox.task?.cancel()
+            }
+        }
+        return startedAt
+    }
+
+    func finishPoll(_ result: SsePollResult, startedAt: ContinuousClock.Instant) -> Bool {
+        let shouldReport = lock.withLock {
+            guard !timedOut else {
+                return false
+            }
+            task?.cancel()
+            task = nil
+            return true
+        }
+        guard shouldReport else {
+            return false
+        }
+        telemetry?.onSSEPoll(result: result, duration: startedAt.duration(to: .now))
+        return true
+    }
+
+    func cancel() {
+        lock.withLock {
+            task?.cancel()
+            task = nil
+        }
+    }
+
+    private func markTimedOut() -> Bool {
+        lock.withLock {
+            guard !timedOut else {
+                return false
+            }
+            task = nil
+            timedOut = true
+            return true
+        }
+    }
+
+    private static func sleep(milliseconds: UInt64) async {
+        let nanoseconds = milliseconds.multipliedReportingOverflow(by: 1_000_000)
+        try? await Task.sleep(nanoseconds: nanoseconds.overflow ? UInt64.max : nanoseconds.partialValue)
     }
 }
 
@@ -456,6 +580,10 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         ResponsesClient(streaming: streaming.withTelemetry(telemetry))
     }
 
+    public func withTelemetry(request: RequestTelemetry?, sse: SseTelemetry?) -> ResponsesClient {
+        ResponsesClient(streaming: streaming.withTelemetry(request: request, sse: sse))
+    }
+
     public func streamRequest(_ request: ResponsesRequest) async -> Result<ResponseEventResults, APIError> {
         await stream(body: request.body, extraHeaders: request.headers)
     }
@@ -550,6 +678,10 @@ public struct ChatClient<Transport: APITransport, Auth: APIAuthProvider> {
 
     public func withTelemetry(_ telemetry: RequestTelemetry?) -> ChatClient {
         ChatClient(streaming: streaming.withTelemetry(telemetry))
+    }
+
+    public func withTelemetry(request: RequestTelemetry?, sse: SseTelemetry?) -> ChatClient {
+        ChatClient(streaming: streaming.withTelemetry(request: request, sse: sse))
     }
 
     public func streamRequest(_ request: ChatRequest) async -> Result<ResponseEventResults, APIError> {
