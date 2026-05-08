@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .executable(name: "codex", targets: ["codex"]),
         .executable(name: "apply_patch", targets: ["apply_patch"]),
+        .executable(name: "codex-responses-api-proxy", targets: ["codex-responses-api-proxy"]),
         .library(name: "CodexApplyPatch", targets: ["CodexApplyPatch"]),
         .library(name: "CodexChatGPT", targets: ["CodexChatGPT"]),
         .library(name: "CodexCLI", targets: ["CodexCLI"]),
@@ -51,6 +52,10 @@ let package = Package(
         .executableTarget(
             name: "codex-stdio-to-uds",
             dependencies: ["CodexStdioToUDS"]
+        ),
+        .executableTarget(
+            name: "codex-responses-api-proxy",
+            dependencies: ["CodexCore", "CodexResponsesAPIProxy"]
         ),
         .executableTarget(
             name: "codex",
