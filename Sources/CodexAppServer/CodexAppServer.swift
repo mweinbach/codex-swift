@@ -2003,6 +2003,36 @@ public enum CodexAppServer {
         [:]
     }
 
+    fileprivate static func mcpResourceReadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        if params?["threadId"] != nil {
+            _ = try materializedThreadID(params: params, configuration: configuration)
+        }
+        guard let server = stringParam(params?["server"]), !server.isEmpty else {
+            throw AppServerError.invalidRequest("missing server")
+        }
+        guard let uri = stringParam(params?["uri"]), !uri.isEmpty else {
+            throw AppServerError.invalidRequest("missing uri")
+        }
+        throw AppServerError.internalError("MCP resource read is not implemented for server \(server)")
+    }
+
+    fileprivate static func mcpServerToolCallResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        _ = try materializedThreadID(params: params, configuration: configuration)
+        guard let server = stringParam(params?["server"]), !server.isEmpty else {
+            throw AppServerError.invalidRequest("missing server")
+        }
+        guard let tool = stringParam(params?["tool"]), !tool.isEmpty else {
+            throw AppServerError.invalidRequest("missing tool")
+        }
+        throw AppServerError.internalError("MCP tool call is not implemented for server \(server) tool \(tool)")
+    }
+
     fileprivate static func mcpServerOAuthLoginResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -6194,6 +6224,16 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.mcpServerRefreshResult()
+                    )
+                case "mcpServer/resource/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.mcpResourceReadResult(params: params, configuration: configuration)
+                    )
+                case "mcpServer/tool/call":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.mcpServerToolCallResult(params: params, configuration: configuration)
                     )
                 case "externalAgentConfig/detect":
                     response = CodexAppServer.responseObject(

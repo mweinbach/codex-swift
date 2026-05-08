@@ -1938,6 +1938,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nonEmptyImportError["message"] as? String, "external agent config import is not implemented")
     }
 
+    func testMcpResourceAndToolCallsValidateThreadBeforeLiveDispatch() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+
+        let resourceInvalidThread = try appServerResponse(
+            #"{"id":1,"method":"mcpServer/resource/read","params":{"threadId":"not-a-thread","server":"filesystem","uri":"file:///tmp/a"}}"#,
+            codexHome: temp.url
+        )
+        let resourceInvalidThreadError = try XCTUnwrap(resourceInvalidThread["error"] as? [String: Any])
+        XCTAssertEqual(resourceInvalidThreadError["code"] as? Int, -32600)
+        XCTAssertTrue((resourceInvalidThreadError["message"] as? String)?.hasPrefix("invalid thread id: ") == true)
+
+        let resourceMissingThread = try appServerResponse(
+            #"{"id":2,"method":"mcpServer/resource/read","params":{"threadId":"\#(threadID)","server":"filesystem","uri":"file:///tmp/a"}}"#,
+            codexHome: temp.url
+        )
+        let resourceMissingThreadError = try XCTUnwrap(resourceMissingThread["error"] as? [String: Any])
+        XCTAssertEqual(resourceMissingThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(resourceMissingThreadError["message"] as? String, "thread not found: \(threadID)")
+
+        let toolMissingThread = try appServerResponse(
+            #"{"id":3,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"filesystem","tool":"read_file","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolMissingThreadError = try XCTUnwrap(toolMissingThread["error"] as? [String: Any])
+        XCTAssertEqual(toolMissingThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(toolMissingThreadError["message"] as? String, "thread not found: \(threadID)")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
