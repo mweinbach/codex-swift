@@ -431,6 +431,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     case message(role: String, content: [ContentItem])
     case webSearchCall(status: String?, action: WebSearchAction)
     case compaction(encryptedContent: String)
+    case knownPersisted(type: String)
     case other
 
     private enum CodingKeys: String, CodingKey {
@@ -444,7 +445,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
         case "message":
             self = .message(
                 role: try container.decode(String.self, forKey: .role),
@@ -457,6 +459,14 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             )
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
+        case "reasoning",
+             "local_shell_call",
+             "function_call",
+             "function_call_output",
+             "custom_tool_call",
+             "custom_tool_call_output",
+             "ghost_snapshot":
+            self = .knownPersisted(type: type)
         default:
             self = .other
         }
@@ -476,6 +486,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case let .compaction(encryptedContent):
             try container.encode("compaction", forKey: .type)
             try container.encode(encryptedContent, forKey: .encryptedContent)
+        case let .knownPersisted(type):
+            try container.encode(type, forKey: .type)
         case .other:
             try container.encode("other", forKey: .type)
         }

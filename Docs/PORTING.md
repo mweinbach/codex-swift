@@ -156,6 +156,8 @@ Source baseline inspected for this scaffold:
   - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
+- `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
+  - rollout response-item and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
 
 ## Known Gaps
 
@@ -184,5 +186,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - execpolicy config-layer file discovery and Starlark-compatible parser completeness
 - keyring storage for `codex apply <task_id>`
 - ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
+- rollout recorder/list flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
