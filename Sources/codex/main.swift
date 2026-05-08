@@ -24,6 +24,7 @@ let exitCode = await cli.runAsync(
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
     execRunner: runExecCommand,
+    reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
@@ -160,13 +161,6 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
 }
 
 private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
-    guard case .run = request.action else {
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: exec resume/review runtime is not complete yet."
-        )
-    }
-
     let operation = try request.resolvedInitialOperation(
         stdinIsTerminal: isatty(STDIN_FILENO) != 0,
         readStdin: readUTF8FromStdin,
@@ -174,20 +168,77 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
             try Data(contentsOf: URL(fileURLWithPath: path))
         }
     )
-    guard case let .userTurn(promptResolution, outputSchema) = operation else {
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: exec resume/review runtime is not complete yet."
-        )
-    }
 
     let cwd = resolveExecWorkingDirectory(from: request.arguments)
+    switch operation {
+    case let .userTurn(promptResolution, outputSchema):
+        return try await runNonInteractiveExec(
+            promptResolution: promptResolution,
+            outputSchema: outputSchema,
+            options: request.options,
+            arguments: request.arguments,
+            configOverrides: request.configOverrides,
+            cwd: cwd
+        )
+
+    case let .review(reviewRequest):
+        let resolved = try ReviewPrompts.resolveReviewRequest(
+            reviewRequest,
+            cwd: cwd.path,
+            mergeBaseWithHead: gitMergeBaseWithHead
+        )
+        return try await runNonInteractiveExec(
+            promptResolution: NonInteractivePromptResolution(prompt: resolved.prompt),
+            outputSchema: nil,
+            options: request.options,
+            arguments: request.arguments,
+            configOverrides: request.configOverrides,
+            cwd: cwd
+        )
+
+    case .resume:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec resume runtime is not complete yet."
+        )
+    }
+}
+
+private func runReviewCommand(_ request: CodexCLI.ReviewCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let reviewRequest = try request.target.resolvedReviewRequest(
+        stdinIsTerminal: isatty(STDIN_FILENO) != 0,
+        readStdin: readUTF8FromStdin
+    )
+    let resolved = try ReviewPrompts.resolveReviewRequest(
+        reviewRequest,
+        cwd: cwd.path,
+        mergeBaseWithHead: gitMergeBaseWithHead
+    )
+    return try await runNonInteractiveExec(
+        promptResolution: NonInteractivePromptResolution(prompt: resolved.prompt),
+        outputSchema: nil,
+        options: CodexCLI.ExecCommandOptions(),
+        arguments: [],
+        configOverrides: request.configOverrides,
+        cwd: cwd
+    )
+}
+
+private func runNonInteractiveExec(
+    promptResolution: NonInteractivePromptResolution,
+    outputSchema: JSONValue?,
+    options: CodexCLI.ExecCommandOptions,
+    arguments: [String],
+    configOverrides: CliConfigOverrides,
+    cwd: URL
+) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
         cwd: cwd,
-        skipGitRepoCheck: request.options.skipGitRepoCheck
+        skipGitRepoCheck: options.skipGitRepoCheck
     )
 
-    let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+    let (codexHome, settings) = try resolvedAuthSettings(overrides: configOverrides)
     let environment = ProcessInfo.processInfo.environment
     try await CodexAuthStorage.enforceLoginRestrictions(
         codexHome: codexHome,
@@ -213,19 +264,19 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
         authMode: authResolution.authMode,
         environment: environment
     )
-    let model = execOptionValue(short: "-m", long: "--model", in: request.arguments)
+    let model = execOptionValue(short: "-m", long: "--model", in: arguments)
         ?? settings.model
         ?? (authResolution.authMode == .chatGPT
             ? ModelsManager.openAIDefaultChatGPTModel
             : ModelsManager.openAIDefaultAPIModel)
     let modelFamily = ModelsManager.constructModelFamilyOffline(model: model)
-    let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: request.arguments)
-    let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: request.arguments)
+    let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: arguments)
+    let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
     let shell = ShellResolver.defaultUserShell()
     let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
-        imagePaths: request.options.imagePaths,
+        imagePaths: options.imagePaths,
         outputSchema: outputSchema,
         cwd: cwd,
         approvalPolicy: approvalPolicy,
@@ -276,9 +327,9 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
 
     let result = NonInteractiveExec.finish(
         responseEvents: events,
-        outputMode: request.options.json ? .jsonLines : .human,
+        outputMode: options.json ? .jsonLines : .human,
         conversationID: conversationID,
-        lastMessageFile: request.options.lastMessageFile
+        lastMessageFile: options.lastMessageFile
     )
     var stderrMessages = [String]()
     if let promptStderr = promptResolution.stderrMessage {
@@ -291,6 +342,30 @@ private func runExecCommand(_ request: CodexCLI.ExecCommandRequest) async throws
         stdoutMessage: result.stdoutMessage,
         stderrMessage: stderrMessages.isEmpty ? nil : stderrMessages.joined(separator: "\n")
     )
+}
+
+private func gitMergeBaseWithHead(cwd: String, branch: String) throws -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git", "merge-base", "HEAD", branch]
+    process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
+
+    do {
+        try process.run()
+    } catch {
+        return nil
+    }
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        return nil
+    }
+    let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    let value = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
 }
 
 private struct ExecModelProviderResolution {

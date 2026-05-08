@@ -307,13 +307,15 @@ Source baseline inspected for this scaffold:
   - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, and `--output-last-message` writes
 - Initial `codex-rs/core/src/unified_exec` tool-session behavior
   - non-interactive `exec_command` can now keep long-running commands alive, return a session ID, and continue them through `write_stdin` with Rust-shaped unified exec output sections
+- Initial `codex-rs/exec/src/lib.rs` review operation dispatch
+  - top-level `codex review ...` and `codex exec review ...` now resolve Rust-shaped review targets/prompts, reuse the non-interactive Responses tool loop, and use a local `git merge-base HEAD <branch>` when available for base-branch review prompts
 
 ## Known Gaps
 
 The executable is not functionally equivalent yet. Some commands have native runtime slices, while most registered commands still return a clear unimplemented status. The remaining major areas include:
 
 - interactive TUI runtime
-- non-interactive `exec` resume/review continuation and Rust-complete live tool orchestration
+- non-interactive `exec resume` continuation and Rust-complete live tool orchestration
 - full resume continuation after rollout target resolution
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
 - model-provider parity beyond the initial Responses/OpenAI provider/auth path
