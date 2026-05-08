@@ -185,7 +185,8 @@ public enum CodexConfigLayerLoader {
         }
 
         do {
-            return try ConfigTomlParser.parse(contents)
+            let parsed = try ConfigTomlParser.parse(contents)
+            return try resolveRelativePaths(in: parsed, baseDirectory: url.deletingLastPathComponent())
         } catch {
             throw ConfigLayerLoadError.parseFailed(path: url.path, message: String(describing: error))
         }
@@ -228,6 +229,25 @@ public enum CodexConfigLayerLoader {
         return value
     }
 
+    public static func resolveRelativePaths(in value: ConfigValue, baseDirectory: URL) throws -> ConfigValue {
+        switch value {
+        case let .array(values):
+            return .array(try values.map { try resolveRelativePaths(in: $0, baseDirectory: baseDirectory) })
+        case let .table(table):
+            var resolved: [String: ConfigValue] = [:]
+            for (key, child) in table {
+                if Self.configPathKeys.contains(key), case let .string(path) = child {
+                    resolved[key] = try .string(resolveConfigPath(path, baseDirectory: baseDirectory))
+                } else {
+                    resolved[key] = try resolveRelativePaths(in: child, baseDirectory: baseDirectory)
+                }
+            }
+            return .table(resolved)
+        default:
+            return value
+        }
+    }
+
     private static func loadRequiredConfigLayer(
         configFile: URL,
         source: ConfigLayerSource,
@@ -235,6 +255,18 @@ public enum CodexConfigLayerLoader {
     ) throws -> ConfigLayerEntry {
         let config = try readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
         return ConfigLayerEntry(name: source, config: config)
+    }
+
+    private static let configPathKeys: Set<String> = [
+        "experimental_instructions_file",
+        "experimental_compact_prompt_file"
+    ]
+
+    private static func resolveConfigPath(_ path: String, baseDirectory: URL) throws -> String {
+        if path.hasPrefix("/") {
+            return try AbsolutePath(absolutePath: path).path
+        }
+        return try AbsolutePath.resolve(path, against: baseDirectory.standardizedFileURL.path).path
     }
 
     private static func mergedConfig(layers: [ConfigLayerEntry]) -> ConfigValue {

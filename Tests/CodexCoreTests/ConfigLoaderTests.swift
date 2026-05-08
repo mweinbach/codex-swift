@@ -24,6 +24,9 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.forcedChatGPTWorkspaceID)
         XCTAssertNil(config.experimentalInstructionsFile)
         XCTAssertNil(config.experimentalCompactPromptFile)
+        XCTAssertNil(config.baseInstructions)
+        XCTAssertNil(config.developerInstructions)
+        XCTAssertNil(config.compactPrompt)
         XCTAssertNil(config.includeApplyPatchTool)
         XCTAssertNil(config.experimentalUseUnifiedExecTool)
         XCTAssertNil(config.experimentalUseFreeformApplyPatch)
@@ -42,6 +45,10 @@ final class ConfigLoaderTests: XCTestCase {
 
     func testLoadsApplyRelevantTopLevelValues() throws {
         let dir = try CoreTemporaryDirectory()
+        let instructions = dir.url.appendingPathComponent("instructions.md")
+        let compact = dir.url.appendingPathComponent("compact.md")
+        try "  file instructions  ".write(to: instructions, atomically: true, encoding: .utf8)
+        try "  file compact  ".write(to: compact, atomically: true, encoding: .utf8)
         try """
         model = "gpt-5.4"
         model_provider = "openai"
@@ -54,6 +61,8 @@ final class ConfigLoaderTests: XCTestCase {
         cli_auth_credentials_store = "auto"
         forced_login_method = "api"
         forced_chatgpt_workspace_id = "org_workspace"
+        developer_instructions = "  Use developer override.  "
+        compact_prompt = "  Summarize differently.  "
         experimental_instructions_file = "instructions.md"
         experimental_compact_prompt_file = "compact.md"
         include_apply_patch_tool = true
@@ -79,8 +88,11 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
-        XCTAssertEqual(config.experimentalInstructionsFile, "instructions.md")
-        XCTAssertEqual(config.experimentalCompactPromptFile, "compact.md")
+        XCTAssertEqual(config.developerInstructions, "Use developer override.")
+        XCTAssertEqual(config.compactPrompt, "Summarize differently.")
+        XCTAssertEqual(config.experimentalInstructionsFile, instructions.path)
+        XCTAssertEqual(config.experimentalCompactPromptFile, compact.path)
+        XCTAssertEqual(config.baseInstructions, "file instructions")
         XCTAssertEqual(config.includeApplyPatchTool, true)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
@@ -261,6 +273,13 @@ final class ConfigLoaderTests: XCTestCase {
 
     func testProfileRuntimeFieldsOverrideTopLevelValues() throws {
         let dir = try CoreTemporaryDirectory()
+        for filename in ["top-instructions.md", "top-compact.md", "profile-instructions.md", "profile-compact.md"] {
+            try " \(filename) ".write(
+                to: dir.url.appendingPathComponent(filename),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
         try """
         profile = "work"
         model = "top-model"
@@ -308,14 +327,67 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelReasoningEffort, .xhigh)
         XCTAssertEqual(config.modelReasoningSummary, .auto)
         XCTAssertEqual(config.modelVerbosity, .high)
-        XCTAssertEqual(config.experimentalInstructionsFile, "profile-instructions.md")
-        XCTAssertEqual(config.experimentalCompactPromptFile, "profile-compact.md")
+        XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile-instructions.md").path)
+        XCTAssertEqual(config.experimentalCompactPromptFile, dir.url.appendingPathComponent("profile-compact.md").path)
+        XCTAssertEqual(config.baseInstructions, "profile-instructions.md")
+        XCTAssertEqual(config.compactPrompt, "profile-compact.md")
         XCTAssertEqual(config.includeApplyPatchTool, false)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.experimentalUseFreeformApplyPatch, true)
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, true)
         XCTAssertEqual(config.ossProvider, "profile-oss")
+    }
+
+    func testPromptOverridesLoadFromFilesAndTrimLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let instructions = dir.url.appendingPathComponent("instructions.txt")
+        let compact = dir.url.appendingPathComponent("compact.txt")
+        try "  use file instructions  ".write(to: instructions, atomically: true, encoding: .utf8)
+        try "  compact from file  ".write(to: compact, atomically: true, encoding: .utf8)
+        try """
+        experimental_instructions_file = "instructions.txt"
+        experimental_compact_prompt_file = "compact.txt"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.experimentalInstructionsFile, instructions.path)
+        XCTAssertEqual(config.experimentalCompactPromptFile, compact.path)
+        XCTAssertEqual(config.baseInstructions, "use file instructions")
+        XCTAssertEqual(config.compactPrompt, "compact from file")
+    }
+
+    func testProjectPromptFilesResolveRelativeToDotCodexLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let nested = project.appendingPathComponent("child", isDirectory: true)
+        let dotCodex = nested.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        experimental_instructions_file = "child-instructions.txt"
+        experimental_compact_prompt_file = "child-compact.txt"
+        """.write(to: dotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try " child instructions ".write(
+            to: dotCodex.appendingPathComponent("child-instructions.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try " child compact ".write(
+            to: dotCodex.appendingPathComponent("child-compact.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: home, cwd: nested, systemConfigFile: nil)
+
+        XCTAssertEqual(config.baseInstructions, "child instructions")
+        XCTAssertEqual(config.compactPrompt, "child compact")
+        XCTAssertEqual(config.experimentalInstructionsFile, dotCodex.appendingPathComponent("child-instructions.txt").path)
+        XCTAssertEqual(config.experimentalCompactPromptFile, dotCodex.appendingPathComponent("child-compact.txt").path)
     }
 
     func testCLIOverridesCanSelectAndPatchProfile() throws {
@@ -540,6 +612,48 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.chatgptBaseURL, "https://child.example/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
+    }
+
+    func testProjectRelativePathFieldsResolveAgainstDotCodexAndOverrideInOrder() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        let rootDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        let childDotCodex = child.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: rootDotCodex, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: childDotCodex, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        experimental_instructions_file = "root.txt"
+        experimental_compact_prompt_file = "root-compact.txt"
+        """.write(to: rootDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try """
+        experimental_instructions_file = "child.txt"
+        experimental_compact_prompt_file = "child-compact.txt"
+        """.write(to: childDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try "root instructions".write(to: rootDotCodex.appendingPathComponent("root.txt"), atomically: true, encoding: .utf8)
+        try "root compact".write(to: rootDotCodex.appendingPathComponent("root-compact.txt"), atomically: true, encoding: .utf8)
+        try "child instructions".write(to: childDotCodex.appendingPathComponent("child.txt"), atomically: true, encoding: .utf8)
+        try "child compact".write(to: childDotCodex.appendingPathComponent("child-compact.txt"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(
+            config.experimentalInstructionsFile,
+            childDotCodex.appendingPathComponent("child.txt").path
+        )
+        XCTAssertEqual(
+            config.experimentalCompactPromptFile,
+            childDotCodex.appendingPathComponent("child-compact.txt").path
+        )
+        XCTAssertEqual(config.baseInstructions, "child instructions")
+        XCTAssertEqual(config.compactPrompt, "child compact")
     }
 
     func testCLIOverridesBeatLayeredProjectConfigWhenNoProfileOverridesIt() throws {

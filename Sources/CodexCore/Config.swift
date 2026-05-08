@@ -22,6 +22,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var forcedChatGPTWorkspaceID: String?
     public var experimentalInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
+    public var baseInstructions: String?
+    public var developerInstructions: String?
+    public var compactPrompt: String?
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
@@ -51,6 +54,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         forcedChatGPTWorkspaceID: String? = nil,
         experimentalInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        compactPrompt: String? = nil,
         includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
@@ -79,6 +85,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
         self.experimentalInstructionsFile = experimentalInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.compactPrompt = compactPrompt
         self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
@@ -162,7 +171,10 @@ public enum CodexConfigLoader {
         ) {
             if fileManager.fileExists(atPath: configFile.path) {
                 let contents = try String(contentsOf: configFile, encoding: .utf8)
-                parsed.merge(try ParsedCodexConfigToml.parse(contents))
+                parsed.merge(try ParsedCodexConfigToml.parse(
+                    contents,
+                    baseURL: configFile.deletingLastPathComponent()
+                ))
             }
         }
 
@@ -175,7 +187,10 @@ public enum CodexConfigLoader {
             ) {
                 if fileManager.fileExists(atPath: configFile.path) {
                     let contents = try String(contentsOf: configFile, encoding: .utf8)
-                    parsed.merge(try ParsedCodexConfigToml.parse(contents))
+                    parsed.merge(try ParsedCodexConfigToml.parse(
+                        contents,
+                        baseURL: configFile.deletingLastPathComponent()
+                    ))
                 }
             }
         }
@@ -264,7 +279,7 @@ private struct ParsedCodexConfigToml {
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
 
-    static func parse(_ contents: String) throws -> ParsedCodexConfigToml {
+    static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
         var section = ConfigSection.topLevel
 
@@ -305,10 +320,18 @@ private struct ParsedCodexConfigToml {
                     continue
                 }
                 guard isRelevantTopLevelKey(key) else { continue }
-                parsed.topLevel[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+                parsed.topLevel[key] = try normalizePathLikeValue(
+                    ConfigValueParser.parseTomlLiteral(valueText),
+                    key: key,
+                    baseURL: baseURL
+                )
             case let .profile(name):
                 guard isRelevantProfileKey(key) else { continue }
-                parsed.profiles[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
+                parsed.profiles[name, default: [:]][key] = try normalizePathLikeValue(
+                    ConfigValueParser.parseTomlLiteral(valueText),
+                    key: key,
+                    baseURL: baseURL
+                )
             case let .modelProvider(name):
                 parsed.mergeModelProvider(
                     name: name,
@@ -338,6 +361,18 @@ private struct ParsedCodexConfigToml {
 
         parsed.mcpServers = try McpConfigStore.parseMcpServers(from: contents)
         return parsed
+    }
+
+    private static func normalizePathLikeValue(_ value: ConfigValue, key: String, baseURL: URL?) throws -> ConfigValue {
+        guard ["experimental_instructions_file", "experimental_compact_prompt_file"].contains(key),
+              let baseURL,
+              case let .string(path) = value,
+              !(path as NSString).isAbsolutePath
+        else {
+            return value
+        }
+
+        return .string(baseURL.appendingPathComponent(path).standardizedFileURL.path)
     }
 
     mutating func apply(overrides: CliConfigOverrides) throws {
@@ -504,6 +539,17 @@ private struct ParsedCodexConfigToml {
             config.forcedLoginMethod = method
         }
 
+        if let developerInstructions = topLevel["developer_instructions"] {
+            config.developerInstructions = try Self.trimmedNonEmptyStringValue(
+                developerInstructions,
+                key: "developer_instructions"
+            )
+        }
+
+        if let compactPrompt = topLevel["compact_prompt"] {
+            config.compactPrompt = try Self.trimmedNonEmptyStringValue(compactPrompt, key: "compact_prompt")
+        }
+
         if let workspaceID = topLevel["forced_chatgpt_workspace_id"] {
             config.forcedChatGPTWorkspaceID = try Self.stringValue(workspaceID, key: "forced_chatgpt_workspace_id")
         }
@@ -536,6 +582,15 @@ private struct ParsedCodexConfigToml {
                 keyPrefix: "profiles.\(activeProfile)."
             )
         }
+
+        config.baseInstructions = try config.baseInstructions ?? Self.readNonEmptyFile(
+            config.experimentalInstructionsFile,
+            description: "experimental instructions file"
+        )
+        config.compactPrompt = try config.compactPrompt ?? Self.readNonEmptyFile(
+            config.experimentalCompactPromptFile,
+            description: "experimental compact prompt file"
+        )
 
         var featureStates = FeatureStates.withDefaults()
         featureStates.apply(featureValues: features)
@@ -718,6 +773,8 @@ private struct ParsedCodexConfigToml {
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
             || key == "forced_chatgpt_workspace_id"
+            || key == "developer_instructions"
+            || key == "compact_prompt"
             || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
             || key == "include_apply_patch_tool"
@@ -756,6 +813,27 @@ private struct ParsedCodexConfigToml {
         key == "query_params"
             || key == "http_headers"
             || key == "env_http_headers"
+    }
+
+    private static func trimmedNonEmptyStringValue(_ value: ConfigValue, key: String) throws -> String? {
+        let trimmed = try stringValue(value, key: key).trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func readNonEmptyFile(_ path: String?, description: String) throws -> String? {
+        guard let path else {
+            return nil
+        }
+
+        let contents: String
+        do {
+            contents = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            throw ConfigLayerLoadError.readFailed(path: path, message: "Failed to read \(description): \(error)")
+        }
+
+        let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func stringValue(_ value: ConfigValue, key: String) throws -> String {
