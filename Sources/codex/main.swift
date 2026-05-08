@@ -1,3 +1,4 @@
+import CodexApplyPatch
 import CodexAppServer
 import CodexChatGPT
 import CodexCLI
@@ -7,6 +8,20 @@ import CodexResponsesAPIProxy
 import CodexStdioToUDS
 import Darwin
 import Foundation
+
+if let result = ApplyPatchCommand.runForArg0Dispatch(
+    argv0: CommandLine.arguments.first ?? "",
+    arguments: Array(CommandLine.arguments.dropFirst()),
+    stdin: { FileHandle.standardInput.readDataToEndOfFile() }
+) {
+    if !result.stdout.isEmpty {
+        print(result.stdout, terminator: "")
+    }
+    if !result.stderr.isEmpty {
+        fputs(result.stderr, stderr)
+    }
+    exit(result.exitCode)
+}
 
 ProcessHardening.preMainHardening()
 

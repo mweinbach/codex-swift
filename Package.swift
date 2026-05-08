@@ -66,7 +66,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "codex",
-            dependencies: ["CodexAppServer", "CodexChatGPT", "CodexCLI", "CodexCore", "CodexMCPServer", "CodexResponsesAPIProxy", "CodexStdioToUDS"]
+            dependencies: ["CodexAppServer", "CodexApplyPatch", "CodexChatGPT", "CodexCLI", "CodexCore", "CodexMCPServer", "CodexResponsesAPIProxy", "CodexStdioToUDS"]
         ),
         .testTarget(
             name: "CodexApplyPatchTests",

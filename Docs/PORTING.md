@@ -121,6 +121,8 @@ Source baseline inspected for this scaffold:
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
 - `codex-rs/apply-patch/src/invocation.rs`
   - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
+- `codex-rs/arg0/src/lib.rs` apply-patch dispatch path
+  - `codex` executable dispatch for `apply_patch`/`applypatch` argv0 aliases, hidden `--codex-run-as-apply-patch` argument execution, Rust-matching standalone empty-stdin/extra-argument failures, and shared apply-patch command result routing
 - `codex-rs/utils/git/src/apply.rs`
   - initial native `CodexGit` target for `git apply`, `git apply --check`, diff path extraction, command logging, staging existing paths, and apply-output grouping for clean, skipped, rejected, and conflicted paths
 - `codex-rs/chatgpt/src/get_task.rs` and `codex-rs/chatgpt/src/apply_command.rs`
@@ -336,7 +338,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
 - app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
-- apply-patch runtime
+- apply-patch live tool runtime integration inside model/tool execution
 - cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
