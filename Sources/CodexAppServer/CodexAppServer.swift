@@ -138,6 +138,27 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func skillsListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) -> [String: Any] {
+        let rawCwds = stringArrayParam(params?["cwds"]) ?? []
+        let cwds = rawCwds.isEmpty ? [FileManager.default.currentDirectoryPath] : rawCwds
+        return [
+            "data": cwds.map { cwd in
+                let outcome = loadSkills(
+                    cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                    codexHome: configuration.codexHome
+                )
+                return [
+                    "cwd": cwd,
+                    "skills": outcome.skills.map(skillObject),
+                    "errors": outcome.errors.map(skillErrorObject)
+                ]
+            }
+        ]
+    }
+
     fileprivate static func configReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -758,6 +779,223 @@ public enum CodexAppServer {
         ]
     }
 
+    private static func loadSkills(cwd: URL, codexHome: URL) -> SkillLoadOutcome {
+        var outcome = SkillLoadOutcome()
+        for root in skillRoots(cwd: cwd, codexHome: codexHome) {
+            discoverSkills(root: root.path, scope: root.scope, outcome: &outcome)
+        }
+
+        var seen: Set<String> = []
+        outcome.skills = outcome.skills.filter { seen.insert($0.name).inserted }
+        outcome.skills.sort {
+            if $0.name != $1.name {
+                return $0.name < $1.name
+            }
+            return $0.path < $1.path
+        }
+        return outcome
+    }
+
+    private static func skillRoots(cwd: URL, codexHome: URL) -> [(path: URL, scope: SkillScope)] {
+        var roots: [(URL, SkillScope)] = []
+        if let repoRoot = repoSkillsRoot(cwd: cwd) {
+            roots.append((repoRoot, .repo))
+        }
+        roots.append((codexHome.appendingPathComponent("skills", isDirectory: true), .user))
+        roots.append((codexHome.appendingPathComponent("skills/.system", isDirectory: true), .system))
+        #if os(Windows)
+        #else
+        roots.append((URL(fileURLWithPath: "/etc/codex/skills", isDirectory: true), .admin))
+        #endif
+        return roots
+    }
+
+    private static func repoSkillsRoot(cwd: URL) -> URL? {
+        let base = isDirectory(cwd) ? cwd : cwd.deletingLastPathComponent()
+        let normalizedBase = base.resolvingSymlinksInPath().standardizedFileURL
+        let repoRoot = GitInfoCollector.resolveRootGitProjectForTrust(cwd: normalizedBase) ??
+            GitInfoCollector.gitRepoRoot(baseDir: normalizedBase)
+
+        if let repoRoot {
+            var current = normalizedBase
+            while true {
+                let candidate = current
+                    .appendingPathComponent(".codex", isDirectory: true)
+                    .appendingPathComponent("skills", isDirectory: true)
+                if isDirectory(candidate) {
+                    return candidate
+                }
+                if current.standardizedFileURL.path == repoRoot.standardizedFileURL.path {
+                    return nil
+                }
+                let parent = current.deletingLastPathComponent()
+                if parent.path == current.path {
+                    return nil
+                }
+                current = parent
+            }
+        }
+
+        let candidate = normalizedBase
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("skills", isDirectory: true)
+        return isDirectory(candidate) ? candidate : nil
+    }
+
+    private static func discoverSkills(root: URL, scope: SkillScope, outcome: inout SkillLoadOutcome) {
+        let fileManager = FileManager.default
+        let root = root.resolvingSymlinksInPath().standardizedFileURL
+        guard isDirectory(root) else {
+            return
+        }
+
+        var queue = [root]
+        while !queue.isEmpty {
+            let dir = queue.removeFirst()
+            guard let entries = try? fileManager.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+            for entry in entries {
+                guard entry.lastPathComponent.first != "." else {
+                    continue
+                }
+                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey])
+                if values?.isSymbolicLink == true {
+                    continue
+                }
+                if values?.isDirectory == true {
+                    queue.append(entry)
+                    continue
+                }
+                if values?.isRegularFile == true, entry.lastPathComponent == "SKILL.md" {
+                    do {
+                        outcome.skills.append(try parseSkillFile(entry, scope: scope))
+                    } catch {
+                        if scope != .system {
+                            outcome.errors.append(SkillErrorInfo(path: entry.path, message: String(describing: error)))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func parseSkillFile(_ url: URL, scope: SkillScope) throws -> SkillMetadata {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        guard let frontmatter = extractSkillFrontmatter(contents) else {
+            throw SkillParseError.missingFrontmatter
+        }
+        let fields = parseSkillFrontmatter(frontmatter)
+        let name = sanitizeSkillLine(fields["name"])
+        let description = sanitizeSkillLine(fields["description"])
+        let shortDescription = sanitizeSkillLine(fields["metadata.short-description"])
+
+        guard let name, !name.isEmpty else {
+            throw SkillParseError.missingField("name")
+        }
+        guard name.count <= 64 else {
+            throw SkillParseError.invalidField("name", "exceeds maximum length of 64 characters")
+        }
+        guard let description, !description.isEmpty else {
+            throw SkillParseError.missingField("description")
+        }
+        guard description.count <= 1024 else {
+            throw SkillParseError.invalidField("description", "exceeds maximum length of 1024 characters")
+        }
+        if let shortDescription, shortDescription.count > 1024 {
+            throw SkillParseError.invalidField(
+                "metadata.short-description",
+                "exceeds maximum length of 1024 characters"
+            )
+        }
+
+        return SkillMetadata(
+            name: name,
+            description: description,
+            shortDescription: shortDescription?.isEmpty == false ? shortDescription : nil,
+            path: url.resolvingSymlinksInPath().standardizedFileURL.path,
+            scope: scope
+        )
+    }
+
+    private static func extractSkillFrontmatter(_ contents: String) -> String? {
+        var lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
+            return nil
+        }
+        lines.removeFirst()
+        var frontmatter: [String] = []
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+                return frontmatter.isEmpty ? nil : frontmatter.joined(separator: "\n")
+            }
+            frontmatter.append(line)
+        }
+        return nil
+    }
+
+    private static func parseSkillFrontmatter(_ frontmatter: String) -> [String: String] {
+        var fields: [String: String] = [:]
+        var prefix: String?
+        for rawLine in frontmatter.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else {
+                continue
+            }
+            if !line.hasPrefix(" "), !line.hasPrefix("\t"), trimmed.hasSuffix(":") {
+                prefix = String(trimmed.dropLast())
+                continue
+            }
+            guard let colon = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+            let isNested = line.hasPrefix(" ") || line.hasPrefix("\t")
+            let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueStart = trimmed.index(after: colon)
+            let value = trimmingMatchingQuotes(
+                String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            fields[[isNested ? prefix : nil, key].compactMap(\.self).joined(separator: ".")] = value
+            if !isNested {
+                prefix = nil
+            }
+        }
+        return fields
+    }
+
+    private static func sanitizeSkillLine(_ value: String?) -> String? {
+        value?
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    private static func skillObject(_ skill: SkillMetadata) -> [String: Any] {
+        [
+            "name": skill.name,
+            "description": skill.description,
+            "shortDescription": skill.shortDescription as Any,
+            "path": skill.path,
+            "scope": skill.scope.rawValue
+        ].nullStripped()
+    }
+
+    private static func skillErrorObject(_ error: SkillErrorInfo) -> [String: Any] {
+        [
+            "path": error.path,
+            "message": error.message
+        ]
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
     private static func layerObject(_ layer: ConfigLayerEntry) -> [String: Any] {
         [
             "name": sourceObject(layer.name),
@@ -1355,6 +1593,23 @@ private enum AppServerAuthKind {
     case chatGPT(IdTokenInfo)
 }
 
+private enum SkillParseError: Error, CustomStringConvertible {
+    case missingFrontmatter
+    case missingField(String)
+    case invalidField(String, String)
+
+    var description: String {
+        switch self {
+        case .missingFrontmatter:
+            return "missing YAML frontmatter delimited by ---"
+        case let .missingField(field):
+            return "missing field `\(field)`"
+        case let .invalidField(field, reason):
+            return "invalid \(field): \(reason)"
+        }
+    }
+}
+
 private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
     case invalidRequestWithData(String, data: [String: String])
@@ -1454,6 +1709,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                    )
+                case "skills/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.skillsListResult(params: params, configuration: configuration)
                     )
                 case "config/read":
                     response = CodexAppServer.responseObject(

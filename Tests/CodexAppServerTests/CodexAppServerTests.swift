@@ -430,6 +430,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testSkillsListReturnsRepoUserAndSystemSkillsWithPriorityDedupe() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let repoSkill = cwd.url.appendingPathComponent(".codex/skills/repo/SKILL.md", isDirectory: false)
+        let userSkill = codexHome.url.appendingPathComponent("skills/user/SKILL.md", isDirectory: false)
+        let duplicateUserSkill = codexHome.url.appendingPathComponent("skills/duplicate/SKILL.md", isDirectory: false)
+        let systemSkill = codexHome.url.appendingPathComponent("skills/.system/system/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: repoSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: userSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: duplicateUserSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: systemSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "duplicate", description: "repo wins").write(to: repoSkill, atomically: true, encoding: .utf8)
+        try skillContents(name: "alpha", description: "user skill", shortDescription: "short user")
+            .write(to: userSkill, atomically: true, encoding: .utf8)
+        try skillContents(name: "duplicate", description: "user duplicate")
+            .write(to: duplicateUserSkill, atomically: true, encoding: .utf8)
+        try skillContents(name: "system", description: "system skill").write(to: systemSkill, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.path)
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["alpha", "duplicate", "system"])
+        XCTAssertEqual(skills[0]["scope"] as? String, "user")
+        XCTAssertEqual(skills[0]["shortDescription"] as? String, "short user")
+        XCTAssertEqual(skills[1]["description"] as? String, "repo wins")
+        XCTAssertEqual(skills[1]["scope"] as? String, "repo")
+        XCTAssertEqual(skills[2]["scope"] as? String, "system")
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+    }
+
+    func testSkillsListReportsInvalidUserSkillErrors() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let badSkill = codexHome.url.appendingPathComponent("skills/bad/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: badSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        ---
+        name: bad
+        ---
+        body
+        """.write(to: badSkill, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let errors = try XCTUnwrap(data[0]["errors"] as? [[String: Any]])
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertEqual(
+            (errors[0]["path"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
+            badSkill.path
+        )
+        XCTAssertEqual(errors[0]["message"] as? String, "missing field `description`")
+    }
+
     func testConfigReadReturnsEffectiveConfigOriginsAndLayers() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -889,6 +952,21 @@ final class CodexAppServerTests: XCTestCase {
                     .path
             ]
         )
+    }
+
+    private func skillContents(name: String, description: String, shortDescription: String? = nil) -> String {
+        var lines = [
+            "---",
+            "name: \(name)",
+            "description: \(description)"
+        ]
+        if let shortDescription {
+            lines.append("metadata:")
+            lines.append("  short-description: \(shortDescription)")
+        }
+        lines.append("---")
+        lines.append("body")
+        return lines.joined(separator: "\n") + "\n"
     }
 
     private func decode(_ data: Data?) throws -> [String: Any] {
