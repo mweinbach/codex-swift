@@ -29,6 +29,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case agentReasoningRawContent(AgentReasoningRawContentEvent)
     case agentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent)
     case agentReasoningSectionBreak(AgentReasoningSectionBreakEvent)
+    case sessionConfigured(SessionConfiguredEvent)
     case mcpStartupUpdate(McpStartupUpdateEvent)
     case mcpStartupComplete(McpStartupCompleteEvent)
     case mcpToolCallBegin(McpToolCallBeginEvent)
@@ -87,6 +88,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case agentReasoningRawContent = "agent_reasoning_raw_content"
         case agentReasoningRawContentDelta = "agent_reasoning_raw_content_delta"
         case agentReasoningSectionBreak = "agent_reasoning_section_break"
+        case sessionConfigured = "session_configured"
         case mcpStartupUpdate = "mcp_startup_update"
         case mcpStartupComplete = "mcp_startup_complete"
         case mcpToolCallBegin = "mcp_tool_call_begin"
@@ -158,6 +160,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .agentReasoningRawContentDelta(try AgentReasoningRawContentDeltaEvent(from: decoder))
         case .agentReasoningSectionBreak:
             self = .agentReasoningSectionBreak(try AgentReasoningSectionBreakEvent(from: decoder))
+        case .sessionConfigured:
+            self = .sessionConfigured(try SessionConfiguredEvent(from: decoder))
         case .mcpStartupUpdate:
             self = .mcpStartupUpdate(try McpStartupUpdateEvent(from: decoder))
         case .mcpStartupComplete:
@@ -281,6 +285,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .agentReasoningSectionBreak(event):
             try container.encode(EventType.agentReasoningSectionBreak, forKey: .type)
+            try event.encode(to: encoder)
+        case let .sessionConfigured(event):
+            try container.encode(EventType.sessionConfigured, forKey: .type)
             try event.encode(to: encoder)
         case let .mcpStartupUpdate(event):
             try container.encode(EventType.mcpStartupUpdate, forKey: .type)

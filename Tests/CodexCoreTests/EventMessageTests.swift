@@ -191,7 +191,7 @@ final class EventMessageTests: XCTestCase {
     func testUnsupportedEventMessageVariantThrows() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             EventMessage.self,
-            from: Data(#"{"type":"session_configured"}"#.utf8)
+            from: Data(#"{"type":"future_unported_event"}"#.utf8)
         ))
     }
 }
