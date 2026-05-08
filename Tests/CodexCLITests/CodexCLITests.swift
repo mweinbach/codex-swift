@@ -119,4 +119,126 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 1)
         XCTAssertEqual(stderr, ["apply failed"])
     }
+
+    func testRunAsyncLoginStatusDelegatesToRunnerAndPrintsStatus() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.LoginCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["-c", "cli_auth_credentials_store=\"file\"", "login", "status"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            loginRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(
+                    exitCode: 0,
+                    stderrMessage: "Logged in using an API key - sk-test1***abcde"
+                )
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stdout.isEmpty)
+        XCTAssertEqual(stderr, ["Logged in using an API key - sk-test1***abcde"])
+        XCTAssertEqual(receivedRequest?.action, .status)
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["cli_auth_credentials_store=\"file\""])
+    }
+
+    func testRunAsyncLoginWithAPIKeyDelegatesToRunner() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.LoginCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--with-api-key"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            loginRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stderrMessage: "Successfully logged in")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stdout.isEmpty)
+        XCTAssertEqual(stderr, ["Successfully logged in"])
+        XCTAssertEqual(receivedRequest?.action, .withAPIKeyFromStdin)
+    }
+
+    func testRunAsyncLoginDefaultAndDeviceAuthActionsDelegateToRunner() async {
+        var receivedActions: [CodexCLI.LoginCommandAction] = []
+
+        let defaultExitCode = await CodexCLI().runAsync(
+            arguments: ["login"],
+            stderr: { _ in },
+            loginRunner: { request in
+                receivedActions.append(request.action)
+                return CodexCLI.CommandExecutionResult(exitCode: 78)
+            }
+        )
+        let deviceExitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--device-auth"],
+            stderr: { _ in },
+            loginRunner: { request in
+                receivedActions.append(request.action)
+                return CodexCLI.CommandExecutionResult(exitCode: 78)
+            }
+        )
+
+        XCTAssertEqual(defaultExitCode, 78)
+        XCTAssertEqual(deviceExitCode, 78)
+        XCTAssertEqual(receivedActions, [.chatGPT, .deviceCode])
+    }
+
+    func testRunAsyncLoginRejectsDeprecatedAPIKeyFlagBeforeRunner() async {
+        let message = "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+
+        for arguments in [["login", "--api-key"], ["login", "--api-key=sk-test"]] {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written") },
+                stderr: { stderr.append($0) },
+                loginRunner: { _ in
+                    XCTFail("runner should not be called for deprecated --api-key")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 1)
+            XCTAssertEqual(stderr, [message])
+        }
+
+        var stderrWithoutRunner: [String] = []
+        let exitCodeWithoutRunner = await CodexCLI().runAsync(
+            arguments: ["login", "--api-key"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderrWithoutRunner.append($0) }
+        )
+
+        XCTAssertEqual(exitCodeWithoutRunner, 1)
+        XCTAssertEqual(stderrWithoutRunner, [message])
+    }
+
+    func testRunAsyncLogoutDelegatesToRunnerAndPrintsStatus() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.LogoutCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["-c", "cli_auth_credentials_store=\"file\"", "logout"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            logoutRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stderrMessage: "Successfully logged out")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stdout.isEmpty)
+        XCTAssertEqual(stderr, ["Successfully logged out"])
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["cli_auth_credentials_store=\"file\""])
+    }
 }

@@ -167,6 +167,47 @@ final class AuthTests: XCTestCase {
         XCTAssertNil(try CodexAuthStorage.loadTokenData(codexHome: dir.url, mode: .auto))
     }
 
+    func testLoginWithAPIKeyClearsChatGPTTokens() throws {
+        let dir = try AuthTemporaryDirectory()
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "stale-access-token",
+            refreshToken: "stale-refresh-token",
+            lastRefresh: "2026-05-07T00:00:00Z"
+        )
+
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-new")
+
+        let loaded = try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file)
+        XCTAssertEqual(loaded?.openAIAPIKey, "sk-new")
+        XCTAssertNil(loaded?.tokens)
+        XCTAssertNil(loaded?.lastRefresh)
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .apiKey("sk-new"))
+    }
+
+    func testAuthStatusReportsChatGPTAndNotLoggedIn() throws {
+        let dir = try AuthTemporaryDirectory()
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .notLoggedIn)
+
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            lastRefresh: "2026-05-07T00:00:00Z"
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .chatGPT)
+    }
+
+    func testLogoutRemovesAuthJSONAndReportsMissingAsNotLoggedIn() throws {
+        let dir = try AuthTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-test")
+
+        XCTAssertTrue(try CodexAuthStorage.logout(codexHome: dir.url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.url.appendingPathComponent("auth.json").path))
+        XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url))
+    }
+
     func testKeyringModeReportsUnavailableUntilPorted() throws {
         let dir = try AuthTemporaryDirectory()
         XCTAssertThrowsError(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .keyring)) { error in

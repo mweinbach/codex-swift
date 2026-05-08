@@ -78,6 +78,8 @@ Source baseline inspected for this scaffold:
   - apply-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from git root to cwd, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
+- `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
+  - `codex login --with-api-key` stdin handling, file-backed API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, and `codex logout`
 
 ## Known Gaps
 
@@ -101,5 +103,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - keyring storage for `codex apply <task_id>`
+- ChatGPT browser login, device-code login, forced-login-method enforcement, and keyring storage for login/status/logout
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

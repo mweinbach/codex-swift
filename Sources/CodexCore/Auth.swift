@@ -45,6 +45,12 @@ public struct AuthDotJSON: Codable, Equatable, Sendable {
     }
 }
 
+public enum CodexAuthStatus: Equatable, Sendable {
+    case apiKey(String)
+    case chatGPT
+    case notLoggedIn
+}
+
 public enum CodexHomeError: Error, Equatable, CustomStringConvertible, Sendable {
     case homeDirectoryNotFound
     case codexHomeDoesNotExist(String)
@@ -182,6 +188,57 @@ public enum CodexAuthStorage {
         decoder: JSONDecoder = JSONDecoder()
     ) throws -> AuthTokenData? {
         try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder)?.tokens
+    }
+
+    public static func loginWithAPIKey(
+        codexHome: URL,
+        apiKey: String,
+        mode: AuthCredentialsStoreMode = .file,
+        encoder: JSONEncoder = JSONEncoder()
+    ) throws {
+        try saveAuthDotJSON(
+            AuthDotJSON(openAIAPIKey: apiKey, tokens: nil, lastRefresh: nil),
+            codexHome: codexHome,
+            mode: mode,
+            encoder: encoder
+        )
+    }
+
+    public static func logout(
+        codexHome: URL,
+        mode: AuthCredentialsStoreMode = .file
+    ) throws -> Bool {
+        switch mode {
+        case .file, .auto:
+            let authFile = codexHome.appendingPathComponent("auth.json", isDirectory: false)
+            do {
+                try FileManager.default.removeItem(at: authFile)
+                return true
+            } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                return false
+            } catch {
+                throw error
+            }
+        case .keyring:
+            throw CodexAuthStorageError.keyringStoreNotAvailable
+        }
+    }
+
+    public static func authStatus(
+        codexHome: URL,
+        mode: AuthCredentialsStoreMode = .file,
+        decoder: JSONDecoder = JSONDecoder()
+    ) throws -> CodexAuthStatus {
+        guard let auth = try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder) else {
+            return .notLoggedIn
+        }
+        if let apiKey = auth.openAIAPIKey {
+            return .apiKey(apiKey)
+        }
+        if auth.tokens != nil {
+            return .chatGPT
+        }
+        return .notLoggedIn
     }
 
     public static func loadFreshTokenData(

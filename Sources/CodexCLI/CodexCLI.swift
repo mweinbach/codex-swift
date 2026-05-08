@@ -25,7 +25,44 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum LoginCommandAction: Equatable, Sendable {
+        case status
+        case withAPIKeyFromStdin
+        case chatGPT
+        case deviceCode
+    }
+
+    public struct LoginCommandRequest: Equatable, Sendable {
+        public let action: LoginCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: LoginCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public struct LogoutCommandRequest: Equatable, Sendable {
+        public let configOverrides: CliConfigOverrides
+
+        public init(configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.configOverrides = configOverrides
+        }
+    }
+
+    public struct CommandExecutionResult: Equatable, Sendable {
+        public let exitCode: Int32
+        public let stderrMessage: String?
+
+        public init(exitCode: Int32, stderrMessage: String? = nil) {
+            self.exitCode = exitCode
+            self.stderrMessage = stderrMessage
+        }
+    }
+
     public typealias ApplyCommandRunner = (ApplyCommandRequest) async throws -> String?
+    public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
+    public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -122,7 +159,9 @@ public struct CodexCLI: Sendable {
         arguments: [String],
         stdout: (String) -> Void = { print($0) },
         stderr: (String) -> Void = { fputs($0 + "\n", Darwin.stderr) },
-        applyRunner: ApplyCommandRunner? = nil
+        applyRunner: ApplyCommandRunner? = nil,
+        loginRunner: LoginCommandRunner? = nil,
+        logoutRunner: LogoutCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -148,6 +187,45 @@ public struct CodexCLI: Sendable {
                     stdout(message)
                 }
                 return 0
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, commandArguments) where spec.name == "login":
+            if usesDeprecatedAPIKeyFlag(arguments) {
+                stderr("The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.")
+                return 1
+            }
+            guard let loginRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            do {
+                let result = try await loginRunner(LoginCommandRequest(
+                    action: loginAction(arguments: arguments, commandArguments: commandArguments),
+                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                ))
+                if let message = result.stderrMessage {
+                    stderr(message)
+                }
+                return result.exitCode
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, _) where spec.name == "logout":
+            guard let logoutRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            do {
+                let result = try await logoutRunner(LogoutCommandRequest(
+                    configOverrides: CliConfigOverrides(rawOverrides: configOverrideTokens(arguments))
+                ))
+                if let message = result.stderrMessage {
+                    stderr(message)
+                }
+                return result.exitCode
             } catch {
                 stderr(describe(error))
                 return 1
@@ -237,6 +315,23 @@ public struct CodexCLI: Sendable {
         }
 
         return overrides
+    }
+
+    private func loginAction(arguments: [String], commandArguments: [String]) -> LoginCommandAction {
+        if commandArguments.first == "status" {
+            return .status
+        }
+        if arguments.contains("--device-auth") {
+            return .deviceCode
+        }
+        if arguments.contains("--with-api-key") {
+            return .withAPIKeyFromStdin
+        }
+        return .chatGPT
+    }
+
+    private func usesDeprecatedAPIKeyFlag(_ arguments: [String]) -> Bool {
+        arguments.contains("--api-key") || arguments.contains { $0.hasPrefix("--api-key=") }
     }
 
     private func describe(_ error: Error) -> String {
