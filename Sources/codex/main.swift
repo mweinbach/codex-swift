@@ -1,3 +1,4 @@
+import CodexAppServer
 import CodexChatGPT
 import CodexCLI
 import CodexCore
@@ -29,6 +30,7 @@ let exitCode = await cli.runAsync(
     reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
     mcpServerRunner: runMcpServerCommand,
+    appServerRunner: runAppServerCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
     mcpRunner: runMcpCommand,
@@ -297,6 +299,28 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
         )
     }
     return CodexCLI.CommandExecutionResult(exitCode: 0)
+}
+
+private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    switch request.action {
+    case .run:
+        let codexHome = try CodexHome.find()
+        let settings = try CodexConfigLoader.load(
+            codexHome: codexHome,
+            overrides: request.configOverrides
+        )
+        try CodexAppServer.run(configuration: CodexAppServerConfiguration(
+            codexHome: codexHome,
+            defaultModelProvider: settings.selectedModelProviderID
+        ))
+        return CodexCLI.CommandExecutionResult(exitCode: 0)
+    case .generateTS,
+         .generateJSONSchema:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: app-server protocol generators are not ported yet."
+        )
+    }
 }
 
 private func mcpExecArguments(for toolCall: CodexMCPToolCall) -> [String] {

@@ -317,6 +317,8 @@ Source baseline inspected for this scaffold:
   - non-interactive exec now creates/resumes rollout JSONL files, records turn context, the new user prompt, and completed model/tool transcript items, and durably shuts down the recorder so Swift-created exec sessions become discoverable for later resume
 - Initial `codex-rs/mcp-server` stdio surface
   - executable `codex mcp-server` now runs a Swift-native newline-delimited JSON-RPC loop with initialize, ping, tools/list, and tools/call handling; the `codex` MCP tool delegates to the existing non-interactive exec runtime with model/profile/cwd/approval/sandbox/config overrides, while `codex-reply` remains a listed but not-yet-wired tool
+- Initial `codex-rs/app-server` rollout-listing surface
+  - executable `codex app-server` now runs a Swift-native newline-delimited app-server JSON-RPC loop for initialize, v2 `thread/list`, and legacy `listConversations`, backed by saved rollout files with provider filtering, pagination cursors, preview extraction, session source mapping, and thread/conversation response shapes
 
 ## Known Gaps
 
@@ -332,7 +334,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
-- app-server protocol and server runtime
+- app-server live thread/turn/review/account/model/MCP APIs and protocol generators
 - apply-patch runtime
 - cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
 - full Rust command parser parity for complex Bash/Powershell AST cases
