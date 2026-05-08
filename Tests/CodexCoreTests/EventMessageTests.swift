@@ -80,6 +80,21 @@ final class EventMessageTests: XCTestCase {
             ]
         ])
 
+        try XCTAssertJSONObjectEqual(EventMessage.mcpListToolsResponse(McpListToolsResponseEvent(
+            tools: [:],
+            resources: [:],
+            resourceTemplates: [:],
+            authStatuses: ["filesystem": .oauth]
+        )), [
+            "type": "mcp_list_tools_response",
+            "tools": [:],
+            "resources": [:],
+            "resource_templates": [:],
+            "auth_statuses": [
+                "filesystem": "oauth"
+            ]
+        ])
+
         try XCTAssertJSONObjectEqual(EventMessage.agentMessageContentDelta(AgentMessageContentDeltaEvent(
             threadID: "thread-1",
             turnID: "turn-1",

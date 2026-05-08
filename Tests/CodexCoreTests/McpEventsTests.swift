@@ -59,6 +59,160 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testListToolsResponseWireShape() throws {
+        let event = McpListToolsResponseEvent(
+            tools: [
+                "filesystem/read_file": McpTool(
+                    name: "read_file",
+                    inputSchema: McpToolInputSchema(
+                        properties: .object([
+                            "path": .object([
+                                "type": .string("string")
+                            ])
+                        ]),
+                        required: ["path"]
+                    ),
+                    annotations: McpToolAnnotations(
+                        destructiveHint: false,
+                        readOnlyHint: true,
+                        title: "Read file"
+                    ),
+                    description: "Read a file",
+                    outputSchema: McpToolOutputSchema(properties: .object([
+                        "content": .object([
+                            "type": .string("string")
+                        ])
+                    ])),
+                    title: "Read File"
+                )
+            ],
+            resources: [
+                "filesystem": [
+                    McpResource(
+                        name: "readme",
+                        uri: "file:///tmp/README.md",
+                        annotations: McpAnnotations(
+                            audience: [.assistant, .user],
+                            lastModified: "2026-05-08T00:00:00Z",
+                            priority: 0.5
+                        ),
+                        description: "docs",
+                        mimeType: "text/markdown",
+                        size: 42,
+                        title: "README"
+                    )
+                ]
+            ],
+            resourceTemplates: [
+                "filesystem": [
+                    McpResourceTemplate(
+                        name: "workspace-file",
+                        uriTemplate: "file:///workspace/{path}",
+                        description: "workspace files",
+                        mimeType: "text/plain",
+                        title: "Workspace file"
+                    )
+                ]
+            ],
+            authStatuses: [
+                "filesystem": .oauth,
+                "github": .notLoggedIn
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "tools": [
+                "filesystem/read_file": [
+                    "annotations": [
+                        "destructiveHint": false,
+                        "readOnlyHint": true,
+                        "title": "Read file"
+                    ],
+                    "description": "Read a file",
+                    "inputSchema": [
+                        "properties": [
+                            "path": [
+                                "type": "string"
+                            ]
+                        ],
+                        "required": ["path"],
+                        "type": "object"
+                    ],
+                    "name": "read_file",
+                    "outputSchema": [
+                        "properties": [
+                            "content": [
+                                "type": "string"
+                            ]
+                        ],
+                        "type": "object"
+                    ],
+                    "title": "Read File"
+                ]
+            ],
+            "resources": [
+                "filesystem": [
+                    [
+                        "annotations": [
+                            "audience": ["assistant", "user"],
+                            "lastModified": "2026-05-08T00:00:00Z",
+                            "priority": 0.5
+                        ],
+                        "description": "docs",
+                        "mimeType": "text/markdown",
+                        "name": "readme",
+                        "size": 42,
+                        "title": "README",
+                        "uri": "file:///tmp/README.md"
+                    ]
+                ]
+            ],
+            "resource_templates": [
+                "filesystem": [
+                    [
+                        "description": "workspace files",
+                        "mimeType": "text/plain",
+                        "name": "workspace-file",
+                        "title": "Workspace file",
+                        "uriTemplate": "file:///workspace/{path}"
+                    ]
+                ]
+            ],
+            "auth_statuses": [
+                "filesystem": "oauth",
+                "github": "not_logged_in"
+            ]
+        ])
+    }
+
+    func testToolSchemasDefaultTypeOnDecodeAndAlwaysEncodeType() throws {
+        let inputSchema = try JSONDecoder().decode(McpToolInputSchema.self, from: Data("""
+        {
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(inputSchema.type, "object")
+        try XCTAssertJSONObjectEqual(inputSchema, [
+            "properties": [
+                "query": [
+                    "type": "string"
+                ]
+            ],
+            "type": "object"
+        ])
+
+        let outputSchema = try JSONDecoder().decode(McpToolOutputSchema.self, from: Data(#"{}"#.utf8))
+        XCTAssertEqual(outputSchema, McpToolOutputSchema())
+        try XCTAssertJSONObjectEqual(outputSchema, [
+            "type": "object"
+        ])
+    }
+
     func testInvocationEncodesMissingArgumentsAsNull() throws {
         try XCTAssertJSONObjectEqual(McpInvocation(server: "filesystem", tool: "read_file"), [
             "server": "filesystem",

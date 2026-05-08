@@ -80,6 +80,255 @@ public struct McpStartupFailure: Equatable, Codable, Sendable {
     }
 }
 
+public struct McpListToolsResponseEvent: Equatable, Codable, Sendable {
+    public let tools: [String: McpTool]
+    public let resources: [String: [McpResource]]
+    public let resourceTemplates: [String: [McpResourceTemplate]]
+    public let authStatuses: [String: McpAuthStatus]
+
+    private enum CodingKeys: String, CodingKey {
+        case tools
+        case resources
+        case resourceTemplates = "resource_templates"
+        case authStatuses = "auth_statuses"
+    }
+
+    public init(
+        tools: [String: McpTool],
+        resources: [String: [McpResource]],
+        resourceTemplates: [String: [McpResourceTemplate]],
+        authStatuses: [String: McpAuthStatus]
+    ) {
+        self.tools = tools
+        self.resources = resources
+        self.resourceTemplates = resourceTemplates
+        self.authStatuses = authStatuses
+    }
+}
+
+public enum McpRole: String, Codable, Equatable, Sendable {
+    case assistant
+    case user
+}
+
+public struct McpAnnotations: Equatable, Codable, Sendable {
+    public let audience: [McpRole]?
+    public let lastModified: String?
+    public let priority: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case audience
+        case lastModified = "lastModified"
+        case priority
+    }
+
+    public init(audience: [McpRole]? = nil, lastModified: String? = nil, priority: Double? = nil) {
+        self.audience = audience
+        self.lastModified = lastModified
+        self.priority = priority
+    }
+}
+
+public struct McpResource: Equatable, Codable, Sendable {
+    public let annotations: McpAnnotations?
+    public let description: String?
+    public let mimeType: String?
+    public let name: String
+    public let size: Int64?
+    public let title: String?
+    public let uri: String
+
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case description
+        case mimeType = "mimeType"
+        case name
+        case size
+        case title
+        case uri
+    }
+
+    public init(
+        name: String,
+        uri: String,
+        annotations: McpAnnotations? = nil,
+        description: String? = nil,
+        mimeType: String? = nil,
+        size: Int64? = nil,
+        title: String? = nil
+    ) {
+        self.annotations = annotations
+        self.description = description
+        self.mimeType = mimeType
+        self.name = name
+        self.size = size
+        self.title = title
+        self.uri = uri
+    }
+}
+
+public struct McpResourceTemplate: Equatable, Codable, Sendable {
+    public let annotations: McpAnnotations?
+    public let description: String?
+    public let mimeType: String?
+    public let name: String
+    public let title: String?
+    public let uriTemplate: String
+
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case description
+        case mimeType = "mimeType"
+        case name
+        case title
+        case uriTemplate = "uriTemplate"
+    }
+
+    public init(
+        name: String,
+        uriTemplate: String,
+        annotations: McpAnnotations? = nil,
+        description: String? = nil,
+        mimeType: String? = nil,
+        title: String? = nil
+    ) {
+        self.annotations = annotations
+        self.description = description
+        self.mimeType = mimeType
+        self.name = name
+        self.title = title
+        self.uriTemplate = uriTemplate
+    }
+}
+
+public struct McpTool: Equatable, Codable, Sendable {
+    public let annotations: McpToolAnnotations?
+    public let description: String?
+    public let inputSchema: McpToolInputSchema
+    public let name: String
+    public let outputSchema: McpToolOutputSchema?
+    public let title: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case description
+        case inputSchema = "inputSchema"
+        case name
+        case outputSchema = "outputSchema"
+        case title
+    }
+
+    public init(
+        name: String,
+        inputSchema: McpToolInputSchema,
+        annotations: McpToolAnnotations? = nil,
+        description: String? = nil,
+        outputSchema: McpToolOutputSchema? = nil,
+        title: String? = nil
+    ) {
+        self.annotations = annotations
+        self.description = description
+        self.inputSchema = inputSchema
+        self.name = name
+        self.outputSchema = outputSchema
+        self.title = title
+    }
+}
+
+public struct McpToolInputSchema: Equatable, Codable, Sendable {
+    public let properties: JSONValue?
+    public let required: [String]?
+    public let type: String
+
+    private enum CodingKeys: String, CodingKey {
+        case properties
+        case required
+        case type
+    }
+
+    public init(properties: JSONValue? = nil, required: [String]? = nil, type: String = "object") {
+        self.properties = properties
+        self.required = required
+        self.type = type
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.properties = try container.decodeIfPresent(JSONValue.self, forKey: .properties)
+        self.required = try container.decodeIfPresent([String].self, forKey: .required)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "object"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(properties, forKey: .properties)
+        try container.encodeIfPresent(required, forKey: .required)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+public struct McpToolOutputSchema: Equatable, Codable, Sendable {
+    public let properties: JSONValue?
+    public let required: [String]?
+    public let type: String
+
+    private enum CodingKeys: String, CodingKey {
+        case properties
+        case required
+        case type
+    }
+
+    public init(properties: JSONValue? = nil, required: [String]? = nil, type: String = "object") {
+        self.properties = properties
+        self.required = required
+        self.type = type
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.properties = try container.decodeIfPresent(JSONValue.self, forKey: .properties)
+        self.required = try container.decodeIfPresent([String].self, forKey: .required)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "object"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(properties, forKey: .properties)
+        try container.encodeIfPresent(required, forKey: .required)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+public struct McpToolAnnotations: Equatable, Codable, Sendable {
+    public let destructiveHint: Bool?
+    public let idempotentHint: Bool?
+    public let openWorldHint: Bool?
+    public let readOnlyHint: Bool?
+    public let title: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case destructiveHint = "destructiveHint"
+        case idempotentHint = "idempotentHint"
+        case openWorldHint = "openWorldHint"
+        case readOnlyHint = "readOnlyHint"
+        case title
+    }
+
+    public init(
+        destructiveHint: Bool? = nil,
+        idempotentHint: Bool? = nil,
+        openWorldHint: Bool? = nil,
+        readOnlyHint: Bool? = nil,
+        title: String? = nil
+    ) {
+        self.destructiveHint = destructiveHint
+        self.idempotentHint = idempotentHint
+        self.openWorldHint = openWorldHint
+        self.readOnlyHint = readOnlyHint
+        self.title = title
+    }
+}
+
 public struct McpInvocation: Equatable, Codable, Sendable {
     public let server: String
     public let tool: String
@@ -261,11 +510,11 @@ public enum McpContentBlock: Equatable, Codable, Sendable {
 }
 
 public struct McpTextContent: Equatable, Codable, Sendable {
-    public let annotations: JSONValue?
+    public let annotations: McpAnnotations?
     public let text: String
     public let type: String
 
-    public init(text: String, type: String = "text", annotations: JSONValue? = nil) {
+    public init(text: String, type: String = "text", annotations: McpAnnotations? = nil) {
         self.annotations = annotations
         self.text = text
         self.type = type
@@ -273,7 +522,7 @@ public struct McpTextContent: Equatable, Codable, Sendable {
 }
 
 public struct McpImageContent: Equatable, Codable, Sendable {
-    public let annotations: JSONValue?
+    public let annotations: McpAnnotations?
     public let data: String
     public let mimeType: String
     public let type: String
@@ -285,7 +534,7 @@ public struct McpImageContent: Equatable, Codable, Sendable {
         case type
     }
 
-    public init(data: String, mimeType: String, type: String = "image", annotations: JSONValue? = nil) {
+    public init(data: String, mimeType: String, type: String = "image", annotations: McpAnnotations? = nil) {
         self.annotations = annotations
         self.data = data
         self.mimeType = mimeType
@@ -294,7 +543,7 @@ public struct McpImageContent: Equatable, Codable, Sendable {
 }
 
 public struct McpAudioContent: Equatable, Codable, Sendable {
-    public let annotations: JSONValue?
+    public let annotations: McpAnnotations?
     public let data: String
     public let mimeType: String
     public let type: String
@@ -306,7 +555,7 @@ public struct McpAudioContent: Equatable, Codable, Sendable {
         case type
     }
 
-    public init(data: String, mimeType: String, type: String = "audio", annotations: JSONValue? = nil) {
+    public init(data: String, mimeType: String, type: String = "audio", annotations: McpAnnotations? = nil) {
         self.annotations = annotations
         self.data = data
         self.mimeType = mimeType
@@ -315,7 +564,7 @@ public struct McpAudioContent: Equatable, Codable, Sendable {
 }
 
 public struct McpResourceLink: Equatable, Codable, Sendable {
-    public let annotations: JSONValue?
+    public let annotations: McpAnnotations?
     public let description: String?
     public let mimeType: String?
     public let name: String
@@ -339,7 +588,7 @@ public struct McpResourceLink: Equatable, Codable, Sendable {
         name: String,
         uri: String,
         type: String = "resource_link",
-        annotations: JSONValue? = nil,
+        annotations: McpAnnotations? = nil,
         description: String? = nil,
         mimeType: String? = nil,
         size: Int64? = nil,
@@ -357,11 +606,11 @@ public struct McpResourceLink: Equatable, Codable, Sendable {
 }
 
 public struct McpEmbeddedResource: Equatable, Codable, Sendable {
-    public let annotations: JSONValue?
+    public let annotations: McpAnnotations?
     public let resource: McpEmbeddedResourceResource
     public let type: String
 
-    public init(resource: McpEmbeddedResourceResource, type: String = "resource", annotations: JSONValue? = nil) {
+    public init(resource: McpEmbeddedResourceResource, type: String = "resource", annotations: McpAnnotations? = nil) {
         self.annotations = annotations
         self.resource = resource
         self.type = type

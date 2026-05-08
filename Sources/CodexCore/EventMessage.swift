@@ -33,6 +33,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case mcpStartupComplete(McpStartupCompleteEvent)
     case mcpToolCallBegin(McpToolCallBeginEvent)
     case mcpToolCallEnd(McpToolCallEndEvent)
+    case mcpListToolsResponse(McpListToolsResponseEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
     case execCommandBegin(ExecCommandBeginEvent)
@@ -87,6 +88,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case mcpStartupComplete = "mcp_startup_complete"
         case mcpToolCallBegin = "mcp_tool_call_begin"
         case mcpToolCallEnd = "mcp_tool_call_end"
+        case mcpListToolsResponse = "mcp_list_tools_response"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
         case execCommandBegin = "exec_command_begin"
@@ -158,6 +160,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .mcpToolCallBegin(try McpToolCallBeginEvent(from: decoder))
         case .mcpToolCallEnd:
             self = .mcpToolCallEnd(try McpToolCallEndEvent(from: decoder))
+        case .mcpListToolsResponse:
+            self = .mcpListToolsResponse(try McpListToolsResponseEvent(from: decoder))
         case .webSearchBegin:
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
@@ -277,6 +281,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .mcpToolCallEnd(event):
             try container.encode(EventType.mcpToolCallEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .mcpListToolsResponse(event):
+            try container.encode(EventType.mcpListToolsResponse, forKey: .type)
             try event.encode(to: encoder)
         case let .webSearchBegin(event):
             try container.encode(EventType.webSearchBegin, forKey: .type)
