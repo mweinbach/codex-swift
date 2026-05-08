@@ -191,6 +191,60 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func loginApiKeyResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let apiKey = stringParam(params?["apiKey"]) else {
+            throw AppServerError.invalidRequest("missing apiKey")
+        }
+        if try forcedLoginMethod(configuration: configuration) == "chatgpt" {
+            throw AppServerError.invalidRequest("API key login is disabled. Use ChatGPT login instead.")
+        }
+        do {
+            try CodexAuthStorage.loginWithAPIKey(
+                codexHome: configuration.codexHome,
+                apiKey: apiKey,
+                mode: configuration.authCredentialsStoreMode
+            )
+        } catch {
+            throw AppServerError.internalError("failed to save api key: \(error)")
+        }
+        return [:]
+    }
+
+    fileprivate static func logoutResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        do {
+            _ = try CodexAuthStorage.logout(
+                codexHome: configuration.codexHome,
+                mode: configuration.authCredentialsStoreMode
+            )
+        } catch {
+            throw AppServerError.internalError("logout failed: \(error)")
+        }
+        return [:]
+    }
+
+    fileprivate static func authStatusChangeNotification(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        [
+            "method": "authStatusChange",
+            "params": [
+                "authMethod": try currentAuth(configuration: configuration)?.method ?? NSNull()
+            ].nullStripped(keepNulls: true)
+        ]
+    }
+
+    private static func forcedLoginMethod(configuration: CodexAppServerConfiguration) throws -> String? {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        guard let table = configTable(stack.effectiveConfig()) else {
+            return nil
+        }
+        return stringConfig(table, "forced_login_method")
+    }
+
     fileprivate static func buildUserAgent(
         configuration: CodexAppServerConfiguration,
         params: [String: Any]?,
@@ -299,6 +353,19 @@ public enum CodexAppServer {
             return nil
         }
         return try? JSONSerialization.data(withJSONObject: response)
+    }
+
+    fileprivate static func encodeMessages(_ messages: [[String: Any]]) -> Data? {
+        let encodedLines = messages.compactMap(encodeResponse)
+        guard !encodedLines.isEmpty else {
+            return nil
+        }
+        return encodedLines.enumerated().reduce(into: Data()) { data, item in
+            if item.offset > 0 {
+                data.append(0x0A)
+            }
+            data.append(item.element)
+        }
     }
 
     private static func threadObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
@@ -801,10 +868,13 @@ private enum AppServerAuthKind {
 
 private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
+    case internalError(String)
 
     var description: String {
         switch self {
         case let .invalidRequest(message):
+            return message
+        case let .internalError(message):
             return message
         }
     }
@@ -829,7 +899,8 @@ final class CodexAppServerMessageProcessor {
         }
 
         let params = object["params"] as? [String: Any]
-        let response: [String: Any]
+        var response: [String: Any]
+        var notifications: [[String: Any]] = []
         if method == "initialize" {
             if initialized {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
@@ -894,6 +965,18 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.gitDiffToRemoteResult(params: params)
                     )
+                case "loginApiKey":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.loginApiKeyResult(params: params, configuration: configuration)
+                    )
+                    notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
+                case "logoutChatGpt":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.logoutResult(configuration: configuration)
+                    )
+                    notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
                 case "setDefaultModel":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -903,12 +986,17 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")
                 }
             } catch let error as AppServerError {
-                response = CodexAppServer.errorObject(id: id, code: -32600, message: error.description)
+                switch error {
+                case .invalidRequest:
+                    response = CodexAppServer.errorObject(id: id, code: -32600, message: error.description)
+                case .internalError:
+                    response = CodexAppServer.errorObject(id: id, code: -32603, message: error.description)
+                }
             } catch {
                 response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
             }
         }
-        return CodexAppServer.encodeResponse(response)
+        return CodexAppServer.encodeMessages([response] + notifications)
     }
 }
 

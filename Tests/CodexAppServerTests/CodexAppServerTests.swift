@@ -227,6 +227,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(tokenResult["requiresOpenAIAuth"] as? Bool, true)
     }
 
+    func testLoginApiKeyPersistsAuthAndEmitsLegacyNotification() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"loginApiKey","params":{"apiKey":"sk-test-key"}}"#.utf8)))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "authStatusChange")
+        XCTAssertEqual((messages[1]["params"] as? [String: Any])?["authMethod"] as? String, "apikey")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+
+        let status = try decode(processor.processLine(Data(#"{"id":2,"method":"getAuthStatus","params":{"includeToken":true}}"#.utf8)))
+        let result = try XCTUnwrap(status["result"] as? [String: Any])
+        XCTAssertEqual(result["authMethod"] as? String, "apikey")
+        XCTAssertEqual(result["authToken"] as? String, "sk-test-key")
+    }
+
+    func testLoginApiKeyRejectedWhenForcedChatGPT() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_login_method = "chatgpt""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"loginApiKey","params":{"apiKey":"sk-test-key"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "API key login is disabled. Use ChatGPT login instead.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
+    func testLogoutChatGPTRemovesAuthAndEmitsLegacyNotification() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"logoutChatGpt"}"#.utf8)))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "authStatusChange")
+        XCTAssertTrue((messages[1]["params"] as? [String: Any])?["authMethod"] is NSNull)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+
+        let status = try decode(processor.processLine(Data(#"{"id":2,"method":"getAuthStatus","params":{"includeToken":true}}"#.utf8)))
+        let result = try XCTUnwrap(status["result"] as? [String: Any])
+        XCTAssertTrue(result["authMethod"] is NSNull)
+        XCTAssertTrue(result["authToken"] is NSNull)
+    }
+
     func testAccountAndUserInfoReportChatGPTIdentity() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.saveChatGPTTokens(
@@ -600,6 +653,15 @@ final class CodexAppServerTests: XCTestCase {
     private func decode(_ data: Data?) throws -> [String: Any] {
         let data = try XCTUnwrap(data)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func decodeMessages(_ data: Data?) throws -> [[String: Any]] {
+        let data = try XCTUnwrap(data)
+        let payload = String(data: data, encoding: .utf8) ?? ""
+        return try payload.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let lineData = Data(line.utf8)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: lineData) as? [String: Any])
+        }
     }
 
     @discardableResult
