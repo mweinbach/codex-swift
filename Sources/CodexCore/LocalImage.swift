@@ -49,6 +49,8 @@ public enum LocalImageProcessor {
     public static let maxWidth = 2_048
     public static let maxHeight = 768
 
+    private static let imageCache = BlockingLruCache<Data, EncodedImage>(capacity: 32)
+
     public static func loadAndResizeToFit(path: URL) throws -> EncodedImage {
         let fileBytes: Data
         do {
@@ -57,6 +59,12 @@ public enum LocalImageProcessor {
             throw ImageProcessingError.read(path: path.path, source: String(describing: error))
         }
 
+        return try imageCache.getOrTryInsertWith(CacheUtils.sha1Digest(fileBytes)) {
+            try loadAndResizeToFit(fileBytes: fileBytes, path: path)
+        }
+    }
+
+    private static func loadAndResizeToFit(fileBytes: Data, path: URL) throws -> EncodedImage {
         guard let inputFormat = ImageFileFormat(fileBytes: fileBytes) else {
             throw ImageProcessingError.decode(
                 path: path.path,
