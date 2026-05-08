@@ -94,6 +94,17 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files webview/src | sed -n"]), [
             .search(cmd: "rg --files webview/src", query: nil, path: "webview")
         ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | head -n 50"]), [
+            .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+    }
+
+    func testHandlesComplexSearchPipelineLikeRust() {
+        let inner = "rg -n \"BUG|FIXME|TODO|XXX|HACK\" -S | head -n 200"
+        XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
+            .search(cmd: "rg -n 'BUG|FIXME|TODO|XXX|HACK' -S", query: "BUG|FIXME|TODO|XXX|HACK", path: nil)
+        ])
     }
 
     func testHandlesComplexBashCommandHead() {
@@ -171,6 +182,12 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["sed", "-n", "12,20p", "Cargo.toml"]), [
             .read(cmd: "sed -n '12,20p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
+        XCTAssertEqual(parseCommand(["cat", "--", "./-strange-file-name"]), [
+            .read(cmd: "cat -- ./-strange-file-name", name: "-strange-file-name", path: "./-strange-file-name")
+        ])
+        XCTAssertEqual(parseCommand(["/bin/bash", "-lc", "sed -n '1,10p' Cargo.toml"]), [
+            .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
     }
 
     func testSearchVariants() {
@@ -190,6 +207,14 @@ final class ParsedCommandTests: XCTestCase {
 
     func testStripsTrueInsideBashLc() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files || true"]), [
+            .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["true", "&&", "rg", "--files"]), [
+            .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["rg", "--files", "&&", "true"]), [
             .search(cmd: "rg --files", query: nil, path: nil)
         ])
     }
@@ -220,6 +245,11 @@ final class ParsedCommandTests: XCTestCase {
     func testDropsFormattingCommandsInPipelines() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "yes | rg --files"]), [
             .search(cmd: "rg --files", query: nil, path: nil)
+        ])
+
+        let printfThenCat = #"printf "\n===== ansi-escape/Cargo.toml =====\n"; cat -- ansi-escape/Cargo.toml"#
+        XCTAssertEqual(parseCommand(["bash", "-lc", printfThenCat]), [
+            .read(cmd: "cat -- ansi-escape/Cargo.toml", name: "Cargo.toml", path: "ansi-escape/Cargo.toml")
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | nl -ba"]), [
@@ -265,6 +295,14 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["ls", "--time-style=long-iso", "./dist"]), [
             .listFiles(cmd: "ls '--time-style=long-iso' ./dist", path: ".")
         ])
+
+        XCTAssertEqual(parseCommand(["yes", "|", "rg", "-n", "foo bar", "-S"]), [
+            .search(cmd: "rg -n 'foo bar' -S", query: "foo bar", path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["rg", "--colors=never", "-n", "foo", "src"]), [
+            .search(cmd: "rg '--colors=never' -n foo src", query: "foo", path: "src")
+        ])
     }
 
     func testDedupesConsecutiveCommandsAndKeepsCommandParserCompatibility() {
@@ -275,6 +313,10 @@ final class ParsedCommandTests: XCTestCase {
     }
 
     func testPowerShellCommandIsStripped() {
+        XCTAssertEqual(parseCommand(["powershell", "-Command", "Get-ChildItem"]), [
+            .unknown(cmd: "Get-ChildItem")
+        ])
+
         XCTAssertEqual(parseCommand(["pwsh", "-NoProfile", "-c", "Write-Host hi"]), [
             .unknown(cmd: "Write-Host hi")
         ])
