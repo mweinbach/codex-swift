@@ -14,6 +14,12 @@ final class CompactAPITests: XCTestCase {
         let object = try JSONObject(input)
         XCTAssertEqual(object["model"] as? String, "gpt-test")
         XCTAssertEqual(object["instructions"] as? String, "summarize")
+        XCTAssertEqual((object["tools"] as? [Any])?.count, 0)
+        XCTAssertEqual(object["parallel_tool_calls"] as? Bool, false)
+        XCTAssertNil(object["reasoning"])
+        XCTAssertNil(object["service_tier"])
+        XCTAssertNil(object["prompt_cache_key"])
+        XCTAssertNil(object["text"])
 
         let items = try XCTUnwrap(object["input"] as? [[String: Any]])
         XCTAssertEqual(items.count, 1)
@@ -51,7 +57,40 @@ final class CompactAPITests: XCTestCase {
         XCTAssertEqual(body, .object([
             "model": .string("gpt-test"),
             "input": .array([]),
-            "instructions": .string("inst")
+            "instructions": .string("inst"),
+            "tools": .array([]),
+            "parallel_tool_calls": .bool(false)
+        ]))
+    }
+
+    func testCompactionInputOmissionRulesMatchRust() throws {
+        let body = try CompactAPI.body(for: CompactionInput(
+            model: "gpt-test",
+            input: [],
+            instructions: "",
+            tools: [.object(["type": .string("function"), "name": .string("noop")])],
+            parallelToolCalls: true,
+            reasoning: ResponsesAPIReasoning(effort: .medium, summary: ReasoningSummary.none),
+            serviceTier: nil,
+            promptCacheKey: "cache-key",
+            text: ResponsesAPITextControls(verbosity: .low)
+        ))
+
+        XCTAssertEqual(body, .object([
+            "model": .string("gpt-test"),
+            "input": .array([]),
+            "tools": .array([
+                .object(["type": .string("function"), "name": .string("noop")])
+            ]),
+            "parallel_tool_calls": .bool(true),
+            "reasoning": .object([
+                "effort": .string("medium"),
+                "summary": .string("none")
+            ]),
+            "prompt_cache_key": .string("cache-key"),
+            "text": .object([
+                "verbosity": .string("low")
+            ])
         ]))
     }
 
