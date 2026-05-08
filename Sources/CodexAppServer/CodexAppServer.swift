@@ -10,6 +10,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
     public let environment: [String: String]
     public let activeProfile: String?
+    public let feedback: CodexFeedback
+    public let feedbackUploadTransport: any FeedbackUploadTransport
 
     public init(
         codexHome: URL,
@@ -19,7 +21,9 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         requiresOpenAIAuth: Bool = true,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        activeProfile: String? = nil
+        activeProfile: String? = nil,
+        feedback: CodexFeedback = CodexFeedback(),
+        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -29,6 +33,19 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.authCredentialsStoreMode = authCredentialsStoreMode
         self.environment = environment
         self.activeProfile = activeProfile
+        self.feedback = feedback
+        self.feedbackUploadTransport = feedbackUploadTransport
+    }
+
+    public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
+        lhs.codexHome == rhs.codexHome &&
+            lhs.defaultModelProvider == rhs.defaultModelProvider &&
+            lhs.originator == rhs.originator &&
+            lhs.version == rhs.version &&
+            lhs.requiresOpenAIAuth == rhs.requiresOpenAIAuth &&
+            lhs.authCredentialsStoreMode == rhs.authCredentialsStoreMode &&
+            lhs.environment == rhs.environment &&
+            lhs.activeProfile == rhs.activeProfile
     }
 }
 
@@ -445,6 +462,56 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func feedbackUploadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let classification = stringParam(params?["classification"]) else {
+            throw AppServerError.invalidRequest("missing classification")
+        }
+        let reason = stringParam(params?["reason"])
+        let threadID = stringParam(params?["threadId"])
+        let conversationID: ConversationId?
+        if let threadID {
+            do {
+                conversationID = try ConversationId(string: threadID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid thread id: \(error)")
+            }
+        } else {
+            conversationID = nil
+        }
+
+        let includeLogs = boolParam(params?["includeLogs"], defaultValue: false)
+        let snapshot = configuration.feedback.snapshot(sessionID: conversationID)
+        let rolloutPath: URL?
+        if includeLogs, let conversationID,
+           let foundPath = try? RolloutListing.findConversationPathByIDString(
+            codexHome: configuration.codexHome,
+            idString: conversationID.description
+           )
+        {
+            rolloutPath = URL(fileURLWithPath: foundPath, isDirectory: false)
+        } else {
+            rolloutPath = nil
+        }
+
+        try runAsyncBlocking {
+            try await snapshot.uploadFeedback(
+                classification: classification,
+                reason: reason,
+                includeLogs: includeLogs,
+                rolloutPath: rolloutPath,
+                sessionSource: .mcp,
+                cliVersion: configuration.version,
+                transport: configuration.feedbackUploadTransport
+            )
+        }
+        return [
+            "threadId": snapshot.threadID
+        ]
+    }
+
     fileprivate static func logoutResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         do {
             _ = try CodexAuthStorage.logout(
@@ -609,6 +676,22 @@ public enum CodexAppServer {
             return nil
         }
         return try? JSONSerialization.data(withJSONObject: response)
+    }
+
+    private static func runAsyncBlocking(_ operation: @escaping @Sendable () async throws -> Void) throws {
+        let semaphore = DispatchSemaphore(value: 0)
+        let result = BlockingAsyncResult()
+        Task {
+            do {
+                try await operation()
+                result.set(.success(()))
+            } catch {
+                result.set(.failure(error))
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        try result.get().get()
     }
 
     fileprivate static func encodeMessages(_ messages: [[String: Any]]) -> Data? {
@@ -1770,6 +1853,23 @@ private enum AppServerAuthKind {
     case chatGPT(IdTokenInfo)
 }
 
+private final class BlockingAsyncResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Void, Error>?
+
+    func set(_ result: Result<Void, Error>) {
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+
+    func get() -> Result<Void, Error> {
+        lock.lock()
+        defer { lock.unlock() }
+        return result ?? .failure(AppServerError.internalError("async operation did not complete"))
+    }
+}
+
 private enum SkillParseError: Error, CustomStringConvertible {
     case missingFrontmatter
     case missingField(String)
@@ -1968,6 +2068,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.cancelLoginAccountResult(params: params)
+                    )
+                case "feedback/upload":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.feedbackUploadResult(params: params, configuration: configuration)
                     )
                 case "account/logout":
                     response = CodexAppServer.responseObject(

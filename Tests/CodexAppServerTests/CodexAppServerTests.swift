@@ -418,6 +418,54 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid login id: not-a-uuid")
     }
 
+    func testFeedbackUploadUsesInjectedTransportAndReturnsThreadID() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "feedback rollout",
+            provider: "openai"
+        )
+        let feedback = CodexFeedback()
+        feedback.makeWriter().write(Data("captured logs".utf8))
+        let transport = AppServerRecordingFeedbackUploadTransport()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            feedback: feedback,
+            feedbackUploadTransport: transport
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bad_result","reason":"wrong answer","threadId":"\#(threadID)","includeLogs":true}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["threadId"] as? String, threadID)
+        let requests = await transport.requests
+        XCTAssertEqual(requests.count, 1)
+        let envelope = String(decoding: requests[0].envelope, as: UTF8.self)
+        XCTAssertTrue(envelope.contains(#""classification":"bad_result""#))
+        XCTAssertTrue(envelope.contains("captured logs"))
+        XCTAssertTrue(envelope.contains("feedback rollout"))
+    }
+
+    func testFeedbackUploadRejectsInvalidThreadID() throws {
+        let temp = try TemporaryDirectory()
+        let transport = AppServerRecordingFeedbackUploadTransport()
+        let configuration = testConfiguration(codexHome: temp.url, feedbackUploadTransport: transport)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bug","threadId":"not-a-uuid","includeLogs":false}}"#,
+            configuration: configuration
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid thread id: Invalid conversation id: not-a-uuid")
+    }
+
     func testAccountLogoutRemovesAuthAndEmitsV2Notification() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
@@ -1071,7 +1119,19 @@ final class CodexAppServerTests: XCTestCase {
         codexHome: URL,
         initializeFirst: Bool = true
     ) throws -> [String: Any] {
-        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: codexHome))
+        try appServerResponse(
+            line,
+            configuration: testConfiguration(codexHome: codexHome),
+            initializeFirst: initializeFirst
+        )
+    }
+
+    private func appServerResponse(
+        _ line: String,
+        configuration: CodexAppServerConfiguration,
+        initializeFirst: Bool = true
+    ) throws -> [String: Any] {
+        let processor = CodexAppServerMessageProcessor(configuration: configuration)
         if initializeFirst {
             _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
         }
@@ -1086,7 +1146,9 @@ final class CodexAppServerTests: XCTestCase {
 
     private func testConfiguration(
         codexHome: URL,
-        requiresOpenAIAuth: Bool = true
+        requiresOpenAIAuth: Bool = true,
+        feedback: CodexFeedback = CodexFeedback(),
+        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
     ) -> CodexAppServerConfiguration {
         CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -1095,7 +1157,9 @@ final class CodexAppServerTests: XCTestCase {
                 CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
                     .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
                     .path
-            ]
+            ],
+            feedback: feedback,
+            feedbackUploadTransport: feedbackUploadTransport
         )
     }
 
@@ -1241,6 +1305,14 @@ final class CodexAppServerTests: XCTestCase {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+private actor AppServerRecordingFeedbackUploadTransport: FeedbackUploadTransport {
+    private(set) var requests: [FeedbackUploadRequest] = []
+
+    func upload(_ request: FeedbackUploadRequest) async throws {
+        requests.append(request)
     }
 }
 
