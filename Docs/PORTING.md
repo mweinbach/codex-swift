@@ -196,6 +196,8 @@ Source baseline inspected for this scaffold:
   - clean-background-terminals, reload-user-config, set-thread-memory-mode, and thread-rollback operation tags and payloads
 - Agent-path and inter-agent communication models from `codex-rs/protocol/src/agent_path.rs` and `codex-rs/protocol/src/protocol.rs`
   - absolute `/root`/`/morpheus` path validation, child/relative resolution, string-backed serde, inter-agent message payload defaults, message-content detection, and operation wrapping
+- Request-response protocol payloads from `codex-rs/protocol/src/{request_user_input.rs,request_permissions.rs,dynamic_tools.rs,protocol.rs}`
+  - request-user-input question/answer defaults, permission-response defaults, dynamic-tool response content items and legacy `exposeToContext` compatibility, turn environment selections, MCP refresh config payloads, and `Op` wrappers for user-input answers, permission responses, dynamic-tool responses, and MCP refresh
 - `codex-rs/process-hardening/src/lib.rs`
   - macOS pre-main process hardening for debugger attach denial, core-dump limit disabling, byte-level environment key filtering, and `DYLD_` environment removal before CLI dispatch
 - `codex-rs/core/src/safety.rs`

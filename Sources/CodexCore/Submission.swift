@@ -28,7 +28,12 @@ public enum Op: Equatable, Sendable {
     case realtimeConversationText(ConversationTextParams)
     case realtimeConversationClose
     case realtimeConversationListVoices
-    case userInput(items: [UserInput])
+    case userInput(
+        items: [UserInput],
+        environments: [TurnEnvironmentSelection]? = nil,
+        finalOutputJSONSchema: JSONValue? = nil,
+        responsesAPIClientMetadata: [String: String]? = nil
+    )
     case userTurn(
         items: [UserInput],
         cwd: String,
@@ -51,6 +56,10 @@ public enum Op: Equatable, Sendable {
     case execApproval(id: String, decision: ReviewDecision)
     case patchApproval(id: String, decision: ReviewDecision)
     case resolveElicitation(serverName: String, requestID: RequestID, decision: ElicitationAction)
+    case userInputAnswer(id: String, response: RequestUserInputResponse)
+    case requestPermissionsResponse(id: String, response: RequestPermissionsResponse)
+    case dynamicToolResponse(id: String, response: DynamicToolResponse)
+    case refreshMcpServers(config: McpServerRefreshConfig)
     case addToHistory(text: String)
     case getHistoryEntryRequest(offset: Int, logID: UInt64)
     case listMcpTools
@@ -76,6 +85,8 @@ public enum Op: Equatable, Sendable {
         case effort
         case summary
         case finalOutputJSONSchema = "final_output_json_schema"
+        case environments
+        case responsesAPIClientMetadata = "responsesapi_client_metadata"
         case outputModality = "output_modality"
         case prompt
         case realtimeSessionID = "realtime_session_id"
@@ -96,6 +107,8 @@ public enum Op: Equatable, Sendable {
         case numTurns = "num_turns"
         case reviewRequest = "review_request"
         case command
+        case response
+        case config
     }
 
     private enum OperationType: String, Codable {
@@ -113,6 +126,11 @@ public enum Op: Equatable, Sendable {
         case execApproval = "exec_approval"
         case patchApproval = "patch_approval"
         case resolveElicitation = "resolve_elicitation"
+        case userInputAnswer = "user_input_answer"
+        case requestUserInputResponse = "request_user_input_response"
+        case requestPermissionsResponse = "request_permissions_response"
+        case dynamicToolResponse = "dynamic_tool_response"
+        case refreshMcpServers = "refresh_mcp_servers"
         case addToHistory = "add_to_history"
         case getHistoryEntryRequest = "get_history_entry_request"
         case listMcpTools = "list_mcp_tools"
@@ -149,7 +167,15 @@ extension Op: Codable {
         case .realtimeConversationListVoices:
             self = .realtimeConversationListVoices
         case .userInput:
-            self = .userInput(items: try container.decode([UserInput].self, forKey: .items))
+            self = .userInput(
+                items: try container.decode([UserInput].self, forKey: .items),
+                environments: try container.decodeIfPresent([TurnEnvironmentSelection].self, forKey: .environments),
+                finalOutputJSONSchema: try container.decodeIfPresent(JSONValue.self, forKey: .finalOutputJSONSchema),
+                responsesAPIClientMetadata: try container.decodeIfPresent(
+                    [String: String].self,
+                    forKey: .responsesAPIClientMetadata
+                )
+            )
         case .userTurn:
             self = .userTurn(
                 items: try container.decode([UserInput].self, forKey: .items),
@@ -190,6 +216,23 @@ extension Op: Codable {
                 requestID: try container.decode(RequestID.self, forKey: .requestID),
                 decision: try container.decode(ElicitationAction.self, forKey: .decision)
             )
+        case .userInputAnswer, .requestUserInputResponse:
+            self = .userInputAnswer(
+                id: try container.decode(String.self, forKey: .id),
+                response: try container.decode(RequestUserInputResponse.self, forKey: .response)
+            )
+        case .requestPermissionsResponse:
+            self = .requestPermissionsResponse(
+                id: try container.decode(String.self, forKey: .id),
+                response: try container.decode(RequestPermissionsResponse.self, forKey: .response)
+            )
+        case .dynamicToolResponse:
+            self = .dynamicToolResponse(
+                id: try container.decode(String.self, forKey: .id),
+                response: try container.decode(DynamicToolResponse.self, forKey: .response)
+            )
+        case .refreshMcpServers:
+            self = .refreshMcpServers(config: try container.decode(McpServerRefreshConfig.self, forKey: .config))
         case .addToHistory:
             self = .addToHistory(text: try container.decode(String.self, forKey: .text))
         case .getHistoryEntryRequest:
@@ -247,9 +290,12 @@ extension Op: Codable {
             try container.encode(OperationType.realtimeConversationClose, forKey: .type)
         case .realtimeConversationListVoices:
             try container.encode(OperationType.realtimeConversationListVoices, forKey: .type)
-        case let .userInput(items):
+        case let .userInput(items, environments, finalOutputJSONSchema, responsesAPIClientMetadata):
             try container.encode(OperationType.userInput, forKey: .type)
             try container.encode(items, forKey: .items)
+            try container.encodeIfPresent(environments, forKey: .environments)
+            try container.encodeIfPresent(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
+            try container.encodeIfPresent(responsesAPIClientMetadata, forKey: .responsesAPIClientMetadata)
         case let .userTurn(items, cwd, approvalPolicy, sandboxPolicy, model, effort, summary, finalOutputJSONSchema):
             try container.encode(OperationType.userTurn, forKey: .type)
             try container.encode(items, forKey: .items)
@@ -284,6 +330,21 @@ extension Op: Codable {
             try container.encode(serverName, forKey: .serverName)
             try container.encode(requestID, forKey: .requestID)
             try container.encode(decision, forKey: .decision)
+        case let .userInputAnswer(id, response):
+            try container.encode(OperationType.userInputAnswer, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(response, forKey: .response)
+        case let .requestPermissionsResponse(id, response):
+            try container.encode(OperationType.requestPermissionsResponse, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(response, forKey: .response)
+        case let .dynamicToolResponse(id, response):
+            try container.encode(OperationType.dynamicToolResponse, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(response, forKey: .response)
+        case let .refreshMcpServers(config):
+            try container.encode(OperationType.refreshMcpServers, forKey: .type)
+            try container.encode(config, forKey: .config)
         case let .addToHistory(text):
             try container.encode(OperationType.addToHistory, forKey: .type)
             try container.encode(text, forKey: .text)
