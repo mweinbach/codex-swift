@@ -239,6 +239,8 @@ Source baseline inspected for this scaffold:
   - get-history-entry response payloads, custom-prompts response payloads, and raw response item event wrappers around already-ported history/custom-prompt/response item models
 - `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
   - PNG/JPEG local image loading, bounds-preserving resize to 2048x768, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
+- `codex-rs/utils/readiness/src/lib.rs`
+  - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, and Rust-matching readiness error strings
 
 ## Known Gaps
 
