@@ -159,6 +159,8 @@ Source baseline inspected for this scaffold:
   - smart shell-output byte decoding for UTF-8, Cyrillic legacy code pages, Windows-1252 punctuation collisions, Latin-1, ANSI-preserving output, and lossy fallback behavior
 - `codex-rs/core/src/user_instructions.rs`
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
+- `codex-rs/core/src/project_doc.rs`
+  - AGENTS.md/AGENTS.override.md discovery from git root to cwd, project-doc byte limits, fallback filenames, configured instruction merging, and runtime skill-section append behavior
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
   - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`

@@ -3,6 +3,7 @@ import Foundation
 public enum CodexConfigDefaults {
     public static let chatgptBaseURL = "https://chatgpt.com/backend-api/"
     public static let projectRootMarkers = [".git"]
+    public static let projectDocMaxBytes = 32 * 1024
 }
 
 public struct CodexRuntimeConfig: Equatable, Sendable {
@@ -12,6 +13,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public let features: FeatureStates
     public let activeProfile: String?
     public let projectRootMarkers: [String]
+    public let projectDocMaxBytes: Int
+    public let projectDocFallbackFilenames: [String]
 
     public init(
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
@@ -19,7 +22,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         forcedLoginMethod: ForcedLoginMethod? = nil,
         features: FeatureStates = .withDefaults(),
         activeProfile: String? = nil,
-        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
+        projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
+        projectDocFallbackFilenames: [String] = []
     ) {
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
@@ -27,6 +32,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.features = features
         self.activeProfile = activeProfile
         self.projectRootMarkers = projectRootMarkers
+        self.projectDocMaxBytes = projectDocMaxBytes
+        self.projectDocFallbackFilenames = projectDocFallbackFilenames
     }
 }
 
@@ -300,7 +307,9 @@ private struct ParsedCodexConfigToml {
                 forcedLoginMethod: config.forcedLoginMethod,
                 features: config.features,
                 activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
             )
         }
 
@@ -315,7 +324,9 @@ private struct ParsedCodexConfigToml {
                 forcedLoginMethod: config.forcedLoginMethod,
                 features: config.features,
                 activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
             )
         }
 
@@ -330,7 +341,9 @@ private struct ParsedCodexConfigToml {
                 forcedLoginMethod: method,
                 features: config.features,
                 activeProfile: config.activeProfile,
-                projectRootMarkers: config.projectRootMarkers
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
             )
         }
 
@@ -341,7 +354,38 @@ private struct ParsedCodexConfigToml {
                 forcedLoginMethod: config.forcedLoginMethod,
                 features: config.features,
                 activeProfile: config.activeProfile,
-                projectRootMarkers: try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers")
+                projectRootMarkers: try Self.stringArrayValue(projectRootMarkers, key: "project_root_markers"),
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
+            )
+        }
+
+        if let projectDocMaxBytes = topLevel["project_doc_max_bytes"] {
+            config = CodexRuntimeConfig(
+                chatgptBaseURL: config.chatgptBaseURL,
+                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: config.forcedLoginMethod,
+                features: config.features,
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: try Self.nonNegativeIntValue(projectDocMaxBytes, key: "project_doc_max_bytes"),
+                projectDocFallbackFilenames: config.projectDocFallbackFilenames
+            )
+        }
+
+        if let fallbackFilenames = topLevel["project_doc_fallback_filenames"] {
+            config = CodexRuntimeConfig(
+                chatgptBaseURL: config.chatgptBaseURL,
+                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: config.forcedLoginMethod,
+                features: config.features,
+                activeProfile: config.activeProfile,
+                projectRootMarkers: config.projectRootMarkers,
+                projectDocMaxBytes: config.projectDocMaxBytes,
+                projectDocFallbackFilenames: try Self.stringArrayValue(
+                    fallbackFilenames,
+                    key: "project_doc_fallback_filenames"
+                )
             )
         }
 
@@ -358,7 +402,9 @@ private struct ParsedCodexConfigToml {
                     forcedLoginMethod: config.forcedLoginMethod,
                     features: config.features,
                     activeProfile: activeProfile,
-                    projectRootMarkers: config.projectRootMarkers
+                    projectRootMarkers: config.projectRootMarkers,
+                    projectDocMaxBytes: config.projectDocMaxBytes,
+                    projectDocFallbackFilenames: config.projectDocFallbackFilenames
                 )
             } else {
                 config = CodexRuntimeConfig(
@@ -367,7 +413,9 @@ private struct ParsedCodexConfigToml {
                     forcedLoginMethod: config.forcedLoginMethod,
                     features: config.features,
                     activeProfile: activeProfile,
-                    projectRootMarkers: config.projectRootMarkers
+                    projectRootMarkers: config.projectRootMarkers,
+                    projectDocMaxBytes: config.projectDocMaxBytes,
+                    projectDocFallbackFilenames: config.projectDocFallbackFilenames
                 )
             }
         }
@@ -383,7 +431,9 @@ private struct ParsedCodexConfigToml {
             forcedLoginMethod: config.forcedLoginMethod,
             features: featureStates,
             activeProfile: config.activeProfile,
-            projectRootMarkers: config.projectRootMarkers
+            projectRootMarkers: config.projectRootMarkers,
+            projectDocMaxBytes: config.projectDocMaxBytes,
+            projectDocFallbackFilenames: config.projectDocFallbackFilenames
         )
 
         return config
@@ -402,6 +452,8 @@ private struct ParsedCodexConfigToml {
             || key == "forced_login_method"
             || key == "profile"
             || key == "project_root_markers"
+            || key == "project_doc_max_bytes"
+            || key == "project_doc_fallback_filenames"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {
@@ -441,6 +493,13 @@ private struct ParsedCodexConfigToml {
             strings.append(string)
         }
         return strings
+    }
+
+    private static func nonNegativeIntValue(_ value: ConfigValue, key: String) throws -> Int {
+        guard case let .integer(integer) = value, integer >= 0 else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return Int(integer)
     }
 
     private static func parseSectionHeader(_ line: String) throws -> ConfigSection {

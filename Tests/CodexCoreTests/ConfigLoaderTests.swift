@@ -14,6 +14,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertNil(config.activeProfile)
         XCTAssertEqual(config.projectRootMarkers, [".git"])
+        XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
+        XCTAssertEqual(config.projectDocFallbackFilenames, [])
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
