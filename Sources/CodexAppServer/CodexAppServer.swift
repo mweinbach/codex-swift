@@ -2,6 +2,87 @@ import CodexCore
 import Foundation
 
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
+public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
+public typealias AppServerMcpOAuthLoginCompletion = @Sendable (_ success: Bool, _ error: String?) async -> Void
+public typealias AppServerMcpOAuthLoginStarter = @Sendable (
+    AppServerMcpOAuthLoginStartRequest,
+    @escaping AppServerMcpOAuthLoginCompletion
+) async throws -> AppServerMcpOAuthLoginStarted
+
+public struct AppServerMcpOAuthLoginStartRequest: Sendable {
+    public let name: String
+    public let serverURL: String
+    public let codexHome: URL
+    public let storeMode: OAuthCredentialsStoreMode
+    public let httpHeaders: [String: String]?
+    public let envHttpHeaders: [String: String]?
+    public let environment: [String: String]
+    public let scopes: [String]
+    public let timeoutSeconds: Int?
+
+    public init(
+        name: String,
+        serverURL: String,
+        codexHome: URL,
+        storeMode: OAuthCredentialsStoreMode,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        scopes: [String] = [],
+        timeoutSeconds: Int? = nil
+    ) {
+        self.name = name
+        self.serverURL = serverURL
+        self.codexHome = codexHome
+        self.storeMode = storeMode
+        self.httpHeaders = httpHeaders
+        self.envHttpHeaders = envHttpHeaders
+        self.environment = environment
+        self.scopes = scopes
+        self.timeoutSeconds = timeoutSeconds
+    }
+}
+
+public struct AppServerMcpOAuthLoginStarted: Sendable {
+    public let authorizationURL: String
+
+    public init(authorizationURL: String) {
+        self.authorizationURL = authorizationURL
+    }
+}
+
+private actor AppServerMcpOAuthAuthorizationURLCapture {
+    private var continuation: CheckedContinuation<String, Error>?
+    private var result: Result<String, Error>?
+
+    func wait() async throws -> String {
+        if let result {
+            return try result.get()
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func succeed(_ authorizationURL: String) {
+        resolve(.success(authorizationURL))
+    }
+
+    func fail(_ error: Error) {
+        resolve(.failure(error))
+    }
+
+    private func resolve(_ next: Result<String, Error>) {
+        guard result == nil else {
+            return
+        }
+        result = next
+        if let continuation {
+            self.continuation = nil
+            continuation.resume(with: next)
+        }
+    }
+}
 
 public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let codexHome: URL
@@ -16,6 +97,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let feedbackUploadTransport: any FeedbackUploadTransport
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let authRefreshTransport: AppServerAuthRefreshTransport?
+    public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
 
     public init(
         codexHome: URL,
@@ -29,7 +111,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
-        authRefreshTransport: AppServerAuthRefreshTransport? = nil
+        authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -43,6 +126,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.feedbackUploadTransport = feedbackUploadTransport
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.authRefreshTransport = authRefreshTransport
+        self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -207,13 +291,55 @@ public enum CodexAppServer {
     private static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
 
+    public static func defaultMcpOAuthLoginStarter(
+        request: AppServerMcpOAuthLoginStartRequest,
+        completion: @escaping AppServerMcpOAuthLoginCompletion
+    ) async throws -> AppServerMcpOAuthLoginStarted {
+        let capture = AppServerMcpOAuthAuthorizationURLCapture()
+        Task {
+            do {
+                try await McpOAuthLogin.perform(
+                    request: McpOAuthLoginRequest(
+                        serverName: request.name,
+                        serverURL: request.serverURL,
+                        codexHome: request.codexHome,
+                        storeMode: request.storeMode,
+                        httpHeaders: request.httpHeaders,
+                        envHttpHeaders: request.envHttpHeaders,
+                        environment: request.environment,
+                        scopes: request.scopes,
+                        timeoutSeconds: request.timeoutSeconds,
+                        launchBrowser: true
+                    ),
+                    browserLauncher: { _ in },
+                    messageSink: { message in
+                        if case let .authorizationURL(_, authURL) = message {
+                            await capture.succeed(authURL)
+                        }
+                    }
+                )
+                await completion(true, nil)
+            } catch {
+                await capture.fail(error)
+                await completion(false, String(describing: error))
+            }
+        }
+        return AppServerMcpOAuthLoginStarted(authorizationURL: try await capture.wait())
+    }
+
     public static func run(
         configuration: CodexAppServerConfiguration,
         stdin: FileHandle = .standardInput,
         stdout: FileHandle = .standardOutput
     ) throws {
         var buffer = Data()
-        let processor = CodexAppServerMessageProcessor(configuration: configuration)
+        let processor = CodexAppServerMessageProcessor(
+            configuration: configuration,
+            notificationSink: { data in
+                stdout.write(data)
+                stdout.write(Data([0x0A]))
+            }
+        )
         while true {
             let data = stdin.availableData
             if data.isEmpty {
@@ -396,6 +522,82 @@ public enum CodexAppServer {
             "data": data,
             "nextCursor": (end < total ? String(end) : nil) as Any
         ].nullStripped()
+    }
+
+    fileprivate static func mcpServerOAuthLoginResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        notificationSink: AppServerNotificationSink?
+    ) throws -> [String: Any] {
+        guard let name = stringParam(params?["name"]) else {
+            throw AppServerError.invalidRequest("missing name")
+        }
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to load MCP server config: \(error)")
+        }
+
+        guard let server = runtimeConfig.mcpServers[name] else {
+            throw AppServerError.invalidRequest("No MCP server named '\(name)' found.")
+        }
+        let serverURL: String
+        let httpHeaders: [String: String]?
+        let envHttpHeaders: [String: String]?
+        switch server.transport {
+        case let .streamableHttp(url, _, headers, envHeaders):
+            serverURL = url
+            httpHeaders = headers
+            envHttpHeaders = envHeaders
+        case .stdio:
+            throw AppServerError.invalidRequest("OAuth login is only supported for streamable HTTP servers.")
+        }
+
+        let scopes = stringArrayParam(params?["scopes"]) ?? []
+        let timeoutSeconds: Int?
+        if params?["timeoutSecs"] != nil {
+            timeoutSeconds = intParam(params?["timeoutSecs"], defaultValue: 0)
+        } else if params?["timeout_secs"] != nil {
+            timeoutSeconds = intParam(params?["timeout_secs"], defaultValue: 0)
+        } else {
+            timeoutSeconds = nil
+        }
+
+        do {
+            let started = try runAsyncBlocking {
+                try await configuration.mcpOAuthLoginStarter(
+                    AppServerMcpOAuthLoginStartRequest(
+                        name: name,
+                        serverURL: serverURL,
+                        codexHome: configuration.codexHome,
+                        storeMode: runtimeConfig.mcpOAuthCredentialsStoreMode,
+                        httpHeaders: httpHeaders,
+                        envHttpHeaders: envHttpHeaders,
+                        environment: configuration.environment,
+                        scopes: scopes,
+                        timeoutSeconds: timeoutSeconds
+                    ),
+                    { success, error in
+                        await sendMcpServerOAuthLoginCompletedNotification(
+                            name: name,
+                            success: success,
+                            error: error,
+                            notificationSink: notificationSink
+                        )
+                    }
+                )
+            }
+            return [
+                "authorizationUrl": started.authorizationURL
+            ]
+        } catch {
+            throw AppServerError.internalError("failed to login to MCP server '\(name)': \(error)")
+        }
     }
 
     fileprivate static func skillsListResult(
@@ -706,6 +908,29 @@ public enum CodexAppServer {
                 "authMode": try currentAuth(configuration: configuration)?.method ?? NSNull()
             ].nullStripped(keepNulls: true)
         ]
+    }
+
+    fileprivate static func sendMcpServerOAuthLoginCompletedNotification(
+        name: String,
+        success: Bool,
+        error: String?,
+        notificationSink: AppServerNotificationSink?
+    ) async {
+        guard let notificationSink else {
+            return
+        }
+        let notification = [
+            "method": "mcpServer/oauthLogin/completed",
+            "params": [
+                "name": name,
+                "success": success,
+                "error": error as Any
+            ].nullStripped()
+        ] as [String: Any]
+        guard let data = encodeMessages([notification]) else {
+            return
+        }
+        await notificationSink(data)
     }
 
     private static func forcedLoginMethod(configuration: CodexAppServerConfiguration) throws -> String? {
@@ -2182,9 +2407,11 @@ final class CodexAppServerMessageProcessor {
     private var initialized = false
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
+    private let notificationSink: AppServerNotificationSink?
 
-    init(configuration: CodexAppServerConfiguration) {
+    init(configuration: CodexAppServerConfiguration, notificationSink: AppServerNotificationSink? = nil) {
         self.configuration = configuration
+        self.notificationSink = notificationSink
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
     }
 
@@ -2267,6 +2494,15 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.mcpServerStatusListResult(params: params, configuration: configuration)
+                    )
+                case "mcpServer/oauth/login":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.mcpServerOAuthLoginResult(
+                            params: params,
+                            configuration: configuration,
+                            notificationSink: notificationSink
+                        )
                     )
                 case "skills/list":
                     response = CodexAppServer.responseObject(

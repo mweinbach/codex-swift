@@ -857,6 +857,83 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
     }
 
+    func testMcpServerOAuthLoginRejectsUnknownServer() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"missing"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "No MCP server named 'missing' found.")
+    }
+
+    func testMcpServerOAuthLoginRejectsStdioServer() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs-mcp"
+        args = ["--stdio"]
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"docs"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "OAuth login is only supported for streamable HTTP servers.")
+    }
+
+    func testMcpServerOAuthLoginReturnsAuthorizationURLAndEmitsCompletion() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        mcp_oauth_credentials_store = "file"
+
+        [mcp_servers.github]
+        url = "https://mcp.github.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let loginCapture = AppServerMcpOAuthLoginCapture()
+        let notificationCapture = AppServerNotificationCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            mcpOAuthLoginStarter: { request, completion in
+                await loginCapture.append(request)
+                await completion(true, nil)
+                return AppServerMcpOAuthLoginStarted(authorizationURL: "https://auth.github.test/authorize")
+            }
+        )
+        let processor = try initializedProcessor(
+            configuration: configuration,
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"github","scopes":["repo"],"timeoutSecs":7}}"#.utf8)))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["authorizationUrl"] as? String, "https://auth.github.test/authorize")
+        let requests = await loginCapture.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].name, "github")
+        XCTAssertEqual(requests[0].serverURL, "https://mcp.github.test/mcp")
+        XCTAssertEqual(requests[0].storeMode, .file)
+        XCTAssertEqual(requests[0].scopes, ["repo"])
+        XCTAssertEqual(requests[0].timeoutSeconds, 7)
+        let notifications = try await notificationCapture.payloadsData()
+            .flatMap { try decodeMessages($0) }
+        XCTAssertEqual(notifications.count, 1)
+        XCTAssertEqual(notifications[0]["method"] as? String, "mcpServer/oauthLogin/completed")
+        let params = try XCTUnwrap(notifications[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["name"] as? String, "github")
+        XCTAssertEqual(params["success"] as? Bool, true)
+        XCTAssertNil(params["error"])
+    }
+
     func testSkillsListReturnsRepoUserAndSystemSkillsWithPriorityDedupe() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -1372,8 +1449,11 @@ final class CodexAppServerTests: XCTestCase {
         return try decode(processor.processLine(Data(line.utf8)))
     }
 
-    private func initializedProcessor(configuration: CodexAppServerConfiguration) throws -> CodexAppServerMessageProcessor {
-        let processor = CodexAppServerMessageProcessor(configuration: configuration)
+    private func initializedProcessor(
+        configuration: CodexAppServerConfiguration,
+        notificationSink: AppServerNotificationSink? = nil
+    ) throws -> CodexAppServerMessageProcessor {
+        let processor = CodexAppServerMessageProcessor(configuration: configuration, notificationSink: notificationSink)
         _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
         return processor
     }
@@ -1384,7 +1464,8 @@ final class CodexAppServerTests: XCTestCase {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
-        authRefreshTransport: AppServerAuthRefreshTransport? = nil
+        authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter
     ) -> CodexAppServerConfiguration {
         CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -1397,7 +1478,8 @@ final class CodexAppServerTests: XCTestCase {
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
-            authRefreshTransport: authRefreshTransport
+            authRefreshTransport: authRefreshTransport,
+            mcpOAuthLoginStarter: mcpOAuthLoginStarter
         )
     }
 
@@ -1582,6 +1664,26 @@ private actor AppServerRefreshCapture {
 
     func append(_ request: URLRequest) {
         requests.append(Request(url: request.url, method: request.httpMethod))
+    }
+}
+
+private actor AppServerMcpOAuthLoginCapture {
+    private(set) var requests: [AppServerMcpOAuthLoginStartRequest] = []
+
+    func append(_ request: AppServerMcpOAuthLoginStartRequest) {
+        requests.append(request)
+    }
+}
+
+private actor AppServerNotificationCapture {
+    private var payloads: [Data] = []
+
+    func append(_ data: Data) {
+        payloads.append(data)
+    }
+
+    func payloadsData() -> [Data] {
+        payloads
     }
 }
 

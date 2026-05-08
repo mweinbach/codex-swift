@@ -134,6 +134,7 @@ final class CloudTaskClientTests: XCTestCase {
             ),
             transport: transport,
             tokenLoader: { token },
+            currentDirectory: { URL(fileURLWithPath: "/tmp/codex-cloud-client-test-nonrepo", isDirectory: true) },
             currentBranchName: { _ in "feature/current" },
             defaultBranchName: { _ in "main" },
             errorLog: { _ in }
@@ -191,6 +192,7 @@ final class CloudTaskClientTests: XCTestCase {
             configuration: CloudTaskClientConfiguration(codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)),
             transport: transport,
             tokenLoader: { token },
+            currentDirectory: { URL(fileURLWithPath: "/tmp/codex-cloud-client-test-nonrepo", isDirectory: true) },
             currentBranchName: { _ in nil },
             defaultBranchName: { _ in nil },
             errorLog: { _ in }
