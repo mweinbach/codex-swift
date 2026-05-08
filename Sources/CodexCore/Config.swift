@@ -37,6 +37,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var projectRootMarkers: [String]
     public var projectDocMaxBytes: Int
     public var projectDocFallbackFilenames: [String]
+    public var toolOutputTokenLimit: Int?
     public var ossProvider: String?
 
     public init(
@@ -69,6 +70,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
         projectDocFallbackFilenames: [String] = [],
+        toolOutputTokenLimit: Int? = nil,
         ossProvider: String? = nil
     ) {
         self.model = model
@@ -100,6 +102,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectRootMarkers = projectRootMarkers
         self.projectDocMaxBytes = projectDocMaxBytes
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
+        self.toolOutputTokenLimit = toolOutputTokenLimit
         self.ossProvider = ossProvider
     }
 
@@ -609,6 +612,13 @@ private struct ParsedCodexConfigToml {
             )
         }
 
+        if let toolOutputTokenLimit = topLevel["tool_output_token_limit"] {
+            config.toolOutputTokenLimit = try Self.nonNegativeIntValue(
+                toolOutputTokenLimit,
+                key: "tool_output_token_limit"
+            )
+        }
+
         let activeProfile = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         if let activeProfile {
             guard let profile = profiles[activeProfile] else {
@@ -827,6 +837,7 @@ private struct ParsedCodexConfigToml {
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
             || key == "project_doc_fallback_filenames"
+            || key == "tool_output_token_limit"
             || key == "oss_provider"
     }
 

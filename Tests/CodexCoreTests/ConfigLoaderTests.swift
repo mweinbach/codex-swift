@@ -40,6 +40,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.projectRootMarkers, [".git"])
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
         XCTAssertEqual(config.projectDocFallbackFilenames, [])
+        XCTAssertNil(config.toolOutputTokenLimit)
         XCTAssertNil(config.ossProvider)
     }
 
@@ -71,6 +72,7 @@ final class ConfigLoaderTests: XCTestCase {
         tools_web_search = true
         tools_view_image = false
         mcp_oauth_credentials_store = "file"
+        tool_output_token_limit = 12000
         oss_provider = "ollama"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
@@ -99,6 +101,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, false)
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
+        XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
     }
 
