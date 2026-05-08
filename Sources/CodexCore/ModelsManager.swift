@@ -415,10 +415,15 @@ extension ModelPreset {
             description: description,
             defaultReasoningEffort: defaultReasoningEffort,
             supportedReasoningEfforts: supportedReasoningEfforts,
+            supportsPersonality: supportsPersonality,
+            additionalSpeedTiers: additionalSpeedTiers,
+            serviceTiers: serviceTiers,
             isDefault: isDefault,
             upgrade: upgrade,
             showInPicker: showInPicker,
-            supportedInAPI: supportedInAPI
+            availabilityNux: availabilityNux,
+            supportedInAPI: supportedInAPI,
+            inputModalities: inputModalities
         )
     }
 }

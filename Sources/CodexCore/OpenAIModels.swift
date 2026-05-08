@@ -10,6 +10,35 @@ public struct ReasoningEffortPreset: Equatable, Codable, Sendable {
     }
 }
 
+public enum InputModality: String, Codable, CaseIterable, Equatable, Sendable {
+    case text
+    case image
+
+    public static var defaultInputModalities: [InputModality] {
+        [.text, .image]
+    }
+}
+
+public struct ModelAvailabilityNux: Equatable, Codable, Sendable {
+    public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+}
+
+public struct ModelServiceTier: Equatable, Codable, Sendable {
+    public let id: String
+    public let name: String
+    public let description: String
+
+    public init(id: String, name: String, description: String) {
+        self.id = id
+        self.name = name
+        self.description = description
+    }
+}
+
 public struct ModelUpgrade: Equatable, Sendable {
     public let id: String
     public let reasoningEffortMapping: [ReasoningEffort: ReasoningEffort]?
@@ -70,10 +99,15 @@ public struct ModelPreset: Equatable, Sendable {
     public let description: String
     public let defaultReasoningEffort: ReasoningEffort
     public let supportedReasoningEfforts: [ReasoningEffortPreset]
+    public let supportsPersonality: Bool
+    public let additionalSpeedTiers: [String]
+    public let serviceTiers: [ModelServiceTier]
     public let isDefault: Bool
     public let upgrade: ModelUpgrade?
     public let showInPicker: Bool
+    public let availabilityNux: ModelAvailabilityNux?
     public let supportedInAPI: Bool
+    public let inputModalities: [InputModality]
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -82,10 +116,15 @@ public struct ModelPreset: Equatable, Sendable {
         case description
         case defaultReasoningEffort = "default_reasoning_effort"
         case supportedReasoningEfforts = "supported_reasoning_efforts"
+        case supportsPersonality = "supports_personality"
+        case additionalSpeedTiers = "additional_speed_tiers"
+        case serviceTiers = "service_tiers"
         case isDefault = "is_default"
         case upgrade
         case showInPicker = "show_in_picker"
+        case availabilityNux = "availability_nux"
         case supportedInAPI = "supported_in_api"
+        case inputModalities = "input_modalities"
     }
 
     public init(
@@ -95,10 +134,15 @@ public struct ModelPreset: Equatable, Sendable {
         description: String,
         defaultReasoningEffort: ReasoningEffort,
         supportedReasoningEfforts: [ReasoningEffortPreset],
+        supportsPersonality: Bool = false,
+        additionalSpeedTiers: [String] = [],
+        serviceTiers: [ModelServiceTier] = [],
         isDefault: Bool,
         upgrade: ModelUpgrade? = nil,
         showInPicker: Bool,
-        supportedInAPI: Bool
+        availabilityNux: ModelAvailabilityNux? = nil,
+        supportedInAPI: Bool,
+        inputModalities: [InputModality] = InputModality.defaultInputModalities
     ) {
         self.id = id
         self.model = model
@@ -106,10 +150,15 @@ public struct ModelPreset: Equatable, Sendable {
         self.description = description
         self.defaultReasoningEffort = defaultReasoningEffort
         self.supportedReasoningEfforts = supportedReasoningEfforts
+        self.supportsPersonality = supportsPersonality
+        self.additionalSpeedTiers = additionalSpeedTiers
+        self.serviceTiers = serviceTiers
         self.isDefault = isDefault
         self.upgrade = upgrade
         self.showInPicker = showInPicker
+        self.availabilityNux = availabilityNux
         self.supportedInAPI = supportedInAPI
+        self.inputModalities = inputModalities
     }
 
     public init(modelInfo info: ModelInfo) {
@@ -120,6 +169,9 @@ public struct ModelPreset: Equatable, Sendable {
             description: info.description ?? "",
             defaultReasoningEffort: info.defaultReasoningLevel,
             supportedReasoningEfforts: info.supportedReasoningLevels,
+            supportsPersonality: false,
+            additionalSpeedTiers: info.additionalSpeedTiers,
+            serviceTiers: info.serviceTiers,
             isDefault: false,
             upgrade: info.upgrade.map { upgradeSlug in
                 ModelUpgrade(
@@ -129,8 +181,15 @@ public struct ModelPreset: Equatable, Sendable {
                 )
             },
             showInPicker: info.visibility == .list,
-            supportedInAPI: info.supportedInAPI
+            availabilityNux: info.availabilityNux,
+            supportedInAPI: info.supportedInAPI,
+            inputModalities: info.inputModalities
         )
+    }
+
+    public func supportsFastMode() -> Bool {
+        serviceTiers.contains { $0.id == ServiceTier.fast.requestValue }
+            || additionalSpeedTiers.contains("fast")
     }
 
     private static func reasoningEffortMapping(
@@ -178,10 +237,18 @@ extension ModelPreset: Codable {
             [ReasoningEffortPreset].self,
             forKey: .supportedReasoningEfforts
         )
+        self.supportsPersonality = try container.decodeIfPresent(Bool.self, forKey: .supportsPersonality) ?? false
+        self.additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
+        self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
         self.isDefault = try container.decode(Bool.self, forKey: .isDefault)
         self.upgrade = try container.decodeIfPresent(ModelUpgrade.self, forKey: .upgrade)
         self.showInPicker = try container.decode(Bool.self, forKey: .showInPicker)
+        self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.supportedInAPI = try container.decode(Bool.self, forKey: .supportedInAPI)
+        self.inputModalities = try container.decodeIfPresent(
+            [InputModality].self,
+            forKey: .inputModalities
+        ) ?? InputModality.defaultInputModalities
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -192,10 +259,15 @@ extension ModelPreset: Codable {
         try container.encode(description, forKey: .description)
         try container.encode(defaultReasoningEffort, forKey: .defaultReasoningEffort)
         try container.encode(supportedReasoningEfforts, forKey: .supportedReasoningEfforts)
+        try container.encode(supportsPersonality, forKey: .supportsPersonality)
+        try container.encode(additionalSpeedTiers, forKey: .additionalSpeedTiers)
+        try container.encode(serviceTiers, forKey: .serviceTiers)
         try container.encode(isDefault, forKey: .isDefault)
         try encodeNullingOptional(upgrade, into: &container, forKey: .upgrade)
         try container.encode(showInPicker, forKey: .showInPicker)
+        try encodeNullingOptional(availabilityNux, into: &container, forKey: .availabilityNux)
         try container.encode(supportedInAPI, forKey: .supportedInAPI)
+        try container.encode(inputModalities, forKey: .inputModalities)
     }
 }
 
@@ -278,6 +350,9 @@ public struct ModelInfo: Equatable, Sendable {
     public let visibility: ModelVisibility
     public let supportedInAPI: Bool
     public let priority: Int32
+    public let additionalSpeedTiers: [String]
+    public let serviceTiers: [ModelServiceTier]
+    public let availabilityNux: ModelAvailabilityNux?
     public let upgrade: String?
     public let baseInstructions: String?
     public let supportsReasoningSummaries: Bool
@@ -288,6 +363,7 @@ public struct ModelInfo: Equatable, Sendable {
     public let supportsParallelToolCalls: Bool
     public let contextWindow: Int64?
     public let experimentalSupportedTools: [String]
+    public let inputModalities: [InputModality]
 
     private enum CodingKeys: String, CodingKey {
         case slug
@@ -299,6 +375,9 @@ public struct ModelInfo: Equatable, Sendable {
         case visibility
         case supportedInAPI = "supported_in_api"
         case priority
+        case additionalSpeedTiers = "additional_speed_tiers"
+        case serviceTiers = "service_tiers"
+        case availabilityNux = "availability_nux"
         case upgrade
         case baseInstructions = "base_instructions"
         case supportsReasoningSummaries = "supports_reasoning_summaries"
@@ -309,6 +388,7 @@ public struct ModelInfo: Equatable, Sendable {
         case supportsParallelToolCalls = "supports_parallel_tool_calls"
         case contextWindow = "context_window"
         case experimentalSupportedTools = "experimental_supported_tools"
+        case inputModalities = "input_modalities"
     }
 
     public init(
@@ -321,6 +401,9 @@ public struct ModelInfo: Equatable, Sendable {
         visibility: ModelVisibility,
         supportedInAPI: Bool,
         priority: Int32,
+        additionalSpeedTiers: [String] = [],
+        serviceTiers: [ModelServiceTier] = [],
+        availabilityNux: ModelAvailabilityNux? = nil,
         upgrade: String? = nil,
         baseInstructions: String? = nil,
         supportsReasoningSummaries: Bool,
@@ -330,7 +413,8 @@ public struct ModelInfo: Equatable, Sendable {
         truncationPolicy: TruncationPolicyConfig,
         supportsParallelToolCalls: Bool,
         contextWindow: Int64? = nil,
-        experimentalSupportedTools: [String]
+        experimentalSupportedTools: [String],
+        inputModalities: [InputModality] = InputModality.defaultInputModalities
     ) {
         self.slug = slug
         self.displayName = displayName
@@ -341,6 +425,9 @@ public struct ModelInfo: Equatable, Sendable {
         self.visibility = visibility
         self.supportedInAPI = supportedInAPI
         self.priority = priority
+        self.additionalSpeedTiers = additionalSpeedTiers
+        self.serviceTiers = serviceTiers
+        self.availabilityNux = availabilityNux
         self.upgrade = upgrade
         self.baseInstructions = baseInstructions
         self.supportsReasoningSummaries = supportsReasoningSummaries
@@ -351,10 +438,15 @@ public struct ModelInfo: Equatable, Sendable {
         self.supportsParallelToolCalls = supportsParallelToolCalls
         self.contextWindow = contextWindow
         self.experimentalSupportedTools = experimentalSupportedTools
+        self.inputModalities = inputModalities
     }
 
     public var preset: ModelPreset {
         ModelPreset(modelInfo: self)
+    }
+
+    public func supportsServiceTier(_ serviceTier: String) -> Bool {
+        serviceTiers.contains { $0.id == serviceTier }
     }
 }
 
@@ -373,6 +465,9 @@ extension ModelInfo: Codable {
         self.visibility = try container.decode(ModelVisibility.self, forKey: .visibility)
         self.supportedInAPI = try container.decode(Bool.self, forKey: .supportedInAPI)
         self.priority = try container.decode(Int32.self, forKey: .priority)
+        self.additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
+        self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
+        self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.upgrade = try container.decodeIfPresent(String.self, forKey: .upgrade)
         self.baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
         self.supportsReasoningSummaries = try container.decode(Bool.self, forKey: .supportsReasoningSummaries)
@@ -383,6 +478,10 @@ extension ModelInfo: Codable {
         self.supportsParallelToolCalls = try container.decode(Bool.self, forKey: .supportsParallelToolCalls)
         self.contextWindow = try container.decodeIfPresent(Int64.self, forKey: .contextWindow)
         self.experimentalSupportedTools = try container.decode([String].self, forKey: .experimentalSupportedTools)
+        self.inputModalities = try container.decodeIfPresent(
+            [InputModality].self,
+            forKey: .inputModalities
+        ) ?? InputModality.defaultInputModalities
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -396,6 +495,9 @@ extension ModelInfo: Codable {
         try container.encode(visibility, forKey: .visibility)
         try container.encode(supportedInAPI, forKey: .supportedInAPI)
         try container.encode(priority, forKey: .priority)
+        try container.encode(additionalSpeedTiers, forKey: .additionalSpeedTiers)
+        try container.encode(serviceTiers, forKey: .serviceTiers)
+        try encodeNullingOptional(availabilityNux, into: &container, forKey: .availabilityNux)
         try encodeNullingOptional(upgrade, into: &container, forKey: .upgrade)
         try encodeNullingOptional(baseInstructions, into: &container, forKey: .baseInstructions)
         try container.encode(supportsReasoningSummaries, forKey: .supportsReasoningSummaries)
@@ -406,6 +508,7 @@ extension ModelInfo: Codable {
         try container.encode(supportsParallelToolCalls, forKey: .supportsParallelToolCalls)
         try encodeNullingOptional(contextWindow, into: &container, forKey: .contextWindow)
         try container.encode(experimentalSupportedTools, forKey: .experimentalSupportedTools)
+        try container.encode(inputModalities, forKey: .inputModalities)
     }
 }
 

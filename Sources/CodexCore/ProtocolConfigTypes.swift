@@ -22,6 +22,31 @@ public enum Verbosity: String, Codable, CaseIterable, Equatable, Sendable {
     case high
 }
 
+public enum ServiceTier: String, Codable, CaseIterable, Equatable, Sendable {
+    case fast
+    case flex
+
+    public var requestValue: String {
+        switch self {
+        case .fast:
+            return "priority"
+        case .flex:
+            return "flex"
+        }
+    }
+
+    public static func fromRequestValue(_ value: String) -> ServiceTier? {
+        switch value {
+        case "fast", "priority":
+            return .fast
+        case "flex":
+            return .flex
+        default:
+            return nil
+        }
+    }
+}
+
 public enum WireAPI: String, Codable, CaseIterable, Equatable, Sendable {
     case responses
     case chat

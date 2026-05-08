@@ -21,6 +21,12 @@ final class OpenAIModelsTests: XCTestCase {
             "description": "More deliberate"
         ])
 
+        try XCTAssertJSONObjectEqual(ModelServiceTier(id: "priority", name: "Fast", description: "Priority processing."), [
+            "id": "priority",
+            "name": "Fast",
+            "description": "Priority processing."
+        ])
+
         try XCTAssertJSONObjectEqual(TruncationPolicyConfig.tokens(123_456), [
             "mode": "tokens",
             "limit": 123_456
@@ -67,6 +73,11 @@ final class OpenAIModelsTests: XCTestCase {
             visibility: .list,
             supportedInAPI: true,
             priority: 10,
+            additionalSpeedTiers: ["fast"],
+            serviceTiers: [
+                ModelServiceTier(id: "priority", name: "Fast", description: "Priority processing.")
+            ],
+            availabilityNux: ModelAvailabilityNux(message: "Try GPT-5."),
             upgrade: "gpt-5.1",
             supportsReasoningSummaries: true,
             supportVerbosity: true,
@@ -75,9 +86,12 @@ final class OpenAIModelsTests: XCTestCase {
             truncationPolicy: .tokens(200_000),
             supportsParallelToolCalls: true,
             contextWindow: 400_000,
-            experimentalSupportedTools: ["web_search", "apply_patch"]
+            experimentalSupportedTools: ["web_search", "apply_patch"],
+            inputModalities: [.text]
         )
 
+        XCTAssertTrue(info.supportsServiceTier("priority"))
+        XCTAssertFalse(info.supportsServiceTier("flex"))
         try XCTAssertJSONObjectEqual(info, [
             "slug": "gpt-5",
             "display_name": "GPT-5",
@@ -97,6 +111,17 @@ final class OpenAIModelsTests: XCTestCase {
             "visibility": "list",
             "supported_in_api": true,
             "priority": 10,
+            "additional_speed_tiers": ["fast"],
+            "service_tiers": [
+                [
+                    "id": "priority",
+                    "name": "Fast",
+                    "description": "Priority processing."
+                ]
+            ],
+            "availability_nux": [
+                "message": "Try GPT-5."
+            ],
             "upgrade": "gpt-5.1",
             "base_instructions": NSNull(),
             "supports_reasoning_summaries": true,
@@ -109,11 +134,43 @@ final class OpenAIModelsTests: XCTestCase {
             ],
             "supports_parallel_tool_calls": true,
             "context_window": 400_000,
-            "experimental_supported_tools": ["web_search", "apply_patch"]
+            "experimental_supported_tools": ["web_search", "apply_patch"],
+            "input_modalities": ["text"]
         ])
 
         let data = try JSONEncoder().encode(info)
         XCTAssertEqual(try JSONDecoder().decode(ModelInfo.self, from: data), info)
+    }
+
+    func testModelInfoDefaultsMissingCatalogFieldsLikeRust() throws {
+        let decoded = try JSONDecoder().decode(ModelInfo.self, from: Data("""
+        {
+          "slug": "gpt-test",
+          "display_name": "GPT Test",
+          "description": null,
+          "default_reasoning_level": "medium",
+          "supported_reasoning_levels": [],
+          "shell_type": "default",
+          "visibility": "list",
+          "supported_in_api": true,
+          "priority": 1,
+          "upgrade": null,
+          "base_instructions": "base",
+          "supports_reasoning_summaries": false,
+          "support_verbosity": false,
+          "default_verbosity": null,
+          "apply_patch_tool_type": null,
+          "truncation_policy": { "mode": "bytes", "limit": 4096 },
+          "supports_parallel_tool_calls": false,
+          "context_window": null,
+          "experimental_supported_tools": []
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.additionalSpeedTiers, [])
+        XCTAssertEqual(decoded.serviceTiers, [])
+        XCTAssertNil(decoded.availabilityNux)
+        XCTAssertEqual(decoded.inputModalities, [.text, .image])
     }
 
     func testModelsResponseDefaultsMissingEtagToEmptyString() throws {
@@ -145,6 +202,9 @@ final class OpenAIModelsTests: XCTestCase {
                     "visibility": "hide",
                     "supported_in_api": false,
                     "priority": 5,
+                    "additional_speed_tiers": [],
+                    "service_tiers": [],
+                    "availability_nux": NSNull(),
                     "upgrade": NSNull(),
                     "base_instructions": "base",
                     "supports_reasoning_summaries": false,
@@ -157,7 +217,8 @@ final class OpenAIModelsTests: XCTestCase {
                     ],
                     "supports_parallel_tool_calls": false,
                     "context_window": NSNull(),
-                    "experimental_supported_tools": []
+                    "experimental_supported_tools": [],
+                    "input_modalities": ["text", "image"]
                 ]
             ],
             "etag": ""
@@ -178,6 +239,11 @@ final class OpenAIModelsTests: XCTestCase {
             visibility: .list,
             supportedInAPI: true,
             priority: 1,
+            additionalSpeedTiers: [],
+            serviceTiers: [
+                ModelServiceTier(id: "priority", name: "Fast", description: "Priority processing.")
+            ],
+            availabilityNux: ModelAvailabilityNux(message: "Try it."),
             upgrade: "gpt-5.1",
             baseInstructions: nil,
             supportsReasoningSummaries: true,
@@ -197,6 +263,10 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(preset.description, "")
         XCTAssertEqual(preset.defaultReasoningEffort, .medium)
         XCTAssertEqual(preset.supportedReasoningEfforts, info.supportedReasoningLevels)
+        XCTAssertFalse(preset.supportsPersonality)
+        XCTAssertEqual(preset.serviceTiers, info.serviceTiers)
+        XCTAssertEqual(preset.availabilityNux, ModelAvailabilityNux(message: "Try it."))
+        XCTAssertTrue(preset.supportsFastMode())
         XCTAssertFalse(preset.isDefault)
         XCTAssertTrue(preset.showInPicker)
         XCTAssertTrue(preset.supportedInAPI)
@@ -229,6 +299,15 @@ final class OpenAIModelsTests: XCTestCase {
                     "description": "Deep"
                 ]
             ],
+            "supports_personality": false,
+            "additional_speed_tiers": [],
+            "service_tiers": [
+                [
+                    "id": "priority",
+                    "name": "Fast",
+                    "description": "Priority processing."
+                ]
+            ],
             "is_default": false,
             "upgrade": [
                 "id": "gpt-5.1",
@@ -245,8 +324,29 @@ final class OpenAIModelsTests: XCTestCase {
                 "upgrade_copy": NSNull()
             ],
             "show_in_picker": true,
-            "supported_in_api": true
+            "availability_nux": [
+                "message": "Try it."
+            ],
+            "supported_in_api": true,
+            "input_modalities": ["text", "image"]
         ])
+    }
+
+    func testModelPresetSupportsFastModeFromLegacyAdditionalSpeedTiers() {
+        let preset = ModelPreset(
+            id: "legacy-fast",
+            model: "legacy-fast",
+            displayName: "Legacy Fast",
+            description: "",
+            defaultReasoningEffort: .medium,
+            supportedReasoningEfforts: [],
+            additionalSpeedTiers: ["fast"],
+            isDefault: false,
+            showInPicker: true,
+            supportedInAPI: true
+        )
+
+        XCTAssertTrue(preset.supportsFastMode())
     }
 
     private func minimalModelInfo() -> ModelInfo {

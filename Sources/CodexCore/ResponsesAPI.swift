@@ -95,6 +95,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
     public var store: Bool
     public var stream: Bool
     public var include: [String]
+    public var serviceTier: String?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
 
@@ -109,6 +110,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         case store
         case stream
         case include
+        case serviceTier = "service_tier"
         case promptCacheKey = "prompt_cache_key"
         case text
     }
@@ -124,6 +126,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         store: Bool,
         stream: Bool = true,
         include: [String] = [],
+        serviceTier: String? = nil,
         promptCacheKey: String? = nil,
         text: ResponsesAPITextControls? = nil
     ) {
@@ -137,6 +140,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         self.store = store
         self.stream = stream
         self.include = include
+        self.serviceTier = serviceTier
         self.promptCacheKey = promptCacheKey
         self.text = text
     }
@@ -171,6 +175,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
     public var parallelToolCalls: Bool
     public var reasoning: ResponsesAPIReasoning?
     public var include: [String]
+    public var serviceTier: String?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
     public var conversationID: String?
@@ -186,6 +191,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         self.parallelToolCalls = false
         self.reasoning = nil
         self.include = []
+        self.serviceTier = nil
         self.promptCacheKey = nil
         self.text = nil
         self.conversationID = nil
@@ -216,6 +222,16 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         var copy = self
         copy.include = include
         return copy
+    }
+
+    public func serviceTier(_ serviceTier: String?) -> ResponsesRequestBuilder {
+        var copy = self
+        copy.serviceTier = serviceTier
+        return copy
+    }
+
+    public func serviceTier(_ serviceTier: String?, modelInfo: ModelInfo) -> ResponsesRequestBuilder {
+        self.serviceTier(serviceTier.flatMap { modelInfo.supportsServiceTier($0) ? $0 : nil })
     }
 
     public func promptCacheKey(_ key: String?) -> ResponsesRequestBuilder {
@@ -265,6 +281,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
             reasoning: reasoning,
             store: store,
             include: include,
+            serviceTier: serviceTier,
             promptCacheKey: promptCacheKey,
             text: text
         )

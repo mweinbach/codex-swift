@@ -593,6 +593,7 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
 public struct ResponsesOptions: Equatable, Sendable {
     public var reasoning: ResponsesAPIReasoning?
     public var include: [String]
+    public var serviceTier: String?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
     public var storeOverride: Bool?
@@ -603,6 +604,7 @@ public struct ResponsesOptions: Equatable, Sendable {
     public init(
         reasoning: ResponsesAPIReasoning? = nil,
         include: [String] = [],
+        serviceTier: String? = nil,
         promptCacheKey: String? = nil,
         text: ResponsesAPITextControls? = nil,
         storeOverride: Bool? = nil,
@@ -612,6 +614,7 @@ public struct ResponsesOptions: Equatable, Sendable {
     ) {
         self.reasoning = reasoning
         self.include = include
+        self.serviceTier = serviceTier
         self.promptCacheKey = promptCacheKey
         self.text = text
         self.storeOverride = storeOverride
@@ -705,6 +708,7 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
                 .parallelToolCalls(prompt.parallelToolCalls)
                 .reasoning(options.reasoning)
                 .include(options.include)
+                .serviceTier(options.serviceTier)
                 .promptCacheKey(options.promptCacheKey)
                 .text(options.text)
                 .conversation(options.conversationID)

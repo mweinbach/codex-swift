@@ -49,12 +49,58 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(object["parallel_tool_calls"] as? Bool, true)
         XCTAssertEqual(object["store"] as? Bool, false)
         XCTAssertEqual(object["stream"] as? Bool, true)
+        XCTAssertNil(object["service_tier"])
         XCTAssertNil(object["prompt_cache_key"])
         XCTAssertNil(object["text"])
 
         let reasoning = try XCTUnwrap(object["reasoning"] as? [String: Any])
         XCTAssertEqual(reasoning["effort"] as? String, "medium")
         XCTAssertEqual(reasoning["summary"] as? String, "auto")
+    }
+
+    func testResponsesAPIRequestSerializesServiceTierWhenSet() throws {
+        let request = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [],
+            store: false,
+            serviceTier: "flex"
+        )
+
+        let object = try JSONObject(request)
+        XCTAssertEqual(object["service_tier"] as? String, "flex")
+    }
+
+    func testBuilderCanFilterUnsupportedServiceTierWithModelInfo() throws {
+        let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
+        let modelInfo = ModelInfo(
+            slug: "gpt-test",
+            displayName: "GPT Test",
+            defaultReasoningLevel: .medium,
+            supportedReasoningLevels: [],
+            shellType: .default,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 1,
+            serviceTiers: [
+                ModelServiceTier(id: "flex", name: "Flex", description: "Flexible processing.")
+            ],
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(4096),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
+        )
+
+        let supported = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [])
+            .serviceTier("flex", modelInfo: modelInfo)
+            .build(provider: provider)
+        XCTAssertEqual(try JSONObject(supported.body)["service_tier"] as? String, "flex")
+
+        let unsupported = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [])
+            .serviceTier("priority", modelInfo: modelInfo)
+            .build(provider: provider)
+        XCTAssertNil(try JSONObject(unsupported.body)["service_tier"])
     }
 
     func testBuilderUsesAzureStoreDefaultAndConversationHeaders() throws {
