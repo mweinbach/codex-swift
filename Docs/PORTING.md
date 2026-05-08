@@ -291,6 +291,8 @@ Source baseline inspected for this scaffold:
   - PNG/JPEG local image loading, bounds-preserving resize to 2048x768, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 - `codex-rs/utils/readiness/src/lib.rs`
   - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, and Rust-matching readiness error strings
+- `codex-rs/cloud-tasks-client/src/api.rs` and `codex-rs/cloud-tasks-client/src/mock.rs`
+  - cloud task IDs/statuses/summaries, apply outcome/error wire behavior, mock task rows, diff-count summaries, task text/messages, sibling attempts, and local create/apply/preflight behavior
 
 ## Known Gaps
 
@@ -307,7 +309,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - MCP server/client management
 - app-server protocol and server runtime
 - apply-patch runtime
-- cloud tasks
+- cloud tasks live HTTP client and CLI/TUI runtime integration
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
