@@ -58,6 +58,14 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct StdioToUDSCommandRequest: Equatable, Sendable {
+        public let socketPath: String
+
+        public init(socketPath: String) {
+            self.socketPath = socketPath
+        }
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
         public let stderrMessage: String?
@@ -72,6 +80,7 @@ public struct CodexCLI: Sendable {
     public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
     public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
+    public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -171,7 +180,8 @@ public struct CodexCLI: Sendable {
         applyRunner: ApplyCommandRunner? = nil,
         loginRunner: LoginCommandRunner? = nil,
         logoutRunner: LogoutCommandRunner? = nil,
-        featuresRunner: FeaturesCommandRunner? = nil
+        featuresRunner: FeaturesCommandRunner? = nil,
+        stdioToUDSRunner: StdioToUDSCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -232,6 +242,25 @@ public struct CodexCLI: Sendable {
                 let result = try await logoutRunner(LogoutCommandRequest(
                     configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
+                if let message = result.stderrMessage {
+                    stderr(message)
+                }
+                return result.exitCode
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+        case let .command(spec, commandArguments) where spec.name == "stdio-to-uds":
+            guard let stdioToUDSRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            guard commandArguments.count == 1, let socketPath = commandArguments.first else {
+                stderr("codex-swift: missing required argument for command 'stdio-to-uds': <SOCKET_PATH>")
+                return 64
+            }
+            do {
+                let result = try await stdioToUDSRunner(StdioToUDSCommandRequest(socketPath: socketPath))
                 if let message = result.stderrMessage {
                     stderr(message)
                 }

@@ -1,6 +1,7 @@
 import CodexChatGPT
 import CodexCLI
 import CodexCore
+import CodexStdioToUDS
 import Darwin
 import Foundation
 
@@ -19,7 +20,8 @@ let exitCode = await cli.runAsync(
     },
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
-    featuresRunner: runFeaturesCommand
+    featuresRunner: runFeaturesCommand,
+    stdioToUDSRunner: runStdioToUDSCommand
 )
 exit(exitCode)
 
@@ -115,6 +117,11 @@ private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) asyn
             "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
         }
         .joined(separator: "\n")
+}
+
+private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try StdioToUDS.run(socketPath: request.socketPath)
+    return CodexCLI.CommandExecutionResult(exitCode: 0)
 }
 
 private struct APIKeyReadResult {

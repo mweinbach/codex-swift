@@ -14,7 +14,9 @@ let package = Package(
         .library(name: "CodexChatGPT", targets: ["CodexChatGPT"]),
         .library(name: "CodexCLI", targets: ["CodexCLI"]),
         .library(name: "CodexCore", targets: ["CodexCore"]),
-        .library(name: "CodexGit", targets: ["CodexGit"])
+        .library(name: "CodexGit", targets: ["CodexGit"]),
+        .library(name: "CodexStdioToUDS", targets: ["CodexStdioToUDS"]),
+        .executable(name: "codex-stdio-to-uds", targets: ["codex-stdio-to-uds"])
     ],
     targets: [
         .target(name: "CodexCore"),
@@ -28,13 +30,18 @@ let package = Package(
             name: "CodexCLI",
             dependencies: ["CodexCore"]
         ),
+        .target(name: "CodexStdioToUDS"),
         .executableTarget(
             name: "apply_patch",
             dependencies: ["CodexApplyPatch"]
         ),
         .executableTarget(
+            name: "codex-stdio-to-uds",
+            dependencies: ["CodexStdioToUDS"]
+        ),
+        .executableTarget(
             name: "codex",
-            dependencies: ["CodexChatGPT", "CodexCLI", "CodexCore"]
+            dependencies: ["CodexChatGPT", "CodexCLI", "CodexCore", "CodexStdioToUDS"]
         ),
         .testTarget(
             name: "CodexApplyPatchTests",
@@ -55,6 +62,10 @@ let package = Package(
         .testTarget(
             name: "CodexCLITests",
             dependencies: ["CodexCLI"]
+        ),
+        .testTarget(
+            name: "CodexStdioToUDSTests",
+            dependencies: ["CodexStdioToUDS"]
         )
     ]
 )

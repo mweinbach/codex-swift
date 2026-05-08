@@ -308,4 +308,40 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 64)
         XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list"])
     }
+
+    func testRunAsyncStdioToUDSDelegatesToRunner() async {
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.StdioToUDSCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["stdio-to-uds", "/tmp/codex.sock"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            stdioToUDSRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(receivedRequest?.socketPath, "/tmp/codex.sock")
+    }
+
+    func testRunAsyncStdioToUDSRequiresSocketPath() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["stdio-to-uds"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            stdioToUDSRunner: { _ in
+                XCTFail("runner should not be called without socket path")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: missing required argument for command 'stdio-to-uds': <SOCKET_PATH>"])
+    }
 }
