@@ -1,6 +1,8 @@
 import CodexCore
 import Foundation
 
+public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
+
 public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let codexHome: URL
     public let defaultModelProvider: String
@@ -13,6 +15,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
+    public let authRefreshTransport: AppServerAuthRefreshTransport?
 
     public init(
         codexHome: URL,
@@ -25,7 +28,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
-        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher()
+        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
+        authRefreshTransport: AppServerAuthRefreshTransport? = nil
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -38,6 +42,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
+        self.authRefreshTransport = authRefreshTransport
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -725,10 +730,33 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func refreshTokenIfRequested(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) {
+        guard boolParam(params?["refreshToken"], defaultValue: false) else {
+            return
+        }
+        do {
+            _ = try runAsyncBlocking {
+                try await CodexAuthStorage.loadFreshTokenData(
+                    codexHome: configuration.codexHome,
+                    mode: configuration.authCredentialsStoreMode,
+                    environment: configuration.environment,
+                    refreshTransport: configuration.authRefreshTransport
+                )
+            }
+        } catch {
+            return
+        }
+    }
+
     fileprivate static func authStatusResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        refreshTokenIfRequested(params: params, configuration: configuration)
+
         guard configuration.requiresOpenAIAuth else {
             return [
                 "authMethod": NSNull(),
@@ -746,7 +774,12 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
-    fileprivate static func accountResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+    fileprivate static func accountResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        refreshTokenIfRequested(params: params, configuration: configuration)
+
         guard configuration.requiresOpenAIAuth else {
             return [
                 "account": NSNull(),
@@ -2210,7 +2243,7 @@ final class CodexAppServerMessageProcessor {
                 case "account/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.accountResult(configuration: configuration)
+                        result: try CodexAppServer.accountResult(params: params, configuration: configuration)
                     )
                 case "account/rateLimits/read":
                     response = CodexAppServer.responseObject(

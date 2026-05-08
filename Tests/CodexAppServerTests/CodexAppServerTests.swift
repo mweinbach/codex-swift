@@ -533,6 +533,80 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(userInfo["allegedUserEmail"] as? String, "user@example.com")
     }
 
+    func testAccountReadRefreshTokenUpdatesStoredChatGPTTokens() async throws {
+        let temp = try TemporaryDirectory()
+        let staleDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "old-access-token",
+            refreshToken: "old-refresh-token",
+            now: staleDate
+        )
+        let capture = AppServerRefreshCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            authRefreshTransport: { request in
+                await capture.append(request)
+                return AuthRefreshHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"access_token":"new-access-token","refresh_token":"new-refresh-token"}"#.utf8)
+                )
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/read","params":{"refreshToken":true}}"#,
+            configuration: configuration
+        )
+
+        let accountResult = try XCTUnwrap(response["result"] as? [String: Any])
+        let account = try XCTUnwrap(accountResult["account"] as? [String: Any])
+        XCTAssertEqual(account["type"] as? String, "chatgpt")
+        XCTAssertEqual(account["email"] as? String, "user@example.com")
+        XCTAssertEqual(account["planType"] as? String, "pro")
+        let stored = try CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file)
+        XCTAssertEqual(stored?.tokens?.accessToken, "new-access-token")
+        XCTAssertEqual(stored?.tokens?.refreshToken, "new-refresh-token")
+        let requests = await capture.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].url, URL(string: CodexAuthStorage.defaultRefreshTokenURL))
+        XCTAssertEqual(requests[0].method, "POST")
+    }
+
+    func testAuthStatusRefreshTokenReturnsUpdatedAccessToken() async throws {
+        let temp = try TemporaryDirectory()
+        let staleDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "old-access-token",
+            refreshToken: "old-refresh-token",
+            now: staleDate
+        )
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            authRefreshTransport: { _ in
+                AuthRefreshHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"access_token":"new-access-token","refresh_token":"new-refresh-token"}"#.utf8)
+                )
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"getAuthStatus","params":{"includeToken":true,"refreshToken":true}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["authMethod"] as? String, "chatgpt")
+        XCTAssertEqual(result["authToken"] as? String, "new-access-token")
+        XCTAssertEqual(result["requiresOpenAIAuth"] as? Bool, true)
+    }
+
     func testAccountRateLimitsReadRequiresAuthentication() throws {
         let temp = try TemporaryDirectory()
 
@@ -1291,7 +1365,8 @@ final class CodexAppServerTests: XCTestCase {
         requiresOpenAIAuth: Bool = true,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
-        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher()
+        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
+        authRefreshTransport: AppServerAuthRefreshTransport? = nil
     ) -> CodexAppServerConfiguration {
         CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -1303,7 +1378,8 @@ final class CodexAppServerTests: XCTestCase {
             ],
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
-            accountRateLimitsFetcher: accountRateLimitsFetcher
+            accountRateLimitsFetcher: accountRateLimitsFetcher,
+            authRefreshTransport: authRefreshTransport
         )
     }
 
@@ -1475,6 +1551,19 @@ private actor AppServerRequestCapture {
             method: request.httpMethod,
             headers: request.allHTTPHeaderFields ?? [:]
         ))
+    }
+}
+
+private actor AppServerRefreshCapture {
+    struct Request: Equatable {
+        let url: URL?
+        let method: String?
+    }
+
+    private(set) var requests: [Request] = []
+
+    func append(_ request: URLRequest) {
+        requests.append(Request(url: request.url, method: request.httpMethod))
     }
 }
 
