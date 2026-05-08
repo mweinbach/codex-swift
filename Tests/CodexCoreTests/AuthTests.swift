@@ -31,6 +31,136 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(loaded?.lastRefresh, "2026-05-07T00:00:00Z")
     }
 
+    func testLoadFreshTokenDataUsesRecentTokenWithoutRefresh() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "recent-access-token",
+            refreshToken: "recent-refresh-token",
+            lastRefresh: Self.isoString(now)
+        )
+
+        let token = try await CodexAuthStorage.loadFreshTokenData(
+            codexHome: dir.url,
+            now: now,
+            refreshTransport: { _ in
+                XCTFail("recent tokens should not refresh")
+                return AuthRefreshHTTPResponse(statusCode: 500, body: Data())
+            }
+        )
+
+        XCTAssertEqual(token?.accessToken, "recent-access-token")
+        XCTAssertEqual(token?.refreshToken, "recent-refresh-token")
+    }
+
+    func testLoadFreshTokenDataRefreshesStaleTokenAndUpdatesStorage() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let staleRefresh = now.addingTimeInterval(-9 * 24 * 60 * 60)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "initial-access-token",
+            refreshToken: "initial-refresh-token",
+            lastRefresh: Self.isoString(staleRefresh)
+        )
+
+        var capturedRequest: URLRequest?
+        let token = try await CodexAuthStorage.loadFreshTokenData(
+            codexHome: dir.url,
+            now: now,
+            environment: [CodexAuthStorage.refreshTokenURLEnvironmentOverride: "https://auth.example.test/oauth/token"],
+            refreshTransport: { request in
+                capturedRequest = request
+                return AuthRefreshHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"access_token":"new-access-token","refresh_token":"new-refresh-token"}"#.utf8)
+                )
+            }
+        )
+
+        XCTAssertEqual(token?.idToken, "header.payload.signature")
+        XCTAssertEqual(token?.accessToken, "new-access-token")
+        XCTAssertEqual(token?.refreshToken, "new-refresh-token")
+        XCTAssertEqual(token?.accountID, "account-id")
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://auth.example.test/oauth/token")
+        XCTAssertEqual(capturedRequest?.httpMethod, "POST")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+        let body = try XCTUnwrap(capturedRequest?.httpBody)
+        let refreshRequest = try JSONDecoder().decode(RefreshRequestBody.self, from: body)
+        XCTAssertEqual(refreshRequest.clientID, CodexAuthStorage.refreshClientID)
+        XCTAssertEqual(refreshRequest.grantType, "refresh_token")
+        XCTAssertEqual(refreshRequest.refreshToken, "initial-refresh-token")
+        XCTAssertEqual(refreshRequest.scope, "openid profile email")
+
+        let stored = try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file)
+        XCTAssertEqual(stored?.tokens?.accessToken, "new-access-token")
+        XCTAssertEqual(stored?.tokens?.refreshToken, "new-refresh-token")
+        XCTAssertEqual(stored?.lastRefresh, Self.isoString(now))
+    }
+
+    func testLoadFreshTokenDataReportsPermanentRefreshFailureAndLeavesStorageUnchanged() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let staleRefresh = now.addingTimeInterval(-9 * 24 * 60 * 60)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "initial-access-token",
+            refreshToken: "initial-refresh-token",
+            lastRefresh: Self.isoString(staleRefresh)
+        )
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.loadFreshTokenData(
+            codexHome: dir.url,
+            now: now,
+            refreshTransport: { _ in
+                AuthRefreshHTTPResponse(
+                    statusCode: 401,
+                    body: Data(#"{"error":{"code":"refresh_token_expired"}}"#.utf8)
+                )
+            }
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthStorageError)?.description,
+                "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again."
+            )
+        }
+
+        let stored = try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file)
+        XCTAssertEqual(stored?.tokens?.accessToken, "initial-access-token")
+        XCTAssertEqual(stored?.tokens?.refreshToken, "initial-refresh-token")
+        XCTAssertEqual(stored?.lastRefresh, Self.isoString(staleRefresh))
+    }
+
+    func testLoadFreshTokenDataReportsTransientRefreshFailureMessage() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let staleRefresh = now.addingTimeInterval(-9 * 24 * 60 * 60)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "initial-access-token",
+            refreshToken: "initial-refresh-token",
+            lastRefresh: Self.isoString(staleRefresh)
+        )
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.loadFreshTokenData(
+            codexHome: dir.url,
+            now: now,
+            refreshTransport: { _ in
+                AuthRefreshHTTPResponse(
+                    statusCode: 500,
+                    body: Data(#"{"error":{"message":"temporary-failure"}}"#.utf8)
+                )
+            }
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthStorageError)?.description,
+                "Failed to refresh token: 500 Internal Server Error: temporary-failure"
+            )
+        }
+    }
+
     func testMissingAuthJSONReturnsNil() throws {
         let dir = try AuthTemporaryDirectory()
         XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
@@ -54,6 +184,61 @@ final class AuthTests: XCTestCase {
         XCTAssertThrowsError(try CodexHome.find(environment: ["CODEX_HOME": missing])) { error in
             XCTAssertEqual(error as? CodexHomeError, .codexHomeDoesNotExist(missing))
         }
+    }
+
+    private static func writeAuth(
+        to codexHome: URL,
+        accessToken: String,
+        refreshToken: String,
+        lastRefresh: String
+    ) throws {
+        let auth = """
+        {
+          "OPENAI_API_KEY": null,
+          "tokens": {
+            "id_token": "header.payload.signature",
+            "access_token": "\(accessToken)",
+            "refresh_token": "\(refreshToken)",
+            "account_id": "account-id"
+          },
+          "last_refresh": "\(lastRefresh)"
+        }
+        """
+        try auth.write(to: codexHome.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+    }
+
+    private static func isoString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+}
+
+private struct RefreshRequestBody: Decodable {
+    let clientID: String
+    let grantType: String
+    let refreshToken: String
+    let scope: String
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case grantType = "grant_type"
+        case refreshToken = "refresh_token"
+        case scope
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ errorHandler: (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected expression to throw", file: file, line: line)
+    } catch {
+        errorHandler(error)
     }
 }
 

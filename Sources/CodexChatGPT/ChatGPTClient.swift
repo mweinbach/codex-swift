@@ -55,20 +55,21 @@ public enum ChatGPTClientError: Error, Equatable, CustomStringConvertible, Senda
 
 public struct ChatGPTTaskClient {
     public typealias Transport = (URLRequest) async throws -> ChatGPTHTTPResponse
+    public typealias TokenLoader = () async throws -> AuthTokenData?
 
     public let configuration: ChatGPTClientConfiguration
     private let transport: Transport
-    private let tokenLoader: () throws -> AuthTokenData?
+    private let tokenLoader: TokenLoader
 
     public init(
         configuration: ChatGPTClientConfiguration,
         transport: Transport? = nil,
-        tokenLoader: (() throws -> AuthTokenData?)? = nil
+        tokenLoader: TokenLoader? = nil
     ) {
         self.configuration = configuration
         self.transport = transport ?? Self.urlSessionTransport
         self.tokenLoader = tokenLoader ?? {
-            try CodexAuthStorage.loadTokenData(
+            try await CodexAuthStorage.loadFreshTokenData(
                 codexHome: configuration.codexHome,
                 mode: configuration.authCredentialsStoreMode
             )
@@ -85,7 +86,7 @@ public struct ChatGPTTaskClient {
     }
 
     public func get<T: Decodable>(path: String) async throws -> T {
-        guard let token = try tokenLoader() else {
+        guard let token = try await tokenLoader() else {
             throw ChatGPTClientError.chatGPTTokenNotAvailable
         }
         guard let accountID = token.accountID else {

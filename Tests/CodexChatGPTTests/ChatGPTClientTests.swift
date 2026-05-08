@@ -43,7 +43,8 @@ final class ChatGPTClientTests: XCTestCase {
             "access_token": "file-access-token",
             "refresh_token": "file-refresh-token",
             "account_id": "file-account-id"
-          }
+          },
+          "last_refresh": "\(Self.recentLastRefresh())"
         }
         """.write(to: dir.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
 
@@ -139,6 +140,12 @@ final class ChatGPTClientTests: XCTestCase {
       }
     }
     """#
+
+    private static func recentLastRefresh() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: Date())
+    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(
