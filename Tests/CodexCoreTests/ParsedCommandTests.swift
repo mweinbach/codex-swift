@@ -173,6 +173,16 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testShellCdRebasesSearchAndListPathsLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && rg -n TODO core/src"]), [
+            .search(cmd: "rg -n TODO core/src", query: "TODO", path: "codex-rs/core")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && ls core/src"]), [
+            .listFiles(cmd: "ls core/src", path: "codex-rs/core")
+        ])
+    }
+
     func testSupportsSingleStringScriptWithCdAndPipe() {
         let inner = #"cd /Users/pakrym/code/codex && rg -n "codex_api" codex-rs -S | head -n 50"#
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [

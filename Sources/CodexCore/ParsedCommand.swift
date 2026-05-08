@@ -159,14 +159,23 @@ private func parseTokenParts(_ parts: [[String]]) -> [ParsedCommand] {
     for tokens in parts where !tokens.isEmpty {
         if tokens.first == "cd" {
             if let dir = tokens.dropFirst().first {
-                cwd = cwd.map { joinPaths($0, dir) } ?? dir
+                cwd = isAbsoluteLike(dir) ? nil : (cwd.map { joinPaths($0, dir) } ?? dir)
             }
             continue
         }
 
         let parsed = summarizeMainTokens(tokens)
-        if case let .read(cmd, name, path) = parsed, let cwd {
-            parsedCommands.append(.read(cmd: cmd, name: name, path: joinPaths(cwd, path)))
+        if let cwd {
+            switch parsed {
+            case let .read(cmd, name, path):
+                parsedCommands.append(.read(cmd: cmd, name: name, path: joinPaths(cwd, path)))
+            case let .listFiles(cmd, path):
+                parsedCommands.append(.listFiles(cmd: cmd, path: path.map { joinPaths(cwd, $0) }))
+            case let .search(cmd, query, path):
+                parsedCommands.append(.search(cmd: cmd, query: query, path: path.map { joinPaths(cwd, $0) }))
+            case .unknown:
+                parsedCommands.append(parsed)
+            }
         } else {
             parsedCommands.append(parsed)
         }
