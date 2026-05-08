@@ -428,12 +428,15 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
 }
 
 public enum ResponseItem: Equatable, Codable, Sendable {
+    case message(role: String, content: [ContentItem])
     case webSearchCall(status: String?, action: WebSearchAction)
     case compaction(encryptedContent: String)
     case other
 
     private enum CodingKeys: String, CodingKey {
         case type
+        case role
+        case content
         case status
         case action
         case encryptedContent = "encrypted_content"
@@ -442,6 +445,11 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .type) {
+        case "message":
+            self = .message(
+                role: try container.decode(String.self, forKey: .role),
+                content: try container.decode([ContentItem].self, forKey: .content)
+            )
         case "web_search_call":
             self = .webSearchCall(
                 status: try container.decodeIfPresent(String.self, forKey: .status),
@@ -457,6 +465,10 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case let .message(role, content):
+            try container.encode("message", forKey: .type)
+            try container.encode(role, forKey: .role)
+            try container.encode(content, forKey: .content)
         case let .webSearchCall(status, action):
             try container.encode("web_search_call", forKey: .type)
             try container.encodeIfPresent(status, forKey: .status)
