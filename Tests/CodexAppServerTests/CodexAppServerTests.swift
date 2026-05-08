@@ -100,6 +100,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testTurnStartRecordsUserInputAndEmitsStartedNotification() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"},{"type":"image","url":"https://example.test/one.png"}]}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(result["turn"] as? [String: Any])
+        XCTAssertNotNil(turn["id"] as? String)
+        XCTAssertEqual((turn["items"] as? [Any])?.count, 0)
+        XCTAssertEqual(turn["status"] as? String, "inProgress")
+        XCTAssertEqual(turn["error"] as? NSNull, NSNull())
+        XCTAssertEqual(messages[1]["method"] as? String, "turn/started")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(notificationParams["threadId"] as? String, threadID)
+        let notificationTurn = try XCTUnwrap(notificationParams["turn"] as? [String: Any])
+        XCTAssertEqual(notificationTurn["id"] as? String, turn["id"] as? String)
+
+        let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        let items = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        let content = try XCTUnwrap(items[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["text"] as? String, "Hello")
+        XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
+    }
+
     func testThreadResumeReturnsThreadWithRebuiltTurns() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

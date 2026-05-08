@@ -490,6 +490,39 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func turnStartResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let input = v2UserInputs(params?["input"])
+        if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+            let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+            try recorder.recordItems([
+                .eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images)))
+            ])
+            try recorder.shutdown()
+        }
+        let turn: [String: Any] = [
+            "id": UUID().uuidString.lowercased(),
+            "items": [],
+            "status": "inProgress",
+            "error": NSNull()
+        ]
+        return [
+            "turn": turn
+        ]
+    }
+
     fileprivate static func threadArchiveResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -506,17 +539,9 @@ public enum CodexAppServer {
 
         let rolloutPath: String
         do {
-            guard let foundPath = try RolloutListing.findConversationPathByIDString(
-                codexHome: configuration.codexHome,
-                idString: conversationID.description
-            ) else {
-                throw AppServerError.invalidRequest("no rollout found for conversation id \(conversationID)")
-            }
-            rolloutPath = foundPath
+            rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
         } catch let error as AppServerError {
             throw error
-        } catch {
-            throw AppServerError.invalidRequest("failed to locate conversation id \(conversationID): \(error)")
         }
 
         try archiveConversation(conversationID: conversationID, rolloutPath: rolloutPath, configuration: configuration)
@@ -709,6 +734,16 @@ public enum CodexAppServer {
             "method": "thread/started",
             "params": [
                 "thread": thread
+            ]
+        ]
+    }
+
+    fileprivate static func turnStartedNotification(threadID: String, turn: [String: Any]) -> [String: Any] {
+        [
+            "method": "turn/started",
+            "params": [
+                "threadId": threadID,
+                "turn": turn
             ]
         ]
     }
@@ -1336,6 +1371,25 @@ public enum CodexAppServer {
         return builder.finish()
     }
 
+    private static func rolloutPathForConversation(
+        _ conversationID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws -> String {
+        do {
+            guard let foundPath = try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: conversationID.description
+            ) else {
+                throw AppServerError.invalidRequest("no rollout found for conversation id \(conversationID)")
+            }
+            return foundPath
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.invalidRequest("failed to locate conversation id \(conversationID): \(error)")
+        }
+    }
+
     private static func sandboxPolicy(for mode: SandboxMode) -> SandboxPolicy {
         switch mode {
         case .dangerFullAccess:
@@ -1442,6 +1496,32 @@ public enum CodexAppServer {
 
     private static func sandboxModeParam(_ value: Any?) -> SandboxMode? {
         stringParam(value).flatMap(SandboxMode.init(rawValue:))
+    }
+
+    private static func v2UserInputs(_ value: Any?) -> (text: String, images: [String]?) {
+        guard let items = value as? [[String: Any]] else {
+            return ("", nil)
+        }
+        var texts: [String] = []
+        var images: [String] = []
+        for item in items {
+            switch stringParam(item["type"]) {
+            case "text":
+                if let text = stringParam(item["text"]), !text.isEmpty {
+                    texts.append(text)
+                }
+            case "image":
+                if let url = stringParam(item["url"]), !url.isEmpty {
+                    images.append(url)
+                }
+            default:
+                continue
+            }
+        }
+        return (
+            texts.joined(),
+            images.isEmpty ? nil : images
+        )
     }
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
@@ -2614,6 +2694,13 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
                     )
+                case "turn/start":
+                    let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result)
+                    if let threadID = params?["threadId"] as? String,
+                       let turn = result["turn"] as? [String: Any] {
+                        notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
+                    }
                 case "thread/archive":
                     response = CodexAppServer.responseObject(
                         id: id,
