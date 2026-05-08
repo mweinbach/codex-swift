@@ -49,6 +49,14 @@ Source baseline inspected for this scaffold:
   - built-in approval preset ordering and policy pairs
 - `codex-rs/protocol/src/approvals.rs`
   - transparent execpolicy amendment array encoding
+- `codex-rs/protocol/src/user_input.rs`
+  - tagged user input variants for text, images, local images, and skills
+- `codex-rs/protocol/src/plan_tool.rs`
+  - update-plan argument wire shapes
+- `codex-rs/protocol/src/custom_prompts.rs`
+  - custom prompt metadata and `prompts` command prefix
+- `codex-rs/protocol/src/models.rs`
+  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
 
 ## Known Gaps
 
@@ -65,5 +73,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - cloud tasks
 - completion generation
 - platform-specific process hardening
+- local image loading/resizing into data URLs
+- MCP `CallToolResult` conversion into function-call output payloads
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
