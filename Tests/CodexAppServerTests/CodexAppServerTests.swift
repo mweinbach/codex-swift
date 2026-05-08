@@ -62,6 +62,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((data[0]["turns"] as? [Any])?.count, 0)
     }
 
+    func testThreadResumeReturnsThreadWithRebuiltTurns() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .agentReasoning(AgentReasoningEvent(text: "thinking")),
+                .agentReasoningRawContent(AgentReasoningRawContentEvent(text: "raw thought")),
+                .agentMessage(AgentMessageEvent(message: "Done")),
+                .userMessage(UserMessageEvent(message: "Second turn", images: ["https://example.test/image.png"])),
+                .turnAborted(TurnAbortedEvent(reason: .interrupted))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["model"] as? String, "gpt-5.2-codex")
+        XCTAssertEqual(result["modelProvider"] as? String, "openai")
+        XCTAssertEqual(result["approvalPolicy"] as? String, "untrusted")
+        XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "read-only")
+        XCTAssertEqual(result["reasoningEffort"] as? NSNull, NSNull())
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertEqual(thread["id"] as? String, threadID)
+        XCTAssertEqual(thread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(thread["cwd"] as? String, "/")
+        XCTAssertEqual(thread["cliVersion"] as? String, "0.0.0")
+        XCTAssertEqual(thread["source"] as? String, "cli")
+        XCTAssertEqual(thread["gitInfo"] as? NSNull, NSNull())
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 2)
+        XCTAssertEqual(turns[0]["id"] as? String, "turn-1")
+        XCTAssertEqual(turns[0]["status"] as? String, "completed")
+        let firstItems = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(firstItems.map { $0["type"] as? String }, ["userMessage", "reasoning", "agentMessage"])
+        let firstUserContent = try XCTUnwrap(firstItems[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(firstUserContent.count, 1)
+        XCTAssertEqual(firstUserContent[0]["type"] as? String, "text")
+        XCTAssertEqual(firstUserContent[0]["text"] as? String, "Saved user message")
+        XCTAssertEqual(firstItems[1]["summary"] as? [String], ["thinking"])
+        XCTAssertEqual(firstItems[1]["content"] as? [String], ["raw thought"])
+        XCTAssertEqual(firstItems[2]["text"] as? String, "Done")
+        XCTAssertEqual(turns[1]["id"] as? String, "turn-2")
+        XCTAssertEqual(turns[1]["status"] as? String, "interrupted")
+        let secondItems = try XCTUnwrap(turns[1]["items"] as? [[String: Any]])
+        let secondContent = try XCTUnwrap(secondItems[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(secondContent[0]["type"] as? String, "text")
+        XCTAssertEqual(secondContent[0]["text"] as? String, "Second turn")
+        XCTAssertEqual(secondContent[1]["type"] as? String, "image")
+        XCTAssertEqual(secondContent[1]["url"] as? String, "https://example.test/image.png")
+    }
+
+    func testThreadResumeRejectsMissingRollout() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = UUID().uuidString.lowercased()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "no rollout found for conversation id \(threadID)")
+    }
+
     func testLegacyListConversationsUsesPageSizeCursorAndDefaultProvider() throws {
         let temp = try TemporaryDirectory()
         _ = try writeRollout(
@@ -1552,6 +1633,17 @@ final class CodexAppServerTests: XCTestCase {
         }.joined(separator: "\n")
         try lines.write(to: path, atomically: true, encoding: .utf8)
         return id
+    }
+
+    private func appendRolloutEvents(to path: String, timestamp: String, events: [EventMessage]) throws {
+        let encoder = JSONEncoder()
+        let lines = try events.map { event in
+            let line = RolloutLine(timestamp: timestamp, item: .eventMsg(event))
+            return String(data: try encoder.encode(line), encoding: .utf8)!
+        }.joined(separator: "\n")
+        let url = URL(fileURLWithPath: path)
+        let existing = try String(contentsOf: url, encoding: .utf8)
+        try (existing + "\n" + lines).write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func fakeJWT(email: String, plan: String) throws -> String {

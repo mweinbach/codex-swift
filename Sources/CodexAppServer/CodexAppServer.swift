@@ -386,6 +386,62 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func threadResumeResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+
+        let rolloutPath: String
+        if let path = stringParam(params?["path"]) {
+            rolloutPath = path
+        } else {
+            let conversationID: ConversationId
+            do {
+                conversationID = try ConversationId(string: threadID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid thread id: \(error)")
+            }
+            do {
+                guard let foundPath = try RolloutListing.findConversationPathByIDString(
+                    codexHome: configuration.codexHome,
+                    idString: conversationID.description
+                ) else {
+                    throw AppServerError.invalidRequest("no rollout found for conversation id \(conversationID)")
+                }
+                rolloutPath = foundPath
+            } catch let error as AppServerError {
+                throw error
+            } catch {
+                throw AppServerError.invalidRequest("failed to locate conversation id \(conversationID): \(error)")
+            }
+        }
+
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let thread = try threadObject(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            turns: buildTurnsFromRolloutEvents(at: rolloutPath)
+        )
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
+        let modelProvider = runtimeConfig.selectedModelProviderID
+        let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
+        let sandbox = sandboxPolicy(for: runtimeConfig.sandboxMode ?? .readOnly)
+
+        return [
+            "thread": thread,
+            "model": model,
+            "modelProvider": modelProvider,
+            "cwd": thread["cwd"] ?? "/",
+            "approvalPolicy": approvalPolicy.rawValue,
+            "sandbox": try jsonObject(sandbox),
+            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func threadArchiveResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1187,7 +1243,11 @@ public enum CodexAppServer {
         }
     }
 
-    private static func threadObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
+    private static func threadObject(
+        for item: ConversationItem,
+        defaultProvider: String,
+        turns: [[String: Any]] = []
+    ) throws -> [String: Any] {
         let summary = try RolloutSummary(path: item.path, defaultProvider: defaultProvider)
         return [
             "id": summary.id,
@@ -1198,9 +1258,41 @@ public enum CodexAppServer {
             "cwd": summary.cwd,
             "cliVersion": summary.cliVersion,
             "source": appServerSource(summary.source),
-            "gitInfo": summary.gitInfo as Any,
-            "turns": []
-        ].nullStripped()
+            "gitInfo": summary.gitInfo ?? NSNull(),
+            "turns": turns
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func buildTurnsFromRolloutEvents(at path: String) throws -> [[String: Any]] {
+        let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+        let decoder = JSONDecoder()
+        var builder = AppServerThreadHistoryBuilder()
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            guard let data = rawLine.data(using: .utf8),
+                  let line = try? decoder.decode(RolloutLine.self, from: data),
+                  case let .eventMsg(event) = line.item
+            else {
+                continue
+            }
+            builder.handle(event)
+        }
+        return builder.finish()
+    }
+
+    private static func sandboxPolicy(for mode: SandboxMode) -> SandboxPolicy {
+        switch mode {
+        case .dangerFullAccess:
+            return .dangerFullAccess
+        case .readOnly:
+            return .readOnly
+        case .workspaceWrite:
+            return .newWorkspaceWritePolicy()
+        }
+    }
+
+    private static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
+        let data = try JSONEncoder().encode(value)
+        return try JSONSerialization.jsonObject(with: data)
     }
 
     private static func conversationObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
@@ -2446,6 +2538,11 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
                     )
+                case "thread/resume":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
+                    )
                 case "thread/archive":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -2607,6 +2704,144 @@ final class CodexAppServerMessageProcessor {
             }
         }
         return CodexAppServer.encodeMessages([response] + notifications)
+    }
+}
+
+private struct AppServerThreadHistoryBuilder {
+    private var turns: [[String: Any]] = []
+    private var currentTurn: [String: Any]?
+    private var currentItems: [[String: Any]] = []
+    private var currentStatus = "completed"
+    private var nextTurnIndex = 1
+    private var nextItemIndex = 1
+
+    mutating func handle(_ event: EventMessage) {
+        switch event {
+        case let .userMessage(payload):
+            finishCurrentTurn()
+            startTurn()
+            var content: [[String: Any]] = []
+            if !payload.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                content.append([
+                    "type": "text",
+                    "text": payload.message
+                ])
+            }
+            for image in payload.images ?? [] {
+                content.append([
+                    "type": "image",
+                    "url": image
+                ])
+            }
+            currentItems.append([
+                "type": "userMessage",
+                "id": nextItemID(),
+                "content": content
+            ])
+        case let .agentMessage(payload):
+            guard !payload.message.isEmpty else {
+                return
+            }
+            ensureTurn()
+            currentItems.append([
+                "type": "agentMessage",
+                "id": nextItemID(),
+                "text": payload.message
+            ])
+        case let .agentReasoning(payload):
+            guard !payload.text.isEmpty else {
+                return
+            }
+            ensureTurn()
+            appendReasoning(summary: payload.text, content: nil)
+        case let .agentReasoningRawContent(payload):
+            guard !payload.text.isEmpty else {
+                return
+            }
+            ensureTurn()
+            appendReasoning(summary: nil, content: payload.text)
+        case .turnAborted:
+            guard currentTurn != nil else {
+                return
+            }
+            currentStatus = "interrupted"
+        default:
+            return
+        }
+    }
+
+    mutating func finish() -> [[String: Any]] {
+        finishCurrentTurn()
+        return turns
+    }
+
+    private mutating func ensureTurn() {
+        if currentTurn == nil {
+            startTurn()
+        }
+    }
+
+    private mutating func startTurn() {
+        currentTurn = [
+            "id": nextTurnID()
+        ]
+        currentItems = []
+        currentStatus = "completed"
+    }
+
+    private mutating func finishCurrentTurn() {
+        guard var turn = currentTurn else {
+            return
+        }
+        guard !currentItems.isEmpty else {
+            currentTurn = nil
+            return
+        }
+        turn["items"] = currentItems
+        turn["status"] = currentStatus
+        turn["error"] = NSNull()
+        turns.append(turn)
+        currentTurn = nil
+        currentItems = []
+        currentStatus = "completed"
+    }
+
+    private mutating func appendReasoning(summary: String?, content: String?) {
+        if let last = currentItems.indices.last,
+           currentItems[last]["type"] as? String == "reasoning" {
+            if let summary {
+                var summaries = currentItems[last]["summary"] as? [String] ?? []
+                summaries.append(summary)
+                currentItems[last]["summary"] = summaries
+            }
+            if let content {
+                var contents = currentItems[last]["content"] as? [String] ?? []
+                contents.append(content)
+                currentItems[last]["content"] = contents
+            }
+            return
+        }
+
+        currentItems.append([
+            "type": "reasoning",
+            "id": nextItemID(),
+            "summary": summary.map { [$0] } ?? [],
+            "content": content.map { [$0] } ?? []
+        ])
+    }
+
+    private mutating func nextTurnID() -> String {
+        defer {
+            nextTurnIndex += 1
+        }
+        return "turn-\(nextTurnIndex)"
+    }
+
+    private mutating func nextItemID() -> String {
+        defer {
+            nextItemIndex += 1
+        }
+        return "item-\(nextItemIndex)"
     }
 }
 
