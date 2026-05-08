@@ -1,4 +1,5 @@
 import CodexCore
+import Foundation
 import XCTest
 
 final class FeatureTogglesTests: XCTestCase {
@@ -192,5 +193,72 @@ final class FeatureTogglesTests: XCTestCase {
 
     func testUnknownFeatureThrows() {
         XCTAssertThrowsError(try FeatureToggles(enable: ["definitely_not_real"]).toOverrides())
+    }
+
+    func testConfigFeatureEditorAppendsRootFeatureTable() throws {
+        let temp = try FeatureToggleTemporaryDirectory()
+        try ConfigFeatureEditor.setFeatureEnabled(codexHome: temp.url, feature: "unified_exec", enabled: true)
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertEqual(config, """
+        [features]
+        unified_exec = true
+
+        """)
+    }
+
+    func testConfigFeatureEditorUpdatesExistingFeatureTable() throws {
+        let input = """
+        model = "gpt-5"
+
+        [features]
+        shell_tool = true
+        unified_exec = false
+
+        [mcp_servers.docs]
+        command = "docs"
+        """
+
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "unified_exec", enabled: true),
+            """
+            model = "gpt-5"
+
+            [features]
+            shell_tool = true
+            unified_exec = true
+
+            [mcp_servers.docs]
+            command = "docs"
+
+            """
+        )
+    }
+
+    func testConfigFeatureEditorWritesProfileFeatureTable() {
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: #"profile = "work""#, feature: "shell_tool", enabled: false, profile: "work"),
+            """
+            profile = "work"
+
+            [profiles.work.features]
+            shell_tool = false
+
+            """
+        )
+    }
+}
+
+private final class FeatureToggleTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-feature-toggle-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

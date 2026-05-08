@@ -181,13 +181,56 @@ private func runLogoutCommand(_ request: CodexCLI.LogoutCommandRequest) async th
     )
 }
 
-private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) async throws -> String {
-    let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
-    return FeatureRegistry.specs
-        .map { spec in
-            "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
-        }
-        .joined(separator: "\n")
+private func runFeaturesCommand(_ request: CodexCLI.FeaturesCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    switch request.action {
+    case .list:
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        let output = FeatureRegistry.specs
+            .map { spec in
+                "\(spec.key)\t\(spec.stage.listName)\t\(settings.features.isEnabled(spec.id))"
+            }
+            .joined(separator: "\n")
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    case let .enable(feature):
+        let codexHome = try CodexHome.find()
+        try ConfigFeatureEditor.setFeatureEnabled(
+            codexHome: codexHome,
+            feature: feature,
+            enabled: true,
+            profile: request.configProfile
+        )
+        let warning = underDevelopmentFeatureWarning(codexHome: codexHome, feature: feature, profile: request.configProfile)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "Enabled feature `\(feature)` in config.toml.",
+            stderrMessage: warning
+        )
+    case let .disable(feature):
+        let codexHome = try CodexHome.find()
+        try ConfigFeatureEditor.setFeatureEnabled(
+            codexHome: codexHome,
+            feature: feature,
+            enabled: false,
+            profile: request.configProfile
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "Disabled feature `\(feature)` in config.toml."
+        )
+    }
+}
+
+private func underDevelopmentFeatureWarning(codexHome: URL, feature: String, profile: String?) -> String? {
+    guard profile == nil else {
+        return nil
+    }
+    guard let spec = FeatureRegistry.specs.first(where: { $0.key == feature }),
+          spec.stage == .underDevelopment
+    else {
+        return nil
+    }
+    let configPath = codexHome.appendingPathComponent("config.toml", isDirectory: false).path
+    return "Under-development features enabled: \(feature). Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in \(configPath)."
 }
 
 private func runExecCommand(

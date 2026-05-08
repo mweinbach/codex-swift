@@ -50,10 +50,24 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum FeaturesCommandAction: Equatable, Sendable {
+        case list
+        case enable(feature: String)
+        case disable(feature: String)
+    }
+
     public struct FeaturesCommandRequest: Equatable, Sendable {
+        public let action: FeaturesCommandAction
+        public let configProfile: String?
         public let configOverrides: CliConfigOverrides
 
-        public init(configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+        public init(
+            action: FeaturesCommandAction = .list,
+            configProfile: String? = nil,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.action = action
+            self.configProfile = configProfile
             self.configOverrides = configOverrides
         }
     }
@@ -405,7 +419,7 @@ public struct CodexCLI: Sendable {
     public typealias ApplyCommandRunner = (ApplyCommandRequest) async throws -> String?
     public typealias LoginCommandRunner = (LoginCommandRequest) async throws -> CommandExecutionResult
     public typealias LogoutCommandRunner = (LogoutCommandRequest) async throws -> CommandExecutionResult
-    public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> String
+    public typealias FeaturesCommandRunner = (FeaturesCommandRequest) async throws -> CommandExecutionResult
     public typealias ExecCommandRunner = (ExecCommandRequest) async throws -> CommandExecutionResult
     public typealias ComputerUseCommandRunner = (ComputerUseCommandRequest) async throws -> CommandExecutionResult
     public typealias ReviewCommandRunner = (ReviewCommandRequest) async throws -> CommandExecutionResult
@@ -865,16 +879,18 @@ public struct CodexCLI: Sendable {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
             }
-            guard commandArguments == ["list"] else {
-                stderr("codex-swift: missing required subcommand for command 'features': list")
+            guard let action = parseFeaturesCommandAction(commandArguments) else {
+                stderr("codex-swift: missing required subcommand for command 'features': list, enable, or disable")
                 return 64
             }
             do {
-                let output = try await featuresRunner(FeaturesCommandRequest(
+                let result = try await featuresRunner(FeaturesCommandRequest(
+                    action: action,
+                    configProfile: configProfileToken(arguments),
                     configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
-                stdout(output)
-                return 0
+                emit(result, stdout: stdout, stderr: stderr)
+                return result.exitCode
             } catch {
                 stderr(describe(error))
                 return 1
@@ -1026,8 +1042,49 @@ public struct CodexCLI: Sendable {
             }
         }
 
+        if let profile = configProfileToken(arguments) {
+            overrides.append("profile=\(tomlString(profile))")
+        }
         overrides.append(contentsOf: try featureToggles.toOverrides())
         return overrides
+    }
+
+    private func configProfileToken(_ arguments: [String]) -> String? {
+        var iterator = arguments.makeIterator()
+        while let argument = iterator.next() {
+            if argument == "-p" || argument == "--profile" {
+                return iterator.next()
+            }
+            if argument.hasPrefix("--profile=") {
+                return String(argument.dropFirst("--profile=".count))
+            }
+            if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
+                return String(argument.dropFirst(2))
+            }
+        }
+        return nil
+    }
+
+    private func parseFeaturesCommandAction(_ arguments: [String]) -> FeaturesCommandAction? {
+        guard let subcommand = arguments.first else {
+            return nil
+        }
+        switch subcommand {
+        case "list":
+            return arguments.count == 1 ? .list : nil
+        case "enable":
+            guard arguments.count == 2 else { return nil }
+            return .enable(feature: arguments[1])
+        case "disable":
+            guard arguments.count == 2 else { return nil }
+            return .disable(feature: arguments[1])
+        default:
+            return nil
+        }
+    }
+
+    private func tomlString(_ value: String) -> String {
+        #""\#(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))""#
     }
 
     private func loginAction(arguments: [String], commandArguments: [String]) -> LoginCommandAction {

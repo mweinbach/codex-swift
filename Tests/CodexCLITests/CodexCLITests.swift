@@ -322,13 +322,15 @@ final class CodexCLITests: XCTestCase {
             stderr: { stderr.append($0) },
             featuresRunner: { request in
                 receivedRequest = request
-                return "web_search_request\tstable\ttrue"
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "web_search_request\tstable\ttrue")
             }
         )
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["web_search_request\tstable\ttrue"])
         XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(receivedRequest?.action, .list)
+        XCTAssertNil(receivedRequest?.configProfile)
         XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [
             "features.web_search_request=true",
             "features.memories=true",
@@ -345,7 +347,7 @@ final class CodexCLITests: XCTestCase {
             stderr: { stderr.append($0) },
             featuresRunner: { _ in
                 XCTFail("runner should not be called when feature toggle validation fails")
-                return ""
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
             }
         )
 
@@ -362,12 +364,56 @@ final class CodexCLITests: XCTestCase {
             stderr: { stderr.append($0) },
             featuresRunner: { _ in
                 XCTFail("runner should not be called without list subcommand")
-                return ""
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
             }
         )
 
         XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list"])
+        XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list, enable, or disable"])
+    }
+
+    func testRunAsyncFeaturesEnableDelegatesToRunner() async {
+        var stdout: [String] = []
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.FeaturesCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--profile", "work", "features", "enable", "runtime_metrics"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) },
+            featuresRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(
+                    exitCode: 0,
+                    stdoutMessage: "Enabled feature `runtime_metrics` in config.toml.",
+                    stderrMessage: "warn"
+                )
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["Enabled feature `runtime_metrics` in config.toml."])
+        XCTAssertEqual(stderr, ["warn"])
+        XCTAssertEqual(receivedRequest?.action, .enable(feature: "runtime_metrics"))
+        XCTAssertEqual(receivedRequest?.configProfile, "work")
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["profile=\"work\""])
+    }
+
+    func testRunAsyncFeaturesDisableDelegatesToRunner() async {
+        var receivedRequest: CodexCLI.FeaturesCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["features", "disable", "shell_tool"],
+            stdout: { _ in },
+            stderr: { _ in },
+            featuresRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .disable(feature: "shell_tool"))
     }
 
     func testRunAsyncStdioToUDSDelegatesToRunner() async {
