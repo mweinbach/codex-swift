@@ -173,6 +173,102 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(ModelsManager.offlineModel(explicitModel: "offline-manual"), "offline-manual")
     }
 
+    func testBuiltInModelPresetsMatchRustOrderAndVisibility() {
+        XCTAssertEqual(ModelsManager.hideGPT51MigrationPromptConfig, "hide_gpt5_1_migration_prompt")
+        XCTAssertEqual(
+            ModelsManager.hideGPT51CodexMaxMigrationPromptConfig,
+            "hide_gpt-5.1-codex-max_migration_prompt"
+        )
+
+        XCTAssertEqual(
+            ModelsManager.allModelPresets.map(\.model),
+            [
+                "gpt-5.2-codex",
+                "gpt-5.1-codex-max",
+                "gpt-5.1-codex-mini",
+                "gpt-5.2",
+                "bengalfox",
+                "boomslang",
+                "gpt-5-codex",
+                "gpt-5-codex-mini",
+                "gpt-5.1-codex",
+                "gpt-5",
+                "gpt-5.1"
+            ]
+        )
+        XCTAssertEqual(
+            ModelsManager.builtinModelPresets(authMode: .apiKey).map(\.model),
+            [
+                "gpt-5.2-codex",
+                "gpt-5.1-codex-max",
+                "gpt-5.1-codex-mini",
+                "gpt-5.2"
+            ]
+        )
+        XCTAssertEqual(
+            ModelsManager.builtinModelPresets(authMode: .chatGPT),
+            ModelsManager.builtinModelPresets(authMode: .apiKey)
+        )
+        XCTAssertEqual(ModelsManager.allModelPresets.filter(\.isDefault).map(\.model), ["gpt-5.2-codex"])
+    }
+
+    func testBuiltInPresetDetailsMatchRustMetadata() throws {
+        let presets = Dictionary(uniqueKeysWithValues: ModelsManager.allModelPresets.map { ($0.model, $0) })
+
+        let codex52 = try XCTUnwrap(presets["gpt-5.2-codex"])
+        XCTAssertEqual(codex52.description, "Latest frontier agentic coding model.")
+        XCTAssertTrue(codex52.isDefault)
+        XCTAssertFalse(codex52.supportedInAPI)
+        XCTAssertNil(codex52.upgrade)
+        XCTAssertEqual(codex52.supportedReasoningEfforts.map(\.effort), [.low, .medium, .high, .xhigh])
+        XCTAssertEqual(
+            codex52.supportedReasoningEfforts.map(\.description),
+            [
+                "Fast responses with lighter reasoning",
+                "Balances speed and reasoning depth for everyday tasks",
+                "Greater reasoning depth for complex problems",
+                "Extra high reasoning depth for complex problems"
+            ]
+        )
+
+        let max = try XCTUnwrap(presets["gpt-5.1-codex-max"])
+        XCTAssertEqual(max.description, "Codex-optimized flagship for deep and fast reasoning.")
+        XCTAssertEqual(max.upgrade?.id, "gpt-5.2-codex")
+        XCTAssertEqual(max.upgrade?.migrationConfigKey, "gpt-5.2-codex")
+        XCTAssertEqual(max.upgrade?.modelLink, "https://openai.com/index/introducing-gpt-5-2-codex")
+        XCTAssertEqual(
+            max.upgrade?.upgradeCopy,
+            "Codex is now powered by gpt-5.2-codex, our latest frontier agentic coding model. It is smarter and faster than its predecessors and capable of long-running project-scale work."
+        )
+        XCTAssertNil(max.upgrade?.reasoningEffortMapping)
+
+        let gpt5 = try XCTUnwrap(presets["gpt-5"])
+        XCTAssertEqual(gpt5.supportedReasoningEfforts.map(\.effort), [.minimal, .low, .medium, .high])
+        XCTAssertFalse(gpt5.showInPicker)
+        XCTAssertTrue(gpt5.supportedInAPI)
+    }
+
+    func testBuiltInAvailableModelsMatchRustAuthFiltering() {
+        let apiModels = ModelsManager.buildAvailableModels(
+            remoteModels: [],
+            localModels: ModelsManager.builtinModelPresets(authMode: .apiKey),
+            chatGPTMode: false
+        )
+        XCTAssertEqual(apiModels.map(\.model), ["gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.2"])
+        XCTAssertEqual(apiModels.map(\.isDefault), [true, false, false])
+
+        let chatGPTModels = ModelsManager.buildAvailableModels(
+            remoteModels: [],
+            localModels: ModelsManager.builtinModelPresets(authMode: .chatGPT),
+            chatGPTMode: true
+        )
+        XCTAssertEqual(
+            chatGPTModels.map(\.model),
+            ["gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.2"]
+        )
+        XCTAssertEqual(chatGPTModels.map(\.isDefault), [true, false, false, false])
+    }
+
     private func parseDate(_ text: String) throws -> Date {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
