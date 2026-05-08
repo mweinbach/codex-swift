@@ -5,6 +5,11 @@ final class RolloutPolicyTests: XCTestCase {
     func testResponseItemPersistenceMatchesRustBuckets() throws {
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.message(role: "assistant", content: [])))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.reasoning(id: "r1", summary: [])))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.functionCall(name: "do_it", arguments: "{}", callID: "call-1")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.customToolCall(callID: "tool-1", name: "custom", input: "{}")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.customToolCallOutput(callID: "tool-1", output: "ok")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.localShellCall(callID: "shell-1", status: .completed, action: .exec(LocalShellExecAction(command: ["echo"])))))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.webSearchCall(status: "completed", action: .search(query: "weather"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.other))

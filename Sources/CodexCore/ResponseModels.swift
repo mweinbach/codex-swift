@@ -435,6 +435,11 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         content: [ReasoningItemContent]? = nil,
         encryptedContent: String? = nil
     )
+    case localShellCall(id: String? = nil, callID: String?, status: LocalShellStatus, action: LocalShellAction)
+    case functionCall(id: String? = nil, name: String, arguments: String, callID: String)
+    case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
+    case customToolCall(id: String? = nil, status: String? = nil, callID: String, name: String, input: String)
+    case customToolCallOutput(callID: String, output: String)
     case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction)
     case compaction(encryptedContent: String)
     case knownPersisted(type: String)
@@ -446,6 +451,11 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case role
         case content
         case summary
+        case callID = "call_id"
+        case name
+        case arguments
+        case input
+        case output
         case status
         case action
         case encryptedContent = "encrypted_content"
@@ -474,6 +484,64 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             } else {
                 self = .knownPersisted(type: type)
             }
+        case "local_shell_call":
+            if let status = try? container.decode(LocalShellStatus.self, forKey: .status),
+               let action = try? container.decode(LocalShellAction.self, forKey: .action)
+            {
+                self = .localShellCall(
+                    id: try container.decodeIfPresent(String.self, forKey: .id),
+                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                    status: status,
+                    action: action
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
+        case "function_call":
+            if let name = try? container.decode(String.self, forKey: .name),
+               let arguments = try? container.decode(String.self, forKey: .arguments),
+               let callID = try? container.decode(String.self, forKey: .callID)
+            {
+                self = .functionCall(
+                    id: try container.decodeIfPresent(String.self, forKey: .id),
+                    name: name,
+                    arguments: arguments,
+                    callID: callID
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
+        case "function_call_output":
+            if let callID = try? container.decode(String.self, forKey: .callID),
+               let output = try? container.decode(FunctionCallOutputPayload.self, forKey: .output)
+            {
+                self = .functionCallOutput(callID: callID, output: output)
+            } else {
+                self = .knownPersisted(type: type)
+            }
+        case "custom_tool_call":
+            if let callID = try? container.decode(String.self, forKey: .callID),
+               let name = try? container.decode(String.self, forKey: .name),
+               let input = try? container.decode(String.self, forKey: .input)
+            {
+                self = .customToolCall(
+                    id: try container.decodeIfPresent(String.self, forKey: .id),
+                    status: try container.decodeIfPresent(String.self, forKey: .status),
+                    callID: callID,
+                    name: name,
+                    input: input
+                )
+            } else {
+                self = .knownPersisted(type: type)
+            }
+        case "custom_tool_call_output":
+            if let callID = try? container.decode(String.self, forKey: .callID),
+               let output = try? container.decode(String.self, forKey: .output)
+            {
+                self = .customToolCallOutput(callID: callID, output: output)
+            } else {
+                self = .knownPersisted(type: type)
+            }
         case "web_search_call":
             self = .webSearchCall(
                 id: try container.decodeIfPresent(String.self, forKey: .id),
@@ -482,12 +550,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             )
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
-        case "local_shell_call",
-             "function_call",
-             "function_call_output",
-             "custom_tool_call",
-             "custom_tool_call_output",
-             "ghost_snapshot":
+        case "ghost_snapshot":
             self = .knownPersisted(type: type)
         default:
             self = .other
@@ -508,6 +571,33 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(summary, forKey: .summary)
             try container.encodeIfPresent(content, forKey: .content)
             try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
+        case let .localShellCall(id, callID, status, action):
+            try container.encode("local_shell_call", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
+            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encode(status, forKey: .status)
+            try container.encode(action, forKey: .action)
+        case let .functionCall(id, name, arguments, callID):
+            try container.encode("function_call", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
+            try container.encode(name, forKey: .name)
+            try container.encode(arguments, forKey: .arguments)
+            try container.encode(callID, forKey: .callID)
+        case let .functionCallOutput(callID, output):
+            try container.encode("function_call_output", forKey: .type)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(output, forKey: .output)
+        case let .customToolCall(id, status, callID, name, input):
+            try container.encode("custom_tool_call", forKey: .type)
+            try container.encodeIfPresent(id, forKey: .id)
+            try container.encodeIfPresent(status, forKey: .status)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(name, forKey: .name)
+            try container.encode(input, forKey: .input)
+        case let .customToolCallOutput(callID, output):
+            try container.encode("custom_tool_call_output", forKey: .type)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(output, forKey: .output)
         case let .webSearchCall(id, status, action):
             try container.encode("web_search_call", forKey: .type)
             try container.encodeIfPresent(id, forKey: .id)

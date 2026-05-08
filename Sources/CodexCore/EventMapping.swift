@@ -37,6 +37,11 @@ public enum EventMapping {
             return .webSearch(WebSearchItem(id: id ?? "", query: query ?? ""))
 
         case .compaction,
+             .localShellCall,
+             .functionCall,
+             .functionCallOutput,
+             .customToolCall,
+             .customToolCallOutput,
              .knownPersisted,
              .other:
             return nil

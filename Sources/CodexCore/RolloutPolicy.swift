@@ -80,6 +80,11 @@ public enum RolloutPolicy {
         switch item {
         case .message,
              .reasoning,
+             .localShellCall,
+             .functionCall,
+             .functionCallOutput,
+             .customToolCall,
+             .customToolCallOutput,
              .webSearchCall,
              .compaction,
              .knownPersisted:

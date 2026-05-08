@@ -101,6 +101,26 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["encrypted_content"] as? String, "encrypted")
     }
 
+    func testRoundTripsCallPairResponseItems() throws {
+        let items: [ResponseItem] = [
+            .localShellCall(
+                id: "shell-id",
+                callID: "shell-call",
+                status: .completed,
+                action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
+            ),
+            .functionCall(id: "fc-id", name: "do_it", arguments: #"{"ok":true}"#, callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "done")),
+            .customToolCall(id: "ct-id", status: "completed", callID: "tool-1", name: "custom", input: "{}"),
+            .customToolCallOutput(callID: "tool-1", output: "done")
+        ]
+
+        for item in items {
+            let data = try JSONEncoder().encode(item)
+            XCTAssertEqual(try JSONDecoder().decode(ResponseItem.self, from: data), item)
+        }
+    }
+
     func testShellToolCallParamsAcceptTimeoutAlias() throws {
         let json = #"{"command":["ls","-l"],"workdir":"/tmp","timeout":1000}"#
         let params = try JSONDecoder().decode(ShellToolCallParams.self, from: Data(json.utf8))
