@@ -390,6 +390,40 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let started = try startRolloutConversation(params: params, configuration: configuration)
+        let item = ConversationItem(path: started.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
+        let thread = try threadObject(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider
+        )
+        return [
+            "thread": thread,
+            "model": started.model,
+            "modelProvider": started.modelProvider,
+            "cwd": started.cwd.path,
+            "approvalPolicy": started.approvalPolicy.rawValue,
+            "sandbox": try jsonObject(started.sandbox),
+            "reasoningEffort": started.reasoningEffort ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
+    fileprivate static func newConversationResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let started = try startRolloutConversation(params: params, configuration: configuration)
+        return [
+            "conversationId": started.conversationID.description,
+            "model": started.model,
+            "reasoningEffort": started.reasoningEffort ?? NSNull(),
+            "rolloutPath": started.rolloutPath.path
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func startRolloutConversation(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerStartedConversation {
         let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
@@ -410,28 +444,26 @@ public enum CodexAppServer {
             codexHome: configuration.codexHome,
             cwd: cwd,
             conversationID: conversationID,
-            instructions: stringParam(params?["developerInstructions"]),
+            instructions: stringParam(params?["developerInstructions"])
+                ?? stringParam(params?["developer_instructions"])
+                ?? stringParam(params?["baseInstructions"])
+                ?? stringParam(params?["base_instructions"]),
             source: .mcp,
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider
         )
         try recorder.shutdown()
-
-        let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
-        let thread = try threadObject(
-            for: item,
-            defaultProvider: configuration.defaultModelProvider
+        return AppServerStartedConversation(
+            conversationID: conversationID,
+            rolloutPath: recorder.rolloutPath,
+            model: model,
+            modelProvider: modelProvider,
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandbox: sandbox,
+            reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue
         )
-        return [
-            "thread": thread,
-            "model": model,
-            "modelProvider": modelProvider,
-            "cwd": cwd.path,
-            "approvalPolicy": approvalPolicy.rawValue,
-            "sandbox": try jsonObject(sandbox),
-            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
-        ].nullStripped(keepNulls: true)
     }
 
     fileprivate static func threadResumeResult(
@@ -651,6 +683,34 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func getConversationSummaryResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let rolloutPath: String
+        if let path = stringParam(params?["rolloutPath"]) ?? stringParam(params?["rollout_path"]) {
+            rolloutPath = path
+        } else {
+            let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
+            guard let rawID else {
+                throw AppServerError.invalidRequest("missing conversationId")
+            }
+            let conversationID: ConversationId
+            do {
+                conversationID = try ConversationId(string: rawID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid conversation id: \(error)")
+            }
+            rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        }
+        return [
+            "summary": try conversationObject(
+                for: ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil),
+                defaultProvider: configuration.defaultModelProvider
+            )
+        ]
+    }
+
     fileprivate static func archiveConversationResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -672,6 +732,63 @@ public enum CodexAppServer {
 
         try archiveConversation(conversationID: conversationID, rolloutPath: rawPath, configuration: configuration)
         return [:]
+    }
+
+    fileprivate static func sendUserMessageResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
+        guard let rawID else {
+            throw AppServerError.invalidRequest("missing conversationId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: rawID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid conversation id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let input = v1InputItems(params?["items"])
+        if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+            let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+            try recorder.recordItems([
+                .eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images)))
+            ])
+            try recorder.shutdown()
+        }
+        return [:]
+    }
+
+    fileprivate static func interruptConversationResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
+        guard let rawID else {
+            throw AppServerError.invalidRequest("missing conversationId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: rawID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid conversation id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.turnAborted(TurnAbortedEvent(reason: .interrupted)))
+        ])
+        try recorder.shutdown()
+        return [
+            "abortReason": "interrupted"
+        ]
+    }
+
+    fileprivate static func addConversationListenerResult() -> [String: Any] {
+        [
+            "subscriptionId": UUID().uuidString.lowercased()
+        ]
     }
 
     fileprivate static func modelListResult(
@@ -1635,6 +1752,37 @@ public enum CodexAppServer {
             case "image":
                 if let url = stringParam(item["url"]), !url.isEmpty {
                     images.append(url)
+                }
+            default:
+                continue
+            }
+        }
+        return (
+            texts.joined(),
+            images.isEmpty ? nil : images
+        )
+    }
+
+    private static func v1InputItems(_ value: Any?) -> (text: String, images: [String]?) {
+        guard let items = value as? [[String: Any]] else {
+            return ("", nil)
+        }
+        var texts: [String] = []
+        var images: [String] = []
+        for item in items {
+            let data = item["data"] as? [String: Any] ?? item
+            switch stringParam(item["type"]) {
+            case "text":
+                if let text = stringParam(data["text"]), !text.isEmpty {
+                    texts.append(text)
+                }
+            case "image":
+                if let url = stringParam(data["imageUrl"]) ?? stringParam(data["image_url"]), !url.isEmpty {
+                    images.append(url)
+                }
+            case "localImage":
+                if let path = stringParam(data["path"]), !path.isEmpty {
+                    images.append(path)
                 }
             default:
                 continue
@@ -2802,6 +2950,17 @@ private struct ConfigWriteEdit {
     let mergeStrategy: String
 }
 
+private struct AppServerStartedConversation {
+    let conversationID: ConversationId
+    let rolloutPath: URL
+    let model: String
+    let modelProvider: String
+    let cwd: URL
+    let approvalPolicy: AskForApproval
+    let sandbox: SandboxPolicy
+    let reasoningEffort: String?
+}
+
 fileprivate struct AppServerReviewStartOutcome {
     let result: [String: Any]
     let startedThread: [String: Any]?
@@ -2845,6 +3004,11 @@ final class CodexAppServerMessageProcessor {
         } else {
             do {
                 switch method {
+                case "newConversation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.newConversationResult(params: params, configuration: configuration)
+                    )
                 case "thread/start":
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
@@ -2901,11 +3065,33 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.listConversationsResult(params: params, configuration: configuration)
                     )
+                case "getConversationSummary":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.getConversationSummaryResult(params: params, configuration: configuration)
+                    )
                 case "archiveConversation":
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.archiveConversationResult(params: params, configuration: configuration)
                     )
+                case "sendUserMessage", "sendUserTurn":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.sendUserMessageResult(params: params, configuration: configuration)
+                    )
+                case "interruptConversation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.interruptConversationResult(params: params, configuration: configuration)
+                    )
+                case "addConversationListener":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.addConversationListenerResult()
+                    )
+                case "removeConversationListener":
+                    response = CodexAppServer.responseObject(id: id, result: [:])
                 case "getUserAgent":
                     response = CodexAppServer.responseObject(id: id, result: [
                         "userAgent": userAgent

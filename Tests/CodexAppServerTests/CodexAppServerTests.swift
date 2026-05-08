@@ -100,6 +100,72 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testLegacyNewConversationSummaryListenerAndSendMessage() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let newConversation = try decode(processor.processLine(Data(#"{"id":1,"method":"newConversation","params":{"model":"gpt-legacy","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","approvalPolicy":"never","sandbox":"workspace-write","developerInstructions":"legacy dev notes"}}"#.utf8)))
+        let newResult = try XCTUnwrap(newConversation["result"] as? [String: Any])
+        let conversationID = try XCTUnwrap(newResult["conversationId"] as? String)
+        let rolloutPath = try XCTUnwrap(newResult["rolloutPath"] as? String)
+        XCTAssertEqual(newResult["model"] as? String, "gpt-legacy")
+        XCTAssertEqual(newResult["reasoningEffort"] as? NSNull, NSNull())
+
+        let addListener = try decode(processor.processLine(Data(#"{"id":2,"method":"addConversationListener","params":{"conversationId":"\#(conversationID)","experimentalRawEvents":false}}"#.utf8)))
+        let listenerResult = try XCTUnwrap(addListener["result"] as? [String: Any])
+        XCTAssertNotNil(listenerResult["subscriptionId"] as? String)
+
+        let send = try decode(processor.processLine(Data(#"{"id":3,"method":"sendUserMessage","params":{"conversationId":"\#(conversationID)","items":[{"type":"text","data":{"text":"Hello legacy"}},{"type":"image","data":{"imageUrl":"https://example.test/legacy.png"}}]}}"#.utf8)))
+        XCTAssertTrue(try XCTUnwrap(send["result"] as? [String: Any]).isEmpty)
+
+        let summaryByID = try decode(processor.processLine(Data(#"{"id":4,"method":"getConversationSummary","params":{"conversationId":"\#(conversationID)"}}"#.utf8)))
+        let summaryResult = try XCTUnwrap(summaryByID["result"] as? [String: Any])
+        let summary = try XCTUnwrap(summaryResult["summary"] as? [String: Any])
+        XCTAssertEqual(summary["conversationId"] as? String, conversationID)
+        XCTAssertEqual(
+            URL(fileURLWithPath: try XCTUnwrap(summary["path"] as? String)).standardizedFileURL.path,
+            URL(fileURLWithPath: rolloutPath).standardizedFileURL.path
+        )
+        XCTAssertEqual(summary["preview"] as? String, "Hello legacy")
+        XCTAssertEqual(summary["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(summary["cwd"] as? String, cwd.url.path)
+
+        let summaryByPath = try decode(processor.processLine(Data(#"{"id":5,"method":"getConversationSummary","params":{"rolloutPath":"\#(rolloutPath)"}}"#.utf8)))
+        let pathSummary = try XCTUnwrap((summaryByPath["result"] as? [String: Any])?["summary"] as? [String: Any])
+        XCTAssertEqual(pathSummary["conversationId"] as? String, conversationID)
+
+        let removeListener = try decode(processor.processLine(Data(#"{"id":6,"method":"removeConversationListener","params":{"subscriptionId":"\#(try XCTUnwrap(listenerResult["subscriptionId"] as? String))"}}"#.utf8)))
+        XCTAssertTrue(try XCTUnwrap(removeListener["result"] as? [String: Any]).isEmpty)
+
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""originator":"codex_app_server""#))
+        XCTAssertTrue(rollout.contains(#""instructions":"legacy dev notes""#))
+        XCTAssertTrue(rollout.contains(#""message":"Hello legacy""#))
+        XCTAssertTrue(rollout.contains(#""https:\/\/example.test\/legacy.png""#))
+    }
+
+    func testLegacySendUserTurnAndInterruptConversation() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let newConversation = try decode(processor.processLine(Data(#"{"id":1,"method":"newConversation","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let conversationID = try XCTUnwrap((newConversation["result"] as? [String: Any])?["conversationId"] as? String)
+
+        let sendTurn = try decode(processor.processLine(Data(#"{"id":2,"method":"sendUserTurn","params":{"conversationId":"\#(conversationID)","items":[{"type":"text","data":{"text":"Turn text"}}],"cwd":"/tmp","approvalPolicy":"never","sandboxPolicy":{"type":"read-only"},"model":"gpt-test","summary":"auto"}}"#.utf8)))
+        XCTAssertTrue(try XCTUnwrap(sendTurn["result"] as? [String: Any]).isEmpty)
+
+        let interrupt = try decode(processor.processLine(Data(#"{"id":3,"method":"interruptConversation","params":{"conversationId":"\#(conversationID)"}}"#.utf8)))
+        let interruptResult = try XCTUnwrap(interrupt["result"] as? [String: Any])
+        XCTAssertEqual(interruptResult["abortReason"] as? String, "interrupted")
+
+        let resume = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/resume","params":{"threadId":"\#(conversationID)"}}"#.utf8)))
+        let resumedThread = try XCTUnwrap((resume["result"] as? [String: Any])?["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
+    }
+
     func testTurnStartRecordsUserInputAndEmitsStartedNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
