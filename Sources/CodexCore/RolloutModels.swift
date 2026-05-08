@@ -2,6 +2,7 @@ import Foundation
 
 public struct SessionMeta: Equatable, Codable, Sendable {
     public let id: ConversationId
+    public let forkedFromID: ConversationId?
     public let timestamp: String
     public let cwd: String
     public let originator: String
@@ -13,9 +14,13 @@ public struct SessionMeta: Equatable, Codable, Sendable {
     public let agentRole: String?
     public let agentPath: String?
     public let modelProvider: String?
+    public let baseInstructions: BaseInstructions?
+    public let dynamicTools: [DynamicToolSpec]?
+    public let memoryMode: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case forkedFromID = "forked_from_id"
         case timestamp
         case cwd
         case originator
@@ -28,10 +33,14 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         case agentType = "agent_type"
         case agentPath = "agent_path"
         case modelProvider = "model_provider"
+        case baseInstructions = "base_instructions"
+        case dynamicTools = "dynamic_tools"
+        case memoryMode = "memory_mode"
     }
 
     public init(
         id: ConversationId,
+        forkedFromID: ConversationId? = nil,
         timestamp: String,
         cwd: String,
         originator: String,
@@ -42,9 +51,13 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         agentNickname: String? = nil,
         agentRole: String? = nil,
         agentPath: String? = nil,
-        modelProvider: String? = nil
+        modelProvider: String? = nil,
+        baseInstructions: BaseInstructions? = nil,
+        dynamicTools: [DynamicToolSpec]? = nil,
+        memoryMode: String? = nil
     ) {
         self.id = id
+        self.forkedFromID = forkedFromID
         self.timestamp = timestamp
         self.cwd = cwd
         self.originator = originator
@@ -56,11 +69,15 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.agentRole = agentRole
         self.agentPath = agentPath
         self.modelProvider = modelProvider
+        self.baseInstructions = baseInstructions
+        self.dynamicTools = dynamicTools
+        self.memoryMode = memoryMode
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(ConversationId.self, forKey: .id)
+        self.forkedFromID = try container.decodeIfPresent(ConversationId.self, forKey: .forkedFromID)
         self.timestamp = try container.decode(String.self, forKey: .timestamp)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.originator = try container.decode(String.self, forKey: .originator)
@@ -73,11 +90,15 @@ public struct SessionMeta: Equatable, Codable, Sendable {
             ?? container.decodeIfPresent(String.self, forKey: .agentType)
         self.agentPath = try container.decodeIfPresent(String.self, forKey: .agentPath)
         self.modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
+        self.baseInstructions = try container.decodeIfPresent(BaseInstructions.self, forKey: .baseInstructions)
+        self.dynamicTools = try container.decodeIfPresent([DynamicToolSpec].self, forKey: .dynamicTools)
+        self.memoryMode = try container.decodeIfPresent(String.self, forKey: .memoryMode)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(forkedFromID, forKey: .forkedFromID)
         try container.encode(timestamp, forKey: .timestamp)
         try container.encode(cwd, forKey: .cwd)
         try container.encode(originator, forKey: .originator)
@@ -89,6 +110,17 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         try container.encodeIfPresent(agentRole, forKey: .agentRole)
         try container.encodeIfPresent(agentPath, forKey: .agentPath)
         try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encode(baseInstructions, forKey: .baseInstructions)
+        try container.encodeIfPresent(dynamicTools, forKey: .dynamicTools)
+        try container.encodeIfPresent(memoryMode, forKey: .memoryMode)
+    }
+}
+
+public struct BaseInstructions: Equatable, Codable, Sendable {
+    public let text: String
+
+    public init(text: String) {
+        self.text = text
     }
 }
 

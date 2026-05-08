@@ -4,8 +4,10 @@ import XCTest
 final class RolloutModelsTests: XCTestCase {
     func testSessionMetaLineFlattensMetaAndOmitsMissingGit() throws {
         let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let forkedID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
         let line = SessionMetaLine(meta: SessionMeta(
             id: id,
+            forkedFromID: forkedID,
             timestamp: "2026-05-08T00:00:00Z",
             cwd: "/repo",
             originator: "codex_swift",
@@ -15,11 +17,17 @@ final class RolloutModelsTests: XCTestCase {
             agentNickname: "reviewer",
             agentRole: "analyst",
             agentPath: "/root/reviewer",
-            modelProvider: "openai"
+            modelProvider: "openai",
+            baseInstructions: BaseInstructions(text: "base"),
+            dynamicTools: [
+                DynamicToolSpec(name: "lookup", description: "Look up things", inputSchema: .object([:]))
+            ],
+            memoryMode: "read_write"
         ))
 
         try XCTAssertJSONObjectEqual(line, [
             "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "forked_from_id": "77e55044-10b1-426f-9247-bb680e5fe0c8",
             "timestamp": "2026-05-08T00:00:00Z",
             "cwd": "/repo",
             "originator": "codex_swift",
@@ -30,7 +38,17 @@ final class RolloutModelsTests: XCTestCase {
             "agent_nickname": "reviewer",
             "agent_role": "analyst",
             "agent_path": "/root/reviewer",
-            "model_provider": "openai"
+            "model_provider": "openai",
+            "base_instructions": [
+                "text": "base"
+            ],
+            "dynamic_tools": [[
+                "name": "lookup",
+                "description": "Look up things",
+                "inputSchema": [:],
+                "deferLoading": false
+            ]],
+            "memory_mode": "read_write"
         ])
 
         let data = try JSONEncoder().encode(line)
@@ -51,10 +69,13 @@ final class RolloutModelsTests: XCTestCase {
         """.utf8))
 
         XCTAssertEqual(line.meta.source, .vscode)
+        XCTAssertNil(line.meta.forkedFromID)
         XCTAssertNil(line.meta.threadSource)
         XCTAssertNil(line.meta.agentNickname)
         XCTAssertNil(line.meta.agentRole)
         XCTAssertNil(line.meta.agentPath)
+        XCTAssertNil(line.meta.dynamicTools)
+        XCTAssertNil(line.meta.memoryMode)
         XCTAssertNil(line.git)
     }
 
@@ -103,6 +124,7 @@ final class RolloutModelsTests: XCTestCase {
                 "subagent": "review"
             ],
             "model_provider": NSNull(),
+            "base_instructions": NSNull(),
             "git": [
                 "commit_hash": "abc123",
                 "branch": "main"

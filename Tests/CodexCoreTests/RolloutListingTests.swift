@@ -280,7 +280,8 @@ final class RolloutListingTests: XCTestCase {
             "cli_version": .string("test_version"),
             "instructions": .null,
             "source": sourceJSONValue(source),
-            "model_provider": provider.map(JSONValue.string) ?? .null
+            "model_provider": provider.map(JSONValue.string) ?? .null,
+            "base_instructions": .null
         ])
     }
 
