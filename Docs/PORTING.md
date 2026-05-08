@@ -314,7 +314,7 @@ Source baseline inspected for this scaffold:
 - Initial `codex-rs/exec/src/lib.rs` non-interactive resume continuation
   - `codex exec resume ...` now resolves saved rollout targets, reconstructs persisted `ResponseItem` history including compaction replacement/fallback handling, appends the new user prompt after resume history, and continues the Responses tool loop under the saved conversation ID
 - Initial `codex-rs/core/src/codex.rs` exec rollout persistence path
-  - non-interactive exec now creates/resumes rollout JSONL files, records the new user prompt plus completed model/tool transcript items, and durably shuts down the recorder so Swift-created exec sessions become discoverable for later resume
+  - non-interactive exec now creates/resumes rollout JSONL files, records turn context, the new user prompt, and completed model/tool transcript items, and durably shuts down the recorder so Swift-created exec sessions become discoverable for later resume
 
 ## Known Gaps
 

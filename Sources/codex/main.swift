@@ -362,6 +362,19 @@ private func runNonInteractiveExec(
         rolloutPath: rolloutPath
     )
     defer { try? recorder.shutdown() }
+    try recorder.recordItems([
+        .turnContext(TurnContextItem(
+            cwd: cwd.path,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            model: model,
+            effort: settings.modelReasoningEffort ?? modelFamily.defaultReasoningEffort,
+            summary: settings.modelReasoningSummary ?? (modelFamily.supportsReasoningSummaries ? .auto : .none),
+            baseInstructions: prompt.baseInstructionsOverride,
+            finalOutputJSONSchema: outputSchema,
+            truncationPolicy: modelFamily.truncationPolicy
+        ))
+    ])
     if let newUserItem = prompt.input.last {
         try recorder.recordItems([.responseItem(newUserItem)])
     }
