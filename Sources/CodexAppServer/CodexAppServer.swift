@@ -902,7 +902,10 @@ public enum CodexAppServer {
             isChatGPT: chatGPTMode,
             availableModels: availableModels
         )
-        let models = availableModels.map { $0.withIsDefault($0.model == defaultModel) }
+        let includeHidden = boolParam(params?["includeHidden"], defaultValue: false)
+        let models = availableModels
+            .map { $0.withIsDefault($0.model == defaultModel) }
+            .filter { includeHidden || $0.showInPicker }
         let total = models.count
         let start = try modelListStart(cursor: stringParam(params?["cursor"]), total: total)
         let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
@@ -1952,8 +1955,12 @@ public enum CodexAppServer {
         [
             "id": preset.id,
             "model": preset.model,
+            "upgrade": (preset.upgrade?.id as Any?) ?? NSNull(),
+            "upgradeInfo": modelUpgradeInfoObject(preset.upgrade),
+            "availabilityNux": modelAvailabilityNuxObject(preset.availabilityNux),
             "displayName": preset.displayName,
             "description": preset.description,
+            "hidden": !preset.showInPicker,
             "supportedReasoningEfforts": preset.supportedReasoningEfforts.map { effort in
                 [
                     "reasoningEffort": effort.effort.rawValue,
@@ -1961,7 +1968,38 @@ public enum CodexAppServer {
                 ]
             },
             "defaultReasoningEffort": preset.defaultReasoningEffort.rawValue,
+            "inputModalities": preset.inputModalities.map(\.rawValue),
+            "supportsPersonality": preset.supportsPersonality,
+            "additionalSpeedTiers": preset.additionalSpeedTiers,
+            "serviceTiers": preset.serviceTiers.map { tier in
+                [
+                    "id": tier.id,
+                    "name": tier.name,
+                    "description": tier.description
+                ]
+            },
             "isDefault": preset.isDefault
+        ]
+    }
+
+    private static func modelUpgradeInfoObject(_ upgrade: ModelUpgrade?) -> Any {
+        guard let upgrade else {
+            return NSNull()
+        }
+        return [
+            "model": upgrade.id,
+            "upgradeCopy": (upgrade.upgradeCopy as Any?) ?? NSNull(),
+            "modelLink": (upgrade.modelLink as Any?) ?? NSNull(),
+            "migrationMarkdown": (upgrade.migrationMarkdown as Any?) ?? NSNull()
+        ]
+    }
+
+    private static func modelAvailabilityNuxObject(_ availabilityNux: ModelAvailabilityNux?) -> Any {
+        guard let availabilityNux else {
+            return NSNull()
+        }
+        return [
+            "message": availabilityNux.message
         ]
     }
 

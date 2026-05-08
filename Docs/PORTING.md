@@ -380,7 +380,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Linux Landlock/Windows debug sandbox helper execution and Rust-complete config-layer fidelity for sandbox runtime setup
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
-- app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, protocol generators, and live `attestation/generate` request routing to capable initialized clients
+- app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
 - Rust-complete apply-patch approval caching, subprocess self-invocation, sandbox retry/escalation, and diff event plumbing
 - cloud tasks TUI list/browse runtime
 - full Rust command parser parity for complex Bash/Powershell AST cases

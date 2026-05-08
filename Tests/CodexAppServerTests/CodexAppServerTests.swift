@@ -182,6 +182,92 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(resolvedHeaderValue, #"{"v":1,"s":1}"#)
     }
 
+    func testAppServerAttestationProviderReportsClientError() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":true}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 1_000_000_000)
+        async let headerValue = provider.header(for: Attestation.Context(threadID: threadID))
+
+        let requestData = await notificationCapture.nextPayload()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+        let requestID = try XCTUnwrap(request["id"])
+
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "id": requestID,
+            "error": [
+                "code": -32_000,
+                "message": "client refused attestation"
+            ]
+        ])
+        XCTAssertNil(processor.processLine(responseData))
+
+        let resolvedHeaderValue = await headerValue
+        XCTAssertEqual(resolvedHeaderValue, #"{"v":1,"s":2}"#)
+    }
+
+    func testAppServerAttestationProviderReportsMalformedResponse() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":true}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 1_000_000_000)
+        async let headerValue = provider.header(for: Attestation.Context(threadID: threadID))
+
+        let requestData = await notificationCapture.nextPayload()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+        let requestID = try XCTUnwrap(request["id"])
+
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "id": requestID,
+            "result": [
+                "token": 42
+            ]
+        ])
+        XCTAssertNil(processor.processLine(responseData))
+
+        let resolvedHeaderValue = await headerValue
+        XCTAssertEqual(resolvedHeaderValue, #"{"v":1,"s":4}"#)
+    }
+
+    func testAppServerAttestationProviderReportsRequestCanceledWhenSendFails() async throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":true}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 1_000_000_000)
+        let headerValue = await provider.header(for: Attestation.Context(threadID: threadID))
+
+        XCTAssertEqual(headerValue, #"{"v":1,"s":3}"#)
+    }
+
     func testLegacyNewConversationSummaryListenerAndSendMessage() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -1359,7 +1445,18 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(firstData.count, 2)
         XCTAssertEqual(firstData[0]["id"] as? String, "gpt-5.5")
         XCTAssertEqual(firstData[0]["displayName"] as? String, "GPT-5.5")
+        XCTAssertEqual(firstData[0]["description"] as? String, "Frontier model for complex coding, research, and real-world work.")
+        XCTAssertTrue(firstData[0]["upgrade"] is NSNull)
+        XCTAssertTrue(firstData[0]["upgradeInfo"] is NSNull)
+        let availabilityNux = try XCTUnwrap(firstData[0]["availabilityNux"] as? [String: Any])
+        XCTAssertTrue((availabilityNux["message"] as? String)?.contains("GPT-5.5") == true)
+        XCTAssertEqual(firstData[0]["hidden"] as? Bool, false)
         XCTAssertEqual(firstData[0]["defaultReasoningEffort"] as? String, "medium")
+        XCTAssertEqual(firstData[0]["inputModalities"] as? [String], ["text", "image"])
+        XCTAssertEqual(firstData[0]["supportsPersonality"] as? Bool, true)
+        XCTAssertEqual(firstData[0]["additionalSpeedTiers"] as? [String], ["fast"])
+        let serviceTiers = try XCTUnwrap(firstData[0]["serviceTiers"] as? [[String: Any]])
+        XCTAssertEqual(serviceTiers.first?["id"] as? String, "priority")
         XCTAssertEqual(firstData[0]["isDefault"] as? Bool, true)
         let efforts = try XCTUnwrap(firstData[0]["supportedReasoningEfforts"] as? [[String: Any]])
         XCTAssertEqual(efforts[0]["reasoningEffort"] as? String, "low")
@@ -1373,6 +1470,39 @@ final class CodexAppServerTests: XCTestCase {
         let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
         XCTAssertFalse(secondData.isEmpty)
         XCTAssertNotEqual(secondData[0]["id"] as? String, firstData[0]["id"] as? String)
+
+        let allVisible = try appServerResponse(
+            #"{"id":3,"method":"model/list","params":{"limit":100}}"#,
+            codexHome: temp.url
+        )
+        let allVisibleResult = try XCTUnwrap(allVisible["result"] as? [String: Any])
+        let visibleData = try XCTUnwrap(allVisibleResult["data"] as? [[String: Any]])
+        XCTAssertEqual(visibleData.map { $0["id"] as? String }, [
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+            "gpt-5.2"
+        ])
+        XCTAssertFalse(visibleData.contains { $0["hidden"] as? Bool == true })
+
+        let codex53 = try XCTUnwrap(visibleData.first { $0["id"] as? String == "gpt-5.3-codex" })
+        XCTAssertEqual(codex53["upgrade"] as? String, "gpt-5.4")
+        let upgradeInfo = try XCTUnwrap(codex53["upgradeInfo"] as? [String: Any])
+        XCTAssertEqual(upgradeInfo["model"] as? String, "gpt-5.4")
+        XCTAssertTrue(upgradeInfo["upgradeCopy"] is NSNull)
+        XCTAssertTrue(upgradeInfo["modelLink"] is NSNull)
+        XCTAssertTrue((upgradeInfo["migrationMarkdown"] as? String)?.contains("Introducing GPT-5.4") == true)
+
+        let withHidden = try appServerResponse(
+            #"{"id":4,"method":"model/list","params":{"limit":100,"includeHidden":true}}"#,
+            codexHome: temp.url
+        )
+        let withHiddenResult = try XCTUnwrap(withHidden["result"] as? [String: Any])
+        let hiddenData = try XCTUnwrap(withHiddenResult["data"] as? [[String: Any]])
+        let reviewModel = try XCTUnwrap(hiddenData.first { $0["id"] as? String == "codex-auto-review" })
+        XCTAssertEqual(reviewModel["hidden"] as? Bool, true)
+        XCTAssertEqual(hiddenData.count, 6)
     }
 
     func testModelListRejectsInvalidCursorWithRustErrorCode() throws {
