@@ -318,7 +318,7 @@ Source baseline inspected for this scaffold:
 - Initial `codex-rs/mcp-server` stdio surface
   - executable `codex mcp-server` now runs a Swift-native newline-delimited JSON-RPC loop with initialize, ping, tools/list, and tools/call handling; the `codex` MCP tool delegates to the existing non-interactive exec runtime with model/profile/cwd/approval/sandbox/config overrides, while `codex-reply` remains a listed but not-yet-wired tool
 - Initial `codex-rs/app-server` rollout-listing surface
-  - executable `codex app-server` now runs a Swift-native newline-delimited app-server JSON-RPC loop for initialize, `getUserAgent`, v2 `thread/list`, v2 `model/list`, v2 `account/read`, v2 `config/read`, legacy `getAuthStatus`, legacy `userInfo`, and legacy `listConversations`, backed by saved rollout files with provider filtering, pagination cursors, preview extraction, session source mapping, model picker data, auth/account status projection, effective config projection, config-layer origins, and thread/conversation response shapes
+  - executable `codex app-server` now runs a Swift-native newline-delimited app-server JSON-RPC loop for initialize, `getUserAgent`, v2 `thread/list`, v2 `model/list`, v2 `account/read`, v2 `config/read`, legacy `setDefaultModel`, legacy `getAuthStatus`, legacy `userInfo`, and legacy `listConversations`, backed by saved rollout files with provider filtering, pagination cursors, preview extraction, session source mapping, model picker data, auth/account status projection, effective config projection, config-layer origins, model-selection persistence, and thread/conversation response shapes
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
 
 ## Known Gaps
@@ -335,7 +335,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
-- app-server live thread/turn/review/MCP APIs, account/model write-refresh flows, config writes, and protocol generators
+- app-server live thread/turn/review/MCP APIs, account write-refresh flows, general config writes, and protocol generators
 - apply-patch runtime
 - cloud tasks TUI list/browse runtime and `codex cloud exec` task creation
 - full Rust command parser parity for complex Bash/Powershell AST cases

@@ -379,6 +379,56 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["layers"])
     }
 
+    func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        model = "gpt-5.1-codex-max"
+        model_reasoning_effort = "medium"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"setDefaultModel","params":{"model":"gpt-4.1"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+
+        let contents = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains(#"model = "gpt-4.1""#))
+        XCTAssertFalse(contents.contains("model_reasoning_effort"))
+    }
+
+    func testSetDefaultModelUpdatesActiveProfile() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        profile = "dev"
+        model = "top-level"
+
+        [profiles.dev]
+        model = "old"
+        model_reasoning_effort = "low"
+
+        [profiles.prod]
+        model = "prod"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"setDefaultModel","params":{"model":"gpt-5.1-codex","reasoningEffort":"high"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+
+        let contents = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains(#"profile = "dev""#))
+        XCTAssertTrue(contents.contains(#"model = "top-level""#))
+        XCTAssertTrue(contents.contains("[profiles.dev]"))
+        XCTAssertTrue(contents.contains(#"model = "gpt-5.1-codex""#))
+        XCTAssertTrue(contents.contains(#"model_reasoning_effort = "high""#))
+        XCTAssertTrue(contents.contains("[profiles.prod]"))
+        XCTAssertTrue(contents.contains(#"model = "prod""#))
+    }
+
     private func appServerResponse(
         _ line: String,
         codexHome: URL,

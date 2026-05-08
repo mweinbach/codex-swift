@@ -9,6 +9,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let requiresOpenAIAuth: Bool
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
     public let environment: [String: String]
+    public let activeProfile: String?
 
     public init(
         codexHome: URL,
@@ -17,7 +18,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         version: String = "0.0.0",
         requiresOpenAIAuth: Bool = true,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        activeProfile: String? = nil
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -26,6 +28,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.requiresOpenAIAuth = requiresOpenAIAuth
         self.authCredentialsStoreMode = authCredentialsStoreMode
         self.environment = environment
+        self.activeProfile = activeProfile
     }
 }
 
@@ -151,6 +154,19 @@ public enum CodexAppServer {
             response["layers"] = stack.layersHighToLow().map(layerObject)
         }
         return response
+    }
+
+    fileprivate static func setDefaultModelResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        try updateDefaultModel(
+            codexHome: configuration.codexHome,
+            model: stringParam(params?["model"]),
+            reasoningEffort: stringParam(params?["reasoningEffort"]),
+            activeProfile: configuration.activeProfile
+        )
+        return [:]
     }
 
     fileprivate static func buildUserAgent(
@@ -437,6 +453,181 @@ public enum CodexAppServer {
         }
     }
 
+    private static func updateDefaultModel(
+        codexHome: URL,
+        model: String?,
+        reasoningEffort: String?,
+        activeProfile: String?
+    ) throws {
+        let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let existing = (try? String(contentsOf: configFile, encoding: .utf8)) ?? ""
+        let profile = activeProfile ?? topLevelStringValue("profile", in: existing)
+        let updated = rewriteConfigModel(
+            existing,
+            profile: profile,
+            model: model,
+            reasoningEffort: reasoningEffort
+        )
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try updated.write(to: configFile, atomically: true, encoding: .utf8)
+    }
+
+    private static func rewriteConfigModel(
+        _ contents: String,
+        profile: String?,
+        model: String?,
+        reasoningEffort: String?
+    ) -> String {
+        var lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let targetHeader = profile.map { "profiles.\($0)" }
+        let range = configSectionRange(targetHeader, in: lines)
+        if range.isEmpty {
+            if let targetHeader {
+                if !lines.isEmpty, lines.last?.isEmpty == false {
+                    lines.append("")
+                }
+                lines.append("[\(targetHeader)]")
+                lines.append(contentsOf: modelConfigLines(model: model, reasoningEffort: reasoningEffort))
+            } else {
+                lines.insert(contentsOf: modelConfigLines(model: model, reasoningEffort: reasoningEffort), at: 0)
+            }
+        } else {
+            rewriteModelLines(in: &lines, range: range, model: model, reasoningEffort: reasoningEffort)
+        }
+        return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
+    }
+
+    private static func rewriteModelLines(
+        in lines: inout [String],
+        range: Range<Int>,
+        model: String?,
+        reasoningEffort: String?
+    ) {
+        var output: [String] = []
+        var sawModel = false
+        var sawReasoningEffort = false
+        for index in lines.indices {
+            guard range.contains(index) else {
+                output.append(lines[index])
+                continue
+            }
+            let key = tomlAssignmentKey(lines[index])
+            if key == "model" {
+                sawModel = true
+                if let model {
+                    output.append("model = \(tomlString(model))")
+                }
+                continue
+            }
+            if key == "model_reasoning_effort" {
+                sawReasoningEffort = true
+                if let reasoningEffort {
+                    output.append("model_reasoning_effort = \(tomlString(reasoningEffort))")
+                }
+                continue
+            }
+            output.append(lines[index])
+        }
+
+        let insertionIndex = outputInsertionIndex(forOriginalRange: range, in: output)
+        var additions: [String] = []
+        if !sawModel, let model {
+            additions.append("model = \(tomlString(model))")
+        }
+        if !sawReasoningEffort, let reasoningEffort {
+            additions.append("model_reasoning_effort = \(tomlString(reasoningEffort))")
+        }
+        if !additions.isEmpty {
+            output.insert(contentsOf: additions, at: insertionIndex)
+        }
+        lines = output
+    }
+
+    private static func outputInsertionIndex(forOriginalRange range: Range<Int>, in output: [String]) -> Int {
+        min(range.upperBound, output.count)
+    }
+
+    private static func configSectionRange(_ targetHeader: String?, in lines: [String]) -> Range<Int> {
+        guard let targetHeader else {
+            let end = lines.firstIndex { tomlSectionHeader($0) != nil } ?? lines.endIndex
+            return 0..<end
+        }
+
+        guard let headerIndex = lines.firstIndex(where: { tomlSectionHeader($0) == targetHeader }) else {
+            return lines.endIndex..<lines.endIndex
+        }
+        let bodyStart = lines.index(after: headerIndex)
+        let bodyEnd = lines[bodyStart...].firstIndex { tomlSectionHeader($0) != nil } ?? lines.endIndex
+        return bodyStart..<bodyEnd
+    }
+
+    private static func topLevelStringValue(_ key: String, in contents: String) -> String? {
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let range = configSectionRange(nil, in: lines)
+        for index in range {
+            guard tomlAssignmentKey(lines[index]) == key,
+                  let equalsIndex = lines[index].firstIndex(of: "=")
+            else {
+                continue
+            }
+            let value = String(lines[index][lines[index].index(after: equalsIndex)...])
+                .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmingMatchingQuotes(value)
+        }
+        return nil
+    }
+
+    private static func modelConfigLines(model: String?, reasoningEffort: String?) -> [String] {
+        [
+            model.map { "model = \(tomlString($0))" },
+            reasoningEffort.map { "model_reasoning_effort = \(tomlString($0))" }
+        ].compactMap(\.self)
+    }
+
+    private static func tomlSectionHeader(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else {
+            return nil
+        }
+        return String(trimmed.dropFirst().dropLast())
+    }
+
+    private static func tomlAssignmentKey(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.hasPrefix("#"),
+              let equalsIndex = trimmed.firstIndex(of: "=")
+        else {
+            return nil
+        }
+        return String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func tomlString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "\"\(escaped)\""
+    }
+
+    private static func trimTrailingBlankLines(_ text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func trimmingMatchingQuotes(_ value: String) -> String {
+        guard value.count >= 2 else { return value }
+        if (value.first == "\"" && value.last == "\"") || (value.first == "'" && value.last == "'") {
+            return String(value.dropFirst().dropLast())
+        }
+        return value
+    }
+
     private static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
         if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(configuration.environment)
             ?? CodexAuthStorage.readOpenAIAPIKeyFromEnvironment(configuration.environment) {
@@ -573,6 +764,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
+                    )
+                case "setDefaultModel":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.setDefaultModelResult(params: params, configuration: configuration)
                     )
                 default:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")

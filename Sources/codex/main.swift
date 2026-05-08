@@ -314,7 +314,8 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             defaultModelProvider: settings.selectedModelProviderID,
             version: CodexCLI.version,
             requiresOpenAIAuth: settings.selectedModelProvider?.requiresOpenAIAuth ?? true,
-            authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode
+            authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
+            activeProfile: settings.activeProfile
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case .generateTS,
