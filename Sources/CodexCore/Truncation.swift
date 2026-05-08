@@ -135,8 +135,8 @@ public enum Truncation {
                     }
                     remainingBudget = 0
                 }
-            case let .inputImage(imageURL):
-                output.append(.inputImage(imageURL: imageURL))
+            case let .inputImage(imageURL, detail):
+                output.append(.inputImage(imageURL: imageURL, detail: detail))
             }
         }
 

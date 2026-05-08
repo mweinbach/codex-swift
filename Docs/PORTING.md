@@ -218,6 +218,8 @@ Source baseline inspected for this scaffold:
   - compaction prompt resources, content-item text joining, user-message extraction/filtering, summary-prefix detection, and token-limited compacted-history construction
 - `codex-rs/core/src/prompts.rs` and `codex-rs/core/computer_use_prompt.md`
   - bundled computer-use prompt loading for native Swift callers
+- Pure helpers from `codex-rs/code-mode/src/description.rs` and `codex-rs/code-mode/src/response.rs`
+  - `exec` pragma parsing, public/nested tool filtering, JavaScript identifier normalization, image detail wire values, and function-call image-output detail serialization
 - `codex-rs/cli/src/main.rs` computer-use dispatch
   - top-level `codex computer-use ...` now reuses the non-interactive exec parser/runtime with `features.computer_use_gui` overrides and the bundled computer-use prompt as a harness/base-instructions override
 - `codex-rs/core/src/flags.rs`

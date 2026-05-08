@@ -297,7 +297,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                     "type": .string("text"),
                     "text": .string(text)
                 ])
-            case let .inputImage(imageURL):
+            case let .inputImage(imageURL, _):
                 return .object([
                     "type": .string("image_url"),
                     "image_url": .object(["url": .string(imageURL)])

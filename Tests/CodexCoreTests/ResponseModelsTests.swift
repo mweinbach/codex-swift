@@ -31,6 +31,27 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(output[1]["image_url"] as? String, "data:image/png;base64,BASE64")
     }
 
+    func testFunctionCallOutputContentItemSupportsImageDetailLikeCodeMode() throws {
+        XCTAssertEqual(defaultImageDetail, .high)
+        let json = #"{"type":"input_image","image_url":"data:image/png;base64,abc","detail":"original"}"#
+        let item = try JSONDecoder().decode(FunctionCallOutputContentItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .inputImage(imageURL: "data:image/png;base64,abc", detail: .original))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "input_image",
+            "image_url": "data:image/png;base64,abc",
+            "detail": "original"
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            FunctionCallOutputContentItem.inputImage(imageURL: "data:image/png;base64,abc"),
+            [
+                "type": "input_image",
+                "image_url": "data:image/png;base64,abc"
+            ]
+        )
+    }
+
     func testMcpCallToolResultStructuredContentBecomesOutputPayload() throws {
         let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
             content: [.text(McpTextContent(text: "ignored"))],

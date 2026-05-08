@@ -54,14 +54,24 @@ public enum ContentItem: Equatable, Codable, Sendable {
     }
 }
 
+public enum ImageDetail: String, Codable, Equatable, Sendable {
+    case auto
+    case low
+    case high
+    case original
+}
+
+public let defaultImageDetail: ImageDetail = .high
+
 public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
     case inputText(text: String)
-    case inputImage(imageURL: String)
+    case inputImage(imageURL: String, detail: ImageDetail? = nil)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case text
         case imageURL = "image_url"
+        case detail
     }
 
     private enum ItemType: String, Codable {
@@ -75,7 +85,10 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
         case .inputText:
             self = .inputText(text: try container.decode(String.self, forKey: .text))
         case .inputImage:
-            self = .inputImage(imageURL: try container.decode(String.self, forKey: .imageURL))
+            self = .inputImage(
+                imageURL: try container.decode(String.self, forKey: .imageURL),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         }
     }
 
@@ -85,9 +98,10 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
         case let .inputText(text):
             try container.encode(ItemType.inputText, forKey: .type)
             try container.encode(text, forKey: .text)
-        case let .inputImage(imageURL):
+        case let .inputImage(imageURL, detail):
             try container.encode(ItemType.inputImage, forKey: .type)
             try container.encode(imageURL, forKey: .imageURL)
+            try container.encodeIfPresent(detail, forKey: .detail)
         }
     }
 }
