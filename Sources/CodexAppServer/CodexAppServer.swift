@@ -1224,6 +1224,234 @@ public enum CodexAppServer {
         throw AppServerError.methodNotFound("\(method) is not supported yet")
     }
 
+    fileprivate static func threadGoalSetResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (result: [String: Any], threadID: String, goal: [String: Any]) {
+        try requireGoalsFeature(configuration: configuration)
+        let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
+        var goals = try readThreadGoals(codexHome: configuration.codexHome)
+        let status = try goalStatus(params?["status"])
+        let objective = stringParam(params?["objective"])?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenBudget = try goalTokenBudget(params: params)
+
+        if let objective {
+            try validateGoalObjective(objective)
+            if tokenBudget.wasProvided {
+                try validateGoalBudget(tokenBudget.value)
+            }
+            if var existing = goals[threadID],
+               existing.objective == objective,
+               existing.status != "complete" {
+                existing.status = status ?? existing.status
+                if tokenBudget.wasProvided {
+                    existing.tokenBudget = tokenBudget.value
+                }
+                existing.updatedAt = currentUnixTimestamp()
+                goals[threadID] = existing
+            } else {
+                goals[threadID] = StoredThreadGoal(
+                    threadID: threadID,
+                    objective: objective,
+                    status: status ?? "active",
+                    tokenBudget: tokenBudget.wasProvided ? tokenBudget.value : nil,
+                    tokensUsed: 0,
+                    timeUsedSeconds: 0,
+                    createdAt: currentUnixTimestamp(),
+                    updatedAt: currentUnixTimestamp()
+                )
+            }
+        } else {
+            guard var existing = goals[threadID] else {
+                throw AppServerError.invalidRequest("cannot update goal for thread \(threadID): no goal exists")
+            }
+            if tokenBudget.wasProvided {
+                try validateGoalBudget(tokenBudget.value)
+            }
+            existing.status = status ?? existing.status
+            if tokenBudget.wasProvided {
+                existing.tokenBudget = tokenBudget.value
+            }
+            existing.updatedAt = currentUnixTimestamp()
+            goals[threadID] = existing
+        }
+
+        try writeThreadGoals(goals, codexHome: configuration.codexHome)
+        let goal = goals[threadID]!.object
+        return (["goal": goal], threadID, goal)
+    }
+
+    fileprivate static func threadGoalGetResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        try requireGoalsFeature(configuration: configuration)
+        let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
+        let goal = try readThreadGoals(codexHome: configuration.codexHome)[threadID]?.object
+        return ["goal": goal ?? NSNull()]
+    }
+
+    fileprivate static func threadGoalClearResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (result: [String: Any], threadID: String, cleared: Bool) {
+        try requireGoalsFeature(configuration: configuration)
+        let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
+        var goals = try readThreadGoals(codexHome: configuration.codexHome)
+        let cleared = goals.removeValue(forKey: threadID) != nil
+        if cleared {
+            try writeThreadGoals(goals, codexHome: configuration.codexHome)
+        }
+        return (["cleared": cleared], threadID, cleared)
+    }
+
+    private static func requireGoalsFeature(configuration: CodexAppServerConfiguration) throws {
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        guard runtimeConfig.features.isEnabled(.goals) else {
+            throw AppServerError.invalidRequest("goals feature is disabled")
+        }
+    }
+
+    private static func materializedGoalThreadID(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> String {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        do {
+            guard try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: threadID.description
+            ) != nil else {
+                throw AppServerError.invalidRequest("thread not found: \(threadID)")
+            }
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("failed to locate thread id \(threadID): \(error)")
+        }
+        return threadID.description
+    }
+
+    private struct GoalTokenBudget {
+        let wasProvided: Bool
+        let value: Int?
+    }
+
+    private static func goalTokenBudget(params: [String: Any]?) throws -> GoalTokenBudget {
+        guard let params, params.keys.contains("tokenBudget") else {
+            return GoalTokenBudget(wasProvided: false, value: nil)
+        }
+        let raw = params["tokenBudget"]
+        if raw is NSNull {
+            return GoalTokenBudget(wasProvided: true, value: nil)
+        }
+        guard let value = raw as? Int else {
+            throw AppServerError.invalidRequest("goal budget must be an integer or null")
+        }
+        return GoalTokenBudget(wasProvided: true, value: value)
+    }
+
+    private static func goalStatus(_ raw: Any?) throws -> String? {
+        guard let raw else {
+            return nil
+        }
+        guard let status = stringParam(raw) else {
+            throw AppServerError.invalidRequest("invalid goal status")
+        }
+        switch status {
+        case "active", "paused", "budgetLimited", "complete":
+            return status
+        default:
+            throw AppServerError.invalidRequest("invalid goal status: \(status)")
+        }
+    }
+
+    private static func validateGoalObjective(_ objective: String) throws {
+        guard !objective.isEmpty else {
+            throw AppServerError.invalidRequest("goal objective must not be empty")
+        }
+        guard objective.count <= 4_000 else {
+            throw AppServerError.invalidRequest("goal objective must be at most 4000 characters")
+        }
+    }
+
+    private static func validateGoalBudget(_ value: Int?) throws {
+        if let value, value <= 0 {
+            throw AppServerError.invalidRequest("goal budgets must be positive when provided")
+        }
+    }
+
+    private struct StoredThreadGoal: Codable {
+        let threadID: String
+        let objective: String
+        var status: String
+        var tokenBudget: Int?
+        var tokensUsed: Int
+        var timeUsedSeconds: Int
+        let createdAt: Int
+        var updatedAt: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case objective
+            case status
+            case tokenBudget
+            case tokensUsed
+            case timeUsedSeconds
+            case createdAt
+            case updatedAt
+        }
+
+        var object: [String: Any] {
+            [
+                "threadId": threadID,
+                "objective": objective,
+                "status": status,
+                "tokenBudget": tokenBudget ?? NSNull(),
+                "tokensUsed": tokensUsed,
+                "timeUsedSeconds": timeUsedSeconds,
+                "createdAt": createdAt,
+                "updatedAt": updatedAt
+            ]
+        }
+    }
+
+    private static func readThreadGoals(codexHome: URL) throws -> [String: StoredThreadGoal] {
+        let path = threadGoalsPath(codexHome: codexHome)
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return [:]
+        }
+        let data = try Data(contentsOf: path)
+        guard !data.isEmpty else {
+            return [:]
+        }
+        return try JSONDecoder().decode([String: StoredThreadGoal].self, from: data)
+    }
+
+    private static func writeThreadGoals(_ goals: [String: StoredThreadGoal], codexHome: URL) throws {
+        let path = threadGoalsPath(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(goals).write(to: path, options: .atomic)
+    }
+
+    private static func threadGoalsPath(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent("thread_goals.json", isDirectory: false)
+    }
+
+    private static func currentUnixTimestamp() -> Int {
+        Int(Date().timeIntervalSince1970)
+    }
+
     fileprivate static func threadMemoryModeSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1588,6 +1816,12 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func windowsSandboxReadinessResult() -> [String: Any] {
+        [
+            "status": "notConfigured"
+        ]
+    }
+
     fileprivate static func mcpServerOAuthLoginResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -1687,6 +1921,26 @@ public enum CodexAppServer {
     fileprivate static func threadArchivedNotification(threadID: String) -> [String: Any] {
         [
             "method": "thread/archived",
+            "params": [
+                "threadId": threadID
+            ]
+        ]
+    }
+
+    fileprivate static func threadGoalUpdatedNotification(threadID: String, goal: [String: Any]) -> [String: Any] {
+        [
+            "method": "thread/goal/updated",
+            "params": [
+                "threadId": threadID,
+                "turnId": NSNull(),
+                "goal": goal
+            ]
+        ]
+    }
+
+    fileprivate static func threadGoalClearedNotification(threadID: String) -> [String: Any] {
+        [
+            "method": "thread/goal/cleared",
             "params": [
                 "threadId": threadID
             ]
@@ -5166,14 +5420,27 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
                     )
-                case "thread/goal/set", "thread/goal/get", "thread/goal/clear":
+                case "thread/goal/set":
+                    let result = try CodexAppServer.threadGoalSetResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadGoalFeatureGateResult(
-                            method: method,
-                            configuration: configuration
-                        )
+                        result: result.result
                     )
+                    notifications.append(CodexAppServer.threadGoalUpdatedNotification(
+                        threadID: result.threadID,
+                        goal: result.goal
+                    ))
+                case "thread/goal/get":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadGoalGetResult(params: params, configuration: configuration)
+                    )
+                case "thread/goal/clear":
+                    let result = try CodexAppServer.threadGoalClearResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result.result)
+                    if result.cleared {
+                        notifications.append(CodexAppServer.threadGoalClearedNotification(threadID: result.threadID))
+                    }
                 case "thread/memoryMode/set":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -5314,6 +5581,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.modelProviderCapabilitiesReadResult(configuration: configuration)
+                    )
+                case "windowsSandbox/readiness":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.windowsSandboxReadinessResult()
                     )
                 case "mcpServerStatus/list":
                     response = CodexAppServer.responseObject(

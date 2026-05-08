@@ -913,20 +913,115 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
-    func testThreadGoalMethodsReportUnsupportedWhenFeatureEnabled() throws {
+    func testThreadGoalMethodsPersistAndNotifyWhenFeatureEnabled() throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
         goals = true
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-30-00",
+            timestamp: "2025-01-06T07:30:00Z",
+            preview: "goal thread",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"thread/goal/get","params":{"threadId":"\#(UUID().uuidString.lowercased())"}}"#,
+        let setMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"  keep polishing  ","status":"budgetLimited","tokenBudget":10}}"#.utf8
+        )))
+        XCTAssertEqual(setMessages.count, 2)
+        let setResult = try XCTUnwrap(setMessages[0]["result"] as? [String: Any])
+        let setGoal = try XCTUnwrap(setResult["goal"] as? [String: Any])
+        XCTAssertEqual(setGoal["threadId"] as? String, threadID)
+        XCTAssertEqual(setGoal["objective"] as? String, "keep polishing")
+        XCTAssertEqual(setGoal["status"] as? String, "budgetLimited")
+        XCTAssertEqual(setGoal["tokenBudget"] as? Int, 10)
+        XCTAssertEqual(setGoal["tokensUsed"] as? Int, 0)
+        XCTAssertEqual(setGoal["timeUsedSeconds"] as? Int, 0)
+
+        XCTAssertEqual(setMessages[1]["method"] as? String, "thread/goal/updated")
+        let updateParams = try XCTUnwrap(setMessages[1]["params"] as? [String: Any])
+        XCTAssertEqual(updateParams["threadId"] as? String, threadID)
+        XCTAssertEqual(updateParams["turnId"] as? NSNull, NSNull())
+        let notifiedGoal = try XCTUnwrap(updateParams["goal"] as? [String: Any])
+        XCTAssertEqual(notifiedGoal["objective"] as? String, "keep polishing")
+
+        let get = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/goal/get","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let getGoal = try XCTUnwrap((get[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(getGoal["status"] as? String, "budgetLimited")
+        XCTAssertEqual(getGoal["tokenBudget"] as? Int, 10)
+
+        let replacement = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing"}}"#.utf8
+        )))
+        let replacementGoal = try XCTUnwrap((replacement[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(replacementGoal["status"] as? String, "budgetLimited")
+        XCTAssertEqual(replacementGoal["tokenBudget"] as? Int, 10)
+
+        let clear = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"thread/goal/clear","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual(clear.count, 2)
+        XCTAssertEqual((clear[0]["result"] as? [String: Any])?["cleared"] as? Bool, true)
+        XCTAssertEqual(clear[1]["method"] as? String, "thread/goal/cleared")
+        XCTAssertEqual((clear[1]["params"] as? [String: Any])?["threadId"] as? String, threadID)
+
+        let emptyGet = try decodeMessages(processor.processLine(Data(
+            #"{"id":5,"method":"thread/goal/get","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual((emptyGet[0]["result"] as? [String: Any])?["goal"] as? NSNull, NSNull())
+
+        let clearAgain = try decodeMessages(processor.processLine(Data(
+            #"{"id":6,"method":"thread/goal/clear","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual(clearAgain.count, 1)
+        XCTAssertEqual((clearAgain[0]["result"] as? [String: Any])?["cleared"] as? Bool, false)
+    }
+
+    func testThreadGoalMethodsValidateEnabledInputs() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-45-00",
+            timestamp: "2025-01-06T07:45:00Z",
+            preview: "goal validation",
+            provider: "mock_provider"
+        )
+
+        let emptyObjective = try appServerResponse(
+            #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"   "}}"#,
             codexHome: temp.url
         )
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32601)
-        XCTAssertEqual(error["message"] as? String, "thread/goal/get is not supported yet")
+        let emptyObjectiveError = try XCTUnwrap(emptyObjective["error"] as? [String: Any])
+        XCTAssertEqual(emptyObjectiveError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyObjectiveError["message"] as? String, "goal objective must not be empty")
+
+        let zeroBudget = try appServerResponse(
+            #"{"id":2,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":0}}"#,
+            codexHome: temp.url
+        )
+        let zeroBudgetError = try XCTUnwrap(zeroBudget["error"] as? [String: Any])
+        XCTAssertEqual(zeroBudgetError["code"] as? Int, -32600)
+        XCTAssertEqual(zeroBudgetError["message"] as? String, "goal budgets must be positive when provided")
+
+        let missingGoal = try appServerResponse(
+            #"{"id":3,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","status":"paused"}}"#,
+            codexHome: temp.url
+        )
+        let missingGoalError = try XCTUnwrap(missingGoal["error"] as? [String: Any])
+        XCTAssertEqual(missingGoalError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            missingGoalError["message"] as? String,
+            "cannot update goal for thread \(threadID): no goal exists"
+        )
     }
 
     func testThreadMemoryModeSetAppendsSessionMetaMarker() throws {
@@ -2650,6 +2745,17 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["namespaceTools"] as? Bool, false)
         XCTAssertEqual(result["imageGeneration"] as? Bool, false)
         XCTAssertEqual(result["webSearch"] as? Bool, false)
+    }
+
+    func testWindowsSandboxReadinessReportsNotConfiguredOffWindows() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"windowsSandbox/readiness"}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "notConfigured")
     }
 
     func testExperimentalFeatureListReturnsRustV2ShapeAndPaginates() throws {
