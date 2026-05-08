@@ -1911,6 +1911,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(remoteDisabledError["message"] as? String, "remote plugin uninstall is not enabled")
     }
 
+    func testExternalAgentConfigDetectAndEmptyImportReturnRustShapes() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"includeHome":false,"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: temp.url
+        )
+        let detectResult = try XCTUnwrap(detect["result"] as? [String: Any])
+        XCTAssertEqual((detectResult["items"] as? [Any])?.count, 0)
+
+        let emptyImport = try appServerResponse(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[]}}"#,
+            codexHome: temp.url
+        )
+        let emptyImportResult = try XCTUnwrap(emptyImport["result"] as? [String: Any])
+        XCTAssertTrue(emptyImportResult.isEmpty)
+
+        let nonEmptyImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":null}]}}"#,
+            codexHome: temp.url
+        )
+        let nonEmptyImportError = try XCTUnwrap(nonEmptyImport["error"] as? [String: Any])
+        XCTAssertEqual(nonEmptyImportError["code"] as? Int, -32600)
+        XCTAssertEqual(nonEmptyImportError["message"] as? String, "external agent config import is not implemented")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

@@ -1885,6 +1885,18 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("local plugin uninstall is not implemented")
     }
 
+    fileprivate static func externalAgentConfigDetectResult(params _: [String: Any]?) -> [String: Any] {
+        ["items": []]
+    }
+
+    fileprivate static func externalAgentConfigImportResult(params: [String: Any]?) throws -> [String: Any] {
+        let items = params?["migrationItems"] as? [Any] ?? []
+        guard items.isEmpty else {
+            throw AppServerError.invalidRequest("external agent config import is not implemented")
+        }
+        return [:]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -6182,6 +6194,16 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.mcpServerRefreshResult()
+                    )
+                case "externalAgentConfig/detect":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.externalAgentConfigDetectResult(params: params)
+                    )
+                case "externalAgentConfig/import":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.externalAgentConfigImportResult(params: params)
                     )
                 case "skills/list":
                     response = CodexAppServer.responseObject(
