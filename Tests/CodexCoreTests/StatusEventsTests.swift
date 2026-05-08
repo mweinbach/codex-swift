@@ -1,0 +1,140 @@
+import CodexCore
+import XCTest
+
+final class StatusEventsTests: XCTestCase {
+    func testCodexErrorInfoUsesRustStringVariants() throws {
+        XCTAssertEqual(try encode(CodexErrorInfo.contextWindowExceeded), #""context_window_exceeded""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.usageLimitExceeded), #""usage_limit_exceeded""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.internalServerError), #""internal_server_error""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.unauthorized), #""unauthorized""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.badRequest), #""bad_request""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.sandboxError), #""sandbox_error""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.other), #""other""#)
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(CodexErrorInfo.self, from: Data(#""bad_request""#.utf8)),
+            .badRequest
+        )
+    }
+
+    func testCodexErrorInfoUsesRustExternallyTaggedStatusVariants() throws {
+        try XCTAssertJSONObjectEqual(CodexErrorInfo.httpConnectionFailed(httpStatusCode: 429), [
+            "http_connection_failed": [
+                "http_status_code": 429
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(CodexErrorInfo.responseStreamConnectionFailed(httpStatusCode: nil), [
+            "response_stream_connection_failed": [
+                "http_status_code": NSNull()
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(CodexErrorInfo.responseStreamDisconnected(httpStatusCode: 502), [
+            "response_stream_disconnected": [
+                "http_status_code": 502
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(CodexErrorInfo.responseTooManyFailedAttempts(httpStatusCode: nil), [
+            "response_too_many_failed_attempts": [
+                "http_status_code": NSNull()
+            ]
+        ])
+
+        let json = #"{"http_connection_failed":{"http_status_code":503}}"#
+        XCTAssertEqual(
+            try JSONDecoder().decode(CodexErrorInfo.self, from: Data(json.utf8)),
+            .httpConnectionFailed(httpStatusCode: 503)
+        )
+    }
+
+    func testErrorAndStreamErrorEventsIncludeNullOptionalsLikeRust() throws {
+        try XCTAssertJSONObjectEqual(ErrorEvent(message: "failed"), [
+            "message": "failed",
+            "codex_error_info": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(ErrorEvent(
+            message: "limited",
+            codexErrorInfo: .usageLimitExceeded
+        ), [
+            "message": "limited",
+            "codex_error_info": "usage_limit_exceeded"
+        ])
+
+        try XCTAssertJSONObjectEqual(StreamErrorEvent(message: "stream failed"), [
+            "message": "stream failed",
+            "codex_error_info": NSNull(),
+            "additional_details": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(StreamErrorEvent(
+            message: "stream failed",
+            codexErrorInfo: .responseStreamDisconnected(httpStatusCode: 500),
+            additionalDetails: "retry exhausted"
+        ), [
+            "message": "stream failed",
+            "codex_error_info": [
+                "response_stream_disconnected": [
+                    "http_status_code": 500
+                ]
+            ],
+            "additional_details": "retry exhausted"
+        ])
+    }
+
+    func testTaskEventsIncludeNullOptionalsLikeRust() throws {
+        try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: nil), [
+            "model_context_window": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: 128_000), [
+            "model_context_window": 128_000
+        ])
+
+        try XCTAssertJSONObjectEqual(TaskCompleteEvent(lastAgentMessage: nil), [
+            "last_agent_message": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(TaskCompleteEvent(lastAgentMessage: "done"), [
+            "last_agent_message": "done"
+        ])
+    }
+
+    func testNoticeUndoAndWarningEventsMatchRustOptionalOmissionRules() throws {
+        try XCTAssertJSONObjectEqual(WarningEvent(message: "heads up"), [
+            "message": "heads up"
+        ])
+        try XCTAssertJSONObjectEqual(StreamInfoEvent(message: "retrying"), [
+            "message": "retrying"
+        ])
+        try XCTAssertJSONObjectEqual(DeprecationNoticeEvent(summary: "old flag"), [
+            "summary": "old flag"
+        ])
+        try XCTAssertJSONObjectEqual(DeprecationNoticeEvent(summary: "old flag", details: "use --new"), [
+            "summary": "old flag",
+            "details": "use --new"
+        ])
+        try XCTAssertJSONObjectEqual(UndoStartedEvent(), [:])
+        try XCTAssertJSONObjectEqual(UndoStartedEvent(message: "undoing"), [
+            "message": "undoing"
+        ])
+        try XCTAssertJSONObjectEqual(UndoCompletedEvent(success: true), [
+            "success": true
+        ])
+        try XCTAssertJSONObjectEqual(UndoCompletedEvent(success: false, message: "conflict"), [
+            "success": false,
+            "message": "conflict"
+        ])
+    }
+
+    func testTurnAbortedEventAndReasonsUseRustSnakeCaseValues() throws {
+        XCTAssertEqual(try encode(TurnAbortReason.interrupted), #""interrupted""#)
+        XCTAssertEqual(try encode(TurnAbortReason.replaced), #""replaced""#)
+        XCTAssertEqual(try encode(TurnAbortReason.reviewEnded), #""review_ended""#)
+
+        try XCTAssertJSONObjectEqual(TurnAbortedEvent(reason: .reviewEnded), [
+            "reason": "review_ended"
+        ])
+    }
+
+    private func encode<T: Encodable>(_ value: T) throws -> String {
+        String(data: try JSONEncoder().encode(value), encoding: .utf8) ?? ""
+    }
+}

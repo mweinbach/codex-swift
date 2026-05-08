@@ -178,6 +178,8 @@ Source baseline inspected for this scaffold:
   - exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
 - `codex-rs/protocol/src/protocol.rs` MCP startup/auth event models
   - MCP startup update/complete/failure payloads, internally tagged startup status, and auth status wire/display values
+- `codex-rs/protocol/src/protocol.rs` status/error/notification event models
+  - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
 
 ## Known Gaps
 
