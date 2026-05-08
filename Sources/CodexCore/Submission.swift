@@ -102,7 +102,7 @@ public enum Op: Equatable, Sendable {
     case threadRollback(numTurns: UInt32)
     case undo
     case review(reviewRequest: ReviewRequest)
-    case approveGuardianDeniedAction(event: JSONValue)
+    case approveGuardianDeniedAction(event: GuardianAssessmentEvent)
     case shutdown
     case runUserShellCommand(command: String)
     case listModels
@@ -323,7 +323,7 @@ extension Op: Codable {
         case .review:
             self = .review(reviewRequest: try container.decode(ReviewRequest.self, forKey: .reviewRequest))
         case .approveGuardianDeniedAction:
-            self = .approveGuardianDeniedAction(event: try container.decode(JSONValue.self, forKey: .event))
+            self = .approveGuardianDeniedAction(event: try container.decode(GuardianAssessmentEvent.self, forKey: .event))
         case .shutdown:
             self = .shutdown
         case .runUserShellCommand:

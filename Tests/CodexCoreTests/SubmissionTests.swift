@@ -340,19 +340,14 @@ final class SubmissionTests: XCTestCase {
     }
 
     func testApproveGuardianDeniedActionWireShape() throws {
-        let op = Op.approveGuardianDeniedAction(event: .object([
-            "id": .string("guardian-1"),
-            "turn_id": .string("turn-1"),
-            "started_at_ms": .integer(1_234),
-            "status": .string("denied"),
-            "risk_level": .string("high"),
-            "action": .object([
-                "type": .string("command"),
-                "source": .string("shell"),
-                "command": .string("rm -rf build"),
-                "cwd": .string("/repo")
-            ])
-        ]))
+        let op = Op.approveGuardianDeniedAction(event: GuardianAssessmentEvent(
+            id: "guardian-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 1_234,
+            status: .denied,
+            riskLevel: .high,
+            action: .command(source: .shell, command: "rm -rf build", cwd: "/repo")
+        ))
 
         try XCTAssertJSONObjectEqual(op, [
             "type": "approve_guardian_denied_action",
