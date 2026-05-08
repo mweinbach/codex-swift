@@ -800,6 +800,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginChatGPTStartsServerAndCancelReportsCanceled() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_chatgpt_workspace_id = "ws-v2""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgpt"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        XCTAssertEqual(loginResult["type"] as? String, "chatgpt")
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+        let authURL = try XCTUnwrap(loginResult["authUrl"] as? String)
+        XCTAssertNotNil(UUID(uuidString: loginID))
+        XCTAssertTrue(authURL.contains("allowed_workspace_id=ws-v2"))
+
+        let cancel = try decode(processor.processLine(Data(#"{"id":2,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#.utf8)))
+        let cancelResult = try XCTUnwrap(cancel["result"] as? [String: Any])
+        XCTAssertEqual(cancelResult["status"] as? String, "canceled")
+
+        let cancelAgain = try decode(processor.processLine(Data(#"{"id":3,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#.utf8)))
+        let cancelAgainResult = try XCTUnwrap(cancelAgain["result"] as? [String: Any])
+        XCTAssertEqual(cancelAgainResult["status"] as? String, "notFound")
+    }
+
     func testLegacyLoginChatGPTStartsServerWithForcedWorkspaceAndCanCancel() throws {
         let temp = try TemporaryDirectory()
         try #"forced_chatgpt_workspace_id = "ws-forced""#.write(

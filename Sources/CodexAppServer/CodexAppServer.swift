@@ -1263,7 +1263,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }
         guard type == "apiKey" else {
-            throw AppServerError.invalidRequest("ChatGPT login is not yet supported")
+            throw AppServerError.invalidRequest("unsupported account login type: \(type ?? "<missing>")")
         }
         _ = try loginApiKeyResult(params: params, configuration: configuration)
         return ["type": "apiKey"]
@@ -3060,7 +3060,7 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
-    private func loginChatGptResult() throws -> [String: Any] {
+    private func startChatGptLogin() throws -> (loginID: UUID, authURL: String) {
         if try CodexAppServer.forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }
@@ -3083,9 +3083,23 @@ final class CodexAppServerMessageProcessor {
         activeChatGPTLogins.removeAll()
         let loginID = UUID()
         activeChatGPTLogins[loginID] = server
+        return (loginID, server.authURL)
+    }
+
+    private func loginChatGptResult() throws -> [String: Any] {
+        let started = try startChatGptLogin()
         return [
-            "loginId": loginID.uuidString.lowercased(),
-            "authUrl": server.authURL
+            "loginId": started.loginID.uuidString.lowercased(),
+            "authUrl": started.authURL
+        ]
+    }
+
+    private func loginChatGptAccountResult() throws -> [String: Any] {
+        let started = try startChatGptLogin()
+        return [
+            "type": "chatgpt",
+            "loginId": started.loginID.uuidString.lowercased(),
+            "authUrl": started.authURL
         ]
     }
 
@@ -3101,6 +3115,20 @@ final class CodexAppServerMessageProcessor {
         }
         server.cancel()
         return [:]
+    }
+
+    private func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let loginIDString = CodexAppServer.stringParam(params?["loginId"]) else {
+            throw AppServerError.invalidRequest("missing loginId")
+        }
+        guard let loginID = UUID(uuidString: loginIDString) else {
+            throw AppServerError.invalidRequest("invalid login id: \(loginIDString)")
+        }
+        if let server = activeChatGPTLogins.removeValue(forKey: loginID) {
+            server.cancel()
+            return ["status": "canceled"]
+        }
+        return ["status": "notFound"]
     }
 
     func processLine(_ data: Data) -> Data? {
@@ -3331,16 +3359,23 @@ final class CodexAppServerMessageProcessor {
                     )
                     notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
                 case "account/login/start":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.loginAccountResult(params: params, configuration: configuration)
-                    )
-                    notifications.append(CodexAppServer.accountLoginCompletedNotification())
-                    notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                    if CodexAppServer.stringParam(params?["type"]) == "chatgpt" {
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: try loginChatGptAccountResult()
+                        )
+                    } else {
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: try CodexAppServer.loginAccountResult(params: params, configuration: configuration)
+                        )
+                        notifications.append(CodexAppServer.accountLoginCompletedNotification())
+                        notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                    }
                 case "account/login/cancel":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.cancelLoginAccountResult(params: params)
+                        result: try cancelLoginAccountResult(params: params)
                     )
                 case "feedback/upload":
                     response = CodexAppServer.responseObject(
