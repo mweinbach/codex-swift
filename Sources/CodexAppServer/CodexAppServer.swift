@@ -1843,6 +1843,48 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
     }
 
+    fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
+        _ = try absolutePathParam(params?["pluginPath"], name: "pluginPath")
+        throw AppServerError.invalidRequest("plugin sharing is not enabled")
+    }
+
+    fileprivate static func pluginShareUpdateTargetsResult(params _: [String: Any]?) throws -> [String: Any] {
+        throw AppServerError.invalidRequest("plugin sharing is not enabled")
+    }
+
+    fileprivate static func pluginShareListResult(params _: [String: Any]?) throws -> [String: Any] {
+        throw AppServerError.invalidRequest("plugin sharing is not enabled")
+    }
+
+    fileprivate static func pluginShareDeleteResult(params _: [String: Any]?) throws -> [String: Any] {
+        throw AppServerError.invalidRequest("plugin sharing is not enabled")
+    }
+
+    fileprivate static func pluginInstallResult(params: [String: Any]?) throws -> [String: Any] {
+        let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
+        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
+        _ = stringParam(params?["pluginName"]) ?? ""
+        switch (marketplacePath, remoteMarketplaceName) {
+        case (.some, .some), (.none, .none):
+            throw AppServerError.invalidRequest("plugin/install requires exactly one of marketplacePath or remoteMarketplaceName")
+        case (.some, .none):
+            throw AppServerError.invalidRequest("local plugin install is not implemented")
+        case (.none, .some(let remoteMarketplaceName)):
+            throw AppServerError.invalidRequest("remote plugin install is not enabled for marketplace \(remoteMarketplaceName)")
+        }
+    }
+
+    fileprivate static func pluginUninstallResult(params: [String: Any]?) throws -> [String: Any] {
+        let pluginID = stringParam(params?["pluginId"]) ?? ""
+        guard isValidRemotePluginID(pluginID) || isLikelyLocalPluginID(pluginID) else {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        if isValidRemotePluginID(pluginID) {
+            throw AppServerError.invalidRequest("remote plugin uninstall is not enabled")
+        }
+        throw AppServerError.invalidRequest("local plugin uninstall is not implemented")
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -3193,6 +3235,17 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
         }
         return path
+    }
+
+    private static func isValidRemotePluginID(_ pluginID: String) -> Bool {
+        !pluginID.isEmpty && pluginID.allSatisfy { character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_" || character == "~")
+        }
+    }
+
+    private static func isLikelyLocalPluginID(_ pluginID: String) -> Bool {
+        let parts = pluginID.split(separator: "@", omittingEmptySubsequences: false)
+        return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
     }
 
     private struct FilesystemMetadata {
@@ -5961,6 +6014,36 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginSkillReadResult(params: params)
+                    )
+                case "plugin/share/save":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginShareSaveResult(params: params)
+                    )
+                case "plugin/share/updateTargets":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginShareUpdateTargetsResult(params: params)
+                    )
+                case "plugin/share/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginShareListResult(params: params)
+                    )
+                case "plugin/share/delete":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginShareDeleteResult(params: params)
+                    )
+                case "plugin/install":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginInstallResult(params: params)
+                    )
+                case "plugin/uninstall":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginUninstallResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

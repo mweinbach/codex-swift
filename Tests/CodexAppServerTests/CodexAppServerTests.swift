@@ -1816,6 +1816,101 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginShareRoutesReportDisabledWhenFeatureUnavailable() throws {
+        let temp = try TemporaryDirectory()
+        let pluginPath = temp.url.appendingPathComponent("plugin").path
+
+        let save = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","remotePluginId":"bad id"}}"#,
+            codexHome: temp.url
+        )
+        let saveError = try XCTUnwrap(save["error"] as? [String: Any])
+        XCTAssertEqual(saveError["code"] as? Int, -32600)
+        XCTAssertEqual(saveError["message"] as? String, "plugin sharing is not enabled")
+
+        let update = try appServerResponse(
+            #"{"id":2,"method":"plugin/share/updateTargets","params":{"remotePluginId":"bad id","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            codexHome: temp.url
+        )
+        let updateError = try XCTUnwrap(update["error"] as? [String: Any])
+        XCTAssertEqual(updateError["code"] as? Int, -32600)
+        XCTAssertEqual(updateError["message"] as? String, "plugin sharing is not enabled")
+
+        let list = try appServerResponse(
+            #"{"id":3,"method":"plugin/share/list","params":{}}"#,
+            codexHome: temp.url
+        )
+        let listError = try XCTUnwrap(list["error"] as? [String: Any])
+        XCTAssertEqual(listError["code"] as? Int, -32600)
+        XCTAssertEqual(listError["message"] as? String, "plugin sharing is not enabled")
+
+        let delete = try appServerResponse(
+            #"{"id":4,"method":"plugin/share/delete","params":{"remotePluginId":"bad id"}}"#,
+            codexHome: temp.url
+        )
+        let deleteError = try XCTUnwrap(delete["error"] as? [String: Any])
+        XCTAssertEqual(deleteError["code"] as? Int, -32600)
+        XCTAssertEqual(deleteError["message"] as? String, "plugin sharing is not enabled")
+    }
+
+    func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {
+        let temp = try TemporaryDirectory()
+        let marketplace = temp.url.appendingPathComponent("marketplace.json").path
+
+        let missingSource = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"pluginName":"gmail"}}"#,
+            codexHome: temp.url
+        )
+        let missingSourceError = try XCTUnwrap(missingSource["error"] as? [String: Any])
+        XCTAssertEqual(missingSourceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            missingSourceError["message"] as? String,
+            "plugin/install requires exactly one of marketplacePath or remoteMarketplaceName"
+        )
+
+        let duplicateSource = try appServerResponse(
+            #"{"id":2,"method":"plugin/install","params":{"marketplacePath":"\#(marketplace)","remoteMarketplaceName":"openai-curated","pluginName":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let duplicateSourceError = try XCTUnwrap(duplicateSource["error"] as? [String: Any])
+        XCTAssertEqual(duplicateSourceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            duplicateSourceError["message"] as? String,
+            "plugin/install requires exactly one of marketplacePath or remoteMarketplaceName"
+        )
+
+        let remoteDisabled = try appServerResponse(
+            #"{"id":3,"method":"plugin/install","params":{"remoteMarketplaceName":"openai-curated","pluginName":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let remoteDisabledError = try XCTUnwrap(remoteDisabled["error"] as? [String: Any])
+        XCTAssertEqual(remoteDisabledError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            remoteDisabledError["message"] as? String,
+            "remote plugin install is not enabled for marketplace openai-curated"
+        )
+    }
+
+    func testPluginUninstallValidatesIdsAndReportsRemoteDisabled() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"plugin/uninstall","params":{"pluginId":"bad id","forceRemoteSync":true}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidError["message"] as? String, "invalid remote plugin id")
+
+        let remoteDisabled = try appServerResponse(
+            #"{"id":2,"method":"plugin/uninstall","params":{"pluginId":"plugins~Plugin_gmail","forceRemoteSync":true}}"#,
+            codexHome: temp.url
+        )
+        let remoteDisabledError = try XCTUnwrap(remoteDisabled["error"] as? [String: Any])
+        XCTAssertEqual(remoteDisabledError["code"] as? Int, -32600)
+        XCTAssertEqual(remoteDisabledError["message"] as? String, "remote plugin uninstall is not enabled")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
