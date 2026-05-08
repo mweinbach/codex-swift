@@ -54,6 +54,39 @@ extension APIStreamResponse: Equatable {
 
 public typealias ResponseEventResults = [Result<ResponseEvent, APIError>]
 
+public protocol ResponseEventFrameParsing: Sendable {
+    mutating func receive(frame: String) -> ResponseEventResults
+    mutating func finish() -> ResponseEventResults
+}
+
+public struct ResponsesEventFrameParser: ResponseEventFrameParsing {
+    private var parser = ResponsesSSEParser()
+
+    public init() {}
+
+    public mutating func receive(frame: String) -> ResponseEventResults {
+        parser.receive(data: frame).map(Result.success)
+    }
+
+    public mutating func finish() -> ResponseEventResults {
+        [parser.finish()]
+    }
+}
+
+public struct ChatEventFrameParser: ResponseEventFrameParsing {
+    private var parser = ChatSSEParser()
+
+    public init() {}
+
+    public mutating func receive(frame: String) -> ResponseEventResults {
+        parser.receive(data: frame)
+    }
+
+    public mutating func finish() -> ResponseEventResults {
+        parser.finish()
+    }
+}
+
 public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider> {
     public let transport: Transport
     public let provider: APIProvider
@@ -82,7 +115,23 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
         path: String,
         body: JSONValue,
         extraHeaders: [String: String] = [:],
-        parse: (String) -> ResponseEventResults
+        parse: @escaping @Sendable (String) -> ResponseEventResults
+    ) async -> Result<ResponseEventResults, APIError> {
+        await stream(
+            path: path,
+            body: body,
+            extraHeaders: extraHeaders,
+            makeParser: {
+                BufferedEventFrameParser(parse: parse)
+            }
+        )
+    }
+
+    public func stream<Parser: ResponseEventFrameParsing>(
+        path: String,
+        body: JSONValue,
+        extraHeaders: [String: String] = [:],
+        makeParser: () -> Parser
     ) async -> Result<ResponseEventResults, APIError> {
         let result: Result<APIStreamResponse, TransportError> = await TransportRetry.runWithRequestTelemetry(
             policy: provider.retry.toPolicy(),
@@ -97,12 +146,7 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
 
         switch result {
         case let .success(response):
-            switch await response.collectSSEText() {
-            case let .success(sseText):
-                return .success(parse(sseText))
-            case let .failure(error):
-                return .failure(.transport(error))
-            }
+            return await collectEvents(from: response, makeParser: makeParser)
         case let .failure(error):
             return .failure(.transport(error))
         }
@@ -119,6 +163,67 @@ public struct StreamingAPIClient<Transport: APITransport, Auth: APIAuthProvider>
         }
         request.headers["accept"] = "text/event-stream"
         return request.addingAuthHeaders(from: auth)
+    }
+
+    private func collectEvents<Parser: ResponseEventFrameParsing>(
+        from response: APIStreamResponse,
+        makeParser: () -> Parser
+    ) async -> Result<ResponseEventResults, APIError> {
+        var parser = makeParser()
+        var textDecoder = UTF8StreamDecoder()
+        var frameDecoder = SSEDataFrameDecoder()
+        var results: ResponseEventResults = []
+
+        for await chunk in response.byteStream {
+            switch chunk {
+            case let .success(data):
+                appendEvents(
+                    from: frameDecoder.receive(textDecoder.receive(data)),
+                    using: &parser,
+                    to: &results
+                )
+            case let .failure(error):
+                return .failure(.transport(error))
+            }
+        }
+
+        appendEvents(
+            from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
+            using: &parser,
+            to: &results
+        )
+        results.append(contentsOf: parser.finish())
+        return .success(results)
+    }
+
+    private func appendEvents<Parser: ResponseEventFrameParsing>(
+        from frames: [String],
+        using parser: inout Parser,
+        to results: inout ResponseEventResults
+    ) {
+        for frame in frames {
+            results.append(contentsOf: parser.receive(frame: frame))
+        }
+    }
+}
+
+private struct BufferedEventFrameParser: ResponseEventFrameParsing {
+    let parse: @Sendable (String) -> ResponseEventResults
+    private var text = ""
+
+    init(parse: @escaping @Sendable (String) -> ResponseEventResults) {
+        self.parse = parse
+    }
+
+    mutating func receive(frame: String) -> ResponseEventResults {
+        text.append("data: ")
+        text.append(frame.replacingOccurrences(of: "\n", with: "\ndata: "))
+        text.append("\n\n")
+        return []
+    }
+
+    mutating func finish() -> ResponseEventResults {
+        parse(text)
     }
 }
 
@@ -343,7 +448,7 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
             path: Self.path(for: streaming.provider.wireAPI),
             body: body,
             extraHeaders: extraHeaders,
-            parse: ResponsesSSEParser.collectEvents(fromSSEText:)
+            makeParser: ResponsesEventFrameParser.init
         )
     }
 
@@ -417,7 +522,7 @@ public struct ChatClient<Transport: APITransport, Auth: APIAuthProvider> {
             path: Self.path(for: streaming.provider.wireAPI),
             body: body,
             extraHeaders: extraHeaders,
-            parse: ChatSSEParser.collectEvents(fromSSEText:)
+            makeParser: ChatEventFrameParser.init
         )
     }
 

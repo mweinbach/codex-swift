@@ -131,6 +131,66 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(request.headers["authorization"], "Bearer tok")
     }
 
+    func testResponsesClientParsesStreamingChunksAcrossUTF8AndSSEBoundaries() async {
+        let delta = "hel\u{1F30A}"
+        let sse = """
+        data: {"type":"response.output_text.delta","delta":"\(delta)"}
+
+        data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+        """
+        let bytes = Data(sse.utf8)
+        let emojiStart = bytes.firstIndex(of: 0xF0)!
+        let splitInsideEmoji = emojiStart + 2
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: byteStream([
+                        Data(bytes[..<splitInsideEmoji]),
+                        Data(bytes[splitInsideEmoji...])
+                    ])
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.stream(body: .object([:]))
+
+        XCTAssertEqual(result, .success([
+            .success(.outputTextDelta(delta)),
+            .success(.completed(responseID: "resp_1", tokenUsage: nil))
+        ]))
+    }
+
+    func testResponsesClientReturnsTransportErrorForStreamChunkFailure() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: APIByteStream { continuation in
+                        continuation.yield(.success(Data("data: ".utf8)))
+                        continuation.yield(.failure(.network("reset")))
+                        continuation.finish()
+                    }
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.stream(body: .object([:]))
+
+        XCTAssertEqual(result, .failure(.transport(.network("reset"))))
+    }
+
     func testResponsesClientUsesChatPathWhenProviderWireIsChat() async {
         let transport = CapturingTransport(
             streamResults: [
@@ -231,6 +291,15 @@ private final class CapturingTransport: APITransport, @unchecked Sendable {
             return .failure(.build("missing stream result"))
         }
         return streamResults.removeFirst()
+    }
+}
+
+private func byteStream(_ chunks: [Data]) -> APIByteStream {
+    APIByteStream { continuation in
+        for chunk in chunks {
+            continuation.yield(.success(chunk))
+        }
+        continuation.finish()
     }
 }
 
