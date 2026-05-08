@@ -298,14 +298,24 @@ public enum McpConfigStore {
 }
 
 public enum McpCommandFormatter {
-    public static func list(servers: [String: McpServerConfig], json: Bool) throws -> String {
+    public static func list(
+        servers: [String: McpServerConfig],
+        json: Bool,
+        authStatuses: [String: McpAuthStatus]? = nil
+    ) throws -> String {
         let entries = servers.keys.sorted().compactMap { name -> (String, McpServerConfig)? in
             guard let config = servers[name] else { return nil }
             return (name, config)
         }
 
         if json {
-            let values = entries.map { name, server in listJSONValue(name: name, server: server) }
+            let values = entries.map { name, server in
+                listJSONValue(
+                    name: name,
+                    server: server,
+                    authStatus: authStatuses?[name] ?? McpAuthStatusResolver.authStatus(for: server)
+                )
+            }
             return try prettyJSON(.array(values))
         }
 
@@ -319,7 +329,7 @@ public enum McpCommandFormatter {
 
         for (name, server) in entries {
             let status = server.enabled ? "enabled" : "disabled"
-            let auth = McpAuthStatus.unsupported.description
+            let auth = (authStatuses?[name] ?? McpAuthStatusResolver.authStatus(for: server)).description
             switch server.transport {
             case let .stdio(command, args, env, envVars, cwd):
                 stdioRows.append([
@@ -400,14 +410,18 @@ public enum McpCommandFormatter {
         return lines.joined(separator: "\n")
     }
 
-    public static func listJSONValue(name: String, server: McpServerConfig) -> JSONValue {
+    public static func listJSONValue(
+        name: String,
+        server: McpServerConfig,
+        authStatus: McpAuthStatus? = nil
+    ) -> JSONValue {
         .object([
             "name": .string(name),
             "enabled": .bool(server.enabled),
             "transport": transportJSONValue(server.transport),
             "startup_timeout_sec": secondsJSONValue(server.startupTimeoutSec),
             "tool_timeout_sec": secondsJSONValue(server.toolTimeoutSec),
-            "auth_status": .string(McpAuthStatus.unsupported.rawValue)
+            "auth_status": .string((authStatus ?? McpAuthStatusResolver.authStatus(for: server)).rawValue)
         ])
     }
 
@@ -534,6 +548,23 @@ public enum McpCommandFormatter {
     private static func stringArrayJSONValue(_ value: [String]?) -> JSONValue {
         guard let value else { return .null }
         return .array(value.map(JSONValue.string))
+    }
+}
+
+public enum McpAuthStatusResolver {
+    public static func authStatuses(for servers: [String: McpServerConfig]) -> [String: McpAuthStatus] {
+        Dictionary(uniqueKeysWithValues: servers.map { name, server in
+            (name, authStatus(for: server))
+        })
+    }
+
+    public static func authStatus(for server: McpServerConfig) -> McpAuthStatus {
+        switch server.transport {
+        case .stdio:
+            return .unsupported
+        case let .streamableHttp(_, bearerTokenEnvVar, _, _):
+            return bearerTokenEnvVar == nil ? .unsupported : .bearerToken
+        }
     }
 }
 

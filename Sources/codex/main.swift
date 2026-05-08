@@ -175,7 +175,11 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
         let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
-            stdoutMessage: try McpCommandFormatter.list(servers: servers, json: json)
+            stdoutMessage: try McpCommandFormatter.list(
+                servers: servers,
+                json: json,
+                authStatuses: McpAuthStatusResolver.authStatuses(for: servers)
+            )
         )
 
     case let .get(name, json):

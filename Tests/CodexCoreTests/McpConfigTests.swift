@@ -198,6 +198,43 @@ final class McpConfigTests: XCTestCase {
         ]))
     }
 
+    func testAuthStatusResolverMarksBearerTokenHTTPServers() throws {
+        let servers = [
+            "docs": McpServerConfig(
+                transport: .stdio(command: "echo", args: [], env: nil, envVars: [], cwd: nil)
+            ),
+            "github": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "GITHUB_TOKEN",
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                )
+            ),
+            "figma": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://figma.example/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                )
+            )
+        ]
+
+        XCTAssertEqual(McpAuthStatusResolver.authStatuses(for: servers), [
+            "docs": .unsupported,
+            "github": .bearerToken,
+            "figma": .unsupported
+        ])
+
+        let text = try McpCommandFormatter.list(servers: servers, json: false)
+        XCTAssertTrue(text.contains("github"))
+        XCTAssertTrue(text.contains("Bearer token"))
+
+        let json = try McpCommandFormatter.list(servers: servers, json: true)
+        XCTAssertTrue(json.contains(#""auth_status": "bearer_token""#))
+    }
+
     func testValidateServerNameMatchesRustAllowedCharacters() {
         XCTAssertNoThrow(try McpServerName.validate("docs-1_server"))
         XCTAssertThrowsError(try McpServerName.validate("docs.server")) { error in
