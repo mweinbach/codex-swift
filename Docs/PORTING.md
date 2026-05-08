@@ -231,6 +231,8 @@ Source baseline inspected for this scaffold:
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
   - rollout response-item and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
+- `codex-rs/core/src/rollout/recorder.rs`
+  - rollout recorder create/resume path layout, session metadata JSONL prelude, persisted-item filtering, per-line flushes, shutdown, conversation listing delegation, and rollout history extraction with invalid-line skips and first session-id selection
 - `codex-rs/core/src/rollout/list.rs`
   - conversation listing over `sessions/YYYY/MM/DD`, newest-first timestamp/UUID ordering, cursor serialization/parsing, source/provider filters, head-summary extraction, updated-at fallback, scan caps, and conversation-id path lookup
 - `codex-rs/core/src/state/turn.rs`
@@ -311,7 +313,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
 - Starlark-compatible execpolicy parser completeness
 - ChatGPT browser login and device-code login
-- rollout recorder flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items
+- full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
 

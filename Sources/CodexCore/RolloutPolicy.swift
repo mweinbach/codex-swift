@@ -65,6 +65,117 @@ public enum RolloutItem: Equatable, Sendable {
 }
 
 public enum RolloutPolicy {
+    public static func eventKind(for event: EventMessage) -> RolloutEventMessageKind {
+        switch event {
+        case .error:
+            return .error
+        case .warning:
+            return .warning
+        case .contextCompacted:
+            return .contextCompacted
+        case .taskStarted:
+            return .taskStarted
+        case .taskComplete:
+            return .taskComplete
+        case .tokenCount:
+            return .tokenCount
+        case .agentMessage:
+            return .agentMessage
+        case .userMessage:
+            return .userMessage
+        case .agentMessageDelta:
+            return .agentMessageDelta
+        case .agentReasoning:
+            return .agentReasoning
+        case .agentReasoningDelta:
+            return .agentReasoningDelta
+        case .agentReasoningRawContent:
+            return .agentReasoningRawContent
+        case .agentReasoningRawContentDelta:
+            return .agentReasoningRawContentDelta
+        case .agentReasoningSectionBreak:
+            return .agentReasoningSectionBreak
+        case .sessionConfigured:
+            return .sessionConfigured
+        case .mcpStartupUpdate:
+            return .mcpStartupUpdate
+        case .mcpStartupComplete:
+            return .mcpStartupComplete
+        case .mcpToolCallBegin:
+            return .mcpToolCallBegin
+        case .mcpToolCallEnd:
+            return .mcpToolCallEnd
+        case .mcpListToolsResponse:
+            return .mcpListToolsResponse
+        case .webSearchBegin:
+            return .webSearchBegin
+        case .webSearchEnd:
+            return .webSearchEnd
+        case .execCommandBegin:
+            return .execCommandBegin
+        case .execCommandOutputDelta:
+            return .execCommandOutputDelta
+        case .terminalInteraction:
+            return .terminalInteraction
+        case .execCommandEnd:
+            return .execCommandEnd
+        case .viewImageToolCall:
+            return .viewImageToolCall
+        case .execApprovalRequest:
+            return .execApprovalRequest
+        case .elicitationRequest:
+            return .elicitationRequest
+        case .applyPatchApprovalRequest:
+            return .applyPatchApprovalRequest
+        case .deprecationNotice:
+            return .deprecationNotice
+        case .backgroundEvent:
+            return .backgroundEvent
+        case .undoStarted:
+            return .undoStarted
+        case .undoCompleted:
+            return .undoCompleted
+        case .streamError:
+            return .streamError
+        case .patchApplyBegin:
+            return .patchApplyBegin
+        case .patchApplyEnd:
+            return .patchApplyEnd
+        case .turnDiff:
+            return .turnDiff
+        case .getHistoryEntryResponse:
+            return .getHistoryEntryResponse
+        case .listSkillsResponse:
+            return .listSkillsResponse
+        case .listCustomPromptsResponse:
+            return .listCustomPromptsResponse
+        case .skillsUpdateAvailable:
+            return .skillsUpdateAvailable
+        case .planUpdate:
+            return .planUpdate
+        case .turnAborted:
+            return .turnAborted
+        case .shutdownComplete:
+            return .shutdownComplete
+        case .enteredReviewMode:
+            return .enteredReviewMode
+        case .exitedReviewMode:
+            return .exitedReviewMode
+        case .rawResponseItem:
+            return .rawResponseItem
+        case .itemStarted:
+            return .itemStarted
+        case .itemCompleted:
+            return .itemCompleted
+        case .agentMessageContentDelta:
+            return .agentMessageContentDelta
+        case .reasoningContentDelta:
+            return .reasoningContentDelta
+        case .reasoningRawContentDelta:
+            return .reasoningRawContentDelta
+        }
+    }
+
     public static func isPersistedResponseItem(_ item: RolloutItem) -> Bool {
         switch item {
         case let .responseItem(responseItem):
@@ -152,5 +263,9 @@ public enum RolloutPolicy {
              .skillsUpdateAvailable:
             return false
         }
+    }
+
+    public static func shouldPersistEventMessage(_ event: EventMessage) -> Bool {
+        shouldPersistEventMessage(eventKind(for: event))
     }
 }

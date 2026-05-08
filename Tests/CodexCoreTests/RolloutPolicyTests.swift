@@ -52,6 +52,13 @@ final class RolloutPolicyTests: XCTestCase {
         }
     }
 
+    func testEventMessageKindMappingFeedsPersistencePolicy() {
+        XCTAssertEqual(RolloutPolicy.eventKind(for: .warning(WarningEvent(message: "heads up"))), .warning)
+        XCTAssertEqual(RolloutPolicy.eventKind(for: .userMessage(UserMessageEvent(message: "hello"))), .userMessage)
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
+    }
+
     func testRolloutItemPersistenceMatchesRustBuckets() {
         XCTAssertTrue(RolloutPolicy.isPersistedResponseItem(.sessionMeta))
         XCTAssertTrue(RolloutPolicy.isPersistedResponseItem(.compacted))
