@@ -494,6 +494,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["layers"])
     }
 
+    func testConfigValueWriteReplacesValueAndReturnsRustShape() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let read = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let origins = try XCTUnwrap(readResult["origins"] as? [String: Any])
+        let modelOrigin = try XCTUnwrap(origins["model"] as? [String: Any])
+        let expectedVersion = try XCTUnwrap(modelOrigin["version"] as? String)
+
+        let response = try appServerResponse(
+            #"{"id":2,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace","expectedVersion":"\#(expectedVersion)"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertTrue((result["version"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertEqual(result["filePath"] as? String, configFile.standardizedFileURL.path)
+        XCTAssertTrue(result["overriddenMetadata"] is NSNull)
+
+        let verify = try appServerResponse(
+            #"{"id":3,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let verifyResult = try XCTUnwrap(verify["result"] as? [String: Any])
+        let config = try XCTUnwrap(verifyResult["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "gpt-new")
+    }
+
+    func testConfigValueWriteRejectsVersionConflict() throws {
+        let temp = try TemporaryDirectory()
+        try #"model = "gpt-old""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace","expectedVersion":"sha256:stale"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "Configuration was modified since last read. Fetch latest version and retry."
+        )
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["config_write_error_code"] as? String, "configVersionConflict")
+    }
+
+    func testConfigBatchWriteAppliesMultipleEdits() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+        let writableRoot = temp.url.appendingPathComponent("workspace", isDirectory: true).path
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/batchWrite","params":{"filePath":"\#(configFile.path)","edits":[{"keyPath":"sandbox_mode","value":"workspace-write","mergeStrategy":"replace"},{"keyPath":"sandbox_workspace_write","value":{"writable_roots":["\#(writableRoot)"],"network_access":false},"mergeStrategy":"replace"}]}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(result["filePath"] as? String, configFile.standardizedFileURL.path)
+
+        let verify = try appServerResponse(
+            #"{"id":2,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let verifyResult = try XCTUnwrap(verify["result"] as? [String: Any])
+        let config = try XCTUnwrap(verifyResult["config"] as? [String: Any])
+        XCTAssertEqual(config["sandbox_mode"] as? String, "workspace-write")
+        let sandbox = try XCTUnwrap(config["sandbox_workspace_write"] as? [String: Any])
+        XCTAssertEqual(sandbox["writable_roots"] as? [String], [writableRoot])
+        XCTAssertEqual(sandbox["network_access"] as? Bool, false)
+    }
+
     func testGetUserSavedConfigReturnsLegacyRustShape() throws {
         let temp = try TemporaryDirectory()
         let writableRoot = temp.url.appendingPathComponent("workspace", isDirectory: true).path

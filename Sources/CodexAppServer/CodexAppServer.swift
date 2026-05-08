@@ -157,6 +157,57 @@ public enum CodexAppServer {
         return response
     }
 
+    fileprivate static func configValueWriteResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let keyPath = stringParam(params?["keyPath"]) else {
+            throw AppServerError.invalidRequest("missing keyPath")
+        }
+        guard let mergeStrategy = stringParam(params?["mergeStrategy"]) else {
+            throw AppServerError.invalidRequest("missing mergeStrategy")
+        }
+        let edit = ConfigWriteEdit(
+            keyPath: keyPath,
+            value: try configWriteValue(params?["value"]),
+            mergeStrategy: mergeStrategy
+        )
+        return try configWriteResult(
+            edits: [edit],
+            filePath: stringParam(params?["filePath"]),
+            expectedVersion: stringParam(params?["expectedVersion"]),
+            configuration: configuration
+        )
+    }
+
+    fileprivate static func configBatchWriteResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let rawEdits = params?["edits"] as? [[String: Any]] else {
+            throw AppServerError.invalidRequest("missing edits")
+        }
+        let edits = try rawEdits.map { rawEdit in
+            guard let keyPath = stringParam(rawEdit["keyPath"]) else {
+                throw AppServerError.invalidRequest("missing keyPath")
+            }
+            guard let mergeStrategy = stringParam(rawEdit["mergeStrategy"]) else {
+                throw AppServerError.invalidRequest("missing mergeStrategy")
+            }
+            return ConfigWriteEdit(
+                keyPath: keyPath,
+                value: try configWriteValue(rawEdit["value"]),
+                mergeStrategy: mergeStrategy
+            )
+        }
+        return try configWriteResult(
+            edits: edits,
+            filePath: stringParam(params?["filePath"]),
+            expectedVersion: stringParam(params?["expectedVersion"]),
+            configuration: configuration
+        )
+    }
+
     fileprivate static func userSavedConfigResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
@@ -415,13 +466,17 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func errorObject(id: Any, code: Int, message: String) -> [String: Any] {
-        [
+    fileprivate static func errorObject(id: Any, code: Int, message: String, data: Any? = nil) -> [String: Any] {
+        var error: [String: Any] = [
+            "code": code,
+            "message": message
+        ]
+        if let data {
+            error["data"] = data
+        }
+        return [
             "id": id,
-            "error": [
-                "code": code,
-                "message": message
-            ]
+            "error": error
         ]
     }
 
@@ -756,6 +811,226 @@ public enum CodexAppServer {
         }
     }
 
+    private static func configWriteResult(
+        edits: [ConfigWriteEdit],
+        filePath: String?,
+        expectedVersion: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let allowedPath = configFile.standardizedFileURL.path
+        let providedPath = filePath.map { URL(fileURLWithPath: $0, isDirectory: false).standardizedFileURL.path }
+            ?? allowedPath
+        guard providedPath == allowedPath else {
+            throw AppServerError.invalidRequestWithData(
+                "Only writes to the user config are allowed",
+                data: ["config_write_error_code": "configLayerReadonly"]
+            )
+        }
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        let userConfig = stack.getUserLayer()?.config ?? .table([:])
+        let currentVersion = stack.getUserLayer()?.version ?? ConfigFingerprint.version(for: userConfig)
+        if let expectedVersion, expectedVersion != currentVersion {
+            throw AppServerError.invalidRequestWithData(
+                "Configuration was modified since last read. Fetch latest version and retry.",
+                data: ["config_write_error_code": "configVersionConflict"]
+            )
+        }
+
+        var nextConfig = userConfig
+        for edit in edits {
+            try applyConfigWriteEdit(edit, to: &nextConfig)
+        }
+
+        try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
+        try renderConfigToml(nextConfig).write(to: configFile, atomically: true, encoding: .utf8)
+
+        return [
+            "status": "ok",
+            "version": ConfigFingerprint.version(for: nextConfig),
+            "filePath": allowedPath,
+            "overriddenMetadata": NSNull()
+        ]
+    }
+
+    private static func configWriteValue(_ value: Any?) throws -> ConfigValue? {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing value")
+        }
+        if value is NSNull {
+            return nil
+        }
+        return try configValue(fromJSONObject: value)
+    }
+
+    private static func configValue(fromJSONObject value: Any) throws -> ConfigValue {
+        switch value {
+        case let string as String:
+            return .string(string)
+        case let bool as Bool:
+            return .bool(bool)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            let double = number.doubleValue
+            if double.rounded() == double {
+                return .integer(number.int64Value)
+            }
+            return .double(double)
+        case let array as [Any]:
+            return .array(try array.map(configValue(fromJSONObject:)))
+        case let object as [String: Any]:
+            return .table(try object.mapValues(configValue(fromJSONObject:)))
+        default:
+            throw AppServerError.invalidRequestWithData(
+                "invalid value",
+                data: ["config_write_error_code": "configValidationError"]
+            )
+        }
+    }
+
+    private static func applyConfigWriteEdit(_ edit: ConfigWriteEdit, to config: inout ConfigValue) throws {
+        let path = edit.keyPath.split(separator: ".").map(String.init)
+        guard !path.isEmpty else {
+            throw AppServerError.invalidRequestWithData(
+                "keyPath must not be empty",
+                data: ["config_write_error_code": "configValidationError"]
+            )
+        }
+
+        if let value = edit.value {
+            setConfigValue(value, at: path, mergeStrategy: edit.mergeStrategy, in: &config)
+        } else if !removeConfigValue(at: path, in: &config) {
+            throw AppServerError.invalidRequestWithData(
+                "Path not found",
+                data: ["config_write_error_code": "configPathNotFound"]
+            )
+        }
+    }
+
+    private static func setConfigValue(
+        _ value: ConfigValue,
+        at path: [String],
+        mergeStrategy: String,
+        in target: inout ConfigValue
+    ) {
+        guard let first = path.first else { return }
+        var table: [String: ConfigValue]
+        if case let .table(existing) = target {
+            table = existing
+        } else {
+            table = [:]
+        }
+
+        if path.count == 1 {
+            if mergeStrategy == "upsert",
+               case let .table(existingTable)? = table[first],
+               case let .table(newTable) = value {
+                var merged = ConfigValue.table(existingTable)
+                merged.merge(overlay: .table(newTable))
+                table[first] = merged
+            } else {
+                table[first] = value
+            }
+            target = .table(table)
+            return
+        }
+
+        var child = table[first] ?? .table([:])
+        setConfigValue(value, at: Array(path.dropFirst()), mergeStrategy: mergeStrategy, in: &child)
+        table[first] = child
+        target = .table(table)
+    }
+
+    private static func removeConfigValue(at path: [String], in target: inout ConfigValue) -> Bool {
+        guard let first = path.first,
+              case var .table(table) = target
+        else {
+            return false
+        }
+        if path.count == 1 {
+            let removed = table.removeValue(forKey: first) != nil
+            target = .table(table)
+            return removed
+        }
+        guard var child = table[first] else {
+            return false
+        }
+        let removed = removeConfigValue(at: Array(path.dropFirst()), in: &child)
+        if removed {
+            table[first] = child
+            target = .table(table)
+        }
+        return removed
+    }
+
+    private static func renderConfigToml(_ value: ConfigValue) -> String {
+        guard case let .table(table) = value else {
+            return ""
+        }
+        var lines: [String] = []
+        renderConfigTable(table, path: [], lines: &lines)
+        return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
+    }
+
+    private static func renderConfigTable(_ table: [String: ConfigValue], path: [String], lines: inout [String]) {
+        let scalarKeys = table.keys.sorted().filter { key in
+            if case .table = table[key] { return false }
+            return true
+        }
+        for key in scalarKeys {
+            guard let value = table[key] else { continue }
+            lines.append("\(tomlKey(key)) = \(tomlLiteral(value))")
+        }
+
+        let tableKeys = table.keys.sorted().filter { key in
+            if case .table = table[key] { return true }
+            return false
+        }
+        for key in tableKeys {
+            guard case let .table(child)? = table[key] else { continue }
+            if !lines.isEmpty, lines.last?.isEmpty == false {
+                lines.append("")
+            }
+            let nextPath = path + [key]
+            lines.append("[\(nextPath.map(tomlKey).joined(separator: "."))]")
+            renderConfigTable(child, path: nextPath, lines: &lines)
+        }
+    }
+
+    private static func tomlLiteral(_ value: ConfigValue) -> String {
+        switch value {
+        case let .string(string):
+            return tomlString(string)
+        case let .integer(integer):
+            return String(integer)
+        case let .double(double):
+            return String(double)
+        case let .bool(bool):
+            return bool ? "true" : "false"
+        case let .array(array):
+            return "[\(array.map(tomlLiteral).joined(separator: ", "))]"
+        case let .table(table):
+            let body = table.keys.sorted().map { key in
+                "\(tomlKey(key)) = \(tomlLiteral(table[key]!))"
+            }.joined(separator: ", ")
+            return "{\(body)}"
+        }
+    }
+
+    private static func tomlKey(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        if !value.isEmpty, value.unicodeScalars.allSatisfy({ allowed.contains($0) }) {
+            return value
+        }
+        return tomlString(value)
+    }
+
     private static func userSavedConfigObject(_ value: ConfigValue) -> [String: Any] {
         let table = configTable(value) ?? [:]
         return [
@@ -1082,16 +1357,32 @@ private enum AppServerAuthKind {
 
 private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
+    case invalidRequestWithData(String, data: [String: String])
     case internalError(String)
 
     var description: String {
         switch self {
-        case let .invalidRequest(message):
+        case let .invalidRequest(message), let .invalidRequestWithData(message, _):
             return message
         case let .internalError(message):
             return message
         }
     }
+
+    var data: [String: String]? {
+        switch self {
+        case let .invalidRequestWithData(_, data):
+            return data
+        case .invalidRequest, .internalError:
+            return nil
+        }
+    }
+}
+
+private struct ConfigWriteEdit {
+    let keyPath: String
+    let value: ConfigValue?
+    let mergeStrategy: String
 }
 
 final class CodexAppServerMessageProcessor {
@@ -1169,6 +1460,16 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.configReadResult(params: params, configuration: configuration)
                     )
+                case "config/value/write":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.configValueWriteResult(params: params, configuration: configuration)
+                    )
+                case "config/batchWrite":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.configBatchWriteResult(params: params, configuration: configuration)
+                    )
                 case "getUserSavedConfig":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -1227,8 +1528,13 @@ final class CodexAppServerMessageProcessor {
                 }
             } catch let error as AppServerError {
                 switch error {
-                case .invalidRequest:
-                    response = CodexAppServer.errorObject(id: id, code: -32600, message: error.description)
+                case .invalidRequest, .invalidRequestWithData:
+                    response = CodexAppServer.errorObject(
+                        id: id,
+                        code: -32600,
+                        message: error.description,
+                        data: error.data
+                    )
                 case .internalError:
                     response = CodexAppServer.errorObject(id: id, code: -32603, message: error.description)
                 }
