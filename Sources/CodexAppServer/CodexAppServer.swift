@@ -1822,6 +1822,27 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func pluginReadResult(params: [String: Any]?) throws -> [String: Any] {
+        let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
+        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
+        _ = stringParam(params?["pluginName"]) ?? ""
+        switch (marketplacePath, remoteMarketplaceName) {
+        case (.some, .some), (.none, .none):
+            throw AppServerError.invalidRequest("plugin/read requires exactly one of marketplacePath or remoteMarketplaceName")
+        case (.some, .none):
+            throw AppServerError.invalidRequest("local plugin read is not implemented")
+        case (.none, .some(let remoteMarketplaceName)):
+            throw AppServerError.invalidRequest("remote plugin read is not enabled for marketplace \(remoteMarketplaceName)")
+        }
+    }
+
+    fileprivate static func pluginSkillReadResult(params: [String: Any]?) throws -> [String: Any] {
+        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"]) ?? ""
+        _ = stringParam(params?["remotePluginId"]) ?? ""
+        _ = stringParam(params?["skillName"]) ?? ""
+        throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -3154,6 +3175,19 @@ public enum CodexAppServer {
     private static func absolutePathParam(_ value: Any?, name: String) throws -> String {
         guard let path = stringParam(value) else {
             throw AppServerError.invalidRequest("missing \(name)")
+        }
+        guard path.hasPrefix("/") else {
+            throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
+        }
+        return path
+    }
+
+    private static func optionalAbsolutePathParam(_ value: Any?, name _: String) throws -> String? {
+        guard let value else {
+            return nil
+        }
+        guard let path = stringParam(value) else {
+            return nil
         }
         guard path.hasPrefix("/") else {
             throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
@@ -5917,6 +5951,16 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginListResult(params: params)
+                    )
+                case "plugin/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginReadResult(params: params)
+                    )
+                case "plugin/skill/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginSkillReadResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

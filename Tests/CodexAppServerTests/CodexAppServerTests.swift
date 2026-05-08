@@ -1763,6 +1763,59 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadValidatesSourceAndReportsRemoteDisabled() throws {
+        let temp = try TemporaryDirectory()
+        let marketplace = temp.url.appendingPathComponent("marketplace.json").path
+
+        let missingSource = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"pluginName":"gmail"}}"#,
+            codexHome: temp.url
+        )
+        let missingSourceError = try XCTUnwrap(missingSource["error"] as? [String: Any])
+        XCTAssertEqual(missingSourceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            missingSourceError["message"] as? String,
+            "plugin/read requires exactly one of marketplacePath or remoteMarketplaceName"
+        )
+
+        let duplicateSource = try appServerResponse(
+            #"{"id":2,"method":"plugin/read","params":{"marketplacePath":"\#(marketplace)","remoteMarketplaceName":"openai-curated","pluginName":"gmail"}}"#,
+            codexHome: temp.url
+        )
+        let duplicateSourceError = try XCTUnwrap(duplicateSource["error"] as? [String: Any])
+        XCTAssertEqual(duplicateSourceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            duplicateSourceError["message"] as? String,
+            "plugin/read requires exactly one of marketplacePath or remoteMarketplaceName"
+        )
+
+        let remoteDisabled = try appServerResponse(
+            #"{"id":3,"method":"plugin/read","params":{"remoteMarketplaceName":"openai-curated","pluginName":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let remoteDisabledError = try XCTUnwrap(remoteDisabled["error"] as? [String: Any])
+        XCTAssertEqual(remoteDisabledError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            remoteDisabledError["message"] as? String,
+            "remote plugin read is not enabled for marketplace openai-curated"
+        )
+    }
+
+    func testPluginSkillReadReportsRemoteDisabled() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"openai-curated","remotePluginId":"plugins~Plugin_gmail","skillName":""}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "remote plugin skill read is not enabled for marketplace openai-curated"
+        )
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
