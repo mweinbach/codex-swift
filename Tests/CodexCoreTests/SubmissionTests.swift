@@ -105,6 +105,7 @@ final class SubmissionTests: XCTestCase {
                 "type": "workspace-write",
                 "writable_roots": ["/repo/out"],
                 "network_access": true,
+                "exclude_tmpdir_env_var": false,
                 "exclude_slash_tmp": true
             ],
             "model": "o3",

@@ -26,8 +26,19 @@ final class SandboxPolicyTests: XCTestCase {
 
     func testTaggedCodableShapeMatchesSerde() throws {
         let policy = SandboxPolicy.newWorkspaceWritePolicy()
-        let encoded = try String(data: JSONEncoder().encode(policy), encoding: .utf8)!
-        XCTAssertEqual(encoded, #"{"type":"workspace-write"}"#)
-        XCTAssertEqual(try JSONDecoder().decode(SandboxPolicy.self, from: Data(encoded.utf8)), policy)
+        try XCTAssertJSONObjectEqual(policy, [
+            "type": "workspace-write",
+            "network_access": false,
+            "exclude_tmpdir_env_var": false,
+            "exclude_slash_tmp": false
+        ])
+
+        try XCTAssertJSONObjectEqual(SandboxPolicy.externalSandbox(networkAccess: .restricted), [
+            "type": "external-sandbox",
+            "network_access": "restricted"
+        ])
+
+        let encoded = try JSONEncoder().encode(policy)
+        XCTAssertEqual(try JSONDecoder().decode(SandboxPolicy.self, from: encoded), policy)
     }
 }

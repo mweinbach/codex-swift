@@ -67,7 +67,8 @@ final class SessionConfiguredEventTests: XCTestCase {
                 "type": "workspace-write",
                 "writable_roots": ["/tmp/work"],
                 "network_access": true,
-                "exclude_tmpdir_env_var": true
+                "exclude_tmpdir_env_var": true,
+                "exclude_slash_tmp": false
             ],
             "cwd": "/tmp/work",
             "reasoning_effort": "high",

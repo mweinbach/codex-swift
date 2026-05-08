@@ -48,7 +48,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/openai_models.rs`
   - reasoning effort wire values needed by config summaries
 - `codex-rs/protocol/src/protocol.rs`
-  - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers
+  - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
   - built-in approval preset ordering and policy pairs
 - `codex-rs/protocol/src/approvals.rs`

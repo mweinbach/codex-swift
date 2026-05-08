@@ -104,23 +104,15 @@ extension SandboxPolicy: Codable {
             try container.encode(PolicyType.readOnly, forKey: .type)
         case let .externalSandbox(networkAccess):
             try container.encode(PolicyType.externalSandbox, forKey: .type)
-            if networkAccess != .restricted {
-                try container.encode(networkAccess, forKey: .networkAccess)
-            }
+            try container.encode(networkAccess, forKey: .networkAccess)
         case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):
             try container.encode(PolicyType.workspaceWrite, forKey: .type)
             if !writableRoots.isEmpty {
                 try container.encode(writableRoots, forKey: .writableRoots)
             }
-            if networkAccess {
-                try container.encode(networkAccess, forKey: .networkAccess)
-            }
-            if excludeTmpdirEnvVar {
-                try container.encode(excludeTmpdirEnvVar, forKey: .excludeTmpdirEnvVar)
-            }
-            if excludeSlashTmp {
-                try container.encode(excludeSlashTmp, forKey: .excludeSlashTmp)
-            }
+            try container.encode(networkAccess, forKey: .networkAccess)
+            try container.encode(excludeTmpdirEnvVar, forKey: .excludeTmpdirEnvVar)
+            try container.encode(excludeSlashTmp, forKey: .excludeSlashTmp)
         }
     }
 }
