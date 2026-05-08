@@ -26,6 +26,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
+    public var serviceTier: String?
     public var chatgptBaseURL: String?
     public var experimentalInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
@@ -45,6 +46,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case modelReasoningEffort = "model_reasoning_effort"
         case modelReasoningSummary = "model_reasoning_summary"
         case modelVerbosity = "model_verbosity"
+        case serviceTier = "service_tier"
         case chatgptBaseURL = "chatgpt_base_url"
         case experimentalInstructionsFile = "experimental_instructions_file"
         case experimentalCompactPromptFile = "experimental_compact_prompt_file"
@@ -65,6 +67,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
+        serviceTier: String? = nil,
         chatgptBaseURL: String? = nil,
         experimentalInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
@@ -83,6 +86,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
+        self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
         self.experimentalInstructionsFile = experimentalInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
@@ -104,6 +108,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.modelReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .modelReasoningEffort)
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
         self.modelVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .modelVerbosity)
+        self.serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         self.chatgptBaseURL = try container.decodeIfPresent(String.self, forKey: .chatgptBaseURL)
         self.experimentalInstructionsFile = try container.decodeIfPresent(String.self, forKey: .experimentalInstructionsFile)
         self.experimentalCompactPromptFile = try container.decodeIfPresent(String.self, forKey: .experimentalCompactPromptFile)
@@ -125,6 +130,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(modelReasoningEffort, into: &container, forKey: .modelReasoningEffort)
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
         try encodeOptional(modelVerbosity, into: &container, forKey: .modelVerbosity)
+        try encodeOptional(serviceTier, into: &container, forKey: .serviceTier)
         try encodeOptional(chatgptBaseURL, into: &container, forKey: .chatgptBaseURL)
         try encodeOptional(experimentalInstructionsFile, into: &container, forKey: .experimentalInstructionsFile)
         try encodeOptional(experimentalCompactPromptFile, into: &container, forKey: .experimentalCompactPromptFile)
