@@ -1,21 +1,10 @@
 import Foundation
 
-public protocol Readiness: Sendable {
-    func isReady() -> Bool
-    func subscribe() async throws -> ReadinessToken
-    func markReady(_ token: ReadinessToken) async throws -> Bool
-    func waitReady() async
-}
-
-public struct ReadinessToken: Hashable, Sendable, CustomStringConvertible {
+public struct ReadinessToken: Hashable, Sendable {
     public let rawValue: Int32
 
-    public init(rawValue: Int32) {
+    public init(_ rawValue: Int32) {
         self.rawValue = rawValue
-    }
-
-    public var description: String {
-        "Token(\(rawValue))"
     }
 }
 
@@ -26,9 +15,9 @@ public enum ReadinessError: Error, Equatable, CustomStringConvertible, Localized
     public var description: String {
         switch self {
         case .tokenLockFailed:
-            "Failed to acquire readiness token lock"
+            return "Failed to acquire readiness token lock"
         case .flagAlreadyReady:
-            "Flag is already ready. Impossible to subscribe"
+            return "Flag is already ready. Impossible to subscribe"
         }
     }
 
@@ -37,116 +26,107 @@ public enum ReadinessError: Error, Equatable, CustomStringConvertible, Localized
     }
 }
 
-public final class ReadinessFlag: Readiness, @unchecked Sendable, CustomDebugStringConvertible {
+/// Port of codex-rs/utils/readiness/src/lib.rs.
+public final class ReadinessFlag: @unchecked Sendable {
+    private static let lockTimeout: TimeInterval = 1.0
+
     private let lock = NSLock()
-    private let lockTimeout: TimeInterval
     private var ready = false
     private var nextID: Int32 = 1
-    private var tokens: Set<ReadinessToken> = []
+    private var tokens = Set<ReadinessToken>()
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    public init(lockTimeout: TimeInterval = 1.0) {
-        self.lockTimeout = lockTimeout
-    }
+    public init() {}
 
-    public var debugDescription: String {
-        "ReadinessFlag(ready: \(isReadyLoaded()))"
-    }
-
-    public func isReady() -> Bool {
-        lock.lock()
-        if ready {
-            lock.unlock()
-            return true
+    public var isReady: Bool {
+        if lock.try() {
+            defer { lock.unlock() }
+            if ready {
+                return true
+            }
+            if tokens.isEmpty {
+                markReadyLocked()
+                return true
+            }
+            return false
         }
 
-        if tokens.isEmpty {
-            ready = true
-            let continuations = waiters
-            waiters.removeAll()
-            lock.unlock()
-            continuations.forEach { $0.resume() }
-            return true
-        }
-
-        lock.unlock()
         return false
     }
 
-    public func subscribe() async throws -> ReadinessToken {
-        try withLockedState {
-            guard !ready else {
+    public func subscribe() throws -> ReadinessToken {
+        try withLock {
+            if ready {
                 throw ReadinessError.flagAlreadyReady
             }
 
-            let token = ReadinessToken(rawValue: nextID)
+            let token = ReadinessToken(nextID)
             nextID &+= 1
-            if nextID == 0 {
-                nextID = 1
-            }
             tokens.insert(token)
             return token
         }
     }
 
-    public func markReady(_ token: ReadinessToken) async throws -> Bool {
-        if token.rawValue == 0 {
-            return false
-        }
-
-        let continuations = try withLockedState {
-            if ready {
-                return nil as [CheckedContinuation<Void, Never>]?
+    @discardableResult
+    public func markReady(_ token: ReadinessToken) throws -> Bool {
+        try withLock {
+            if ready || token.rawValue == 0 {
+                return false
             }
             guard tokens.remove(token) != nil else {
-                return nil
+                return false
             }
 
-            ready = true
-            tokens.removeAll()
-            let continuations = waiters
-            waiters.removeAll()
-            return continuations
+            markReadyLocked()
+            return true
         }
-
-        guard let continuations else {
-            return false
-        }
-        continuations.forEach { $0.resume() }
-        return true
     }
 
     public func waitReady() async {
-        if isReady() {
+        if isReady {
             return
         }
 
         await withCheckedContinuation { continuation in
-            lock.lock()
-            if ready {
-                lock.unlock()
-                continuation.resume()
-                return
-            }
-            waiters.append(continuation)
-            lock.unlock()
+            addWaiterOrResume(continuation)
         }
     }
 
-    private func isReadyLoaded() -> Bool {
-        lock.lock()
-        let value = ready
-        lock.unlock()
-        return value
-    }
-
-    private func withLockedState<R>(_ body: () throws -> R) throws -> R {
-        guard lock.lock(before: Date(timeIntervalSinceNow: lockTimeout)) else {
+    private func lockBeforeDeadline() throws {
+        guard lock.lock(before: Date(timeIntervalSinceNow: Self.lockTimeout)) else {
             throw ReadinessError.tokenLockFailed
         }
-        defer {
+    }
+
+    private func addWaiterOrResume(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if ready {
             lock.unlock()
+            continuation.resume()
+            return
         }
+        waiters.append(continuation)
+        lock.unlock()
+    }
+
+    private func withLock<T>(_ body: () throws -> T) throws -> T {
+        try lockBeforeDeadline()
+        defer { lock.unlock() }
         return try body()
+    }
+
+    private func markReadyLocked() {
+        guard !ready else {
+            return
+        }
+        ready = true
+        tokens.removeAll()
+        let continuations = waiters
+        waiters.removeAll()
+        lock.unlock()
+        for continuation in continuations {
+            continuation.resume()
+        }
+        lock.lock()
     }
 }

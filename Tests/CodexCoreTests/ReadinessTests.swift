@@ -4,87 +4,64 @@ import XCTest
 final class ReadinessTests: XCTestCase {
     func testSubscribeAndMarkReadyRoundTrip() async throws {
         let flag = ReadinessFlag()
-        let token = try await flag.subscribe()
+        let token = try flag.subscribe()
 
-        let markedReady = try await flag.markReady(token)
-        XCTAssertTrue(markedReady)
-        XCTAssertTrue(flag.isReady())
+        XCTAssertTrue(try flag.markReady(token))
+        XCTAssertTrue(flag.isReady)
     }
 
-    func testSubscribeAfterReadyThrows() async throws {
+    func testSubscribeAfterReadyReturnsRustError() async throws {
         let flag = ReadinessFlag()
-        let token = try await flag.subscribe()
-        let markedReady = try await flag.markReady(token)
-        XCTAssertTrue(markedReady)
+        let token = try flag.subscribe()
+        XCTAssertTrue(try flag.markReady(token))
 
         do {
-            _ = try await flag.subscribe()
-            XCTFail("expected already-ready flag to reject new subscriptions")
-        } catch ReadinessError.flagAlreadyReady {
-            XCTAssertEqual(
-                ReadinessError.flagAlreadyReady.description,
-                "Flag is already ready. Impossible to subscribe"
-            )
+            _ = try flag.subscribe()
+            XCTFail("subscribe after readiness should fail")
+        } catch let error as ReadinessError {
+            XCTAssertEqual(error, .flagAlreadyReady)
+            XCTAssertEqual(String(describing: error), "Flag is already ready. Impossible to subscribe")
         }
     }
 
     func testMarkReadyRejectsUnknownAndZeroTokens() async throws {
         let flag = ReadinessFlag()
 
-        let unknownMarkedReady = try await flag.markReady(ReadinessToken(rawValue: 42))
-        XCTAssertFalse(unknownMarkedReady)
-        XCTAssertTrue(flag.isReady())
-        let zeroMarkedReady = try await flag.markReady(ReadinessToken(rawValue: 0))
-        XCTAssertFalse(zeroMarkedReady)
+        XCTAssertFalse(try flag.markReady(ReadinessToken(0)))
+        XCTAssertFalse(try flag.markReady(ReadinessToken(42)))
+        XCTAssertTrue(flag.isReady)
     }
 
     func testWaitReadyUnblocksAfterMarkReady() async throws {
         let flag = ReadinessFlag()
-        let token = try await flag.subscribe()
-
+        let token = try flag.subscribe()
         let waiter = Task {
             await flag.waitReady()
-            return true
         }
 
-        let markedReady = try await flag.markReady(token)
-        XCTAssertTrue(markedReady)
-        let waiterResult = await waiter.value
-        XCTAssertTrue(waiterResult)
+        XCTAssertTrue(try flag.markReady(token))
+        await waiter.value
     }
 
     func testMarkReadyTwiceUsesSingleToken() async throws {
         let flag = ReadinessFlag()
-        let token = try await flag.subscribe()
+        let token = try flag.subscribe()
 
-        let firstMarkedReady = try await flag.markReady(token)
-        let secondMarkedReady = try await flag.markReady(token)
-        XCTAssertTrue(firstMarkedReady)
-        XCTAssertFalse(secondMarkedReady)
+        XCTAssertTrue(try flag.markReady(token))
+        XCTAssertFalse(try flag.markReady(token))
     }
 
     func testIsReadyWithoutSubscribersMarksFlagReady() async throws {
         let flag = ReadinessFlag()
 
-        XCTAssertTrue(flag.isReady())
-        XCTAssertTrue(flag.isReady())
+        XCTAssertTrue(flag.isReady)
+        XCTAssertTrue(flag.isReady)
 
         do {
-            _ = try await flag.subscribe()
-            XCTFail("expected already-ready flag to reject subscriptions")
-        } catch ReadinessError.flagAlreadyReady {
-            // Expected.
+            _ = try flag.subscribe()
+            XCTFail("subscribe after no-subscriber readiness should fail")
+        } catch let error as ReadinessError {
+            XCTAssertEqual(error, .flagAlreadyReady)
         }
-    }
-
-    func testReadinessErrorDescriptionsMatchRust() {
-        XCTAssertEqual(
-            ReadinessError.tokenLockFailed.description,
-            "Failed to acquire readiness token lock"
-        )
-        XCTAssertEqual(
-            ReadinessError.flagAlreadyReady.description,
-            "Flag is already ready. Impossible to subscribe"
-        )
     }
 }

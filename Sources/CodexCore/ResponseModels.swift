@@ -794,7 +794,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode("reasoning", forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(summary, forKey: .summary)
-            if Self.shouldSerializeReasoningContent(content) {
+            if !Self.shouldSkipReasoningContent(content) {
                 try container.encode(content, forKey: .content)
             }
             try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
@@ -843,9 +843,9 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         }
     }
 
-    private static func shouldSerializeReasoningContent(_ content: [ReasoningItemContent]?) -> Bool {
+    private static func shouldSkipReasoningContent(_ content: [ReasoningItemContent]?) -> Bool {
         guard let content else {
-            return false
+            return true
         }
         return !content.contains { item in
             if case .reasoningText = item {
