@@ -43,6 +43,8 @@ Source baseline inspected for this scaffold:
   - string-backed Codable conversation IDs with UUIDv7 generation
 - `codex-rs/protocol/src/config_types.rs`
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
+- `codex-rs/protocol/src/openai_models.rs`
+  - reasoning effort wire values needed by config summaries
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers
 - `codex-rs/common/src/approval_presets.rs`
@@ -110,6 +112,8 @@ Source baseline inspected for this scaffold:
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
+- `codex-rs/common/src/config_summary.rs`
+  - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
 
 ## Known Gaps
 

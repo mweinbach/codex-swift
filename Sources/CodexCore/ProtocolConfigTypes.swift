@@ -7,10 +7,24 @@ public enum ReasoningSummary: String, Codable, CaseIterable, Equatable, Sendable
     case none
 }
 
+public enum ReasoningEffort: String, Codable, CaseIterable, Equatable, Sendable {
+    case none
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+}
+
 public enum Verbosity: String, Codable, CaseIterable, Equatable, Sendable {
     case low
     case medium
     case high
+}
+
+public enum WireAPI: String, Codable, CaseIterable, Equatable, Sendable {
+    case responses
+    case chat
 }
 
 public enum ForcedLoginMethod: String, Codable, CaseIterable, Equatable, Sendable {
