@@ -39,6 +39,8 @@ Source baseline inspected for this scaffold:
   - `-c key=value` parsing, TOML-like literal fallback, and dotted-path application
 - `codex-rs/core/src/config_loader/merge.rs` and `codex-rs/core/src/config_loader/overrides.rs`
   - recursive TOML-like value merging, non-table replacement, and CLI override layer construction
+- `codex-rs/utils/json-to-toml/src/lib.rs`
+  - JSON-to-TOML value conversion for null, booleans, numbers, strings, arrays, and nested objects
 - `codex-rs/core/src/config_loader/layer_io.rs` and `codex-rs/core/src/config_loader/macos.rs`
   - legacy managed-config file loading, `CODEX_MANAGED_CONFIG_PATH`, managed preferences base64 parsing, config-layer stack loading, project-layer inclusion, and managed-layer precedence over CLI/user/project config
 - `codex-rs/core/src/features.rs`
