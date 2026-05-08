@@ -755,6 +755,10 @@ private func shellQuote(_ token: String) -> String {
         return token
     }
 
+    if token.contains("\\"), !token.contains("\"") {
+        return "\"" + token.replacingOccurrences(of: "\\", with: "\\\\") + "\""
+    }
+
     if !token.contains("'") {
         return "'\(token)'"
     }

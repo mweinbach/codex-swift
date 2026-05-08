@@ -60,11 +60,21 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cat README.md"]), [
             .read(cmd: "cat README.md", name: "README.md", path: "README.md")
         ])
+
+        XCTAssertEqual(parseCommand(["zsh", "-lc", "cat README.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
     }
 
     func testCdThenCatIsSingleRead() {
         XCTAssertEqual(parseCommand(["cd", "foo", "&&", "cat", "foo.txt"]), [
             .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo/foo.txt")
+        ])
+    }
+
+    func testBashCdThenUnknownDropsLeadingCdLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
+            .unknown(cmd: "bar")
         ])
     }
 
@@ -122,17 +132,31 @@ final class ParsedCommandTests: XCTestCase {
                 path: "."
             )
         ])
+
+        XCTAssertEqual(parseCommand(["grep", "-R", "COD`EX_SANDBOX", "-n"]), [
+            .search(
+                cmd: "grep -R 'COD`EX_SANDBOX' -n",
+                query: "COD`EX_SANDBOX",
+                path: nil
+            )
+        ])
     }
 
     func testSupportsReadHelpers() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "head -n50 Cargo.toml"]), [
             .read(cmd: "head -n50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "head -n 50 Cargo.toml"]), [
+            .read(cmd: "head -n 50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
         XCTAssertEqual(parseCommand(["bash", "-lc", "head Cargo.toml"]), [
             .read(cmd: "head Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
         XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n+10 README.md"]), [
             .read(cmd: "tail -n+10 README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n 30 README.md"]), [
+            .read(cmd: "tail -n 30 README.md", name: "README.md", path: "README.md")
         ])
         XCTAssertEqual(parseCommand(["bash", "-lc", "tail README.md"]), [
             .read(cmd: "tail README.md", name: "README.md", path: "README.md")
@@ -152,6 +176,9 @@ final class ParsedCommandTests: XCTestCase {
     func testSearchVariants() {
         XCTAssertEqual(parseCommand(["fd", "-t", "f", "src/"]), [
             .search(cmd: "fd -t f src/", query: nil, path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["fd", "main", "src"]), [
+            .search(cmd: "fd main src", query: "main", path: "src")
         ])
         XCTAssertEqual(parseCommand(["find", ".", "-name", "*.rs"]), [
             .search(cmd: "find . -name '*.rs'", query: "*.rs", path: ".")
@@ -219,6 +246,25 @@ final class ParsedCommandTests: XCTestCase {
             .search(cmd: "rg foo", query: "foo", path: nil),
             .unknown(cmd: "echo done")
         ])
+
+        let mixed = #"pwd; ls -la; rg --files -g '!target' | wc -l; rg -n '^\[workspace\]' -n Cargo.toml || true; cargo --version"#
+        XCTAssertEqual(parseCommand(["bash", "-lc", mixed]), [
+            .unknown(cmd: "pwd"),
+            .listFiles(cmd: "ls -la", path: nil),
+            .search(cmd: "rg --files -g '!target'", query: nil, path: "!target"),
+            .search(cmd: ##"rg -n "^\\[workspace\\]" -n Cargo.toml"##, query: #"^\[workspace\]"#, path: "Cargo.toml"),
+            .unknown(cmd: "cargo --version")
+        ])
+    }
+
+    func testPathAndFlagEdgeCasesFromRustParser() {
+        XCTAssertEqual(parseCommand(["cat", #"pkg\src\main.rs"#]), [
+            .read(cmd: ##"cat "pkg\\src\\main.rs""##, name: "main.rs", path: #"pkg\src\main.rs"#)
+        ])
+
+        XCTAssertEqual(parseCommand(["ls", "--time-style=long-iso", "./dist"]), [
+            .listFiles(cmd: "ls '--time-style=long-iso' ./dist", path: ".")
+        ])
     }
 
     func testDedupesConsecutiveCommandsAndKeepsCommandParserCompatibility() {
@@ -230,6 +276,10 @@ final class ParsedCommandTests: XCTestCase {
 
     func testPowerShellCommandIsStripped() {
         XCTAssertEqual(parseCommand(["pwsh", "-NoProfile", "-c", "Write-Host hi"]), [
+            .unknown(cmd: "Write-Host hi")
+        ])
+
+        XCTAssertEqual(parseCommand(["/usr/local/bin/powershell.exe", "-NoProfile", "-c", "Write-Host hi"]), [
             .unknown(cmd: "Write-Host hi")
         ])
     }
