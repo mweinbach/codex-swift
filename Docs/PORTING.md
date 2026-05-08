@@ -174,6 +174,8 @@ Source baseline inspected for this scaffold:
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, and temp-file save path
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
   - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
+- `codex-rs/protocol/src/protocol.rs` exec event support models
+  - exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
 
 ## Known Gaps
 
@@ -181,6 +183,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 
 - interactive TUI runtime
 - non-interactive `exec`
+- full exec begin/end event payloads and runtime event emission
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing
