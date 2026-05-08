@@ -10,6 +10,7 @@ final class ProtocolConfigTypesTests: XCTestCase {
         XCTAssertEqual(try encode(Verbosity.medium), #""medium""#)
         XCTAssertEqual(try encode(WireAPI.responses), #""responses""#)
         XCTAssertEqual(try encode(WireAPI.chat), #""chat""#)
+        XCTAssertEqual(try encode(WireAPI.compact), #""compact""#)
         XCTAssertEqual(try encode(ForcedLoginMethod.chatgpt), #""chatgpt""#)
         XCTAssertEqual(try encode(TrustLevel.untrusted), #""untrusted""#)
         XCTAssertEqual(try encode(SandboxMode.workspaceWrite), #""workspace-write""#)

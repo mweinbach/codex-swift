@@ -66,6 +66,8 @@ Source baseline inspected for this scaffold:
   - Responses API reasoning/text controls, output-schema text formatting, request body serialization, conversation/subagent headers, and Azure store/id request assembly
 - `codex-rs/codex-api/src/requests/chat.rs`
   - Chat Completions request body/header assembly, response-item to chat-message conversion, image/tool output mapping, assistant reasoning attachment, and duplicate assistant text suppression
+- Pure compaction endpoint helpers from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/endpoint/compact.rs`
+  - compact wire API value, compaction input body shape, `responses/compact` path selection, chat-wire rejection message, and compact-history response decoding
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`

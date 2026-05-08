@@ -25,6 +25,7 @@ public enum Verbosity: String, Codable, CaseIterable, Equatable, Sendable {
 public enum WireAPI: String, Codable, CaseIterable, Equatable, Sendable {
     case responses
     case chat
+    case compact
 }
 
 public enum ForcedLoginMethod: String, Codable, CaseIterable, Equatable, Sendable {
