@@ -18,6 +18,31 @@ public struct ExecPolicyAmendment: Equatable, Codable, Sendable {
     }
 }
 
+public enum NetworkPolicyRuleAction: String, Codable, Equatable, Sendable {
+    case allow
+    case deny
+}
+
+public struct NetworkApprovalContext: Equatable, Codable, Sendable {
+    public let host: String
+    public let `protocol`: NetworkApprovalProtocol
+
+    public init(host: String, protocol: NetworkApprovalProtocol) {
+        self.host = host
+        self.protocol = `protocol`
+    }
+}
+
+public struct NetworkPolicyAmendment: Equatable, Codable, Sendable {
+    public let host: String
+    public let action: NetworkPolicyRuleAction
+
+    public init(host: String, action: NetworkPolicyRuleAction) {
+        self.host = host
+        self.action = action
+    }
+}
+
 public enum RequestID: Equatable, Codable, Sendable {
     case string(String)
     case integer(Int64)
@@ -44,64 +69,151 @@ public enum RequestID: Equatable, Codable, Sendable {
 
 public struct ExecApprovalRequestEvent: Equatable, Codable, Sendable {
     public let callID: String
+    public let approvalID: String?
     public let turnID: String
+    public let startedAtMilliseconds: Int64
     public let command: [String]
     public let cwd: String
     public let reason: String?
+    public let networkApprovalContext: NetworkApprovalContext?
     public let proposedExecPolicyAmendment: ExecPolicyAmendment?
+    public let proposedNetworkPolicyAmendments: [NetworkPolicyAmendment]?
+    public let additionalPermissions: RequestPermissionProfile?
+    public let availableDecisions: [ReviewDecision]?
     public let parsedCmd: [ParsedCommand]
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
+        case approvalID = "approval_id"
         case turnID = "turn_id"
+        case startedAtMilliseconds = "started_at_ms"
         case command
         case cwd
         case reason
+        case networkApprovalContext = "network_approval_context"
         case proposedExecPolicyAmendment = "proposed_execpolicy_amendment"
+        case proposedNetworkPolicyAmendments = "proposed_network_policy_amendments"
+        case additionalPermissions = "additional_permissions"
+        case availableDecisions = "available_decisions"
         case parsedCmd = "parsed_cmd"
     }
 
     public init(
         callID: String,
+        approvalID: String? = nil,
         turnID: String = "",
+        startedAtMilliseconds: Int64 = 0,
         command: [String],
         cwd: String,
         reason: String? = nil,
+        networkApprovalContext: NetworkApprovalContext? = nil,
         proposedExecPolicyAmendment: ExecPolicyAmendment? = nil,
+        proposedNetworkPolicyAmendments: [NetworkPolicyAmendment]? = nil,
+        additionalPermissions: RequestPermissionProfile? = nil,
+        availableDecisions: [ReviewDecision]? = nil,
         parsedCmd: [ParsedCommand]
     ) {
         self.callID = callID
+        self.approvalID = approvalID
         self.turnID = turnID
+        self.startedAtMilliseconds = startedAtMilliseconds
         self.command = command
         self.cwd = cwd
         self.reason = reason
+        self.networkApprovalContext = networkApprovalContext
         self.proposedExecPolicyAmendment = proposedExecPolicyAmendment
+        self.proposedNetworkPolicyAmendments = proposedNetworkPolicyAmendments
+        self.additionalPermissions = additionalPermissions
+        self.availableDecisions = availableDecisions
         self.parsedCmd = parsedCmd
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.callID = try container.decode(String.self, forKey: .callID)
+        self.approvalID = try container.decodeIfPresent(String.self, forKey: .approvalID)
         self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        self.startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        self.networkApprovalContext = try container.decodeIfPresent(
+            NetworkApprovalContext.self,
+            forKey: .networkApprovalContext
+        )
         self.proposedExecPolicyAmendment = try container.decodeIfPresent(
             ExecPolicyAmendment.self,
             forKey: .proposedExecPolicyAmendment
         )
+        self.proposedNetworkPolicyAmendments = try container.decodeIfPresent(
+            [NetworkPolicyAmendment].self,
+            forKey: .proposedNetworkPolicyAmendments
+        )
+        self.additionalPermissions = try container.decodeIfPresent(
+            RequestPermissionProfile.self,
+            forKey: .additionalPermissions
+        )
+        self.availableDecisions = try container.decodeIfPresent([ReviewDecision].self, forKey: .availableDecisions)
         self.parsedCmd = try container.decode([ParsedCommand].self, forKey: .parsedCmd)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(callID, forKey: .callID)
+        try container.encodeIfPresent(approvalID, forKey: .approvalID)
         try container.encode(turnID, forKey: .turnID)
+        try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
         try container.encode(command, forKey: .command)
         try container.encode(cwd, forKey: .cwd)
         try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encodeIfPresent(networkApprovalContext, forKey: .networkApprovalContext)
         try container.encodeIfPresent(proposedExecPolicyAmendment, forKey: .proposedExecPolicyAmendment)
+        try container.encodeIfPresent(proposedNetworkPolicyAmendments, forKey: .proposedNetworkPolicyAmendments)
+        try container.encodeIfPresent(additionalPermissions, forKey: .additionalPermissions)
+        try container.encodeIfPresent(availableDecisions, forKey: .availableDecisions)
         try container.encode(parsedCmd, forKey: .parsedCmd)
+    }
+
+    public var effectiveApprovalID: String {
+        approvalID ?? callID
+    }
+
+    public var effectiveAvailableDecisions: [ReviewDecision] {
+        availableDecisions ?? Self.defaultAvailableDecisions(
+            networkApprovalContext: networkApprovalContext,
+            proposedExecPolicyAmendment: proposedExecPolicyAmendment,
+            proposedNetworkPolicyAmendments: proposedNetworkPolicyAmendments,
+            additionalPermissions: additionalPermissions
+        )
+    }
+
+    public static func defaultAvailableDecisions(
+        networkApprovalContext: NetworkApprovalContext?,
+        proposedExecPolicyAmendment: ExecPolicyAmendment?,
+        proposedNetworkPolicyAmendments: [NetworkPolicyAmendment]?,
+        additionalPermissions: RequestPermissionProfile?
+    ) -> [ReviewDecision] {
+        if networkApprovalContext != nil {
+            var decisions: [ReviewDecision] = [.approved, .approvedForSession]
+            if let amendment = proposedNetworkPolicyAmendments?.first(where: { $0.action == .allow }) {
+                decisions.append(.networkPolicyAmendment(networkPolicyAmendment: amendment))
+            }
+            decisions.append(.abort)
+            return decisions
+        }
+
+        if additionalPermissions != nil {
+            return [.approved, .abort]
+        }
+
+        var decisions: [ReviewDecision] = [.approved]
+        if let proposedExecPolicyAmendment {
+            decisions.append(.approvedExecpolicyAmendment(
+                proposedExecpolicyAmendment: proposedExecPolicyAmendment
+            ))
+        }
+        decisions.append(.abort)
+        return decisions
     }
 }
 
@@ -132,6 +244,7 @@ public enum ElicitationAction: String, Codable, Equatable, Sendable {
 public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let turnID: String
+    public let startedAtMilliseconds: Int64
     public let changes: [String: FileChange]
     public let reason: String?
     public let grantRoot: String?
@@ -139,6 +252,7 @@ public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
         case turnID = "turn_id"
+        case startedAtMilliseconds = "started_at_ms"
         case changes
         case reason
         case grantRoot = "grant_root"
@@ -147,12 +261,14 @@ public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
     public init(
         callID: String,
         turnID: String = "",
+        startedAtMilliseconds: Int64 = 0,
         changes: [String: FileChange],
         reason: String? = nil,
         grantRoot: String? = nil
     ) {
         self.callID = callID
         self.turnID = turnID
+        self.startedAtMilliseconds = startedAtMilliseconds
         self.changes = changes
         self.reason = reason
         self.grantRoot = grantRoot
@@ -162,6 +278,7 @@ public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.callID = try container.decode(String.self, forKey: .callID)
         self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        self.startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
         self.changes = try container.decode([String: FileChange].self, forKey: .changes)
         self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
         self.grantRoot = try container.decodeIfPresent(String.self, forKey: .grantRoot)
@@ -171,6 +288,7 @@ public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(callID, forKey: .callID)
         try container.encode(turnID, forKey: .turnID)
+        try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
         try container.encode(changes, forKey: .changes)
         try container.encodeIfPresent(reason, forKey: .reason)
         try container.encodeIfPresent(grantRoot, forKey: .grantRoot)
@@ -181,7 +299,9 @@ public enum ReviewDecision: Equatable, Codable, Sendable {
     case approved
     case approvedExecpolicyAmendment(proposedExecpolicyAmendment: ExecPolicyAmendment)
     case approvedForSession
+    case networkPolicyAmendment(networkPolicyAmendment: NetworkPolicyAmendment)
     case denied
+    case timedOut
     case abort
 
     public static let `default`: ReviewDecision = .denied
@@ -190,15 +310,18 @@ public enum ReviewDecision: Equatable, Codable, Sendable {
         case approved
         case approvedForSession = "approved_for_session"
         case denied
+        case timedOut = "timed_out"
         case abort
     }
 
     private enum CodingKeys: String, CodingKey {
         case approvedExecpolicyAmendment = "approved_execpolicy_amendment"
+        case networkPolicyAmendment = "network_policy_amendment"
     }
 
     private enum AmendmentKeys: String, CodingKey {
         case proposedExecpolicyAmendment = "proposed_execpolicy_amendment"
+        case networkPolicyAmendment = "network_policy_amendment"
     }
 
     public init(from decoder: Decoder) throws {
@@ -210,6 +333,8 @@ public enum ReviewDecision: Equatable, Codable, Sendable {
                 self = .approvedForSession
             case .denied:
                 self = .denied
+            case .timedOut:
+                self = .timedOut
             case .abort:
                 self = .abort
             }
@@ -226,6 +351,20 @@ public enum ReviewDecision: Equatable, Codable, Sendable {
                 proposedExecpolicyAmendment: try nested.decode(
                     ExecPolicyAmendment.self,
                     forKey: .proposedExecpolicyAmendment
+                )
+            )
+            return
+        }
+
+        if container.contains(.networkPolicyAmendment) {
+            let nested = try container.nestedContainer(
+                keyedBy: AmendmentKeys.self,
+                forKey: .networkPolicyAmendment
+            )
+            self = .networkPolicyAmendment(
+                networkPolicyAmendment: try nested.decode(
+                    NetworkPolicyAmendment.self,
+                    forKey: .networkPolicyAmendment
                 )
             )
             return
@@ -252,8 +391,17 @@ public enum ReviewDecision: Equatable, Codable, Sendable {
             try nested.encode(amendment, forKey: .proposedExecpolicyAmendment)
         case .approvedForSession:
             try UnitDecision.approvedForSession.encode(to: encoder)
+        case let .networkPolicyAmendment(amendment):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            var nested = container.nestedContainer(
+                keyedBy: AmendmentKeys.self,
+                forKey: .networkPolicyAmendment
+            )
+            try nested.encode(amendment, forKey: .networkPolicyAmendment)
         case .denied:
             try UnitDecision.denied.encode(to: encoder)
+        case .timedOut:
+            try UnitDecision.timedOut.encode(to: encoder)
         case .abort:
             try UnitDecision.abort.encode(to: encoder)
         }
