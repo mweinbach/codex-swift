@@ -48,6 +48,8 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/openai_models.rs`
   - reasoning effort wire values needed by config summaries
   - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, and remote `ModelInfo` to `ModelPreset` conversion
+- `codex-rs/core/src/models_manager/cache.rs` and pure helpers from `codex-rs/core/src/models_manager/manager.rs`
+  - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, model preset merge/filter/default behavior, and offline/default model selection constants
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
