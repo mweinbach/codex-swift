@@ -29,6 +29,8 @@ public struct NonInteractiveExecRunResult: Equatable, Sendable {
 }
 
 public enum NonInteractiveExec {
+    private static let unifiedExecSessions = UnifiedExecSessionRegistry()
+
     public static func makePrompt(
         prompt: String,
         imagePaths: [String],
@@ -366,8 +368,7 @@ public enum NonInteractiveExec {
             case "exec_command":
                 let params = try decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8))
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
-                return await executeShellCommand(
-                    toolName: name,
+                return await executeUnifiedExecCommand(
                     command: requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: params.login),
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
@@ -377,8 +378,7 @@ public enum NonInteractiveExec {
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
-                    environment: environment,
-                    responseFormat: .unifiedExec
+                    environment: environment
                 )
 
             case "shell_command":
@@ -416,11 +416,26 @@ public enum NonInteractiveExec {
                 )
 
             case "write_stdin":
-                return functionOutput(
-                    callID: callID,
-                    content: "write_stdin is not supported by codex-swift exec yet.",
-                    success: false
-                )
+                let params = try decoder.decode(WriteStdinToolCallParams.self, from: Data(arguments.utf8))
+                do {
+                    let output = try await unifiedExecSessions.writeStdin(
+                        sessionID: String(params.sessionID),
+                        chars: params.chars,
+                        yieldTimeMS: params.yieldTimeMS,
+                        truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy
+                    )
+                    return functionOutput(
+                        callID: callID,
+                        content: formatUnifiedExecResponse(output),
+                        success: true
+                    )
+                } catch {
+                    return functionOutput(
+                        callID: callID,
+                        content: "write_stdin failed: \(String(describing: error))",
+                        success: false
+                    )
+                }
 
             default:
                 return functionOutput(
@@ -480,6 +495,54 @@ public enum NonInteractiveExec {
             content: formatShellResponse(output, truncationPolicy: truncationPolicy, format: responseFormat),
             success: output.exitCode == 0 && !output.timedOut
         )
+    }
+
+    private static func executeUnifiedExecCommand(
+        command: [String],
+        workdir: String?,
+        timeoutMS: UInt64?,
+        sandboxPermissions: SandboxPermissions,
+        callID: String,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        truncationPolicy: TruncationPolicy,
+        environment: [String: String]
+    ) async -> ResponseItem {
+        if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
+            return functionOutput(
+                callID: callID,
+                content: "approval policy is \(approvalPolicy); reject command — you cannot ask for escalated permissions if the approval policy is \(approvalPolicy)",
+                success: false
+            )
+        }
+
+        guard !command.isEmpty else {
+            return functionOutput(callID: callID, content: "exec_command command is empty", success: false)
+        }
+
+        let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        do {
+            let output = try await unifiedExecSessions.start(
+                command: command,
+                cwd: commandCwd,
+                sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
+                yieldTimeMS: timeoutMS ?? 10_000,
+                truncationPolicy: truncationPolicy,
+                environment: environment
+            )
+            return functionOutput(
+                callID: callID,
+                content: formatUnifiedExecResponse(output),
+                success: output.exitCode.map { $0 == 0 } ?? true
+            )
+        } catch {
+            return functionOutput(
+                callID: callID,
+                content: "exec_command failed: \(String(describing: error))",
+                success: false
+            )
+        }
     }
 
     private static func completedOutputItems(from events: ResponseEventResults) -> [ResponseItem] {
@@ -749,6 +812,26 @@ public enum NonInteractiveExec {
         ].joined(separator: "\n")
     }
 
+    private static func formatUnifiedExecResponse(_ output: UnifiedExecToolOutput) -> String {
+        var sections: [String] = []
+        if !output.chunkID.isEmpty {
+            sections.append("Chunk ID: \(output.chunkID)")
+        }
+        sections.append("Wall time: \(String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), output.duration)) seconds")
+        if let exitCode = output.exitCode {
+            sections.append("Process exited with code \(exitCode)")
+        }
+        if let processID = output.processID {
+            sections.append("Process running with session ID \(processID)")
+        }
+        if let originalTokenCount = output.originalTokenCount {
+            sections.append("Original token count: \(originalTokenCount)")
+        }
+        sections.append("Output:")
+        sections.append(output.output)
+        return sections.joined(separator: "\n")
+    }
+
     private static func roundedDurationSeconds(_ duration: TimeInterval) -> Double {
         (duration * 10).rounded() / 10
     }
@@ -797,6 +880,280 @@ private final class DataCapture: @unchecked Sendable {
         lock.withLock {
             data
         }
+    }
+
+    func snapshot(from offset: Int) -> Data {
+        lock.withLock {
+            guard offset < data.count else {
+                return Data()
+            }
+            return data.subdata(in: offset..<data.count)
+        }
+    }
+
+    var count: Int {
+        lock.withLock {
+            data.count
+        }
+    }
+}
+
+private struct UnifiedExecToolOutput: Sendable {
+    let chunkID: String
+    let duration: TimeInterval
+    let output: String
+    let processID: String?
+    let exitCode: Int?
+    let originalTokenCount: Int?
+}
+
+private actor UnifiedExecSessionRegistry {
+    private struct Session {
+        let id: String
+        let process: Process
+        let stdinPipe: Pipe
+        let stdoutPipe: Pipe
+        let stderrPipe: Pipe
+        let stdoutCapture: DataCapture
+        let stderrCapture: DataCapture
+        var stdoutOffset: Int
+        var stderrOffset: Int
+        let startedAt: Date
+    }
+
+    private var sessions: [String: Session] = [:]
+
+    func start(
+        command: [String],
+        cwd: URL,
+        sandboxPolicy: SandboxPolicy,
+        yieldTimeMS: UInt64,
+        truncationPolicy: TruncationPolicy,
+        environment: [String: String]
+    ) throws -> UnifiedExecToolOutput {
+        let start = Date()
+        let sessionID = allocateSessionID()
+        let launch = try launchCommand(command: command, cwd: cwd, sandboxPolicy: sandboxPolicy, environment: environment)
+        let process = Process()
+        if launch.executable.contains("/") {
+            process.executableURL = URL(fileURLWithPath: launch.executable)
+            process.arguments = launch.arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [launch.executable] + launch.arguments
+        }
+        process.currentDirectoryURL = cwd
+        process.environment = launch.environment
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        let stdoutCapture = DataCapture()
+        let stderrCapture = DataCapture()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        attachCapture(stdoutPipe, to: stdoutCapture)
+        attachCapture(stderrPipe, to: stderrCapture)
+
+        do {
+            try process.run()
+        } catch {
+            detach(stdoutPipe, stderrPipe)
+            throw UnifiedExecError.createSession(String(describing: error))
+        }
+
+        waitUntilDeadlineOrExit(process: process, startedAt: start, yieldTimeMS: yieldTimeMS)
+
+        if process.isRunning {
+            let stdout = stdoutCapture.snapshot()
+            let stderr = stderrCapture.snapshot()
+            sessions[sessionID] = Session(
+                id: sessionID,
+                process: process,
+                stdinPipe: stdinPipe,
+                stdoutPipe: stdoutPipe,
+                stderrPipe: stderrPipe,
+                stdoutCapture: stdoutCapture,
+                stderrCapture: stderrCapture,
+                stdoutOffset: stdout.count,
+                stderrOffset: stderr.count,
+                startedAt: start
+            )
+            return makeOutput(
+                stdout: stdout,
+                stderr: stderr,
+                duration: Date().timeIntervalSince(start),
+                processID: sessionID,
+                exitCode: nil,
+                truncationPolicy: truncationPolicy
+            )
+        }
+
+        detach(stdoutPipe, stderrPipe)
+        let stdout = readFinalData(pipe: stdoutPipe, capture: stdoutCapture)
+        let stderr = readFinalData(pipe: stderrPipe, capture: stderrCapture)
+        return makeOutput(
+            stdout: stdout,
+            stderr: stderr,
+            duration: Date().timeIntervalSince(start),
+            processID: nil,
+            exitCode: Int(process.terminationStatus),
+            truncationPolicy: truncationPolicy
+        )
+    }
+
+    func writeStdin(
+        sessionID: String,
+        chars: String,
+        yieldTimeMS: UInt64,
+        truncationPolicy: TruncationPolicy
+    ) throws -> UnifiedExecToolOutput {
+        guard var session = sessions[sessionID] else {
+            throw UnifiedExecError.unknownSessionID(processID: sessionID)
+        }
+
+        let start = Date()
+        if !chars.isEmpty {
+            guard let data = chars.data(using: .utf8) else {
+                throw UnifiedExecError.writeToStdin
+            }
+            do {
+                try session.stdinPipe.fileHandleForWriting.write(contentsOf: data)
+            } catch {
+                throw UnifiedExecError.writeToStdin
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        waitUntilDeadlineOrExit(process: session.process, startedAt: start, yieldTimeMS: yieldTimeMS)
+
+        let stdout = session.stdoutCapture.snapshot(from: session.stdoutOffset)
+        let stderr = session.stderrCapture.snapshot(from: session.stderrOffset)
+        session.stdoutOffset = session.stdoutCapture.count
+        session.stderrOffset = session.stderrCapture.count
+
+        if session.process.isRunning {
+            sessions[sessionID] = session
+            return makeOutput(
+                stdout: stdout,
+                stderr: stderr,
+                duration: Date().timeIntervalSince(start),
+                processID: sessionID,
+                exitCode: nil,
+                truncationPolicy: truncationPolicy
+            )
+        }
+
+        detach(session.stdoutPipe, session.stderrPipe)
+        var finalStdout = stdout
+        finalStdout.append(session.stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+        var finalStderr = stderr
+        finalStderr.append(session.stderrPipe.fileHandleForReading.readDataToEndOfFile())
+        sessions.removeValue(forKey: sessionID)
+        return makeOutput(
+            stdout: finalStdout,
+            stderr: finalStderr,
+            duration: Date().timeIntervalSince(start),
+            processID: nil,
+            exitCode: Int(session.process.terminationStatus),
+            truncationPolicy: truncationPolicy
+        )
+    }
+
+    private func allocateSessionID() -> String {
+        var candidate: String
+        repeat {
+            candidate = String(Int.random(in: 1_000..<100_000))
+        } while sessions[candidate] != nil
+        return candidate
+    }
+
+    private func launchCommand(
+        command: [String],
+        cwd: URL,
+        sandboxPolicy: SandboxPolicy,
+        environment: [String: String]
+    ) throws -> (executable: String, arguments: [String], environment: [String: String]) {
+        var childEnvironment = ExecEnvironment.createEnv(policy: ShellEnvironmentPolicy(), environment: environment)
+        let launch: [String]
+        if sandboxPolicy == .dangerFullAccess {
+            launch = command
+        } else {
+            let absoluteCwd = try AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
+            launch = [SeatbeltSandbox.executablePath] + SeatbeltSandbox.commandArguments(
+                command: command,
+                sandboxPolicy: sandboxPolicy,
+                sandboxPolicyCwd: absoluteCwd,
+                environment: environment
+            )
+            childEnvironment["CODEX_SANDBOX"] = SeatbeltSandbox.sandboxEnvironmentValue
+            if !sandboxPolicy.hasFullNetworkAccess {
+                childEnvironment["CODEX_SANDBOX_NETWORK_DISABLED"] = "1"
+            }
+        }
+
+        guard let executable = launch.first else {
+            throw UnifiedExecError.missingCommandLine
+        }
+        return (executable, Array(launch.dropFirst()), childEnvironment)
+    }
+
+    private func attachCapture(_ pipe: Pipe, to capture: DataCapture) {
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                capture.append(data)
+            }
+        }
+    }
+
+    private func detach(_ pipes: Pipe...) {
+        for pipe in pipes {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
+    }
+
+    private func waitUntilDeadlineOrExit(process: Process, startedAt: Date, yieldTimeMS: UInt64) {
+        let deadline = startedAt.addingTimeInterval(TimeInterval(yieldTimeMS) / 1_000)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if !process.isRunning {
+            process.waitUntilExit()
+        }
+    }
+
+    private func readFinalData(pipe: Pipe, capture: DataCapture) -> Data {
+        var data = capture.snapshot()
+        data.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        return data
+    }
+
+    private func makeOutput(
+        stdout: Data,
+        stderr: Data,
+        duration: TimeInterval,
+        processID: String?,
+        exitCode: Int?,
+        truncationPolicy: TruncationPolicy
+    ) -> UnifiedExecToolOutput {
+        let stdoutText = String(decoding: stdout, as: UTF8.self)
+        let stderrText = String(decoding: stderr, as: UTF8.self)
+        let rawOutput = stdoutText.isEmpty ? stderrText : (stderrText.isEmpty ? stdoutText : stdoutText + stderrText)
+        let output = Truncation.formattedTruncateText(rawOutput, policy: truncationPolicy)
+        return UnifiedExecToolOutput(
+            chunkID: randomChunkID(),
+            duration: duration,
+            output: output,
+            processID: processID,
+            exitCode: exitCode,
+            originalTokenCount: rawOutput.split(whereSeparator: \.isWhitespace).count
+        )
+    }
+
+    private func randomChunkID() -> String {
+        String((0..<6).map { _ in "0123456789abcdef".randomElement()! })
     }
 }
 

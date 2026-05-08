@@ -598,6 +598,28 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
     }
 }
 
+public struct WriteStdinToolCallParams: Equatable, Decodable, Sendable {
+    public let sessionID: Int
+    public let chars: String
+    public let yieldTimeMS: UInt64
+    public let maxOutputTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case chars
+        case yieldTimeMS = "yield_time_ms"
+        case maxOutputTokens = "max_output_tokens"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionID = try container.decode(Int.self, forKey: .sessionID)
+        self.chars = try container.decodeIfPresent(String.self, forKey: .chars) ?? ""
+        self.yieldTimeMS = try container.decodeIfPresent(UInt64.self, forKey: .yieldTimeMS) ?? 250
+        self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
+    }
+}
+
 public enum ResponseItem: Equatable, Codable, Sendable {
     case message(id: String? = nil, role: String, content: [ContentItem])
     case reasoning(

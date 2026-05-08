@@ -172,6 +172,54 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("reject command"))
     }
 
+    func testUnifiedExecCommandPersistsSessionAndWriteStdinContinuesIt() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let start = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"read line; echo got:$line","yield_time_ms":100}"#,
+            callID: "call-start"
+        )
+
+        let startOutput = await NonInteractiveExec.executeFunctionCall(
+            start,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(_, startPayload) = startOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(startPayload.success, true)
+        let sessionID = try XCTUnwrap(Self.sessionID(from: startPayload.content))
+
+        let write = ResponseItem.functionCall(
+            name: "write_stdin",
+            arguments: #"{"session_id":\#(sessionID),"chars":"hello\n","yield_time_ms":2500}"#,
+            callID: "call-write"
+        )
+        let writeOutput = await NonInteractiveExec.executeFunctionCall(
+            write,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = writeOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-write")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Process exited with code 0"))
+        XCTAssertTrue(payload.content.contains("got:hello"))
+    }
+
     func testHumanOutputReturnsFinalAssistantMessageAndWritesLastMessage() throws {
         let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let writes = WriteSink()
@@ -286,6 +334,19 @@ private final class WriteSink: @unchecked Sendable {
         lock.withLock {
             writes[path]
         }
+    }
+}
+
+private extension NonInteractiveExecTests {
+    static func sessionID(from content: String) -> Int? {
+        let prefix = "Process running with session ID "
+        guard let line = content
+            .split(separator: "\n")
+            .first(where: { $0.hasPrefix(prefix) })
+        else {
+            return nil
+        }
+        return Int(line.dropFirst(prefix.count))
     }
 }
 
