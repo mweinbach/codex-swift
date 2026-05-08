@@ -7,11 +7,19 @@ struct AppServerConnectionCapabilities: Equatable, Sendable {
     let requestAttestation: Bool
 }
 
+enum AppServerElicitationCounterResult: Equatable, Sendable {
+    case success(Int)
+    case threadNotFound
+    case alreadyZero
+    case overflow
+}
+
 actor AppServerThreadStateManager {
     private var liveConnections: [AppServerConnectionID: AppServerConnectionCapabilities] = [:]
     private var threadConnectionIDs: [String: Set<AppServerConnectionID>] = [:]
     private var threadIDsByConnection: [AppServerConnectionID: Set<String>] = [:]
     private var loadedThreadIDs: Set<String> = []
+    private var outOfBandElicitationCounts: [String: Int] = [:]
 
     func connectionInitialized(
         _ connectionID: AppServerConnectionID,
@@ -38,6 +46,36 @@ actor AppServerThreadStateManager {
 
     func listLoadedThreadIDs() -> [String] {
         loadedThreadIDs.sorted()
+    }
+
+    func incrementOutOfBandElicitationCount(threadID: String) -> AppServerElicitationCounterResult {
+        guard loadedThreadIDs.contains(threadID) else {
+            return .threadNotFound
+        }
+        let current = outOfBandElicitationCounts[threadID] ?? 0
+        guard current < Int.max else {
+            return .overflow
+        }
+        let count = current + 1
+        outOfBandElicitationCounts[threadID] = count
+        return .success(count)
+    }
+
+    func decrementOutOfBandElicitationCount(threadID: String) -> AppServerElicitationCounterResult {
+        guard loadedThreadIDs.contains(threadID) else {
+            return .threadNotFound
+        }
+        let current = outOfBandElicitationCounts[threadID] ?? 0
+        guard current > 0 else {
+            return .alreadyZero
+        }
+        let count = current - 1
+        if count == 0 {
+            outOfBandElicitationCounts.removeValue(forKey: threadID)
+        } else {
+            outOfBandElicitationCounts[threadID] = count
+        }
+        return .success(count)
     }
 
     @discardableResult

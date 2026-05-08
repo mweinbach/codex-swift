@@ -1259,6 +1259,43 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func threadElicitationCounterThreadID(params: [String: Any]?) throws -> String {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        do {
+            return try ConversationId(string: rawThreadID).description
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+    }
+
+    fileprivate static func threadElicitationCounterResult(
+        method: String,
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool,
+        update: (String) throws -> AppServerElicitationCounterResult
+    ) throws -> [String: Any] {
+        guard experimentalAPIEnabled else {
+            throw AppServerError.invalidRequest("\(method) requires experimentalApi capability")
+        }
+
+        let threadID = try threadElicitationCounterThreadID(params: params)
+        switch try update(threadID) {
+        case let .success(count):
+            return [
+                "count": count,
+                "paused": count > 0
+            ]
+        case .threadNotFound:
+            throw AppServerError.invalidRequest("thread not found: \(threadID)")
+        case .alreadyZero:
+            throw AppServerError.invalidRequest("out-of-band elicitation count is already zero")
+        case .overflow:
+            throw AppServerError.internalError("failed to increment out-of-band elicitation counter: out-of-band elicitation count overflowed")
+        }
+    }
+
     fileprivate static func threadGoalSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -5147,6 +5184,20 @@ final class CodexAppServerMessageProcessor {
         }) ?? false
     }
 
+    private func incrementOutOfBandElicitationCount(threadID: String) throws -> AppServerElicitationCounterResult {
+        let manager = threadStateManager
+        return try CodexAppServer.runAsyncBlocking {
+            await manager.incrementOutOfBandElicitationCount(threadID: threadID)
+        }
+    }
+
+    private func decrementOutOfBandElicitationCount(threadID: String) throws -> AppServerElicitationCounterResult {
+        let manager = threadStateManager
+        return try CodexAppServer.runAsyncBlocking {
+            await manager.decrementOutOfBandElicitationCount(threadID: threadID)
+        }
+    }
+
     private func listLoadedThreadIDs() -> [String] {
         let manager = threadStateManager
         return (try? CodexAppServer.runAsyncBlocking {
@@ -5373,6 +5424,26 @@ final class CodexAppServerMessageProcessor {
                             params: params,
                             isLoaded: { isThreadLoaded($0) },
                             unsubscribe: { unsubscribeCurrentConnection(fromThreadID: $0) }
+                        )
+                    )
+                case "thread/increment_elicitation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadElicitationCounterResult(
+                            method: "thread/increment_elicitation",
+                            params: params,
+                            experimentalAPIEnabled: experimentalAPIEnabled,
+                            update: { try incrementOutOfBandElicitationCount(threadID: $0) }
+                        )
+                    )
+                case "thread/decrement_elicitation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadElicitationCounterResult(
+                            method: "thread/decrement_elicitation",
+                            params: params,
+                            experimentalAPIEnabled: experimentalAPIEnabled,
+                            update: { try decrementOutOfBandElicitationCount(threadID: $0) }
                         )
                     )
                 case "thread/turns/list":

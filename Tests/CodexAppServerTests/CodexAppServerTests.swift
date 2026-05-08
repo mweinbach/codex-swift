@@ -1000,6 +1000,97 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((error["message"] as? String)?.contains("invalid thread id") == true)
     }
 
+    func testThreadElicitationCountersRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/increment_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "thread/increment_elicitation requires experimentalApi capability"
+        )
+    }
+
+    func testThreadElicitationCountersTrackLoadedThreadCounts() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decode(processor.processLine(Data(
+            #"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"experimentalApi":true}}}"#.utf8
+        )))
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let firstIncrement = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/increment_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual((firstIncrement["result"] as? [String: Any])?["count"] as? Int, 1)
+        XCTAssertEqual((firstIncrement["result"] as? [String: Any])?["paused"] as? Bool, true)
+
+        let secondIncrement = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"thread/increment_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual((secondIncrement["result"] as? [String: Any])?["count"] as? Int, 2)
+        XCTAssertEqual((secondIncrement["result"] as? [String: Any])?["paused"] as? Bool, true)
+
+        let firstDecrement = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"thread/decrement_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual((firstDecrement["result"] as? [String: Any])?["count"] as? Int, 1)
+        XCTAssertEqual((firstDecrement["result"] as? [String: Any])?["paused"] as? Bool, true)
+
+        let secondDecrement = try decode(processor.processLine(Data(
+            #"{"id":5,"method":"thread/decrement_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual((secondDecrement["result"] as? [String: Any])?["count"] as? Int, 0)
+        XCTAssertEqual((secondDecrement["result"] as? [String: Any])?["paused"] as? Bool, false)
+
+        let zeroDecrement = try decode(processor.processLine(Data(
+            #"{"id":6,"method":"thread/decrement_elicitation","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(zeroDecrement["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "out-of-band elicitation count is already zero")
+    }
+
+    func testThreadElicitationCountersValidateThreadIDsAndLoadedState() throws {
+        let temp = try TemporaryDirectory()
+        let persistedThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-15-00",
+            timestamp: "2025-01-06T08:15:00Z",
+            preview: "not loaded",
+            provider: "mock_provider"
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decode(processor.processLine(Data(
+            #"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"experimentalApi":true}}}"#.utf8
+        )))
+
+        let invalid = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/increment_elicitation","params":{"threadId":"not-a-thread-id"}}"#.utf8
+        )))
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertTrue((invalidError["message"] as? String)?.contains("invalid thread id") == true)
+
+        let notLoaded = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/increment_elicitation","params":{"threadId":"\#(persistedThreadID)"}}"#.utf8
+        )))
+        let notLoadedError = try XCTUnwrap(notLoaded["error"] as? [String: Any])
+        XCTAssertEqual(notLoadedError["code"] as? Int, -32600)
+        XCTAssertEqual(notLoadedError["message"] as? String, "thread not found: \(persistedThreadID)")
+    }
+
     func testThreadGoalMethodsReturnRustDisabledFeatureErrorByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()
