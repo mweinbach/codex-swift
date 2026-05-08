@@ -25,9 +25,11 @@ final class SubmissionTests: XCTestCase {
     func testUnitOperationsUseRustTagsOnly() throws {
         let cases: [(Op, [String: Any])] = [
             (.interrupt, ["type": "interrupt"]),
+            (.cleanBackgroundTerminals, ["type": "clean_background_terminals"]),
             (.listMcpTools, ["type": "list_mcp_tools"]),
             (.listCustomPrompts, ["type": "list_custom_prompts"]),
             (.compact, ["type": "compact"]),
+            (.reloadUserConfig, ["type": "reload_user_config"]),
             (.undo, ["type": "undo"]),
             (.shutdown, ["type": "shutdown"]),
             (.listModels, ["type": "list_models"])
@@ -229,6 +231,31 @@ final class SubmissionTests: XCTestCase {
             "type": "run_user_shell_command",
             "command": "ls -la"
         ])
+    }
+
+    func testThreadControlOperationsWireShape() throws {
+        let enableMemory = Op.setThreadMemoryMode(mode: .enabled)
+        try XCTAssertJSONObjectEqual(enableMemory, [
+            "type": "set_thread_memory_mode",
+            "mode": "enabled"
+        ])
+
+        let disableMemory = Op.setThreadMemoryMode(mode: .disabled)
+        try XCTAssertJSONObjectEqual(disableMemory, [
+            "type": "set_thread_memory_mode",
+            "mode": "disabled"
+        ])
+
+        let rollback = Op.threadRollback(numTurns: 3)
+        try XCTAssertJSONObjectEqual(rollback, [
+            "type": "thread_rollback",
+            "num_turns": 3
+        ])
+
+        for op in [enableMemory, disableMemory, rollback] {
+            let data = try JSONEncoder().encode(op)
+            XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
+        }
     }
 
     func testListSkillsDefaultsDecodeLikeSerdeDefaults() throws {

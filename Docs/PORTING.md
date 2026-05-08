@@ -192,6 +192,8 @@ Source baseline inspected for this scaffold:
   - hook event/type/mode/scope/source/trust/run-status/output-entry wire values, run-summary started/completed event shapes with explicit null optionals, hook config-label constants, matcher-capable event list, and persisted hook key formatting
 - Initial realtime conversation protocol models from `codex-rs/protocol/src/protocol.rs`
   - conversation start/audio/text/list-voices operation wire shapes, double-optional prompt encoding, websocket/WebRTC transport tags, stable builtin voice lists, realtime event external tags, and lifecycle/list-voices response payloads
+- Additional thread-control operations from `codex-rs/protocol/src/protocol.rs`
+  - clean-background-terminals, reload-user-config, set-thread-memory-mode, and thread-rollback operation tags and payloads
 - `codex-rs/process-hardening/src/lib.rs`
   - macOS pre-main process hardening for debugger attach denial, core-dump limit disabling, byte-level environment key filtering, and `DYLD_` environment removal before CLI dispatch
 - `codex-rs/core/src/safety.rs`

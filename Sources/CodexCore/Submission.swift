@@ -15,8 +15,14 @@ public enum ReasoningEffortOverride: Equatable, Sendable {
     case set(ReasoningEffort)
 }
 
+public enum ThreadMemoryMode: String, Codable, Equatable, Sendable {
+    case enabled
+    case disabled
+}
+
 public enum Op: Equatable, Sendable {
     case interrupt
+    case cleanBackgroundTerminals
     case realtimeConversationStart(ConversationStartParams)
     case realtimeConversationAudio(ConversationAudioParams)
     case realtimeConversationText(ConversationTextParams)
@@ -49,7 +55,10 @@ public enum Op: Equatable, Sendable {
     case listMcpTools
     case listCustomPrompts
     case listSkills(cwds: [String], forceReload: Bool)
+    case reloadUserConfig
     case compact
+    case setThreadMemoryMode(mode: ThreadMemoryMode)
+    case threadRollback(numTurns: UInt32)
     case undo
     case review(reviewRequest: ReviewRequest)
     case shutdown
@@ -81,12 +90,15 @@ public enum Op: Equatable, Sendable {
         case logID = "log_id"
         case cwds
         case forceReload = "force_reload"
+        case mode
+        case numTurns = "num_turns"
         case reviewRequest = "review_request"
         case command
     }
 
     private enum OperationType: String, Codable {
         case interrupt
+        case cleanBackgroundTerminals = "clean_background_terminals"
         case realtimeConversationStart = "realtime_conversation_start"
         case realtimeConversationAudio = "realtime_conversation_audio"
         case realtimeConversationText = "realtime_conversation_text"
@@ -103,7 +115,10 @@ public enum Op: Equatable, Sendable {
         case listMcpTools = "list_mcp_tools"
         case listCustomPrompts = "list_custom_prompts"
         case listSkills = "list_skills"
+        case reloadUserConfig = "reload_user_config"
         case compact
+        case setThreadMemoryMode = "set_thread_memory_mode"
+        case threadRollback = "thread_rollback"
         case undo
         case review
         case shutdown
@@ -118,6 +133,8 @@ extension Op: Codable {
         switch try container.decode(OperationType.self, forKey: .type) {
         case .interrupt:
             self = .interrupt
+        case .cleanBackgroundTerminals:
+            self = .cleanBackgroundTerminals
         case .realtimeConversationStart:
             self = .realtimeConversationStart(try ConversationStartParams(from: decoder))
         case .realtimeConversationAudio:
@@ -182,8 +199,14 @@ extension Op: Codable {
                 cwds: try container.decodeIfPresent([String].self, forKey: .cwds) ?? [],
                 forceReload: try container.decodeIfPresent(Bool.self, forKey: .forceReload) ?? false
             )
+        case .reloadUserConfig:
+            self = .reloadUserConfig
         case .compact:
             self = .compact
+        case .setThreadMemoryMode:
+            self = .setThreadMemoryMode(mode: try container.decode(ThreadMemoryMode.self, forKey: .mode))
+        case .threadRollback:
+            self = .threadRollback(numTurns: try container.decode(UInt32.self, forKey: .numTurns))
         case .undo:
             self = .undo
         case .review:
@@ -202,6 +225,8 @@ extension Op: Codable {
         switch self {
         case .interrupt:
             try container.encode(OperationType.interrupt, forKey: .type)
+        case .cleanBackgroundTerminals:
+            try container.encode(OperationType.cleanBackgroundTerminals, forKey: .type)
         case let .realtimeConversationStart(params):
             try container.encode(OperationType.realtimeConversationStart, forKey: .type)
             try params.encode(to: encoder)
@@ -268,8 +293,16 @@ extension Op: Codable {
             if forceReload {
                 try container.encode(forceReload, forKey: .forceReload)
             }
+        case .reloadUserConfig:
+            try container.encode(OperationType.reloadUserConfig, forKey: .type)
         case .compact:
             try container.encode(OperationType.compact, forKey: .type)
+        case let .setThreadMemoryMode(mode):
+            try container.encode(OperationType.setThreadMemoryMode, forKey: .type)
+            try container.encode(mode, forKey: .mode)
+        case let .threadRollback(numTurns):
+            try container.encode(OperationType.threadRollback, forKey: .type)
+            try container.encode(numTurns, forKey: .numTurns)
         case .undo:
             try container.encode(OperationType.undo, forKey: .type)
         case let .review(reviewRequest):
