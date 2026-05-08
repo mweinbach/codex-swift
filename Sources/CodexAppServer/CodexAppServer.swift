@@ -1395,7 +1395,7 @@ public enum CodexAppServer {
         await notificationSink(data)
     }
 
-    private static func forcedLoginMethod(configuration: CodexAppServerConfiguration) throws -> String? {
+    fileprivate static func forcedLoginMethod(configuration: CodexAppServerConfiguration) throws -> String? {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             environment: configuration.environment
@@ -1800,7 +1800,7 @@ public enum CodexAppServer {
         return defaultValue
     }
 
-    private static func stringParam(_ value: Any?) -> String? {
+    fileprivate static func stringParam(_ value: Any?) -> String? {
         value as? String
     }
 
@@ -3046,11 +3046,61 @@ final class CodexAppServerMessageProcessor {
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
+    private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
 
     init(configuration: CodexAppServerConfiguration, notificationSink: AppServerNotificationSink? = nil) {
         self.configuration = configuration
         self.notificationSink = notificationSink
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
+    }
+
+    deinit {
+        for server in activeChatGPTLogins.values {
+            server.cancel()
+        }
+    }
+
+    private func loginChatGptResult() throws -> [String: Any] {
+        if try CodexAppServer.forcedLoginMethod(configuration: configuration) == "api" {
+            throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
+        }
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let server: ChatGPTLoginServer
+        do {
+            server = try ChatGPTLoginServer.start(options: ChatGPTLoginOptions(
+                codexHome: configuration.codexHome,
+                openBrowser: false,
+                forcedChatGPTWorkspaceID: runtimeConfig.forcedChatGPTWorkspaceID,
+                authCredentialsStoreMode: configuration.authCredentialsStoreMode,
+                originator: configuration.originator
+            ))
+        } catch {
+            throw AppServerError.internalError("failed to start login server: \(error)")
+        }
+        for active in activeChatGPTLogins.values {
+            active.cancel()
+        }
+        activeChatGPTLogins.removeAll()
+        let loginID = UUID()
+        activeChatGPTLogins[loginID] = server
+        return [
+            "loginId": loginID.uuidString.lowercased(),
+            "authUrl": server.authURL
+        ]
+    }
+
+    private func cancelLoginChatGptResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let loginIDString = CodexAppServer.stringParam(params?["loginId"]) else {
+            throw AppServerError.invalidRequest("missing loginId")
+        }
+        guard let loginID = UUID(uuidString: loginIDString) else {
+            throw AppServerError.invalidRequest("invalid login id: \(loginIDString)")
+        }
+        guard let server = activeChatGPTLogins.removeValue(forKey: loginID) else {
+            throw AppServerError.invalidRequest("login id not found: \(loginIDString)")
+        }
+        server.cancel()
+        return [:]
     }
 
     func processLine(_ data: Data) -> Data? {
@@ -3264,6 +3314,16 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.loginApiKeyResult(params: params, configuration: configuration)
                     )
                     notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
+                case "loginChatGpt":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try loginChatGptResult()
+                    )
+                case "cancelLoginChatGpt":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try cancelLoginChatGptResult(params: params)
+                    )
                 case "logoutChatGpt":
                     response = CodexAppServer.responseObject(
                         id: id,

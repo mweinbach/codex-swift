@@ -800,6 +800,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testLegacyLoginChatGPTStartsServerWithForcedWorkspaceAndCanCancel() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_chatgpt_workspace_id = "ws-forced""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"loginChatGpt"}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+        let authURL = try XCTUnwrap(loginResult["authUrl"] as? String)
+        XCTAssertNotNil(UUID(uuidString: loginID))
+        XCTAssertTrue(authURL.contains("allowed_workspace_id=ws-forced"))
+
+        let cancel = try decode(processor.processLine(Data(#"{"id":2,"method":"cancelLoginChatGpt","params":{"loginId":"\#(loginID)"}}"#.utf8)))
+        XCTAssertTrue(try XCTUnwrap(cancel["result"] as? [String: Any]).isEmpty)
+    }
+
+    func testLegacyLoginChatGPTRejectedWhenForcedAPIAndCancelReportsMissing() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_login_method = "api""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let forcedResponse = try appServerResponse(
+            #"{"id":1,"method":"loginChatGpt"}"#,
+            codexHome: temp.url
+        )
+        let forcedError = try XCTUnwrap(forcedResponse["error"] as? [String: Any])
+        XCTAssertEqual(forcedError["code"] as? Int, -32600)
+        XCTAssertEqual(forcedError["message"] as? String, "ChatGPT login is disabled. Use API key login instead.")
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let missingID = "11111111-1111-1111-1111-111111111111"
+        let cancel = try decode(processor.processLine(Data(#"{"id":2,"method":"cancelLoginChatGpt","params":{"loginId":"\#(missingID)"}}"#.utf8)))
+        let cancelError = try XCTUnwrap(cancel["error"] as? [String: Any])
+        XCTAssertEqual(cancelError["code"] as? Int, -32600)
+        XCTAssertEqual(cancelError["message"] as? String, "login id not found: \(missingID)")
+    }
+
     func testAccountLoginCancelReturnsNotFoundForUnknownLoginID() throws {
         let temp = try TemporaryDirectory()
         let loginID = "11111111-1111-1111-1111-111111111111"
