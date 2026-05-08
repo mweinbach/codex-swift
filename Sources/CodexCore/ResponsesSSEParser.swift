@@ -99,35 +99,7 @@ public struct ResponsesSSEParser: Sendable {
     }
 
     public static func dataFrames(fromSSEText text: String) -> [String] {
-        var frames: [String] = []
-        var dataLines: [String] = []
-
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .newlines)
-            if line.isEmpty {
-                if !dataLines.isEmpty {
-                    frames.append(dataLines.joined(separator: "\n"))
-                    dataLines.removeAll(keepingCapacity: true)
-                }
-                continue
-            }
-
-            guard line.hasPrefix("data:") else {
-                continue
-            }
-
-            var data = String(line.dropFirst("data:".count))
-            if data.first == " " {
-                data.removeFirst()
-            }
-            dataLines.append(data)
-        }
-
-        if !dataLines.isEmpty {
-            frames.append(dataLines.joined(separator: "\n"))
-        }
-
-        return frames
+        SSEDataFrameDecoder.dataFrames(from: text)
     }
 
     private mutating func receiveFailedResponse(_ response: JSONValue?) {

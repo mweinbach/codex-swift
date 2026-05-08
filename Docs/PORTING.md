@@ -261,6 +261,8 @@ Source baseline inspected for this scaffold:
   - get-history-entry response payloads, custom-prompts response payloads, and raw response item event wrappers around already-ported history/custom-prompt/response item models
 - Pure Responses SSE parsing from `codex-rs/codex-api/src/sse/responses.rs` and `ResponseEvent` from `codex-rs/codex-api/src/common.rs`
   - SSE `data:` frame extraction, response output/delta/created/completed event mapping, close-time completed/error emission, failed-response fatal/retryable classification, retry-after delay parsing, and token-usage conversion
+- Incremental SSE `data:` frame decoding needed by `codex-rs/codex-api/src/sse/{responses,chat}.rs`
+  - chunk-boundary buffering, CRLF normalization, non-data line ignoring, blank-line event flushes, multiline `data:` joins, single-leading-space stripping, and EOF flush of pending frames
 - Pure Chat Completions SSE parsing from `codex-rs/codex-api/src/sse/chat.rs`
   - chat SSE `choices` traversal, assistant/reasoning delta accumulation, tool-call index/id tracking, argument concatenation, finish-reason handling for stop/length/tool calls, and EOF flush behavior
 - `AggregatedStream` and `AggregateStreamExt` behavior from `codex-rs/codex-api/src/endpoint/chat.rs`
