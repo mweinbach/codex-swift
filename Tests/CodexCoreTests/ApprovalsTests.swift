@@ -41,8 +41,14 @@ final class ApprovalsTests: XCTestCase {
         let decision = ReviewDecision.networkPolicyAmendment(networkPolicyAmendment: amendment)
         let json = #"{"network_policy_amendment":{"network_policy_amendment":{"host":"example.com","action":"allow"}}}"#
 
-        let encoded = try String(data: JSONEncoder().encode(decision), encoding: .utf8)
-        XCTAssertEqual(encoded, json)
+        try XCTAssertJSONObjectEqual(decision, [
+            "network_policy_amendment": [
+                "network_policy_amendment": [
+                    "host": "example.com",
+                    "action": "allow"
+                ]
+            ]
+        ])
         XCTAssertEqual(try JSONDecoder().decode(ReviewDecision.self, from: Data(json.utf8)), decision)
     }
 
