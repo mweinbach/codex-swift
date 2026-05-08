@@ -62,6 +62,8 @@ Source baseline inspected for this scaffold:
   - model-family slug matching, context window defaults, base instruction prompts, reasoning/verbosity/tool capabilities, remote metadata overrides, config override order, truncation policy conversion, and auto-compact token-limit defaults
 - `codex-rs/core/src/client_common.rs` prompt instruction assembly and `codex-rs/apply-patch/apply_patch_tool_instructions.md`
   - prompt input/tool/output-schema container shape and model-family-aware full-instruction selection, including legacy apply_patch shell guidance only when no explicit base override or apply_patch tool is present
+- Pure request models from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/requests/responses.rs`
+  - Responses API reasoning/text controls, output-schema text formatting, request body serialization, conversation/subagent headers, and Azure store/id request assembly
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
