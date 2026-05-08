@@ -2555,6 +2555,33 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
     }
 
+    fileprivate static func processSpawnResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let command = stringArrayParam(params?["command"]) else {
+            throw AppServerError.invalidRequest("missing command")
+        }
+        guard !command.isEmpty else {
+            throw AppServerError.invalidRequest("command must not be empty")
+        }
+        guard let processHandle = stringParam(params?["processHandle"]) else {
+            throw AppServerError.invalidRequest("missing processHandle")
+        }
+        guard !processHandle.isEmpty else {
+            throw AppServerError.invalidRequest("processHandle must not be empty")
+        }
+        _ = try absolutePathParam(params?["cwd"], name: "cwd")
+        let tty = boolParam(params?["tty"], defaultValue: false)
+        if params?["size"] != nil && !tty {
+            throw AppServerError.invalidParams("process/spawn size requires tty: true")
+        }
+        if let size = params?["size"] as? [String: Any] {
+            try validateProcessSize(size)
+        }
+        if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
+            throw AppServerError.invalidParams("process/spawn timeoutMs must be non-negative, got \(timeoutMs)")
+        }
+        throw AppServerError.invalidRequest("process/spawn live process lifecycle is not implemented")
+    }
+
     fileprivate static func processKillResult(params: [String: Any]?) throws -> [String: Any] {
         let processHandle = try processHandle(params: params)
         throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
@@ -2572,6 +2599,17 @@ public enum CodexAppServer {
             throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
         }
         throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+    }
+
+    private static func validateProcessSize(_ size: [String: Any]) throws {
+        guard let rows = size["rows"] as? Int,
+              let cols = size["cols"] as? Int
+        else {
+            throw AppServerError.invalidParams("process/resizePty requires size rows and cols")
+        }
+        guard rows > 0, cols > 0 else {
+            throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
+        }
     }
 
     private static func processHandle(params: [String: Any]?) throws -> String {
@@ -6243,6 +6281,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.commandExecTerminateResult(params: params)
+                    )
+                case "process/spawn":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.processSpawnResult(params: params)
                     )
                 case "process/writeStdin":
                     response = CodexAppServer.responseObject(

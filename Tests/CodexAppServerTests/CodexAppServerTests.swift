@@ -4189,6 +4189,64 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(killError["message"] as? String, #"no active process for process handle "proc-1""#)
     }
 
+    func testProcessSpawnValidatesRustParamsBeforeLiveLifecycle() throws {
+        let temp = try TemporaryDirectory()
+
+        let emptyCommand = try appServerResponse(
+            #"{"id":1,"method":"process/spawn","params":{"command":[],"processHandle":"proc-1","cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url
+        )
+        let emptyCommandError = try XCTUnwrap(emptyCommand["error"] as? [String: Any])
+        XCTAssertEqual(emptyCommandError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyCommandError["message"] as? String, "command must not be empty")
+
+        let emptyHandle = try appServerResponse(
+            #"{"id":2,"method":"process/spawn","params":{"command":["echo"],"processHandle":"","cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url
+        )
+        let emptyHandleError = try XCTUnwrap(emptyHandle["error"] as? [String: Any])
+        XCTAssertEqual(emptyHandleError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyHandleError["message"] as? String, "processHandle must not be empty")
+
+        let relativeCwd = try appServerResponse(
+            #"{"id":3,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"relative"}}"#,
+            codexHome: temp.url
+        )
+        let relativeCwdError = try XCTUnwrap(relativeCwd["error"] as? [String: Any])
+        XCTAssertEqual(relativeCwdError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            relativeCwdError["message"] as? String,
+            "Invalid request: AbsolutePathBuf deserialized without a base path"
+        )
+
+        let sizeWithoutTty = try appServerResponse(
+            #"{"id":4,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","size":{"rows":24,"cols":80}}}"#,
+            codexHome: temp.url
+        )
+        let sizeWithoutTtyError = try XCTUnwrap(sizeWithoutTty["error"] as? [String: Any])
+        XCTAssertEqual(sizeWithoutTtyError["code"] as? Int, -32602)
+        XCTAssertEqual(sizeWithoutTtyError["message"] as? String, "process/spawn size requires tty: true")
+
+        let negativeTimeout = try appServerResponse(
+            #"{"id":5,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","timeoutMs":-1}}"#,
+            codexHome: temp.url
+        )
+        let negativeTimeoutError = try XCTUnwrap(negativeTimeout["error"] as? [String: Any])
+        XCTAssertEqual(negativeTimeoutError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            negativeTimeoutError["message"] as? String,
+            "process/spawn timeoutMs must be non-negative, got -1"
+        )
+
+        let zeroSize = try appServerResponse(
+            #"{"id":6,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","tty":true,"size":{"rows":0,"cols":80}}}"#,
+            codexHome: temp.url
+        )
+        let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
+        XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)
+        XCTAssertEqual(zeroSizeError["message"] as? String, "process size rows and cols must be greater than 0")
+    }
+
     func testProcessFollowUpsValidateWriteAndResizeParams() throws {
         let temp = try TemporaryDirectory()
 
