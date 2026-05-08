@@ -2,6 +2,7 @@ import Foundation
 
 public enum CodexConfigDefaults {
     public static let chatgptBaseURL = "https://chatgpt.com/backend-api/"
+    public static let modelProviderID = "openai"
     public static let projectRootMarkers = [".git"]
     public static let projectDocMaxBytes = 32 * 1024
 }
@@ -92,6 +93,14 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
         self.ossProvider = ossProvider
     }
+
+    public var selectedModelProviderID: String {
+        modelProvider ?? CodexConfigDefaults.modelProviderID
+    }
+
+    public var selectedModelProvider: ModelProviderInfo? {
+        modelProviders[selectedModelProviderID]
+    }
 }
 
 public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -101,6 +110,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidOAuthCredentialsStoreMode
     case invalidForcedLoginMethod
     case invalidProjectRootMarkers
+    case modelProviderNotFound(String)
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -119,6 +129,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "Invalid override value for forced_login_method"
         case .invalidProjectRootMarkers:
             return "project_root_markers must be an array of strings"
+        case let .modelProviderNotFound(providerID):
+            return "Model provider `\(providerID)` not found"
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -546,6 +558,9 @@ private struct ParsedCodexConfigToml {
         config.mcpServers = mcpServers
         config.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
         config.modelProviders = try Self.combinedModelProviders(from: modelProviders, environment: environment)
+        guard config.selectedModelProvider != nil else {
+            throw CodexConfigLoadError.modelProviderNotFound(config.selectedModelProviderID)
+        }
 
         return config
     }

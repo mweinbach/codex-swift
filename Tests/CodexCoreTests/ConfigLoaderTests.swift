@@ -11,6 +11,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelProvider)
         XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "ollama", "lmstudio"])
         XCTAssertTrue(config.modelProviders["openai"]?.requiresOpenAIAuth == true)
+        XCTAssertEqual(config.selectedModelProviderID, "openai")
+        XCTAssertEqual(config.selectedModelProvider?.name, "OpenAI")
         XCTAssertNil(config.approvalPolicy)
         XCTAssertNil(config.sandboxMode)
         XCTAssertNil(config.modelReasoningEffort)
@@ -42,7 +44,7 @@ final class ConfigLoaderTests: XCTestCase {
         let dir = try CoreTemporaryDirectory()
         try """
         model = "gpt-5.4"
-        model_provider = "openai-responses"
+        model_provider = "openai"
         approval_policy = "on-failure"
         sandbox_mode = "workspace-write"
         model_reasoning_effort = "high"
@@ -66,7 +68,8 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.model, "gpt-5.4")
-        XCTAssertEqual(config.modelProvider, "openai-responses")
+        XCTAssertEqual(config.modelProvider, "openai")
+        XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.approvalPolicy, .onFailure)
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertEqual(config.modelReasoningEffort, .high)
@@ -140,6 +143,8 @@ final class ConfigLoaderTests: XCTestCase {
     func testLoadsModelProvidersIntoRuntimeConfig() throws {
         let dir = try CoreTemporaryDirectory()
         try """
+        model_provider = "mock"
+
         [model_providers.mock]
         name = "Mock provider"
         base_url = "https://mock.example/v1"
@@ -164,6 +169,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
+        XCTAssertEqual(config.selectedModelProviderID, "mock")
         XCTAssertEqual(
             config.modelProviders["mock"],
             ModelProviderInfo(
@@ -258,7 +264,7 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         profile = "work"
         model = "top-model"
-        model_provider = "top-provider"
+        model_provider = "ollama"
         approval_policy = "on-request"
         sandbox_mode = "read-only"
         model_reasoning_effort = "low"
@@ -275,7 +281,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         [profiles.work]
         model = "profile-model"
-        model_provider = "profile-provider"
+        model_provider = "lmstudio"
         approval_policy = "never"
         sandbox_mode = "danger-full-access"
         model_reasoning_effort = "xhigh"
@@ -295,7 +301,8 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.activeProfile, "work")
         XCTAssertEqual(config.model, "profile-model")
-        XCTAssertEqual(config.modelProvider, "profile-provider")
+        XCTAssertEqual(config.modelProvider, "lmstudio")
+        XCTAssertEqual(config.selectedModelProviderID, "lmstudio")
         XCTAssertEqual(config.approvalPolicy, .never)
         XCTAssertEqual(config.sandboxMode, .dangerFullAccess)
         XCTAssertEqual(config.modelReasoningEffort, .xhigh)
@@ -391,6 +398,33 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for mcp_oauth_credentials_store")
+        }
+    }
+
+    func testMissingModelProviderMatchesRustError() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"model_provider = "missing-provider""#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Model provider `missing-provider` not found")
+        }
+    }
+
+    func testMissingProfileModelProviderMatchesRustError() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [profiles.work]
+        model_provider = "missing-profile-provider"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                (error as? CodexConfigLoadError)?.description,
+                "Model provider `missing-profile-provider` not found"
+            )
         }
     }
 
