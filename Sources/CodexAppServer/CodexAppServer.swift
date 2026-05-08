@@ -1643,7 +1643,7 @@ public enum CodexAppServer {
         return try? JSONSerialization.data(withJSONObject: response)
     }
 
-    private static func runAsyncBlocking<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
+    fileprivate static func runAsyncBlocking<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
         let result = BlockingAsyncResult<T>()
         Task {
@@ -3064,16 +3064,26 @@ fileprivate struct AppServerReviewStartOutcome {
 }
 
 final class CodexAppServerMessageProcessor {
+    private let connectionID: AppServerConnectionID = 0
     private var initialized = false
     private var requestAttestation = false
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
+    private let threadStateManager: AppServerThreadStateManager
+    private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
 
-    init(configuration: CodexAppServerConfiguration, notificationSink: AppServerNotificationSink? = nil) {
+    init(
+        configuration: CodexAppServerConfiguration,
+        notificationSink: AppServerNotificationSink? = nil,
+        threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
+        outgoingRequestBroker: AppServerOutgoingRequestBroker? = nil
+    ) {
         self.configuration = configuration
         self.notificationSink = notificationSink
+        self.threadStateManager = threadStateManager
+        self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
     }
 
@@ -3081,6 +3091,81 @@ final class CodexAppServerMessageProcessor {
         for server in activeChatGPTLogins.values {
             server.cancel()
         }
+    }
+
+    func attestationProvider(
+        timeoutNanoseconds: UInt64 = AppServerAttestationProvider.defaultTimeoutNanoseconds
+    ) -> any AttestationProvider {
+        AppServerAttestationProvider(
+            outgoing: outgoingRequestBroker,
+            threadStateManager: threadStateManager,
+            timeoutNanoseconds: timeoutNanoseconds
+        )
+    }
+
+    private func markCurrentConnectionInitialized(requestAttestation: Bool) {
+        let manager = threadStateManager
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await manager.connectionInitialized(
+                connectionID,
+                capabilities: AppServerConnectionCapabilities(requestAttestation: requestAttestation)
+            )
+        }
+    }
+
+    private func subscribeCurrentConnection(toThreadID threadID: String) {
+        let manager = threadStateManager
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await manager.tryAddConnectionToThread(threadID: threadID, connectionID: connectionID)
+        }
+    }
+
+    private func receiveClientResponseIfPresent(_ object: [String: Any]) -> Bool {
+        guard let rawID = object["id"],
+              let requestID = AppServerRequestIDCodec.requestID(from: rawID)
+        else {
+            return false
+        }
+
+        let broker = outgoingRequestBroker
+        if let result = object["result"] {
+            if JSONSerialization.isValidJSONObject(result),
+               let resultData = try? JSONSerialization.data(withJSONObject: result) {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveResponse(id: requestID, resultData: resultData)
+                }
+            } else {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveMalformedResponse(id: requestID)
+                }
+            }
+            return true
+        }
+        if let error = object["error"] as? [String: Any] {
+            let code = (error["code"] as? NSNumber)?.int64Value
+            let message = error["message"] as? String
+            _ = try? CodexAppServer.runAsyncBlocking {
+                await broker.receiveError(id: requestID, code: code, message: message)
+            }
+            return true
+        }
+        if object["method"] as? String == Attestation.generateMethod,
+           let response = object["response"] {
+            if JSONSerialization.isValidJSONObject(response),
+               let responseData = try? JSONSerialization.data(withJSONObject: response) {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveResponse(id: requestID, resultData: responseData)
+                }
+            } else {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveMalformedResponse(id: requestID)
+                }
+            }
+            return true
+        }
+        return false
     }
 
     private func startChatGptLogin() throws -> (loginID: UUID, authURL: String) {
@@ -3155,8 +3240,13 @@ final class CodexAppServerMessageProcessor {
     }
 
     func processLine(_ data: Data) -> Data? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = object["id"],
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if receiveClientResponseIfPresent(object) {
+            return nil
+        }
+        guard let id = object["id"],
               let method = object["method"] as? String
         else {
             return nil
@@ -3171,6 +3261,7 @@ final class CodexAppServerMessageProcessor {
             } else {
                 initialized = true
                 requestAttestation = ((params?["capabilities"] as? [String: Any])?["requestAttestation"] as? Bool) ?? false
+                markCurrentConnectionInitialized(requestAttestation: requestAttestation)
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 response = CodexAppServer.responseObject(id: id, result: [
                     "userAgent": userAgent,
@@ -3193,6 +3284,9 @@ final class CodexAppServerMessageProcessor {
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
+                        if let threadID = thread["id"] as? String {
+                            subscribeCurrentConnection(toThreadID: threadID)
+                        }
                         notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
                     }
                 case "thread/list":
@@ -3201,10 +3295,12 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
                     )
                 case "thread/resume":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
-                    )
+                    let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result)
+                    if let thread = result["thread"] as? [String: Any],
+                       let threadID = thread["id"] as? String {
+                        subscribeCurrentConnection(toThreadID: threadID)
+                    }
                 case "turn/start":
                     let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
@@ -3229,7 +3325,13 @@ final class CodexAppServerMessageProcessor {
                     let outcome = try CodexAppServer.reviewStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: outcome.result)
                     if let thread = outcome.startedThread {
+                        if let threadID = thread["id"] as? String {
+                            subscribeCurrentConnection(toThreadID: threadID)
+                        }
                         notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
+                    }
+                    if let reviewThreadID = outcome.result["reviewThreadId"] as? String {
+                        subscribeCurrentConnection(toThreadID: reviewThreadID)
                     }
                     if let reviewThreadID = outcome.result["reviewThreadId"] as? String,
                        let turn = outcome.result["turn"] as? [String: Any] {
@@ -3271,10 +3373,15 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.interruptConversationResult(params: params, configuration: configuration)
                     )
                 case "addConversationListener":
+                    let result = CodexAppServer.addConversationListenerResult()
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.addConversationListenerResult()
+                        result: result
                     )
+                    if let threadID = CodexAppServer.stringParam(params?["conversationId"])
+                        ?? CodexAppServer.stringParam(params?["conversation_id"]) {
+                        subscribeCurrentConnection(toThreadID: threadID)
+                    }
                 case "removeConversationListener":
                     response = CodexAppServer.responseObject(id: id, result: [:])
                 case "getUserAgent":

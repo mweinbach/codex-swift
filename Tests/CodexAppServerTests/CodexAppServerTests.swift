@@ -100,6 +100,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testAppServerAttestationProviderRequestsCapableSubscribedClient() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":true}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 1_000_000_000)
+        async let headerValue = provider.header(for: Attestation.Context(threadID: threadID))
+
+        let requestData = await notificationCapture.nextPayload()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+        XCTAssertEqual(request["method"] as? String, "attestation/generate")
+        XCTAssertEqual((request["params"] as? [String: Any])?.isEmpty, true)
+        let requestID = try XCTUnwrap(request["id"])
+
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "id": requestID,
+            "result": [
+                "token": "v1.client-attestation-payload"
+            ]
+        ])
+        XCTAssertNil(processor.processLine(responseData))
+
+        let resolvedHeaderValue = await headerValue
+        XCTAssertEqual(resolvedHeaderValue, #"{"v":1,"s":0,"t":"v1.client-attestation-payload"}"#)
+    }
+
+    func testAppServerAttestationProviderSkipsClientWithoutCapability() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 1_000_000)
+        let headerValue = await provider.header(for: Attestation.Context(threadID: threadID))
+
+        XCTAssertNil(headerValue)
+        let payloadCount = await notificationCapture.payloadsData().count
+        XCTAssertEqual(payloadCount, 0)
+    }
+
+    func testAppServerAttestationProviderReportsTimeout() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":true}}}"#.utf8)))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let provider = processor.attestationProvider(timeoutNanoseconds: 2_000_000)
+        async let headerValue = provider.header(for: Attestation.Context(threadID: threadID))
+        _ = await notificationCapture.nextPayload()
+
+        let resolvedHeaderValue = await headerValue
+        XCTAssertEqual(resolvedHeaderValue, #"{"v":1,"s":1}"#)
+    }
+
     func testLegacyNewConversationSummaryListenerAndSendMessage() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -2190,13 +2272,28 @@ private actor AppServerMcpOAuthLoginCapture {
 
 private actor AppServerNotificationCapture {
     private var payloads: [Data] = []
+    private var waiters: [CheckedContinuation<Data, Never>] = []
 
     func append(_ data: Data) {
+        if !waiters.isEmpty {
+            let waiter = waiters.removeFirst()
+            waiter.resume(returning: data)
+            return
+        }
         payloads.append(data)
     }
 
     func payloadsData() -> [Data] {
         payloads
+    }
+
+    func nextPayload() async -> Data {
+        if !payloads.isEmpty {
+            return payloads.removeFirst()
+        }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
     }
 }
 
