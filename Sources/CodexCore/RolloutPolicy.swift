@@ -197,6 +197,7 @@ public enum RolloutPolicy {
              .customToolCall,
              .customToolCallOutput,
              .webSearchCall,
+             .ghostSnapshot,
              .compaction,
              .knownPersisted:
             return true

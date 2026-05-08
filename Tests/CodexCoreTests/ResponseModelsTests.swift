@@ -229,6 +229,36 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["status"] as? String, "completed")
     }
 
+    func testRoundTripsGhostSnapshotPayloadLikeRust() throws {
+        let json = #"""
+        {
+            "type": "ghost_snapshot",
+            "ghost_commit": {
+                "id": "ghost-1",
+                "parent": "parent-1",
+                "preexisting_untracked_files": ["notes.txt"],
+                "preexisting_untracked_dirs": ["scratch"]
+            }
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .ghostSnapshot(ghostCommit: GhostCommit(
+            id: "ghost-1",
+            parent: "parent-1",
+            preexistingUntrackedFiles: ["notes.txt"],
+            preexistingUntrackedDirs: ["scratch"]
+        )))
+
+        let object = try JSONObject(item)
+        XCTAssertEqual(object["type"] as? String, "ghost_snapshot")
+        let ghostCommit = try XCTUnwrap(object["ghost_commit"] as? [String: Any])
+        XCTAssertEqual(ghostCommit["id"] as? String, "ghost-1")
+        XCTAssertEqual(ghostCommit["parent"] as? String, "parent-1")
+        XCTAssertEqual(ghostCommit["preexisting_untracked_files"] as? [String], ["notes.txt"])
+        XCTAssertEqual(ghostCommit["preexisting_untracked_dirs"] as? [String], ["scratch"])
+    }
+
     func testDecodesReasoningPayload() throws {
         let json = #"""
         {

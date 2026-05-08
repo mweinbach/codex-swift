@@ -504,6 +504,32 @@ public enum ReasoningItemContent: Equatable, Codable, Sendable {
     }
 }
 
+public struct GhostCommit: Equatable, Codable, Sendable {
+    public let id: String
+    public let parent: String?
+    public let preexistingUntrackedFiles: [String]
+    public let preexistingUntrackedDirs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case parent
+        case preexistingUntrackedFiles = "preexisting_untracked_files"
+        case preexistingUntrackedDirs = "preexisting_untracked_dirs"
+    }
+
+    public init(
+        id: String,
+        parent: String? = nil,
+        preexistingUntrackedFiles: [String] = [],
+        preexistingUntrackedDirs: [String] = []
+    ) {
+        self.id = id
+        self.parent = parent
+        self.preexistingUntrackedFiles = preexistingUntrackedFiles
+        self.preexistingUntrackedDirs = preexistingUntrackedDirs
+    }
+}
+
 public struct ShellToolCallParams: Equatable, Decodable, Sendable {
     public let command: [String]
     public let workdir: String?
@@ -634,6 +660,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     case customToolCall(id: String? = nil, status: String? = nil, callID: String, name: String, input: String)
     case customToolCallOutput(callID: String, output: String)
     case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction)
+    case ghostSnapshot(ghostCommit: GhostCommit)
     case compaction(encryptedContent: String)
     case knownPersisted(type: String)
     case other
@@ -651,6 +678,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case output
         case status
         case action
+        case ghostCommit = "ghost_commit"
         case encryptedContent = "encrypted_content"
     }
 
@@ -744,7 +772,11 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
         case "ghost_snapshot":
-            self = .knownPersisted(type: type)
+            if let ghostCommit = try? container.decode(GhostCommit.self, forKey: .ghostCommit) {
+                self = .ghostSnapshot(ghostCommit: ghostCommit)
+            } else {
+                self = .knownPersisted(type: type)
+            }
         default:
             self = .other
         }
@@ -796,6 +828,9 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encode(action, forKey: .action)
+        case let .ghostSnapshot(ghostCommit):
+            try container.encode("ghost_snapshot", forKey: .type)
+            try container.encode(ghostCommit, forKey: .ghostCommit)
         case let .compaction(encryptedContent):
             try container.encode("compaction", forKey: .type)
             try container.encode(encryptedContent, forKey: .encryptedContent)

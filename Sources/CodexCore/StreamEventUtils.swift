@@ -12,6 +12,7 @@ public enum StreamEventUtils {
              .localShellCall,
              .functionCall,
              .customToolCall,
+             .ghostSnapshot,
              .compaction,
              .knownPersisted,
              .other:

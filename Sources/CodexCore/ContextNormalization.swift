@@ -60,6 +60,7 @@ public enum ContextNormalization {
                  .functionCallOutput,
                  .customToolCallOutput,
                  .webSearchCall,
+                 .ghostSnapshot,
                  .compaction,
                  .knownPersisted,
                  .other:
@@ -161,6 +162,7 @@ public enum ContextNormalization {
         case .message,
              .reasoning,
              .webSearchCall,
+             .ghostSnapshot,
              .compaction,
              .knownPersisted,
              .other:

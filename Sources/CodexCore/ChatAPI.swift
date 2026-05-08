@@ -147,6 +147,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
 
             case .reasoning,
                  .webSearchCall,
+                 .ghostSnapshot,
                  .compaction,
                  .knownPersisted,
                  .other:
@@ -236,6 +237,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                  .customToolCall,
                  .customToolCallOutput,
                  .webSearchCall,
+                 .ghostSnapshot,
                  .compaction,
                  .knownPersisted,
                  .other:

@@ -42,6 +42,7 @@ public enum EventMapping {
              .functionCallOutput,
              .customToolCall,
              .customToolCallOutput,
+             .ghostSnapshot,
              .knownPersisted,
              .other:
             return nil

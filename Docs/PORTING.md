@@ -4,11 +4,11 @@ Objective: port `/Users/mweinbach/Projects/codex` from Rust to native Swift with
 
 Source baseline inspected for this scaffold:
 
-- Repository: `/Users/mweinbach/Projects/codex`
-- HEAD: `b00146a47f0fc7eb8353664c0bf4942763e22c91`
+- Repository: `/private/tmp/codex-upstream.1xIR1c/repo` (fresh clone of `openai/codex`; in-place `/Users/mweinbach/Projects/codex` fetch was sandbox-blocked)
+- HEAD: `61142b61693dd89fc0104946ecb23c177a360905`
 - Rust workspace: `codex-rs`
-- Rust workspace member count: 53 Cargo manifests
-- Rust source size: 789 tracked `.rs` files
+- Rust workspace member count: 114 Cargo manifests
+- Rust source size: 1,818 tracked `.rs` files
 
 ## Current Swift Package Shape
 
@@ -101,7 +101,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/account.rs`
   - lowercase ChatGPT plan wire values with unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
-  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, and compaction alias decoding
+  - sandbox permission values, response input items, content items, function-call output payloads, shell tool call params, web-search actions, ghost snapshot response items, and compaction alias decoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
   - turn item wire tags, user/agent/reasoning/web-search item models, item IDs, legacy message/reasoning/web-search events, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models

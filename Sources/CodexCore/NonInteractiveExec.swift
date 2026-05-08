@@ -652,6 +652,7 @@ public enum NonInteractiveExec {
                  .functionCallOutput,
                  .customToolCallOutput,
                  .webSearchCall,
+                 .ghostSnapshot,
                  .compaction,
                  .knownPersisted,
                  .other:

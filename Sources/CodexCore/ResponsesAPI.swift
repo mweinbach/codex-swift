@@ -336,6 +336,7 @@ private extension ResponseItem {
             return id
         case .functionCallOutput,
              .customToolCallOutput,
+             .ghostSnapshot,
              .compaction,
              .knownPersisted,
              .other:
