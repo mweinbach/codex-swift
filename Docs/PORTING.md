@@ -70,6 +70,8 @@ Source baseline inspected for this scaffold:
   - compact wire API value, compaction input body shape, `responses/compact` path selection, chat-wire rejection message, and compact-history response decoding
 - `codex-rs/codex-api/src/provider.rs` plus `codex-rs/codex-client/src/request.rs` and `retry.rs`
   - provider URL/path rendering, low-level API request envelope construction, JSON body attachment, and retry-policy conversion shape
+- Pure `/models` endpoint helpers from `codex-rs/codex-api/src/endpoint/models.rs`
+  - models request path construction, `client_version` query appending, extra-header merging, response decoding, and ETag header precedence
 - `codex-rs/protocol/src/protocol.rs`
   - ask-for-approval wire values and sandbox policy tagged Codable shape/access helpers, including serde default-field serialization
 - `codex-rs/common/src/approval_presets.rs`
