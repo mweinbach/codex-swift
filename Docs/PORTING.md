@@ -170,6 +170,8 @@ Source baseline inspected for this scaffold:
   - PKCE verifier generation from 64 random bytes, base64url no-padding encoding, and S256 code-challenge derivation
 - `codex-rs/ollama/src/url.rs` and `codex-rs/ollama/src/parser.rs`
   - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
+- `codex-rs/feedback/src/lib.rs`
+  - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, and temp-file save path
 
 ## Known Gaps
 
@@ -179,6 +181,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - non-interactive `exec`
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
+- Sentry feedback upload and rollout attachment plumbing
 - Responses API streaming and tool orchestration
 - sandbox execution
 - tool handler registry dispatch and dynamic MCP tool conversion
