@@ -57,9 +57,9 @@ Source baseline inspected for this scaffold:
   - reasoning effort wire values needed by config summaries
   - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, structured upgrade migration markdown, and remote `ModelInfo` to `ModelPreset` conversion
 - `codex-rs/core/src/models_manager/cache.rs` and pure helpers from `codex-rs/core/src/models_manager/manager.rs`
-  - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, model preset merge/filter/default behavior, and offline/default model selection constants
-- `codex-rs/core/src/models_manager/model_presets.rs`
-  - built-in model preset ordering, visibility filtering, default model marker, upgrade prompt metadata, supported reasoning effort labels, and migration config keys
+  - models cache JSON shape, RFC3339 timestamps, TTL freshness, pretty file persistence, client-version fallback formatting, bundled model catalog loading, model preset merge/filter/default behavior, and empty fallback default selection
+- `codex-rs/models-manager/models.json` and legacy notice keys from `codex-rs/models-manager/src/model_presets.rs`
+  - bundled model catalog ordering, picker visibility, default model marker, upgrade prompt metadata, supported reasoning effort labels, service tiers, and migration markdown
 - `codex-rs/protocol/src/openai_models.rs`, `codex-rs/protocol/src/config_types.rs`, and service-tier request plumbing from `codex-rs/core`
   - model service-tier metadata, dynamic fast-tier support detection, arbitrary string service-tier config, legacy `fast` to `priority` normalization, and Responses API `service_tier` request encoding
 - `codex-rs/core/src/models_manager/model_family.rs` and model prompt includes from `codex-rs/core/*.md`

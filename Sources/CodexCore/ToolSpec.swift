@@ -12,6 +12,11 @@ public enum ApplyPatchToolType: String, Codable, CaseIterable, Equatable, Sendab
     case freeform
 }
 
+public enum WebSearchToolType: String, Codable, CaseIterable, Equatable, Sendable {
+    case text
+    case textAndImage = "text_and_image"
+}
+
 public enum JSONSchemaAdditionalProperties: Equatable, Codable, Sendable {
     case boolean(Bool)
     case schema(JSONSchema)

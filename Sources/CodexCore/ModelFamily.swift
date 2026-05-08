@@ -32,6 +32,7 @@ public struct ModelFamily: Equatable, Sendable {
     public var effectiveContextWindowPercent: Int64
     public var supportVerbosity: Bool
     public var defaultVerbosity: Verbosity?
+    public var defaultReasoningSummary: ReasoningSummary
     public var shellType: ConfigShellToolType
     public var truncationPolicy: TruncationPolicy
 
@@ -52,6 +53,7 @@ public struct ModelFamily: Equatable, Sendable {
         effectiveContextWindowPercent: Int64 = 95,
         supportVerbosity: Bool = false,
         defaultVerbosity: Verbosity? = nil,
+        defaultReasoningSummary: ReasoningSummary = .auto,
         shellType: ConfigShellToolType = .default,
         truncationPolicy: TruncationPolicy = .bytes(10_000)
     ) {
@@ -69,6 +71,7 @@ public struct ModelFamily: Equatable, Sendable {
         self.effectiveContextWindowPercent = effectiveContextWindowPercent
         self.supportVerbosity = supportVerbosity
         self.defaultVerbosity = defaultVerbosity
+        self.defaultReasoningSummary = defaultReasoningSummary
         self.shellType = shellType
         self.truncationPolicy = truncationPolicy
     }
@@ -110,12 +113,15 @@ public struct ModelFamily: Equatable, Sendable {
             self.baseInstructions = baseInstructions
         }
         supportsReasoningSummaries = model.supportsReasoningSummaries
+        defaultReasoningSummary = model.defaultReasoningSummary
         supportVerbosity = model.supportVerbosity
         defaultVerbosity = model.defaultVerbosity
         applyPatchToolType = model.applyPatchToolType
         truncationPolicy = model.truncationPolicy.runtimePolicy
         supportsParallelToolCalls = model.supportsParallelToolCalls
-        contextWindow = model.contextWindow
+        contextWindow = model.resolvedContextWindow
+        configuredAutoCompactTokenLimit = model.autoCompactTokenLimitValue()
+        effectiveContextWindowPercent = model.effectiveContextWindowPercent
         experimentalSupportedTools = model.experimentalSupportedTools
     }
 
@@ -229,6 +235,14 @@ extension ModelsManager {
                 shellType: .unifiedExec,
                 truncationPolicy: .bytes(10_000)
             )
+        } else if slug.hasPrefix("gpt-5.5") {
+            return gpt55Family(slug)
+        } else if slug.hasPrefix("gpt-5.4-mini") {
+            return gpt54MiniFamily(slug)
+        } else if slug.hasPrefix("gpt-5.4") || slug.hasPrefix("codex-auto-review") {
+            return gpt54Family(slug)
+        } else if slug.hasPrefix("gpt-5.3-codex") {
+            return gpt53CodexFamily(slug)
         } else if slug.hasPrefix("gpt-5.2-codex") {
             return codex52Family(slug)
         } else if slug.hasPrefix("bengalfox") {
@@ -320,6 +334,63 @@ extension ModelsManager {
             defaultVerbosity: .low,
             shellType: .shellCommand,
             truncationPolicy: .bytes(10_000)
+        )
+    }
+
+    private static func gpt55Family(_ slug: String) -> ModelFamily {
+        ModelFamily(
+            slug: slug,
+            family: slug,
+            supportsReasoningSummaries: true,
+            defaultReasoningEffort: .medium,
+            supportsParallelToolCalls: true,
+            applyPatchToolType: .freeform,
+            baseInstructions: ModelFamilyPrompts.base,
+            supportVerbosity: true,
+            defaultVerbosity: .low,
+            defaultReasoningSummary: .none,
+            shellType: .shellCommand,
+            truncationPolicy: .tokens(10_000)
+        )
+    }
+
+    private static func gpt54Family(_ slug: String) -> ModelFamily {
+        ModelFamily(
+            slug: slug,
+            family: slug,
+            supportsReasoningSummaries: true,
+            defaultReasoningEffort: .medium,
+            supportsParallelToolCalls: true,
+            applyPatchToolType: .freeform,
+            baseInstructions: ModelFamilyPrompts.base,
+            supportVerbosity: true,
+            defaultVerbosity: .low,
+            defaultReasoningSummary: .none,
+            shellType: .shellCommand,
+            truncationPolicy: .tokens(10_000)
+        )
+    }
+
+    private static func gpt54MiniFamily(_ slug: String) -> ModelFamily {
+        var family = gpt54Family(slug)
+        family.defaultVerbosity = .medium
+        return family
+    }
+
+    private static func gpt53CodexFamily(_ slug: String) -> ModelFamily {
+        ModelFamily(
+            slug: slug,
+            family: slug,
+            supportsReasoningSummaries: true,
+            defaultReasoningEffort: .medium,
+            supportsParallelToolCalls: true,
+            applyPatchToolType: .freeform,
+            baseInstructions: ModelFamilyPrompts.gpt5Codex,
+            supportVerbosity: true,
+            defaultVerbosity: .low,
+            defaultReasoningSummary: .none,
+            shellType: .shellCommand,
+            truncationPolicy: .tokens(10_000)
         )
     }
 

@@ -125,7 +125,9 @@ public enum NonInteractiveExec {
         outputSchema: JSONValue?
     ) -> ResponsesOptions {
         let effort = reasoningEffort ?? modelFamily.defaultReasoningEffort
-        let summary = reasoningSummary ?? (modelFamily.supportsReasoningSummaries ? .auto : nil)
+        let summary = reasoningSummary ?? (modelFamily.supportsReasoningSummaries
+            ? modelFamily.defaultReasoningSummary
+            : nil)
         let reasoning = effort == nil && summary == nil
             ? nil
             : ResponsesAPIReasoning(effort: effort, summary: summary)

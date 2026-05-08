@@ -111,8 +111,8 @@ public enum ModelsManager {
     public static let hideGPT51CodexMaxMigrationPromptConfig = "hide_gpt-5.1-codex-max_migration_prompt"
     public static let modelCacheFile = "models_cache.json"
     public static let defaultModelCacheTTL: TimeInterval = 300
-    public static let openAIDefaultAPIModel = "gpt-5.1-codex-max"
-    public static let openAIDefaultChatGPTModel = "gpt-5.2-codex"
+    public static let openAIDefaultAPIModel = "gpt-5.5"
+    public static let openAIDefaultChatGPTModel = "gpt-5.5"
     public static let codexAutoBalancedModel = "codex-auto-balanced"
 
     public static func cachePath(codexHome: URL) -> URL {
@@ -141,21 +141,18 @@ public enum ModelsManager {
             .sorted { $0.priority < $1.priority }
             .map(\.preset)
         var mergedPresets = mergePresets(remotePresets: remotePresets, existingPresets: localModels)
-        mergedPresets = filterVisibleModels(mergedPresets, chatGPTMode: chatGPTMode)
-
-        guard !mergedPresets.contains(where: \.isDefault),
-              let first = mergedPresets.first
-        else {
-            return mergedPresets
-        }
-
-        mergedPresets[0] = first.withIsDefault(true)
+        mergedPresets = filterByAuth(mergedPresets, chatGPTMode: chatGPTMode)
+        markDefaultByPickerVisibility(&mergedPresets)
         return mergedPresets
     }
 
     public static func filterVisibleModels(_ models: [ModelPreset], chatGPTMode: Bool) -> [ModelPreset] {
+        filterByAuth(models, chatGPTMode: chatGPTMode).filter(\.showInPicker)
+    }
+
+    public static func filterByAuth(_ models: [ModelPreset], chatGPTMode: Bool) -> [ModelPreset] {
         models.filter { model in
-            model.showInPicker && (chatGPTMode || model.supportedInAPI)
+            chatGPTMode || model.supportedInAPI
         }
     }
 
@@ -185,223 +182,52 @@ public enum ModelsManager {
         if let explicitModel {
             return explicitModel
         }
-        if isChatGPT {
-            if availableModels.contains(where: { $0.model == codexAutoBalancedModel }) {
-                return codexAutoBalancedModel
-            }
-            return openAIDefaultChatGPTModel
+        if let defaultModel = availableModels.first(where: \.isDefault) {
+            return defaultModel.model
         }
-        return openAIDefaultAPIModel
+        if let firstModel = availableModels.first {
+            return firstModel.model
+        }
+        return ""
     }
 
     public static func offlineModel(explicitModel: String?) -> String {
         explicitModel ?? openAIDefaultChatGPTModel
     }
 
-    public static func builtinModelPresets(authMode _: AuthMode? = nil) -> [ModelPreset] {
-        allModelPresets.filter(\.showInPicker)
+    public static func builtinModelPresets(authMode: AuthMode? = nil) -> [ModelPreset] {
+        filterByAuth(allModelPresets, chatGPTMode: authMode == .chatGPT)
     }
 
     public static var allModelPresets: [ModelPreset] {
-        [
-            ModelPreset(
-                id: "gpt-5.2-codex",
-                model: "gpt-5.2-codex",
-                displayName: "gpt-5.2-codex",
-                description: "Latest frontier agentic coding model.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: codex52Efforts,
-                isDefault: true,
-                upgrade: nil,
-                showInPicker: true,
-                supportedInAPI: false
-            ),
-            ModelPreset(
-                id: "gpt-5.1-codex-max",
-                model: "gpt-5.1-codex-max",
-                displayName: "gpt-5.1-codex-max",
-                description: "Codex-optimized flagship for deep and fast reasoning.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: codex52Efforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: true,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5.1-codex-mini",
-                model: "gpt-5.1-codex-mini",
-                displayName: "gpt-5.1-codex-mini",
-                description: "Optimized for codex. Cheaper, faster, but less capable.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: codexMiniEfforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: true,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5.2",
-                model: "gpt-5.2",
-                displayName: "gpt-5.2",
-                description: "Latest frontier model with improvements across knowledge, reasoning and coding",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: gpt52Efforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: true,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "bengalfox",
-                model: "bengalfox",
-                displayName: "bengalfox",
-                description: "bengalfox",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: codex52Efforts,
-                isDefault: false,
-                upgrade: nil,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "boomslang",
-                model: "boomslang",
-                displayName: "boomslang",
-                description: "boomslang",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: gpt52Efforts,
-                isDefault: false,
-                upgrade: nil,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5-codex",
-                model: "gpt-5-codex",
-                displayName: "gpt-5-codex",
-                description: "Optimized for codex.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: legacyCodexEfforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5-codex-mini",
-                model: "gpt-5-codex-mini",
-                displayName: "gpt-5-codex-mini",
-                description: "Optimized for codex. Cheaper, faster, but less capable.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: codexMiniEfforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5.1-codex",
-                model: "gpt-5.1-codex",
-                displayName: "gpt-5.1-codex",
-                description: "Optimized for codex.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: legacyCodexEfforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5",
-                model: "gpt-5",
-                displayName: "gpt-5",
-                description: "Broad world knowledge with strong general reasoning.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: gpt5Efforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: false,
-                supportedInAPI: true
-            ),
-            ModelPreset(
-                id: "gpt-5.1",
-                model: "gpt-5.1",
-                displayName: "gpt-5.1",
-                description: "Broad world knowledge with strong general reasoning.",
-                defaultReasoningEffort: .medium,
-                supportedReasoningEfforts: gpt51Efforts,
-                isDefault: false,
-                upgrade: gpt52CodexUpgrade,
-                showInPicker: false,
-                supportedInAPI: true
-            )
-        ]
+        var presets = bundledModels
+            .sorted { $0.priority < $1.priority }
+            .map(\.preset)
+        markDefaultByPickerVisibility(&presets)
+        return presets
     }
 
-    private static var gpt52CodexUpgrade: ModelUpgrade {
-        ModelUpgrade(
-            id: "gpt-5.2-codex",
-            reasoningEffortMapping: nil,
-            migrationConfigKey: "gpt-5.2-codex",
-            modelLink: "https://openai.com/index/introducing-gpt-5-2-codex",
-            upgradeCopy: "Codex is now powered by gpt-5.2-codex, our latest frontier agentic coding model. It is smarter and faster than its predecessors and capable of long-running project-scale work."
-        )
+    public static var bundledModels: [ModelInfo] {
+        do {
+            return try bundledModelsResponse().models
+        } catch {
+            preconditionFailure("Unable to load bundled models.json: \(error)")
+        }
     }
 
-    private static var codex52Efforts: [ReasoningEffortPreset] {
-        efforts([
-            (.low, "Fast responses with lighter reasoning"),
-            (.medium, "Balances speed and reasoning depth for everyday tasks"),
-            (.high, "Greater reasoning depth for complex problems"),
-            (.xhigh, "Extra high reasoning depth for complex problems")
-        ])
+    public static func bundledModelsResponse(decoder: JSONDecoder = JSONDecoder()) throws -> ModelsResponse {
+        guard let url = Bundle.module.url(forResource: "models", withExtension: "json") else {
+            preconditionFailure("Missing bundled models.json resource")
+        }
+        return try decoder.decode(ModelsResponse.self, from: Data(contentsOf: url))
     }
 
-    private static var gpt52Efforts: [ReasoningEffortPreset] {
-        efforts([
-            (.low, "Balances speed with some reasoning; useful for straightforward queries and short explanations"),
-            (.medium, "Provides a solid balance of reasoning depth and latency for general-purpose tasks"),
-            (.high, "Maximizes reasoning depth for complex or ambiguous problems"),
-            (.xhigh, "Extra high reasoning for complex problems")
-        ])
-    }
-
-    private static var codexMiniEfforts: [ReasoningEffortPreset] {
-        efforts([
-            (.medium, "Dynamically adjusts reasoning based on the task"),
-            (.high, "Maximizes reasoning depth for complex or ambiguous problems")
-        ])
-    }
-
-    private static var legacyCodexEfforts: [ReasoningEffortPreset] {
-        efforts([
-            (.low, "Fastest responses with limited reasoning"),
-            (.medium, "Dynamically adjusts reasoning based on the task"),
-            (.high, "Maximizes reasoning depth for complex or ambiguous problems")
-        ])
-    }
-
-    private static var gpt5Efforts: [ReasoningEffortPreset] {
-        efforts([
-            (.minimal, "Fastest responses with little reasoning"),
-            (.low, "Balances speed with some reasoning; useful for straightforward queries and short explanations"),
-            (.medium, "Provides a solid balance of reasoning depth and latency for general-purpose tasks"),
-            (.high, "Maximizes reasoning depth for complex or ambiguous problems")
-        ])
-    }
-
-    private static var gpt51Efforts: [ReasoningEffortPreset] {
-        efforts([
-            (.low, "Balances speed with some reasoning; useful for straightforward queries and short explanations"),
-            (.medium, "Provides a solid balance of reasoning depth and latency for general-purpose tasks"),
-            (.high, "Maximizes reasoning depth for complex or ambiguous problems")
-        ])
-    }
-
-    private static func efforts(_ entries: [(ReasoningEffort, String)]) -> [ReasoningEffortPreset] {
-        entries.map { effort, description in
-            ReasoningEffortPreset(effort: effort, description: description)
+    public static func markDefaultByPickerVisibility(_ models: inout [ModelPreset]) {
+        for index in models.indices {
+            models[index] = models[index].withIsDefault(false)
+        }
+        if let defaultIndex = models.firstIndex(where: \.showInPicker) ?? models.indices.first {
+            models[defaultIndex] = models[defaultIndex].withIsDefault(true)
         }
     }
 }

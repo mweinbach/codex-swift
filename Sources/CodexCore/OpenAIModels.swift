@@ -113,6 +113,59 @@ public struct ModelInfoUpgrade: Equatable, Codable, Sendable {
     }
 }
 
+public struct ModelInstructionsVariables: Equatable, Codable, Sendable {
+    public let personalityDefault: String?
+    public let personalityFriendly: String?
+    public let personalityPragmatic: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case personalityDefault = "personality_default"
+        case personalityFriendly = "personality_friendly"
+        case personalityPragmatic = "personality_pragmatic"
+    }
+
+    public init(
+        personalityDefault: String? = nil,
+        personalityFriendly: String? = nil,
+        personalityPragmatic: String? = nil
+    ) {
+        self.personalityDefault = personalityDefault
+        self.personalityFriendly = personalityFriendly
+        self.personalityPragmatic = personalityPragmatic
+    }
+
+    public var isComplete: Bool {
+        personalityDefault != nil
+            && personalityFriendly != nil
+            && personalityPragmatic != nil
+    }
+}
+
+public struct ModelMessages: Equatable, Codable, Sendable {
+    public static let personalityPlaceholder = "{{ personality }}"
+
+    public let instructionsTemplate: String?
+    public let instructionsVariables: ModelInstructionsVariables?
+
+    private enum CodingKeys: String, CodingKey {
+        case instructionsTemplate = "instructions_template"
+        case instructionsVariables = "instructions_variables"
+    }
+
+    public init(
+        instructionsTemplate: String? = nil,
+        instructionsVariables: ModelInstructionsVariables? = nil
+    ) {
+        self.instructionsTemplate = instructionsTemplate
+        self.instructionsVariables = instructionsVariables
+    }
+
+    public var supportsPersonality: Bool {
+        instructionsTemplate?.contains(Self.personalityPlaceholder) == true
+            && instructionsVariables?.isComplete == true
+    }
+}
+
 public struct ModelPreset: Equatable, Sendable {
     public let id: String
     public let model: String
@@ -188,9 +241,9 @@ public struct ModelPreset: Equatable, Sendable {
             model: info.slug,
             displayName: info.displayName,
             description: info.description ?? "",
-            defaultReasoningEffort: info.defaultReasoningLevel,
+            defaultReasoningEffort: info.defaultReasoningLevel ?? .none,
             supportedReasoningEfforts: info.supportedReasoningLevels,
-            supportsPersonality: false,
+            supportsPersonality: info.supportsPersonality,
             additionalSpeedTiers: info.additionalSpeedTiers,
             serviceTiers: info.serviceTiers,
             isDefault: false,
@@ -366,7 +419,7 @@ public struct ModelInfo: Equatable, Sendable {
     public let slug: String
     public let displayName: String
     public let description: String?
-    public let defaultReasoningLevel: ReasoningEffort
+    public let defaultReasoningLevel: ReasoningEffort?
     public let supportedReasoningLevels: [ReasoningEffortPreset]
     public let shellType: ConfigShellToolType
     public let visibility: ModelVisibility
@@ -377,15 +430,23 @@ public struct ModelInfo: Equatable, Sendable {
     public let availabilityNux: ModelAvailabilityNux?
     public let upgrade: ModelInfoUpgrade?
     public let baseInstructions: String?
+    public let modelMessages: ModelMessages?
     public let supportsReasoningSummaries: Bool
+    public let defaultReasoningSummary: ReasoningSummary
     public let supportVerbosity: Bool
     public let defaultVerbosity: Verbosity?
     public let applyPatchToolType: ApplyPatchToolType?
+    public let webSearchToolType: WebSearchToolType
     public let truncationPolicy: TruncationPolicyConfig
     public let supportsParallelToolCalls: Bool
+    public let supportsImageDetailOriginal: Bool
     public let contextWindow: Int64?
+    public let maxContextWindow: Int64?
+    public let autoCompactTokenLimit: Int64?
+    public let effectiveContextWindowPercent: Int64
     public let experimentalSupportedTools: [String]
     public let inputModalities: [InputModality]
+    public let supportsSearchTool: Bool
 
     private enum CodingKeys: String, CodingKey {
         case slug
@@ -402,22 +463,30 @@ public struct ModelInfo: Equatable, Sendable {
         case availabilityNux = "availability_nux"
         case upgrade
         case baseInstructions = "base_instructions"
+        case modelMessages = "model_messages"
         case supportsReasoningSummaries = "supports_reasoning_summaries"
+        case defaultReasoningSummary = "default_reasoning_summary"
         case supportVerbosity = "support_verbosity"
         case defaultVerbosity = "default_verbosity"
         case applyPatchToolType = "apply_patch_tool_type"
+        case webSearchToolType = "web_search_tool_type"
         case truncationPolicy = "truncation_policy"
         case supportsParallelToolCalls = "supports_parallel_tool_calls"
+        case supportsImageDetailOriginal = "supports_image_detail_original"
         case contextWindow = "context_window"
+        case maxContextWindow = "max_context_window"
+        case autoCompactTokenLimit = "auto_compact_token_limit"
+        case effectiveContextWindowPercent = "effective_context_window_percent"
         case experimentalSupportedTools = "experimental_supported_tools"
         case inputModalities = "input_modalities"
+        case supportsSearchTool = "supports_search_tool"
     }
 
     public init(
         slug: String,
         displayName: String,
         description: String? = nil,
-        defaultReasoningLevel: ReasoningEffort,
+        defaultReasoningLevel: ReasoningEffort? = nil,
         supportedReasoningLevels: [ReasoningEffortPreset],
         shellType: ConfigShellToolType,
         visibility: ModelVisibility,
@@ -428,15 +497,23 @@ public struct ModelInfo: Equatable, Sendable {
         availabilityNux: ModelAvailabilityNux? = nil,
         upgrade: ModelInfoUpgrade? = nil,
         baseInstructions: String? = nil,
+        modelMessages: ModelMessages? = nil,
         supportsReasoningSummaries: Bool,
+        defaultReasoningSummary: ReasoningSummary = .auto,
         supportVerbosity: Bool,
         defaultVerbosity: Verbosity? = nil,
         applyPatchToolType: ApplyPatchToolType? = nil,
+        webSearchToolType: WebSearchToolType = .text,
         truncationPolicy: TruncationPolicyConfig,
         supportsParallelToolCalls: Bool,
+        supportsImageDetailOriginal: Bool = false,
         contextWindow: Int64? = nil,
+        maxContextWindow: Int64? = nil,
+        autoCompactTokenLimit: Int64? = nil,
+        effectiveContextWindowPercent: Int64 = 95,
         experimentalSupportedTools: [String],
-        inputModalities: [InputModality] = InputModality.defaultInputModalities
+        inputModalities: [InputModality] = InputModality.defaultInputModalities,
+        supportsSearchTool: Bool = false
     ) {
         self.slug = slug
         self.displayName = displayName
@@ -452,19 +529,43 @@ public struct ModelInfo: Equatable, Sendable {
         self.availabilityNux = availabilityNux
         self.upgrade = upgrade
         self.baseInstructions = baseInstructions
+        self.modelMessages = modelMessages
         self.supportsReasoningSummaries = supportsReasoningSummaries
+        self.defaultReasoningSummary = defaultReasoningSummary
         self.supportVerbosity = supportVerbosity
         self.defaultVerbosity = defaultVerbosity
         self.applyPatchToolType = applyPatchToolType
+        self.webSearchToolType = webSearchToolType
         self.truncationPolicy = truncationPolicy
         self.supportsParallelToolCalls = supportsParallelToolCalls
+        self.supportsImageDetailOriginal = supportsImageDetailOriginal
         self.contextWindow = contextWindow
+        self.maxContextWindow = maxContextWindow
+        self.autoCompactTokenLimit = autoCompactTokenLimit
+        self.effectiveContextWindowPercent = effectiveContextWindowPercent
         self.experimentalSupportedTools = experimentalSupportedTools
         self.inputModalities = inputModalities
+        self.supportsSearchTool = supportsSearchTool
     }
 
     public var preset: ModelPreset {
         ModelPreset(modelInfo: self)
+    }
+
+    public var resolvedContextWindow: Int64? {
+        contextWindow ?? maxContextWindow
+    }
+
+    public var supportsPersonality: Bool {
+        modelMessages?.supportsPersonality == true
+    }
+
+    public func autoCompactTokenLimitValue() -> Int64? {
+        let contextLimit = resolvedContextWindow.map { ($0 * 9) / 10 }
+        guard let contextLimit else {
+            return autoCompactTokenLimit
+        }
+        return autoCompactTokenLimit.map { min($0, contextLimit) } ?? contextLimit
     }
 
     public func supportsServiceTier(_ serviceTier: String) -> Bool {
@@ -478,7 +579,10 @@ extension ModelInfo: Codable {
         self.slug = try container.decode(String.self, forKey: .slug)
         self.displayName = try container.decode(String.self, forKey: .displayName)
         self.description = try container.decodeIfPresent(String.self, forKey: .description)
-        self.defaultReasoningLevel = try container.decode(ReasoningEffort.self, forKey: .defaultReasoningLevel)
+        self.defaultReasoningLevel = try container.decodeIfPresent(
+            ReasoningEffort.self,
+            forKey: .defaultReasoningLevel
+        )
         self.supportedReasoningLevels = try container.decode(
             [ReasoningEffortPreset].self,
             forKey: .supportedReasoningLevels
@@ -492,18 +596,38 @@ extension ModelInfo: Codable {
         self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.upgrade = try container.decodeIfPresent(ModelInfoUpgrade.self, forKey: .upgrade)
         self.baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
+        self.modelMessages = try container.decodeIfPresent(ModelMessages.self, forKey: .modelMessages)
         self.supportsReasoningSummaries = try container.decode(Bool.self, forKey: .supportsReasoningSummaries)
+        self.defaultReasoningSummary = try container.decodeIfPresent(
+            ReasoningSummary.self,
+            forKey: .defaultReasoningSummary
+        ) ?? .auto
         self.supportVerbosity = try container.decode(Bool.self, forKey: .supportVerbosity)
         self.defaultVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .defaultVerbosity)
         self.applyPatchToolType = try container.decodeIfPresent(ApplyPatchToolType.self, forKey: .applyPatchToolType)
+        self.webSearchToolType = try container.decodeIfPresent(
+            WebSearchToolType.self,
+            forKey: .webSearchToolType
+        ) ?? .text
         self.truncationPolicy = try container.decode(TruncationPolicyConfig.self, forKey: .truncationPolicy)
         self.supportsParallelToolCalls = try container.decode(Bool.self, forKey: .supportsParallelToolCalls)
+        self.supportsImageDetailOriginal = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .supportsImageDetailOriginal
+        ) ?? false
         self.contextWindow = try container.decodeIfPresent(Int64.self, forKey: .contextWindow)
+        self.maxContextWindow = try container.decodeIfPresent(Int64.self, forKey: .maxContextWindow)
+        self.autoCompactTokenLimit = try container.decodeIfPresent(Int64.self, forKey: .autoCompactTokenLimit)
+        self.effectiveContextWindowPercent = try container.decodeIfPresent(
+            Int64.self,
+            forKey: .effectiveContextWindowPercent
+        ) ?? 95
         self.experimentalSupportedTools = try container.decode([String].self, forKey: .experimentalSupportedTools)
         self.inputModalities = try container.decodeIfPresent(
             [InputModality].self,
             forKey: .inputModalities
         ) ?? InputModality.defaultInputModalities
+        self.supportsSearchTool = try container.decodeIfPresent(Bool.self, forKey: .supportsSearchTool) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -522,15 +646,23 @@ extension ModelInfo: Codable {
         try encodeNullingOptional(availabilityNux, into: &container, forKey: .availabilityNux)
         try encodeNullingOptional(upgrade, into: &container, forKey: .upgrade)
         try encodeNullingOptional(baseInstructions, into: &container, forKey: .baseInstructions)
+        try encodeNullingOptional(modelMessages, into: &container, forKey: .modelMessages)
         try container.encode(supportsReasoningSummaries, forKey: .supportsReasoningSummaries)
+        try container.encode(defaultReasoningSummary, forKey: .defaultReasoningSummary)
         try container.encode(supportVerbosity, forKey: .supportVerbosity)
         try encodeNullingOptional(defaultVerbosity, into: &container, forKey: .defaultVerbosity)
         try encodeNullingOptional(applyPatchToolType, into: &container, forKey: .applyPatchToolType)
+        try container.encode(webSearchToolType, forKey: .webSearchToolType)
         try container.encode(truncationPolicy, forKey: .truncationPolicy)
         try container.encode(supportsParallelToolCalls, forKey: .supportsParallelToolCalls)
+        try container.encode(supportsImageDetailOriginal, forKey: .supportsImageDetailOriginal)
         try encodeNullingOptional(contextWindow, into: &container, forKey: .contextWindow)
+        try encodeNullingOptional(maxContextWindow, into: &container, forKey: .maxContextWindow)
+        try encodeNullingOptional(autoCompactTokenLimit, into: &container, forKey: .autoCompactTokenLimit)
+        try container.encode(effectiveContextWindowPercent, forKey: .effectiveContextWindowPercent)
         try container.encode(experimentalSupportedTools, forKey: .experimentalSupportedTools)
         try container.encode(inputModalities, forKey: .inputModalities)
+        try container.encode(supportsSearchTool, forKey: .supportsSearchTool)
     }
 }
 

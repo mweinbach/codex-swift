@@ -128,18 +128,26 @@ final class OpenAIModelsTests: XCTestCase {
                 "migration_markdown": "Move to GPT-5.1."
             ],
             "base_instructions": NSNull(),
+            "model_messages": NSNull(),
             "supports_reasoning_summaries": true,
+            "default_reasoning_summary": "auto",
             "support_verbosity": true,
             "default_verbosity": "medium",
             "apply_patch_tool_type": "freeform",
+            "web_search_tool_type": "text",
             "truncation_policy": [
                 "mode": "tokens",
                 "limit": 200_000
             ],
             "supports_parallel_tool_calls": true,
+            "supports_image_detail_original": false,
             "context_window": 400_000,
+            "max_context_window": NSNull(),
+            "auto_compact_token_limit": NSNull(),
+            "effective_context_window_percent": 95,
             "experimental_supported_tools": ["web_search", "apply_patch"],
-            "input_modalities": ["text"]
+            "input_modalities": ["text"],
+            "supports_search_tool": false
         ])
 
         let data = try JSONEncoder().encode(info)
@@ -211,18 +219,26 @@ final class OpenAIModelsTests: XCTestCase {
                     "availability_nux": NSNull(),
                     "upgrade": NSNull(),
                     "base_instructions": "base",
+                    "model_messages": NSNull(),
                     "supports_reasoning_summaries": false,
+                    "default_reasoning_summary": "auto",
                     "support_verbosity": false,
                     "default_verbosity": NSNull(),
                     "apply_patch_tool_type": NSNull(),
+                    "web_search_tool_type": "text",
                     "truncation_policy": [
                         "mode": "bytes",
                         "limit": 4096
                     ],
                     "supports_parallel_tool_calls": false,
+                    "supports_image_detail_original": false,
                     "context_window": NSNull(),
+                    "max_context_window": NSNull(),
+                    "auto_compact_token_limit": NSNull(),
+                    "effective_context_window_percent": 95,
                     "experimental_supported_tools": [],
-                    "input_modalities": ["text", "image"]
+                    "input_modalities": ["text", "image"],
+                    "supports_search_tool": false
                 ]
             ],
             "etag": ""
