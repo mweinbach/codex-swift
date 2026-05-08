@@ -96,6 +96,7 @@ final class AcceptedLinesTests: XCTestCase {
         ))
 
         XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(requests[0].shouldSendInIsolatedRequest)
         try XCTAssertJSONObjectEqual(requests[0], [
             "event_type": "codex_accepted_line_fingerprints",
             "event_params": [
@@ -120,5 +121,94 @@ final class AcceptedLinesTests: XCTestCase {
                 ]
             ]
         ])
+    }
+
+    func testReducerEmitsAcceptedLineFingerprintsOnceFromLatestTurnDiffOnCompletion() {
+        var reducer = AcceptedLineFingerprintReducer(repoHashResolver: { url in
+            "repo:\(url.lastPathComponent)"
+        })
+        let cwd = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+        reducer.ingestResolvedTurn(
+            turnID: "turn-2",
+            threadID: "thread-2",
+            modelSlug: "gpt-5.4",
+            cwd: cwd
+        )
+
+        for line in ["let old_value = 1;", "let latest_value = 2;"] {
+            let diff = """
+            diff --git a/src/lib.rs b/src/lib.rs
+            index 1111111..2222222
+            --- a/src/lib.rs
+            +++ b/src/lib.rs
+            @@ -0,0 +1 @@
+            +\(line)
+            """
+            reducer.ingestTurnDiff(threadID: "thread-2", turnID: "turn-2", unifiedDiff: diff)
+        }
+
+        let events = reducer.completeTurn(turnID: "turn-2", completedAt: 456)
+
+        XCTAssertEqual(events.count, 1)
+        let params = events[0].eventParams
+        XCTAssertEqual(params.eventType, "codex.accepted_line_fingerprints")
+        XCTAssertEqual(params.turnID, "turn-2")
+        XCTAssertEqual(params.threadID, "thread-2")
+        XCTAssertEqual(params.productSurface, "codex")
+        XCTAssertEqual(params.modelSlug, "gpt-5.4")
+        XCTAssertEqual(params.completedAt, 456)
+        XCTAssertEqual(params.repoHash, "repo:project")
+        XCTAssertEqual(params.acceptedAddedLines, 1)
+        XCTAssertEqual(params.acceptedDeletedLines, 0)
+        XCTAssertEqual(params.lineFingerprints.count, 1)
+        XCTAssertEqual(
+            params.lineFingerprints[0].lineHash,
+            AcceptedLines.fingerprintHash(domain: "line", value: "let latest_value = 2;")
+        )
+        XCTAssertTrue(events[0].shouldSendInIsolatedRequest)
+
+        XCTAssertTrue(reducer.completeTurn(turnID: "turn-2", completedAt: 457).isEmpty)
+    }
+
+    func testReducerChunksLargeAcceptedLineFingerprintEventsWithoutRepeatingCounts() throws {
+        var reducer = AcceptedLineFingerprintReducer(repoHashResolver: { _ in nil })
+        reducer.ingestResolvedTurn(
+            turnID: "turn-3",
+            threadID: "thread-3",
+            modelSlug: "gpt-5.4",
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+        )
+        var diff = """
+        diff --git a/src/lib.rs b/src/lib.rs
+        index 1111111..2222222
+        --- a/src/lib.rs
+        +++ b/src/lib.rs
+        @@ -0,0 +1,20000 @@
+
+        """
+        for index in 0..<20_000 {
+            diff += "+let value_\(index) = \(index);\n"
+        }
+        reducer.ingestTurnDiff(threadID: "thread-3", turnID: "turn-3", unifiedDiff: diff)
+
+        let events = reducer.completeTurn(turnID: "turn-3", completedAt: 789)
+
+        XCTAssertGreaterThan(events.count, 1)
+        var totalFingerprints = 0
+        for (index, event) in events.enumerated() {
+            XCTAssertTrue(event.shouldSendInIsolatedRequest)
+            XCTAssertEqual(event.eventParams.turnID, "turn-3")
+            XCTAssertEqual(event.eventParams.threadID, "thread-3")
+            totalFingerprints += event.eventParams.lineFingerprints.count
+            if index == 0 {
+                XCTAssertEqual(event.eventParams.acceptedAddedLines, 20_000)
+                XCTAssertEqual(event.eventParams.acceptedDeletedLines, 0)
+            } else {
+                XCTAssertEqual(event.eventParams.acceptedAddedLines, 0)
+                XCTAssertEqual(event.eventParams.acceptedDeletedLines, 0)
+            }
+            XCTAssertLessThan(try JSONEncoder().encode(event).count, 2_100_000)
+        }
+        XCTAssertEqual(totalFingerprints, 20_000)
     }
 }

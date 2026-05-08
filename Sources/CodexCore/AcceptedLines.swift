@@ -99,6 +99,10 @@ public struct AcceptedLineFingerprintsEventRequest: Equatable, Codable, Sendable
     public let eventType: String
     public let eventParams: AcceptedLineFingerprintsEventParams
 
+    public var shouldSendInIsolatedRequest: Bool {
+        true
+    }
+
     public init(eventParams: AcceptedLineFingerprintsEventParams) {
         self.eventType = "codex_accepted_line_fingerprints"
         self.eventParams = eventParams
@@ -107,6 +111,82 @@ public struct AcceptedLineFingerprintsEventRequest: Equatable, Codable, Sendable
     private enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
         case eventParams = "event_params"
+    }
+}
+
+public struct AcceptedLineFingerprintReducer {
+    private struct TurnState {
+        var threadID: String?
+        var modelSlug: String?
+        var cwd: URL?
+        var latestDiff: String?
+    }
+
+    private var turns: [String: TurnState] = [:]
+    private let repoHashResolver: (URL) -> String?
+
+    public init(repoHashResolver: @escaping (URL) -> String? = { AcceptedLines.acceptedLineRepoHash(cwd: $0) }) {
+        self.repoHashResolver = repoHashResolver
+    }
+
+    public mutating func ingestResolvedTurn(
+        turnID: String,
+        threadID: String,
+        modelSlug: String,
+        cwd: URL
+    ) {
+        updateTurn(turnID) { state in
+            state.threadID = threadID
+            state.modelSlug = modelSlug
+            state.cwd = cwd
+        }
+    }
+
+    public mutating func ingestTurnDiff(threadID: String, turnID: String, unifiedDiff: String) {
+        updateTurn(turnID) { state in
+            state.threadID = threadID
+            state.latestDiff = unifiedDiff
+        }
+    }
+
+    public mutating func completeTurn(
+        turnID: String,
+        completedAt: UInt64
+    ) -> [AcceptedLineFingerprintsEventRequest] {
+        defer { turns.removeValue(forKey: turnID) }
+
+        guard let state = turns[turnID],
+              let latestDiff = state.latestDiff,
+              let threadID = state.threadID,
+              let modelSlug = state.modelSlug,
+              let cwd = state.cwd
+        else {
+            return []
+        }
+
+        let summary = AcceptedLines.acceptedLineFingerprints(fromUnifiedDiff: latestDiff)
+        if summary.acceptedAddedLines == 0 && summary.acceptedDeletedLines == 0 {
+            return []
+        }
+
+        return AcceptedLines.acceptedLineFingerprintEventRequests(input: AcceptedLineFingerprintEventInput(
+            eventType: "codex.accepted_line_fingerprints",
+            turnID: turnID,
+            threadID: threadID,
+            productSurface: "codex",
+            modelSlug: modelSlug,
+            completedAt: completedAt,
+            repoHash: repoHashResolver(cwd),
+            acceptedAddedLines: summary.acceptedAddedLines,
+            acceptedDeletedLines: summary.acceptedDeletedLines,
+            lineFingerprints: summary.lineFingerprints
+        ))
+    }
+
+    private mutating func updateTurn(_ turnID: String, _ body: (inout TurnState) -> Void) {
+        var state = turns[turnID] ?? TurnState()
+        body(&state)
+        turns[turnID] = state
     }
 }
 

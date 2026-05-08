@@ -4,11 +4,11 @@ Objective: port `/Users/mweinbach/Projects/codex` from Rust to native Swift with
 
 Source baseline inspected for this scaffold:
 
-- Repository: `/private/tmp/codex-upstream.1xIR1c/repo` (fresh clone of `openai/codex`; in-place `/Users/mweinbach/Projects/codex` fetch was sandbox-blocked)
-- HEAD: `61142b61693dd89fc0104946ecb23c177a360905`
+- Repository: `/Users/mweinbach/Projects/codex`
+- HEAD: `7c9731c9af879e2ee4fd4bf92312bbd690a55336`
 - Rust workspace: `codex-rs`
-- Rust workspace member count: 114 Cargo manifests
-- Rust source size: 1,818 tracked `.rs` files
+- Rust workspace member count: 115 Cargo manifests
+- Rust source size: 1,816 tracked `.rs` files
 
 ## Current Swift Package Shape
 
@@ -241,7 +241,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/git_info.rs`
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
 - `codex-rs/analytics/src/accepted_lines.rs` plus `codex-rs/git-utils/src/info.rs` remote URL helpers
-  - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, and canonical repository URL normalization
+  - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, canonical repository URL normalization, isolated-request marking, and latest-turn-diff reducer emission on turn completion
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
   - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`
@@ -381,5 +381,5 @@ The executable is not functionally equivalent yet. Some commands have native run
 - persistent SQLite-backed local agent graph store adapter
 - hook discovery, execution, output parsing/spilling, and config-state integration
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
-- accepted-line analytics reducer/uploader integration with turn-diff retention and isolated analytics requests
+- accepted-line analytics uploader/app-server integration with live notification routing
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
