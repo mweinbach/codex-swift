@@ -164,6 +164,133 @@ final class CommandSafetyTests: XCTestCase {
         ]))
     }
 
+    func testWindowsPowerShellSafeWrappers() {
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-NoLogo",
+            "-Command",
+            "Get-ChildItem -Path ."
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            "git status"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "Get-Content",
+            "Cargo.toml"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            #"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#,
+            "-Command",
+            "Get-Content Cargo.toml"
+        ]))
+    }
+
+    func testWindowsPowerShellSafePipelinesAndGitUsage() {
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            "rg --files-with-matches foo | Measure-Object | Select-Object -ExpandProperty Count"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "Get-Content foo.rs | Select-Object -Skip 200"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "git -c core.pager=cat show HEAD:foo.rs"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "-git cat-file -p HEAD:foo.rs"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "(Get-Content foo.rs -Raw)"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "Get-Item foo.rs | Select-Object Length"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "pwd && ls"
+        ]))
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "pwd && ls"
+        ]))
+    }
+
+    func testWindowsPowerShellRejectsSideEffectsAndUnsupportedConstructs() {
+        for args in [
+            ["powershell.exe", "-NoLogo", "-Command", "Remove-Item foo.txt"],
+            ["powershell.exe", "-NoProfile", "-Command", "rg --pre cat"],
+            ["powershell.exe", "-Command", "rg --hostname-bin=pwned files"],
+            ["powershell.exe", "-Command", "Set-Content foo.txt 'hello'"],
+            ["powershell.exe", "-Command", "echo hi > out.txt"],
+            ["powershell.exe", "-Command", "Get-Content x | Out-File y"],
+            ["powershell.exe", "-Command", "Write-Output foo 2> err.txt"],
+            ["powershell.exe", "-Command", "& Remove-Item foo"],
+            ["powershell.exe", "-Command", "Get-ChildItem; Remove-Item foo"],
+            ["powershell.exe", "-Command", "Write-Output (Set-Content foo6.txt 'abc')"],
+            ["powershell.exe", "-Command", "Write-Host (Remove-Item foo.txt)"],
+            ["powershell.exe", "-Command", "Get-Content (New-Item bar.txt)"],
+            ["powershell.exe", "-Command", "ls @(calc.exe)"],
+            ["powershell.exe", "-Command", "ls foo@(calc.exe)"],
+            ["powershell.exe", "-Command", "Write-Output $(Get-Content foo)"],
+            ["powershell.exe", "-Command", "''"],
+            ["powershell.exe", "-EncodedCommand", "RwBlAHQALQBMAG8AYwBhAHQAaQBvAG4A"],
+            ["powershell.exe", "-UnknownFlag", "Get-Location"],
+            ["powershell.exe", "-Command", "Get-Content", "Cargo.toml"]
+        ] {
+            XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
+        }
+    }
+
+    func testWindowsPowerShellAllowsConstantExpressionArguments() {
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Get-Content 'foo bar'"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Get-Content \"foo bar\""
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Write-Output 'foo $bar'"
+        ]))
+    }
+
+    func testWindowsPowerShellRejectsDynamicArguments() {
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Get-Content $foo"
+        ]))
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Write-Output \"foo $bar\""
+        ]))
+    }
+
     func testExternalSandboxOnlyPromptsForDangerousCommands() {
         let externalPolicy = SandboxPolicy.externalSandbox(networkAccess: .restricted)
         XCTAssertFalse(CommandSafety.requiresInitialApproval(
