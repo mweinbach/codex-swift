@@ -142,6 +142,9 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/auth/storage.rs`
   - CLI auth credential store modes for file, macOS Keychain-backed keyring, and auto fallback, including Rust-compatible keyring account hashing and fallback `auth.json` cleanup
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
+  - API-key login/logout/status command routing, deprecated `--api-key` rejection, stdin API-key loading, forced-login restrictions, and auth storage mutation
+- `codex-rs/cli/src/login.rs`, `codex-rs/login`, and auth/config support from `codex-rs/core`
+  - browser ChatGPT login server flow, device-code login flow with experimental issuer/client-id options, forced workspace validation, token exchange/persistence, and Rust-shaped login success/error messages
   - `codex login --with-api-key` stdin handling, file/keyring/auto API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` output with Rust feature order, stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`
@@ -348,7 +351,6 @@ The executable is not functionally equivalent yet. Some commands have native run
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
 - Starlark-compatible execpolicy parser completeness
-- ChatGPT browser login and device-code login
 - full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
