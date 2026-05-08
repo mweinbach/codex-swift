@@ -1767,7 +1767,7 @@ public enum CodexAppServer {
             return "exec"
         case .mcp:
             return "appServer"
-        case .subagent, .unknown:
+        case .custom, .internal, .subagent, .unknown:
             return "unknown"
         }
     }

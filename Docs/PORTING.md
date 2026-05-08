@@ -285,7 +285,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server-protocol/src/protocol/common.rs` and `codex-rs/app-server-protocol/src/protocol/v2/attestation.rs`
   - server-initiated `attestation/generate` request and response protocol envelopes, empty params shape, token response shape, request id preservation, method-tag validation, and request-payload-to-request helper behavior
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
-  - session source/subagent source wire shapes, display strings, conversation headers, underscore plus hyphenated session/thread header emission, and `x-openai-subagent` header value derivation
+  - session source/subagent source wire shapes, custom/internal source helpers, thread-spawn metadata accessors, product-restriction mapping, display strings, conversation headers, underscore plus hyphenated session/thread header emission, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
   - exec command begin/end payloads, Rust duration wire shape, exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
 - `codex-rs/protocol/src/protocol.rs` MCP startup/auth event models

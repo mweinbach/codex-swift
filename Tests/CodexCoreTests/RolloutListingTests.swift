@@ -294,6 +294,10 @@ final class RolloutListingTests: XCTestCase {
             return .string("exec")
         case .mcp:
             return .string("mcp")
+        case let .custom(source):
+            return .object(["custom": .string(source)])
+        case let .internal(source):
+            return .object(["internal": .string(source.rawValue)])
         case let .subagent(subagent):
             return .object(["subagent": subagentJSONValue(subagent)])
         case .unknown:
@@ -307,6 +311,23 @@ final class RolloutListingTests: XCTestCase {
             return .string("review")
         case .compact:
             return .string("compact")
+        case let .threadSpawn(parentThreadID, depth, agentPath, agentNickname, agentRole):
+            var value: [String: JSONValue] = [
+                "parent_thread_id": .string(parentThreadID.description),
+                "depth": .integer(Int64(depth))
+            ]
+            if let agentPath {
+                value["agent_path"] = .string(agentPath.description)
+            }
+            if let agentNickname {
+                value["agent_nickname"] = .string(agentNickname)
+            }
+            if let agentRole {
+                value["agent_role"] = .string(agentRole)
+            }
+            return .object(["thread_spawn": .object(value)])
+        case .memoryConsolidation:
+            return .string("memory_consolidation")
         case let .other(label):
             return .object(["other": .string(label)])
         }
