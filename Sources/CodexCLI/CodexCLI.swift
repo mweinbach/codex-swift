@@ -72,12 +72,118 @@ public struct CodexCLI: Sendable {
 
     public struct ExecCommandRequest: Equatable, Sendable {
         public let arguments: [String]
+        public let action: ExecCommandAction
+        public let options: ExecCommandOptions
         public let configOverrides: CliConfigOverrides
 
-        public init(arguments: [String], configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+        public init(
+            arguments: [String],
+            action: ExecCommandAction = .run(prompt: nil),
+            options: ExecCommandOptions = ExecCommandOptions(),
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
             self.arguments = arguments
+            self.action = action
+            self.options = options
             self.configOverrides = configOverrides
         }
+
+        public func resolvedInitialOperation(
+            stdinIsTerminal: Bool,
+            readStdin: NonInteractiveInput.StdinReader,
+            readFile: NonInteractiveInput.FileReader
+        ) throws -> ResolvedExecInitialOperation {
+            switch action {
+            case let .run(promptArgument):
+                let prompt = try NonInteractiveInput.resolvePrompt(
+                    promptArgument,
+                    stdinIsTerminal: stdinIsTerminal,
+                    readStdin: readStdin
+                )
+                let outputSchema = try NonInteractiveInput.loadOutputSchema(
+                    path: options.outputSchemaPath,
+                    readFile: readFile
+                )
+                return .userTurn(prompt: prompt, outputSchema: outputSchema)
+
+            case let .resume(resume):
+                let prompt = try NonInteractiveInput.resolvePrompt(
+                    resume.promptArgument,
+                    stdinIsTerminal: stdinIsTerminal,
+                    readStdin: readStdin
+                )
+                let outputSchema = try NonInteractiveInput.loadOutputSchema(
+                    path: options.outputSchemaPath,
+                    readFile: readFile
+                )
+                return .resume(
+                    sessionID: resume.resumeSessionID,
+                    last: resume.last,
+                    prompt: prompt,
+                    outputSchema: outputSchema
+                )
+
+            case let .review(target):
+                return .review(try target.resolvedReviewRequest(
+                    stdinIsTerminal: stdinIsTerminal,
+                    readStdin: readStdin
+                ))
+            }
+        }
+    }
+
+    public enum ExecCommandAction: Equatable, Sendable {
+        case run(prompt: String?)
+        case resume(ExecResumeCommand)
+        case review(ReviewCommandTarget)
+    }
+
+    public struct ExecResumeCommand: Equatable, Sendable {
+        public let sessionID: String?
+        public let last: Bool
+        public let prompt: String?
+
+        public init(sessionID: String?, last: Bool, prompt: String?) {
+            self.sessionID = sessionID
+            self.last = last
+            self.prompt = prompt
+        }
+
+        public var promptArgument: String? {
+            prompt ?? (last ? sessionID : nil)
+        }
+
+        public var resumeSessionID: String? {
+            last ? nil : sessionID
+        }
+    }
+
+    public struct ExecCommandOptions: Equatable, Sendable {
+        public let json: Bool
+        public let imagePaths: [String]
+        public let outputSchemaPath: String?
+        public let lastMessageFile: String?
+        public let skipGitRepoCheck: Bool
+
+        public init(
+            json: Bool = false,
+            imagePaths: [String] = [],
+            outputSchemaPath: String? = nil,
+            lastMessageFile: String? = nil,
+            skipGitRepoCheck: Bool = false
+        ) {
+            self.json = json
+            self.imagePaths = imagePaths
+            self.outputSchemaPath = outputSchemaPath
+            self.lastMessageFile = lastMessageFile
+            self.skipGitRepoCheck = skipGitRepoCheck
+        }
+    }
+
+    public enum ResolvedExecInitialOperation: Equatable, Sendable {
+        case userTurn(prompt: NonInteractivePromptResolution, outputSchema: JSONValue?)
+        case resume(sessionID: String?, last: Bool, prompt: NonInteractivePromptResolution, outputSchema: JSONValue?)
+        case review(ReviewRequest)
     }
 
     public struct ComputerUseCommandRequest: Equatable, Sendable {
@@ -116,6 +222,21 @@ public struct CodexCLI: Sendable {
             case .customFromStdin:
                 return nil
             }
+        }
+
+        public func resolvedReviewRequest(
+            stdinIsTerminal: Bool,
+            readStdin: NonInteractiveInput.StdinReader
+        ) throws -> ReviewRequest {
+            if let reviewRequest {
+                return reviewRequest
+            }
+
+            let prompt = try NonInteractiveInput
+                .resolvePrompt("-", stdinIsTerminal: stdinIsTerminal, readStdin: readStdin)
+                .prompt
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return ReviewRequest(target: .custom(instructions: prompt))
         }
     }
 
