@@ -56,6 +56,8 @@ public final class RolloutRecorder {
         conversationID: ConversationId,
         instructions: String? = nil,
         source: SessionSource,
+        forkedFromID: ConversationId? = nil,
+        threadSource: ThreadSource? = nil,
         originator: String,
         cliVersion: String,
         modelProvider: String?,
@@ -81,12 +83,14 @@ public final class RolloutRecorder {
         try recorder.writeRolloutItem(.sessionMeta(SessionMetaLine(
             meta: SessionMeta(
                 id: conversationID,
+                forkedFromID: forkedFromID,
                 timestamp: rolloutTimestampFormatter.string(from: sessionStartedAt),
                 cwd: cwd.path,
                 originator: originator,
                 cliVersion: cliVersion,
                 instructions: instructions,
                 source: source,
+                threadSource: threadSource,
                 modelProvider: modelProvider
             ),
             git: gitInfo
@@ -105,6 +109,8 @@ public final class RolloutRecorder {
         originator: String,
         cliVersion: String,
         modelProvider: String?,
+        forkedFromID: ConversationId? = nil,
+        threadSource: ThreadSource? = nil,
         params: RolloutRecorderParams,
         gitInfo: GitInfo? = nil,
         calendar: Calendar = .current,
@@ -119,6 +125,8 @@ public final class RolloutRecorder {
                 conversationID: conversationID,
                 instructions: instructions,
                 source: source,
+                forkedFromID: forkedFromID,
+                threadSource: threadSource,
                 originator: originator,
                 cliVersion: cliVersion,
                 modelProvider: modelProvider,

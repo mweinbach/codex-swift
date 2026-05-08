@@ -641,6 +641,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
     }
 
+    func testThreadForkCreatesNewThreadWithCopiedHistoryAndStartedNotification() throws {
+        let temp = try TemporaryDirectory()
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let sourcePath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: sourceID
+        ))
+        try appendRolloutEvents(to: sourcePath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .agentMessage(AgentMessageEvent(message: "Done"))
+        ])
+        let sourceContents = try String(contentsOfFile: sourcePath, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/fork","params":{"threadId":"\#(sourceID)","threadSource":"user","excludeTurns":false}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertNil(result["sessionId"], "thread/fork should not include top-level sessionId")
+        XCTAssertEqual(result["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(result["cwd"] as? String, "/")
+        XCTAssertEqual(result["approvalPolicy"] as? String, "untrusted")
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let forkID = try XCTUnwrap(thread["id"] as? String)
+        XCTAssertNotEqual(forkID, sourceID)
+        XCTAssertEqual(thread["sessionId"] as? String, forkID)
+        XCTAssertEqual(thread["forkedFromId"] as? String, sourceID)
+        XCTAssertEqual(thread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(thread["source"] as? String, "appServer")
+        XCTAssertEqual(thread["threadSource"] as? String, "user")
+        XCTAssertEqual(thread["name"] as? NSNull, NSNull())
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turnUserText(turns[0]), "Saved user message")
+        XCTAssertEqual(turnAgentTexts(turns[0]), ["Done"])
+
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/started")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let notificationThread = try XCTUnwrap(notificationParams["thread"] as? [String: Any])
+        XCTAssertEqual(notificationThread["id"] as? String, forkID)
+        XCTAssertEqual(notificationThread["forkedFromId"] as? String, sourceID)
+        XCTAssertEqual((notificationThread["turns"] as? [Any])?.count, 0)
+
+        let afterContents = try String(contentsOfFile: sourcePath, encoding: .utf8)
+        XCTAssertEqual(afterContents, sourceContents)
+    }
+
     func testThreadReadCanIncludeTurns() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -1885,6 +1938,83 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+    }
+
+    func testExperimentalFeatureListReturnsRustV2ShapeAndPaginates() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        memories = true
+        shell_tool = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"experimentalFeature/list","params":{"limit":2}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.count, 2)
+        XCTAssertEqual(firstData[0]["name"] as? String, "undo")
+        XCTAssertEqual(firstData[0]["stage"] as? String, "removed")
+        XCTAssertTrue(firstData[0]["displayName"] is NSNull)
+        XCTAssertEqual(firstData[0]["enabled"] as? Bool, false)
+        XCTAssertEqual(firstData[0]["defaultEnabled"] as? Bool, false)
+        XCTAssertEqual(firstData[1]["name"] as? String, "shell_tool")
+        XCTAssertEqual(firstData[1]["stage"] as? String, "stable")
+        XCTAssertEqual(firstData[1]["enabled"] as? Bool, false)
+        XCTAssertEqual(firstData[1]["defaultEnabled"] as? Bool, true)
+        XCTAssertEqual(firstResult["nextCursor"] as? String, "2")
+
+        let all = try appServerResponse(
+            #"{"id":2,"method":"experimentalFeature/list","params":{"limit":100}}"#,
+            codexHome: temp.url
+        )
+        let allResult = try XCTUnwrap(all["result"] as? [String: Any])
+        let allData = try XCTUnwrap(allResult["data"] as? [[String: Any]])
+        XCTAssertEqual(allData.count, FeatureRegistry.specs.count)
+        XCTAssertTrue(allResult["nextCursor"] is NSNull)
+        XCTAssertEqual(allData.map { $0["name"] as? String }, FeatureRegistry.specs.map(\.key))
+
+        let terminalResize = try XCTUnwrap(allData.first { $0["name"] as? String == "terminal_resize_reflow" })
+        XCTAssertEqual(terminalResize["stage"] as? String, "beta")
+        XCTAssertEqual(terminalResize["displayName"] as? String, "Terminal resize reflow")
+        XCTAssertEqual(
+            terminalResize["description"] as? String,
+            "Rebuild Codex-owned transcript scrollback when the terminal width changes."
+        )
+        XCTAssertEqual(terminalResize["announcement"] as? String, "")
+        XCTAssertEqual(terminalResize["enabled"] as? Bool, true)
+        XCTAssertEqual(terminalResize["defaultEnabled"] as? Bool, true)
+
+        let memories = try XCTUnwrap(allData.first { $0["name"] as? String == "memories" })
+        XCTAssertEqual(memories["stage"] as? String, "beta")
+        XCTAssertEqual(memories["displayName"] as? String, "Memories")
+        XCTAssertEqual(memories["enabled"] as? Bool, true)
+        XCTAssertEqual(memories["defaultEnabled"] as? Bool, false)
+    }
+
+    func testExperimentalFeatureListRejectsInvalidCursorWithRustErrorCode() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"experimentalFeature/list","params":{"cursor":"bogus"}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidError["message"] as? String, "invalid cursor: bogus")
+
+        let beyond = try appServerResponse(
+            #"{"id":2,"method":"experimentalFeature/list","params":{"cursor":"9999"}}"#,
+            codexHome: temp.url
+        )
+        let beyondError = try XCTUnwrap(beyond["error"] as? [String: Any])
+        XCTAssertEqual(beyondError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            beyondError["message"] as? String,
+            "cursor 9999 exceeds total feature flags \(FeatureRegistry.specs.count)"
+        )
     }
 
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {

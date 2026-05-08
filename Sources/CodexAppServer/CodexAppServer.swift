@@ -542,6 +542,119 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func threadForkResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+
+        let sourceRolloutPath: String
+        let sourceConversationID: ConversationId
+        if let path = stringParam(params?["path"]) {
+            sourceRolloutPath = path
+            let summary = try RolloutSummary(path: path, defaultProvider: configuration.defaultModelProvider)
+            do {
+                sourceConversationID = try ConversationId(string: summary.id)
+            } catch {
+                throw AppServerError.invalidRequest("invalid source rollout conversation id: \(error)")
+            }
+        } else {
+            do {
+                sourceConversationID = try ConversationId(string: threadID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid thread id: \(error)")
+            }
+            do {
+                guard let foundPath = try RolloutListing.findConversationPathByIDString(
+                    codexHome: configuration.codexHome,
+                    idString: sourceConversationID.description
+                ) else {
+                    throw AppServerError.invalidRequest("no rollout found for conversation id \(sourceConversationID)")
+                }
+                sourceRolloutPath = foundPath
+            } catch let error as AppServerError {
+                throw error
+            } catch {
+                throw AppServerError.invalidRequest("failed to locate conversation id \(sourceConversationID): \(error)")
+            }
+        }
+
+        let history: InitialHistory
+        do {
+            history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: sourceRolloutPath))
+        } catch {
+            throw AppServerError.invalidRequest(
+                "failed to load rollout `\(sourceRolloutPath)` for conversation \(sourceConversationID): \(error)"
+            )
+        }
+        let sourceSummary = try RolloutSummary(path: sourceRolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let model = stringParam(params?["model"])
+            ?? runtimeConfig.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let modelProvider = stringParam(params?["modelProvider"])
+            ?? sourceSummary.modelProvider
+        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+            ?? runtimeConfig.approvalPolicy
+            ?? .unlessTrusted
+        let sandboxMode = sandboxModeParam(params?["sandbox"])
+            ?? runtimeConfig.sandboxMode
+            ?? .readOnly
+        let sandbox = sandboxPolicy(for: sandboxMode)
+        let cwd = URL(
+            fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
+            isDirectory: true
+        )
+        let threadSource = threadSourceParam(params?["threadSource"])
+        let conversationID = ConversationId()
+        let recorder = try RolloutRecorder.create(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            instructions: stringParam(params?["developerInstructions"])
+                ?? stringParam(params?["developer_instructions"])
+                ?? stringParam(params?["baseInstructions"])
+                ?? stringParam(params?["base_instructions"]),
+            source: .mcp,
+            forkedFromID: sourceConversationID,
+            threadSource: threadSource,
+            originator: "codex_app_server",
+            cliVersion: configuration.version,
+            modelProvider: modelProvider
+        )
+        try recorder.recordItems(history.rolloutItems.filter { item in
+            if case .sessionMeta = item {
+                return false
+            }
+            return true
+        })
+        try recorder.shutdown()
+
+        let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
+        let includeTurns = !boolParam(params?["excludeTurns"], defaultValue: false)
+        let thread = try threadObject(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            turns: includeTurns ? buildTurnsFromRolloutEvents(at: recorder.rolloutPath.path) : []
+        )
+        return [
+            "thread": thread,
+            "model": model,
+            "modelProvider": modelProvider,
+            "serviceTier": nullable(stringParam(params?["serviceTier"])),
+            "cwd": cwd.path,
+            "instructionSources": [],
+            "approvalPolicy": approvalPolicy.rawValue,
+            "approvalsReviewer": "user",
+            "sandbox": try jsonObject(sandbox),
+            "permissionProfile": NSNull(),
+            "activePermissionProfile": NSNull(),
+            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func threadReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1281,6 +1394,41 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func experimentalFeatureListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+
+        let data = FeatureRegistry.specs.map { spec in
+            experimentalFeatureObject(spec: spec, features: runtimeConfig.features)
+        }
+        let total = data.count
+        if total == 0 {
+            return [
+                "data": [],
+                "nextCursor": NSNull()
+            ]
+        }
+
+        let start = try experimentalFeatureListStart(cursor: stringParam(params?["cursor"]), total: total)
+        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), total)
+        let end = min(start + effectiveLimit, total)
+        return [
+            "data": start < end ? Array(data[start..<end]) : [],
+            "nextCursor": end < total ? String(end) : NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func configReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1857,7 +2005,7 @@ public enum CodexAppServer {
         return [
             "id": summary.id,
             "sessionId": summary.id,
-            "forkedFromId": NSNull(),
+            "forkedFromId": summary.forkedFromID ?? NSNull(),
             "preview": summary.preview,
             "ephemeral": false,
             "modelProvider": summary.modelProvider,
@@ -1868,9 +2016,9 @@ public enum CodexAppServer {
             "cwd": summary.cwd,
             "cliVersion": summary.cliVersion,
             "source": appServerSource(summary.source),
-            "threadSource": NSNull(),
-            "agentNickname": NSNull(),
-            "agentRole": NSNull(),
+            "threadSource": summary.threadSource ?? NSNull(),
+            "agentNickname": summary.agentNickname ?? NSNull(),
+            "agentRole": summary.agentRole ?? NSNull(),
             "gitInfo": summary.gitInfo ?? NSNull(),
             "name": NSNull(),
             "turns": turns
@@ -2005,6 +2153,19 @@ public enum CodexAppServer {
         return start
     }
 
+    private static func experimentalFeatureListStart(cursor: String?, total: Int) throws -> Int {
+        guard let cursor else {
+            return 0
+        }
+        guard let start = Int(cursor) else {
+            throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+        }
+        guard start <= total else {
+            throw AppServerError.invalidRequest("cursor \(start) exceeds total feature flags \(total)")
+        }
+        return start
+    }
+
     private static func intParam(_ value: Any?, defaultValue: Int) -> Int {
         if let int = value as? Int {
             return int
@@ -2031,6 +2192,10 @@ public enum CodexAppServer {
 
     private static func approvalPolicyParam(_ value: Any?) -> AskForApproval? {
         stringParam(value).flatMap(AskForApproval.init(rawValue:))
+    }
+
+    private static func threadSourceParam(_ value: Any?) -> ThreadSource? {
+        stringParam(value).flatMap(ThreadSource.init(rawValue:))
     }
 
     private static func sandboxModeParam(_ value: Any?) -> SandboxMode? {
@@ -2180,6 +2345,36 @@ public enum CodexAppServer {
             },
             "isDefault": preset.isDefault
         ]
+    }
+
+    private static func experimentalFeatureObject(
+        spec: FeatureSpec,
+        features: FeatureStates
+    ) -> [String: Any] {
+        [
+            "name": spec.key,
+            "stage": experimentalFeatureStageObject(spec.stage),
+            "displayName": spec.displayName ?? NSNull(),
+            "description": spec.description ?? NSNull(),
+            "announcement": spec.announcement ?? NSNull(),
+            "enabled": features.isEnabled(spec.id),
+            "defaultEnabled": spec.defaultEnabled
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func experimentalFeatureStageObject(_ stage: FeatureStage) -> String {
+        switch stage {
+        case .experimental:
+            return "beta"
+        case .underDevelopment:
+            return "underDevelopment"
+        case .stable:
+            return "stable"
+        case .deprecated:
+            return "deprecated"
+        case .removed:
+            return "removed"
+        }
     }
 
     private static func modelUpgradeInfoObject(_ upgrade: ModelUpgrade?) -> Any {
@@ -3668,6 +3863,17 @@ final class CodexAppServerMessageProcessor {
                        let threadID = thread["id"] as? String {
                         subscribeCurrentConnection(toThreadID: threadID)
                     }
+                case "thread/fork":
+                    let result = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
+                    response = CodexAppServer.responseObject(id: id, result: result)
+                    if let thread = result["thread"] as? [String: Any] {
+                        if let threadID = thread["id"] as? String {
+                            subscribeCurrentConnection(toThreadID: threadID)
+                        }
+                        var notificationThread = thread
+                        notificationThread["turns"] = []
+                        notifications.append(CodexAppServer.threadStartedNotification(thread: notificationThread))
+                    }
                 case "turn/start":
                     let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
@@ -3810,6 +4016,14 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.skillsListResult(params: params, configuration: configuration)
+                    )
+                case "experimentalFeature/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.experimentalFeatureListResult(
+                            params: params,
+                            configuration: configuration
+                        )
                     )
                 case "config/read":
                     response = CodexAppServer.responseObject(
@@ -4251,12 +4465,16 @@ private func parseThreadTurnsCursor(_ cursor: String) throws -> AppServerThreadT
 
 private struct RolloutSummary {
     let id: String
+    let forkedFromID: String?
     let preview: String
     let modelProvider: String
     let createdAtUnixSeconds: Int
     let cwd: String
     let cliVersion: String
     let source: SessionSource
+    let threadSource: String?
+    let agentNickname: String?
+    let agentRole: String?
     let gitInfo: [String: Any]?
     let v1GitInfo: [String: Any]?
 
@@ -4299,12 +4517,16 @@ private struct RolloutSummary {
         }
 
         self.id = meta.meta.id.description
+        self.forkedFromID = meta.meta.forkedFromID?.description
         self.preview = preview
         self.modelProvider = meta.meta.modelProvider ?? defaultProvider
         self.createdAtUnixSeconds = Self.unixSeconds(meta.meta.timestamp)
         self.cwd = meta.meta.cwd
         self.cliVersion = meta.meta.cliVersion
         self.source = meta.meta.source
+        self.threadSource = meta.meta.threadSource?.description
+        self.agentNickname = meta.meta.agentNickname
+        self.agentRole = meta.meta.agentRole
         if let git = meta.git {
             self.gitInfo = [
                 "sha": git.commitHash as Any,

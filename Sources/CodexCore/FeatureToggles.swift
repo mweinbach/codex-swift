@@ -116,12 +116,26 @@ public struct FeatureSpec: Equatable, Sendable {
     public let key: String
     public let stage: FeatureStage
     public let defaultEnabled: Bool
+    public let displayName: String?
+    public let description: String?
+    public let announcement: String?
 
-    public init(id: FeatureKey, key: String, stage: FeatureStage, defaultEnabled: Bool) {
+    public init(
+        id: FeatureKey,
+        key: String,
+        stage: FeatureStage,
+        defaultEnabled: Bool,
+        displayName: String? = nil,
+        description: String? = nil,
+        announcement: String? = nil
+    ) {
         self.id = id
         self.key = key
         self.stage = stage
         self.defaultEnabled = defaultEnabled
+        self.displayName = displayName
+        self.description = description
+        self.announcement = announcement
     }
 }
 
@@ -197,14 +211,30 @@ public enum FeatureRegistry {
         FeatureSpec(id: .codeMode, key: "code_mode", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .codeModeOnly, key: "code_mode_only", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .jsReplToolsOnly, key: "js_repl_tools_only", stage: .removed, defaultEnabled: false),
-        FeatureSpec(id: .terminalResizeReflow, key: "terminal_resize_reflow", stage: .experimental, defaultEnabled: true),
+        FeatureSpec(
+            id: .terminalResizeReflow,
+            key: "terminal_resize_reflow",
+            stage: .experimental,
+            defaultEnabled: true,
+            displayName: "Terminal resize reflow",
+            description: "Rebuild Codex-owned transcript scrollback when the terminal width changes.",
+            announcement: ""
+        ),
         FeatureSpec(id: .webSearchRequest, key: "web_search_request", stage: .deprecated, defaultEnabled: false),
         FeatureSpec(id: .webSearchCached, key: "web_search_cached", stage: .deprecated, defaultEnabled: false),
         FeatureSpec(id: .searchTool, key: "search_tool", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .codexGitCommit, key: "codex_git_commit", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .runtimeMetrics, key: "runtime_metrics", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .sqlite, key: "sqlite", stage: .removed, defaultEnabled: true),
-        FeatureSpec(id: .memoryTool, key: "memories", stage: .experimental, defaultEnabled: false),
+        FeatureSpec(
+            id: .memoryTool,
+            key: "memories",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "Memories",
+            description: "Allow Codex to create new memories from conversations and bring relevant memories into new conversations.",
+            announcement: "NEW: Codex can now generate and use memories. Try it now with `/memories`"
+        ),
         FeatureSpec(id: .builtInMcp, key: "builtin_mcp", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .chronicle, key: "chronicle", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .childAgentsMd, key: "child_agents_md", stage: .underDevelopment, defaultEnabled: false),
@@ -237,14 +267,30 @@ public enum FeatureRegistry {
         FeatureSpec(id: .browserUseExternal, key: "browser_use_external", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .computerUse, key: "computer_use", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .remotePlugin, key: "remote_plugin", stage: .underDevelopment, defaultEnabled: false),
-        FeatureSpec(id: .externalMigration, key: "external_migration", stage: .experimental, defaultEnabled: false),
+        FeatureSpec(
+            id: .externalMigration,
+            key: "external_migration",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "External migration",
+            description: "Show a startup prompt when Codex detects migratable external agent config for this machine or project.",
+            announcement: ""
+        ),
         FeatureSpec(id: .imageGeneration, key: "image_generation", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .skillMcpDependencyInstall, key: "skill_mcp_dependency_install", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .skillEnvVarDependencyPrompt, key: "skill_env_var_dependency_prompt", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .steer, key: "steer", stage: .removed, defaultEnabled: true),
         FeatureSpec(id: .defaultModeRequestUserInput, key: "default_mode_request_user_input", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .guardianApproval, key: "guardian_approval", stage: .stable, defaultEnabled: true),
-        FeatureSpec(id: .goals, key: "goals", stage: .experimental, defaultEnabled: false),
+        FeatureSpec(
+            id: .goals,
+            key: "goals",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "Goals",
+            description: "Set a persistent goal Codex can continue over time",
+            announcement: ""
+        ),
         FeatureSpec(id: .collaborationModes, key: "collaboration_modes", stage: .removed, defaultEnabled: true),
         FeatureSpec(id: .toolCallMcpElicitation, key: "tool_call_mcp_elicitation", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .authElicitation, key: "auth_elicitation", stage: .underDevelopment, defaultEnabled: false),
@@ -255,7 +301,15 @@ public enum FeatureRegistry {
         FeatureSpec(id: .remoteControl, key: "remote_control", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .imageDetailOriginal, key: "image_detail_original", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .tuiAppServer, key: "tui_app_server", stage: .removed, defaultEnabled: true),
-        FeatureSpec(id: .preventIdleSleep, key: "prevent_idle_sleep", stage: .experimental, defaultEnabled: false),
+        FeatureSpec(
+            id: .preventIdleSleep,
+            key: "prevent_idle_sleep",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "Prevent sleep while running",
+            description: "Keep your computer awake while Codex is running a thread.",
+            announcement: "NEW: Prevent sleep while running is now available in /experimental."
+        ),
         FeatureSpec(id: .workspaceOwnerUsageNudge, key: "workspace_owner_usage_nudge", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .responsesWebsockets, key: "responses_websockets", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .responsesWebsocketsV2, key: "responses_websockets_v2", stage: .removed, defaultEnabled: false),
