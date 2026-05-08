@@ -9,6 +9,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
+        XCTAssertNil(config.forcedLoginMethod)
         XCTAssertNil(config.activeProfile)
     }
 
@@ -17,12 +18,14 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         chatgpt_base_url = "https://example.test/backend-api/"
         cli_auth_credentials_store = "auto"
+        forced_login_method = "api"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
+        XCTAssertEqual(config.forcedLoginMethod, .api)
     }
 
     func testProfileChatGPTBaseURLOverridesTopLevelValue() throws {
@@ -59,7 +62,8 @@ final class ConfigLoaderTests: XCTestCase {
             overrides: CliConfigOverrides(rawOverrides: [
                 "profile=\"work\"",
                 "profiles.work.chatgpt_base_url=\"https://override.example/backend-api/\"",
-                "cli_auth_credentials_store=\"keyring\""
+                "cli_auth_credentials_store=\"keyring\"",
+                "forced_login_method=\"chatgpt\""
             ]),
             systemConfigFile: nil
         )
@@ -67,6 +71,17 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.activeProfile, "work")
         XCTAssertEqual(config.chatgptBaseURL, "https://override.example/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .keyring)
+        XCTAssertEqual(config.forcedLoginMethod, .chatgpt)
+    }
+
+    func testInvalidForcedLoginMethodMatchesRustConfigErrorShape() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"forced_login_method = "browser""#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid override value for forced_login_method")
+        }
     }
 
     func testMissingProfileMatchesRustError() throws {

@@ -33,10 +33,9 @@ private func resolvedAuthSettings(overrides: CliConfigOverrides) throws -> (code
 }
 
 private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
-    let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
-
     switch request.action {
     case .status:
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
         switch try CodexAuthStorage.authStatus(codexHome: codexHome, mode: settings.cliAuthCredentialsStoreMode) {
         case let .apiKey(apiKey):
             return CodexCLI.CommandExecutionResult(
@@ -54,6 +53,13 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
         guard readResult.exitCode == 0, let apiKey = readResult.apiKey else {
             return CodexCLI.CommandExecutionResult(exitCode: readResult.exitCode, stderrMessage: readResult.message)
         }
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        if settings.forcedLoginMethod == .chatgpt {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "\(readResult.message)\nAPI key login is disabled. Use ChatGPT login instead."
+            )
+        }
         try CodexAuthStorage.loginWithAPIKey(
             codexHome: codexHome,
             apiKey: apiKey,
@@ -65,12 +71,26 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
         )
 
     case .chatGPT:
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        if settings.forcedLoginMethod == .api {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "ChatGPT login is disabled. Use API key login instead."
+            )
+        }
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
             stderrMessage: "codex-swift: ChatGPT login runtime is not complete yet."
         )
 
     case .deviceCode:
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        if settings.forcedLoginMethod == .api {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "ChatGPT login is disabled. Use API key login instead."
+            )
+        }
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
             stderrMessage: "codex-swift: device-code login runtime is not complete yet."

@@ -75,11 +75,11 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/main.rs` apply dispatch
   - `codex apply <task_id>` async CLI path, task ID validation, config override forwarding for `chatgpt_base_url` and `cli_auth_credentials_store`, and Rust success output after local diff application
 - `codex-rs/core/src/config/mod.rs` apply-relevant config loading
-  - apply-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from git root to cwd, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
+  - apply/auth-relevant layered config support for `/etc/codex/config.toml`, `$CODEX_HOME/config.toml`, project `.codex/config.toml` files from git root to cwd, top-level `chatgpt_base_url`, top-level `cli_auth_credentials_store`, top-level `forced_login_method`, `profile`, `[profiles.<name>].chatgpt_base_url`, and `-c` overrides
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
   - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, and Rust-matching refresh failure messages
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands
-  - `codex login --with-api-key` stdin handling, file-backed API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, and `codex logout`
+  - `codex login --with-api-key` stdin handling, file-backed API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
 
 ## Known Gaps
 
@@ -103,6 +103,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - apply-patch invocation detection from arbitrary shell commands/heredocs
 - apply-patch unified diff preview helpers
 - keyring storage for `codex apply <task_id>`
-- ChatGPT browser login, device-code login, forced-login-method enforcement, and keyring storage for login/status/logout
+- ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

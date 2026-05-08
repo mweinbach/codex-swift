@@ -7,15 +7,18 @@ public enum CodexConfigDefaults {
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public let chatgptBaseURL: String
     public let cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
+    public let forcedLoginMethod: ForcedLoginMethod?
     public let activeProfile: String?
 
     public init(
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        forcedLoginMethod: ForcedLoginMethod? = nil,
         activeProfile: String? = nil
     ) {
         self.chatgptBaseURL = chatgptBaseURL
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
+        self.forcedLoginMethod = forcedLoginMethod
         self.activeProfile = activeProfile
     }
 }
@@ -23,6 +26,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidStringValue(String)
     case invalidAuthCredentialsStoreMode
+    case invalidForcedLoginMethod
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -33,6 +37,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "Invalid value for \(key): expected string"
         case .invalidAuthCredentialsStoreMode:
             return "Invalid override value for cli_auth_credentials_store"
+        case .invalidForcedLoginMethod:
+            return "Invalid override value for forced_login_method"
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -223,6 +229,7 @@ private struct ParsedCodexConfigToml {
             config = CodexRuntimeConfig(
                 chatgptBaseURL: try Self.stringValue(baseURL, key: "chatgpt_base_url"),
                 cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: config.forcedLoginMethod,
                 activeProfile: config.activeProfile
             )
         }
@@ -235,6 +242,20 @@ private struct ParsedCodexConfigToml {
             config = CodexRuntimeConfig(
                 chatgptBaseURL: config.chatgptBaseURL,
                 cliAuthCredentialsStoreMode: mode,
+                forcedLoginMethod: config.forcedLoginMethod,
+                activeProfile: config.activeProfile
+            )
+        }
+
+        if let forcedLoginMethod = topLevel["forced_login_method"] {
+            let rawMethod = try Self.stringValue(forcedLoginMethod, key: "forced_login_method")
+            guard let method = ForcedLoginMethod(rawValue: rawMethod) else {
+                throw CodexConfigLoadError.invalidForcedLoginMethod
+            }
+            config = CodexRuntimeConfig(
+                chatgptBaseURL: config.chatgptBaseURL,
+                cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                forcedLoginMethod: method,
                 activeProfile: config.activeProfile
             )
         }
@@ -249,12 +270,14 @@ private struct ParsedCodexConfigToml {
                 config = CodexRuntimeConfig(
                     chatgptBaseURL: try Self.stringValue(baseURL, key: "profiles.\(activeProfile).chatgpt_base_url"),
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                    forcedLoginMethod: config.forcedLoginMethod,
                     activeProfile: activeProfile
                 )
             } else {
                 config = CodexRuntimeConfig(
                     chatgptBaseURL: config.chatgptBaseURL,
                     cliAuthCredentialsStoreMode: config.cliAuthCredentialsStoreMode,
+                    forcedLoginMethod: config.forcedLoginMethod,
                     activeProfile: activeProfile
                 )
             }
@@ -264,7 +287,10 @@ private struct ParsedCodexConfigToml {
     }
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
-        key == "chatgpt_base_url" || key == "cli_auth_credentials_store" || key == "profile"
+        key == "chatgpt_base_url"
+            || key == "cli_auth_credentials_store"
+            || key == "forced_login_method"
+            || key == "profile"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {
