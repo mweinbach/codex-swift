@@ -1799,6 +1799,29 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func pluginListResult(params: [String: Any]?) throws -> [String: Any] {
+        if let cwds = stringArrayParam(params?["cwds"]) {
+            for cwd in cwds {
+                guard URL(fileURLWithPath: cwd, isDirectory: true).path == cwd,
+                      cwd.hasPrefix("/")
+                else {
+                    throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
+                }
+            }
+        }
+        if let kinds = stringArrayParam(params?["marketplaceKinds"]) {
+            let validKinds: Set<String> = ["local", "workspace-directory", "shared-with-me"]
+            for kind in kinds where !validKinds.contains(kind) {
+                throw AppServerError.invalidParams("unknown variant `\(kind)`, expected one of `local`, `workspace-directory`, `shared-with-me`")
+            }
+        }
+        return [
+            "marketplaces": [],
+            "marketplaceLoadErrors": [],
+            "featuredPluginIds": []
+        ]
+    }
+
     fileprivate static func addConversationListenerResult() -> [String: Any] {
         [
             "subscriptionId": UUID().uuidString.lowercased()
@@ -5889,6 +5912,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.appListResult(params: params)
+                    )
+                case "plugin/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.pluginListResult(params: params)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(

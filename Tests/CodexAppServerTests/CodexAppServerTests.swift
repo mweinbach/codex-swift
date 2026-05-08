@@ -1723,6 +1723,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(beyondError["message"] as? String, "cursor 1 exceeds total apps 0")
     }
 
+    func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"cwds":["\#(cwd.url.path)"],"forceRemoteSync":true,"marketplaceKinds":["local"]}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual((result["marketplaces"] as? [Any])?.count, 0)
+        XCTAssertEqual((result["marketplaceLoadErrors"] as? [Any])?.count, 0)
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
+    }
+
+    func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalidKind = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"marketplaceKinds":["bogus"]}}"#,
+            codexHome: temp.url
+        )
+        let invalidKindError = try XCTUnwrap(invalidKind["error"] as? [String: Any])
+        XCTAssertEqual(invalidKindError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            invalidKindError["message"] as? String,
+            "unknown variant `bogus`, expected one of `local`, `workspace-directory`, `shared-with-me`"
+        )
+
+        let relativeCwd = try appServerResponse(
+            #"{"id":2,"method":"plugin/list","params":{"cwds":["relative/path"]}}"#,
+            codexHome: temp.url
+        )
+        let relativeCwdError = try XCTUnwrap(relativeCwd["error"] as? [String: Any])
+        XCTAssertEqual(relativeCwdError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            relativeCwdError["message"] as? String,
+            "Invalid request: AbsolutePathBuf deserialized without a base path"
+        )
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
