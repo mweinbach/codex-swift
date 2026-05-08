@@ -158,6 +158,8 @@ Source baseline inspected for this scaffold:
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
   - rollout response-item and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
+- `codex-rs/core/src/state/turn.rs`
+  - turn-local task ordering/replacement/removal semantics, pending approval map behavior, pending input buffering, take-and-clear behavior, and active-turn pending cleanup
 
 ## Known Gaps
 
@@ -187,5 +189,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - keyring storage for `codex apply <task_id>`
 - ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
 - rollout recorder/list flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items
+- active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
