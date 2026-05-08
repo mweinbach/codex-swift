@@ -157,6 +157,8 @@ Source baseline inspected for this scaffold:
   - response-item to turn-item projection for user/assistant/reasoning/web-search items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
+- `codex-rs/core/src/function_tool.rs`
+  - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, and fatal errors
 - `codex-rs/core/src/context_manager/normalize.rs`
   - function/custom/local-shell call-output invariant repair, synthetic aborted outputs for missing pairs, orphan output removal, and paired-item removal helpers for transcript trimming
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`
@@ -201,6 +203,8 @@ Source baseline inspected for this scaffold:
   - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
 - `codex-rs/feedback/src/lib.rs`
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, and temp-file save path
+- `codex-rs/core/src/user_notification.rs`
+  - agent-turn-complete notification payload wire shape, nullable last assistant message, notifier command argument construction, and fire-and-forget process invocation
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
   - session source/subagent source wire shapes, display strings, conversation headers, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
