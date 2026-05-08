@@ -272,6 +272,8 @@ Source baseline inspected for this scaffold:
   - PKCE verifier generation from 64 random bytes, base64url no-padding encoding, and S256 code-challenge derivation
 - `codex-rs/ollama/src/url.rs` and `codex-rs/ollama/src/parser.rs`
   - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
+- Pure version gate from `codex-rs/ollama/src/lib.rs`
+  - Ollama Responses API minimum-version comparison, development-version allowance, and Rust-matching unsupported-version error text
 - `codex-rs/feedback/src/lib.rs`
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
 - `codex-rs/hooks/src/legacy_notify.rs`
@@ -369,7 +371,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - full interactive resume continuation after rollout target resolution
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
 - model-provider parity beyond the initial Responses/OpenAI provider/auth path
-- LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
+- LM Studio/Ollama provider clients, server probing, model download/load readiness, and local-provider runtime wiring
 - runtime Responses API tool orchestration
 - Linux Landlock/Windows debug sandbox helper execution and Rust-complete config-layer fidelity for sandbox runtime setup
 - tool handler registry dispatch and dynamic MCP tool conversion
