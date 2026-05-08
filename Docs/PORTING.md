@@ -70,6 +70,8 @@ Source baseline inspected for this scaffold:
   - compact wire API value, compaction input body shape, `responses/compact` path selection, chat-wire rejection message, and compact-history response decoding
 - `codex-rs/codex-api/src/provider.rs` plus `codex-rs/codex-client/src/request.rs` and `retry.rs`
   - provider URL/path rendering, low-level API request envelope construction, JSON body attachment, and retry-policy conversion shape
+- Pure retry/error helpers from `codex-rs/codex-client/src/error.rs` and `retry.rs`
+  - transport and stream error display strings, retry bucket decisions for 429/5xx/transport failures, attempt cap checks, configured-base exponential backoff, retry-loop request rebuilding, and request telemetry status/error recording
 - Pure `/models` endpoint helpers from `codex-rs/codex-api/src/endpoint/models.rs`
   - models request path construction, `client_version` query appending, extra-header merging, response decoding, and ETag header precedence
 - `codex-rs/codex-api/src/auth.rs`
