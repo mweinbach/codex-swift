@@ -522,6 +522,81 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func resumeConversationResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let history: InitialHistory
+        if let path = stringParam(params?["path"]) {
+            do {
+                history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: path))
+            } catch {
+                throw AppServerError.invalidRequest("failed to load rollout `\(path)`: \(error)")
+            }
+        } else if let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"]) {
+            let conversationID: ConversationId
+            do {
+                conversationID = try ConversationId(string: rawID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid conversation id: \(error)")
+            }
+            let path = try rolloutPathForConversation(conversationID, configuration: configuration)
+            do {
+                history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: path))
+            } catch {
+                throw AppServerError.invalidRequest(
+                    "failed to load rollout `\(path)` for conversation \(conversationID): \(error)"
+                )
+            }
+        } else if let rawHistory = params?["history"] as? [Any], !rawHistory.isEmpty {
+            history = .forked([])
+        } else {
+            throw AppServerError.invalidRequest("either path, conversation id or non empty history must be provided")
+        }
+
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let overrides = params?["overrides"] as? [String: Any]
+        let model = stringParam(overrides?["model"])
+            ?? runtimeConfig.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let modelProvider = stringParam(overrides?["modelProvider"])
+            ?? stringParam(overrides?["model_provider"])
+            ?? runtimeConfig.selectedModelProviderID
+        let cwd = URL(
+            fileURLWithPath: stringParam(overrides?["cwd"]) ?? FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        )
+        let conversationID = ConversationId()
+        let recorder = try RolloutRecorder.create(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            instructions: stringParam(overrides?["developerInstructions"])
+                ?? stringParam(overrides?["developer_instructions"])
+                ?? stringParam(overrides?["baseInstructions"])
+                ?? stringParam(overrides?["base_instructions"]),
+            source: .mcp,
+            originator: "codex_app_server",
+            cliVersion: configuration.version,
+            modelProvider: modelProvider
+        )
+        try recorder.recordItems(history.rolloutItems.filter { item in
+            if case .sessionMeta = item {
+                return false
+            }
+            return true
+        })
+        try recorder.shutdown()
+
+        let initialMessages = history.eventMessages ?? []
+        return [
+            "conversationId": conversationID.description,
+            "model": model,
+            "initialMessages": initialMessages.isEmpty ? NSNull() : try jsonObject(initialMessages),
+            "rolloutPath": recorder.rolloutPath.path
+        ].nullStripped(keepNulls: true)
+    }
+
     fileprivate static func turnStartResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -3069,6 +3144,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.getConversationSummaryResult(params: params, configuration: configuration)
+                    )
+                case "resumeConversation":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.resumeConversationResult(params: params, configuration: configuration)
                     )
                 case "archiveConversation":
                     response = CodexAppServer.responseObject(

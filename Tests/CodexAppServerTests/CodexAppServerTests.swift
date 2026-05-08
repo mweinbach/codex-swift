@@ -166,6 +166,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
     }
 
+    func testLegacyResumeConversationFromPathAndConversationID() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let newConversation = try decode(processor.processLine(Data(#"{"id":1,"method":"newConversation","params":{"model":"gpt-original","modelProvider":"mock_provider"}}"#.utf8)))
+        let original = try XCTUnwrap(newConversation["result"] as? [String: Any])
+        let originalID = try XCTUnwrap(original["conversationId"] as? String)
+        let originalPath = try XCTUnwrap(original["rolloutPath"] as? String)
+
+        _ = try decode(processor.processLine(Data(#"{"id":2,"method":"sendUserMessage","params":{"conversationId":"\#(originalID)","items":[{"type":"text","data":{"text":"Resume me"}}]}}"#.utf8)))
+
+        let resumedByPath = try decode(processor.processLine(Data(#"{"id":3,"method":"resumeConversation","params":{"path":"\#(originalPath)","overrides":{"model":"gpt-resumed","modelProvider":"mock_provider","developerInstructions":"resume notes"}}}"#.utf8)))
+        let pathResult = try XCTUnwrap(resumedByPath["result"] as? [String: Any])
+        let resumedID = try XCTUnwrap(pathResult["conversationId"] as? String)
+        let resumedPath = try XCTUnwrap(pathResult["rolloutPath"] as? String)
+        XCTAssertNotEqual(resumedID, originalID)
+        XCTAssertEqual(pathResult["model"] as? String, "gpt-resumed")
+        let initialMessages = try XCTUnwrap(pathResult["initialMessages"] as? [[String: Any]])
+        XCTAssertTrue(String(describing: initialMessages).contains("Resume me"))
+
+        let resumedRollout = try String(contentsOfFile: resumedPath, encoding: .utf8)
+        XCTAssertTrue(resumedRollout.contains(#""instructions":"resume notes""#))
+        XCTAssertTrue(resumedRollout.contains(#""message":"Resume me""#))
+
+        let resumedByID = try decode(processor.processLine(Data(#"{"id":4,"method":"resumeConversation","params":{"conversationId":"\#(originalID)","overrides":{"model":"gpt-resumed-id"}}}"#.utf8)))
+        let idResult = try XCTUnwrap(resumedByID["result"] as? [String: Any])
+        XCTAssertNotEqual(idResult["conversationId"] as? String, originalID)
+        XCTAssertEqual(idResult["model"] as? String, "gpt-resumed-id")
+        XCTAssertNotNil(idResult["rolloutPath"] as? String)
+    }
+
     func testTurnStartRecordsUserInputAndEmitsStartedNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
