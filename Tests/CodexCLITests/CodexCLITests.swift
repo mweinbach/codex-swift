@@ -491,21 +491,82 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["attempts must be between 1 and 4"])
     }
 
-    func testRunAsyncCloudExecReportsRuntimeIncomplete() async {
-        var stderr: [String] = []
+    func testRunAsyncCloudExecParsesEnvAttemptsBranchAndQuery() async {
+        var stdout: [String] = []
+        var receivedRequest: CodexCLI.CloudCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["cloud", "exec", "--env", "env_123", "ship it"],
-            stdout: { _ in XCTFail("stdout should not be written") },
-            stderr: { stderr.append($0) },
-            cloudRunner: { _ in
-                XCTFail("runner should not be called for incomplete cloud exec runtime")
+            arguments: [
+                "-c",
+                "chatgpt_base_url=\"https://example.test\"",
+                "cloud",
+                "exec",
+                "--env",
+                "Env A",
+                "--attempts=3",
+                "--branch",
+                "feature/x",
+                "ship it"
+            ],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "https://chatgpt.com/codex/tasks/task_123")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["https://chatgpt.com/codex/tasks/task_123"])
+        XCTAssertEqual(
+            receivedRequest?.action,
+            .exec(query: "ship it", environment: "Env A", branch: "feature/x", attempts: 3)
+        )
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["chatgpt_base_url=\"https://example.test\""])
+    }
+
+    func testRunAsyncCloudExecAllowsMissingQueryForStdinResolutionByRunner() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--env=env_123"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
                 return CodexCLI.CommandExecutionResult(exitCode: 0)
             }
         )
 
-        XCTAssertEqual(exitCode, 78)
-        XCTAssertEqual(stderr, ["codex-swift: command 'cloud exec' runtime is not complete yet."])
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .exec(query: nil, environment: "env_123", branch: nil, attempts: 1))
+    }
+
+    func testRunAsyncCloudExecRequiresEnvAndRejectsInvalidAttemptsBeforeRunner() async {
+        var missingEnvStderr: [String] = []
+        let missingEnvExit = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "ship it"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { missingEnvStderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called without env")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+        XCTAssertEqual(missingEnvExit, 64)
+        XCTAssertEqual(missingEnvStderr, ["codex-swift: missing required option for command 'cloud exec': --env <ENV_ID>"])
+
+        var invalidAttemptsStderr: [String] = []
+        let invalidAttemptsExit = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--env", "env_123", "--attempts", "0", "ship it"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { invalidAttemptsStderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called with invalid attempts")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+        XCTAssertEqual(invalidAttemptsExit, 64)
+        XCTAssertEqual(invalidAttemptsStderr, ["attempts must be between 1 and 4"])
     }
 
     func testRunAsyncCloudWithoutRunnerStillReportsUnimplemented() async {

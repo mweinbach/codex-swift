@@ -110,6 +110,106 @@ final class CloudTaskClientTests: XCTestCase {
         }
     }
 
+    func testCreateTaskResolvesEnvironmentLabelBranchAndReturnsBrowserURL() async throws {
+        let token = AuthTokenData(idToken: "id", accessToken: "access", refreshToken: "refresh", accountID: "account")
+        let capturedRequests = AsyncCapture<[URLRequest]>()
+        let storage = RequestStorage()
+        let transport = URLSessionAPITransport { request in
+            await storage.append(request)
+            await capturedRequests.set(storage.requests)
+            if request.url?.path == "/backend-api/wham/environments" {
+                return URLSessionTransportResponse(statusCode: 200, body: Data("""
+                [
+                  { "id": "env-A", "label": "Env A", "is_pinned": true },
+                  { "id": "env-B", "label": "Other" }
+                ]
+                """.utf8))
+            }
+            return URLSessionTransportResponse(statusCode: 200, body: Data(#"{"task":{"id":"task-new"}}"#.utf8))
+        }
+        let client = CloudTaskClient(
+            configuration: CloudTaskClientConfiguration(
+                chatgptBaseURL: "https://chatgpt.com",
+                codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)
+            ),
+            transport: transport,
+            tokenLoader: { token },
+            currentBranchName: { _ in "feature/current" },
+            defaultBranchName: { _ in "main" },
+            errorLog: { _ in }
+        )
+
+        let url = try await client.createTask(
+            prompt: "Ship it",
+            environment: "env a",
+            attempts: 2
+        )
+
+        XCTAssertEqual(url, "https://chatgpt.com/codex/tasks/task-new")
+        let requests = await capturedRequests.value ?? []
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].httpMethod, "GET")
+        XCTAssertEqual(requests[0].url?.absoluteString, "https://chatgpt.com/backend-api/wham/environments")
+        XCTAssertEqual(requests[1].httpMethod, "POST")
+        XCTAssertEqual(requests[1].url?.absoluteString, "https://chatgpt.com/backend-api/wham/tasks")
+        let body = try JSONDecoder().decode(JSONValue.self, from: try XCTUnwrap(requests[1].httpBody))
+        XCTAssertEqual(body, .object([
+            "new_task": .object([
+                "environment_id": .string("env-A"),
+                "branch": .string("feature/current"),
+                "run_environment_in_qa_mode": .bool(false)
+            ]),
+            "input_items": .array([
+                .object([
+                    "type": .string("message"),
+                    "role": .string("user"),
+                    "content": .array([
+                        .object([
+                            "content_type": .string("text"),
+                            "text": .string("Ship it")
+                        ])
+                    ])
+                ])
+            ]),
+            "metadata": .object(["best_of_n": .integer(2)])
+        ]))
+    }
+
+    func testCreateTaskReportsAmbiguousEnvironmentLabelBeforeCreate() async {
+        let token = AuthTokenData(idToken: "id", accessToken: "access", refreshToken: "refresh", accountID: "account")
+        let requests = RequestStorage()
+        let transport = URLSessionAPITransport { request in
+            await requests.append(request)
+            return URLSessionTransportResponse(statusCode: 200, body: Data("""
+            [
+              { "id": "env-A", "label": "Prod" },
+              { "id": "env-B", "label": "prod" }
+            ]
+            """.utf8))
+        }
+        let client = CloudTaskClient(
+            configuration: CloudTaskClientConfiguration(codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)),
+            transport: transport,
+            tokenLoader: { token },
+            currentBranchName: { _ in nil },
+            defaultBranchName: { _ in nil },
+            errorLog: { _ in }
+        )
+
+        await XCTAssertThrowsErrorAsync(try await client.createTask(
+            prompt: "Ship it",
+            environment: "prod",
+            branch: "main"
+        )) { error in
+            XCTAssertEqual(
+                (error as? CloudTaskClientError)?.description,
+                "environment label 'prod' is ambiguous; run `codex cloud` to pick the desired environment id"
+            )
+        }
+        let requestCount = await requests.requests.count
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func testParseTaskIDAcceptsURLsAndRejectsEmptyInput() throws {
         XCTAssertEqual(try CloudTaskClient<URLSessionAPITransport>.parseTaskID(" task_123 ").rawValue, "task_123")
         XCTAssertEqual(
@@ -159,6 +259,25 @@ final class CloudTaskClientTests: XCTestCase {
         )
     }
 
+    func testTaskURLMatchesRustUtilityShapes() {
+        XCTAssertEqual(
+            CloudTaskCommandFormatter.taskURL(baseURL: "https://chatgpt.com", taskID: "task_123"),
+            "https://chatgpt.com/codex/tasks/task_123"
+        )
+        XCTAssertEqual(
+            CloudTaskCommandFormatter.taskURL(baseURL: "https://example.com/api/codex", taskID: "task_123"),
+            "https://example.com/codex/tasks/task_123"
+        )
+        XCTAssertEqual(
+            CloudTaskCommandFormatter.taskURL(baseURL: "https://example.com/codex", taskID: "task_123"),
+            "https://example.com/codex/tasks/task_123"
+        )
+        XCTAssertEqual(
+            CloudTaskCommandFormatter.taskURL(baseURL: "https://example.com", taskID: "task_123"),
+            "https://example.com/codex/tasks/task_123"
+        )
+    }
+
     private static let validDiff = """
     diff --git a/file.txt b/file.txt
     --- a/file.txt
@@ -193,6 +312,18 @@ private actor AsyncCapture<Value: Sendable> {
 
     func set(_ value: Value) {
         storedValue = value
+    }
+}
+
+private actor RequestStorage {
+    private var storedRequests: [URLRequest] = []
+
+    var requests: [URLRequest] {
+        storedRequests
+    }
+
+    func append(_ request: URLRequest) {
+        storedRequests.append(request)
     }
 }
 

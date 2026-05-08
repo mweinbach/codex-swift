@@ -219,6 +219,20 @@ public struct CloudCreatedTask: Equatable, Codable, Sendable {
     }
 }
 
+public struct CloudEnvironmentRow: Equatable, Codable, Sendable {
+    public let id: String
+    public let label: String?
+    public let isPinned: Bool
+    public let repoHints: String?
+
+    public init(id: String, label: String? = nil, isPinned: Bool = false, repoHints: String? = nil) {
+        self.id = id
+        self.label = label
+        self.isPinned = isPinned
+        self.repoHints = repoHints
+    }
+}
+
 public struct CloudDiffSummary: Equatable, Codable, Sendable {
     public let filesChanged: Int
     public let linesAdded: Int
@@ -264,6 +278,7 @@ public struct CloudTaskText: Equatable, Sendable {
 
 public protocol CloudBackend: Sendable {
     func listTasks(environment: String?) async -> CloudTaskResult<[CloudTaskSummary]>
+    func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]>
     func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary>
     func getTaskDiff(id: CloudTaskID) async -> CloudTaskResult<String?>
     func getTaskMessages(id: CloudTaskID) async -> CloudTaskResult<[String]>
@@ -336,6 +351,13 @@ public struct CloudMockClient: CloudBackend {
                 attemptTotal: id == "T-1000" ? 2 : 1
             )
         })
+    }
+
+    public func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]> {
+        .success([
+            CloudEnvironmentRow(id: "env-A", label: "Env A", isPinned: true, repoHints: "mock/repo"),
+            CloudEnvironmentRow(id: "env-B", label: "Env B")
+        ])
     }
 
     public func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary> {

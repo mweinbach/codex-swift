@@ -65,6 +65,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
     private let now: @Sendable () -> Date
     private let environment: @Sendable () -> [String: String]
     private let currentDirectory: @Sendable () -> URL
+    private let gitOriginURLs: @Sendable () -> [String]
     private let applyGitPatch: CloudGitApply?
     private let errorLog: CloudTaskErrorLog
 
@@ -85,6 +86,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         currentDirectory: @escaping @Sendable () -> URL = {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         },
+        gitOriginURLs: (@Sendable () -> [String])? = nil,
         applyGitPatch: CloudGitApply? = nil,
         errorLog: @escaping CloudTaskErrorLog = CloudTaskErrorLogger.append
     ) {
@@ -98,6 +100,9 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         self.now = now
         self.environment = environment
         self.currentDirectory = currentDirectory
+        self.gitOriginURLs = gitOriginURLs ?? {
+            GitInfoCollector.remoteURLs(cwd: currentDirectory())
+        }
         self.applyGitPatch = applyGitPatch
         self.errorLog = errorLog
     }
@@ -136,6 +141,42 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         case let .failure(error):
             return .failure(.http("list_tasks failed: \(Self.message(from: error))"))
         }
+    }
+
+    public func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]> {
+        var rowsByID: [String: CloudEnvironmentRow] = [:]
+
+        for origin in gitOriginURLs() {
+            guard let (owner, repo) = Self.parseGitHubOwnerRepo(from: origin) else {
+                continue
+            }
+            let repoHint = "\(owner)/\(repo)"
+            let repoPath = path(
+                codex: "api/codex/environments/by-repo/github/\(owner)/\(repo)",
+                chatGPT: "wham/environments/by-repo/github/\(owner)/\(repo)"
+            )
+            switch await fetchEnvironments(path: repoPath, operation: "list_environments by-repo \(repoHint)") {
+            case let .success(environments):
+                errorLog("env_tui: by-repo \(repoHint) -> \(environments.count) envs")
+                merge(environments: environments, repoHint: repoHint, into: &rowsByID)
+            case let .failure(error):
+                errorLog("env_tui: by-repo fetch failed for \(repoHint): \(Self.message(from: error))")
+            }
+        }
+
+        let globalPath = path(codex: "api/codex/environments", chatGPT: "wham/environments")
+        switch await fetchEnvironments(path: globalPath, operation: "list_environments") {
+        case let .success(environments):
+            errorLog("env_tui: global list -> \(environments.count) envs")
+            merge(environments: environments, repoHint: nil, into: &rowsByID)
+        case let .failure(error):
+            if rowsByID.isEmpty {
+                return .failure(error)
+            }
+            errorLog("env_tui: global list failed; using by-repo results only: \(Self.message(from: error))")
+        }
+
+        return .success(rowsByID.values.sorted(by: Self.compareEnvironmentRows))
     }
 
     public func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary> {
@@ -283,6 +324,38 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         case let .failure(error):
             errorLog("new_task: create failed env=\(environmentID) prompt_chars=\(prompt.count): \(Self.message(from: error))")
             return .failure(.http("create_task failed: \(Self.message(from: error))"))
+        }
+    }
+
+    private func fetchEnvironments(path: String, operation: String) async -> CloudTaskResult<[CloudCodeEnvironment]> {
+        switch await executeText(method: .get, path: path) {
+        case let .success(response):
+            do {
+                return .success(try decode([CloudCodeEnvironment].self, from: response))
+            } catch {
+                return .failure(.http("\(operation) failed: \(decodeDescription(error, response: response))"))
+            }
+        case let .failure(error):
+            return .failure(.http("\(operation) failed: \(Self.message(from: error))"))
+        }
+    }
+
+    private func merge(
+        environments: [CloudCodeEnvironment],
+        repoHint: String?,
+        into rowsByID: inout [String: CloudEnvironmentRow]
+    ) {
+        for environment in environments {
+            guard !environment.id.isEmpty else {
+                continue
+            }
+            let existing = rowsByID[environment.id]
+            rowsByID[environment.id] = CloudEnvironmentRow(
+                id: environment.id,
+                label: existing?.label ?? environment.label,
+                isPinned: (existing?.isPinned ?? false) || (environment.isPinned ?? false),
+                repoHints: existing?.repoHints ?? repoHint
+            )
         }
     }
 
@@ -516,6 +589,20 @@ private struct CloudTaskListItem: Decodable, Equatable, Sendable {
         case updatedAt = "updated_at"
         case taskStatusDisplay = "task_status_display"
         case pullRequests = "pull_requests"
+    }
+}
+
+private struct CloudCodeEnvironment: Decodable, Equatable, Sendable {
+    let id: String
+    let label: String?
+    let isPinned: Bool?
+    let taskCount: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case isPinned = "is_pinned"
+        case taskCount = "task_count"
     }
 }
 
@@ -914,6 +1001,67 @@ private extension CloudHTTPClient {
             return nil
         }
         return siblings.count + 1
+    }
+
+    static func compareEnvironmentRows(_ lhs: CloudEnvironmentRow, _ rhs: CloudEnvironmentRow) -> Bool {
+        if lhs.isPinned != rhs.isPinned {
+            return lhs.isPinned && !rhs.isPinned
+        }
+        let leftLabel = lhs.label?.lowercased() ?? ""
+        let rightLabel = rhs.label?.lowercased() ?? ""
+        if leftLabel != rightLabel {
+            return leftLabel < rightLabel
+        }
+        return lhs.id < rhs.id
+    }
+
+    static func parseGitHubOwnerRepo(from rawURL: String) -> (owner: String, repo: String)? {
+        var value = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            return nil
+        }
+        if value.hasPrefix("ssh://") {
+            value.removeFirst("ssh://".count)
+        }
+
+        if let range = value.range(of: "@github.com:") {
+            let rest = String(value[range.upperBound...])
+            return ownerRepo(fromPath: rest)
+        }
+        if let range = value.range(of: "@github.com/") {
+            let rest = String(value[range.upperBound...])
+            return ownerRepo(fromPath: rest)
+        }
+
+        for prefix in [
+            "https://github.com/",
+            "http://github.com/",
+            "git://github.com/",
+            "github.com/"
+        ] {
+            if value.hasPrefix(prefix) {
+                let rest = String(value.dropFirst(prefix.count))
+                return ownerRepo(fromPath: rest)
+            }
+        }
+        return nil
+    }
+
+    static func ownerRepo(fromPath rawPath: String) -> (owner: String, repo: String)? {
+        var path = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.hasSuffix(".git") {
+            path.removeLast(".git".count)
+        }
+        let parts = path.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count >= 2 else {
+            return nil
+        }
+        let owner = String(parts[0])
+        let repo = String(parts[1])
+        guard !owner.isEmpty, !repo.isEmpty else {
+            return nil
+        }
+        return (owner, repo)
     }
 
     static func extractAssistantMessages(fromBody body: String) -> [String] {

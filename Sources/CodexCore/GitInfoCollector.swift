@@ -212,6 +212,43 @@ public enum GitInfoCollector {
         return defaultBranchNameLocal(cwd: cwd)
     }
 
+    public static func remoteURLs(cwd: URL) -> [String] {
+        if let output = runGit(["config", "--get-regexp", "remote\\..*\\.url"], cwd: cwd),
+           output.exitCode == 0 {
+            let urls = output.stdout
+                .split(whereSeparator: \.isNewline)
+                .compactMap { line -> String? in
+                    guard let separator = line.firstIndex(of: " ") else {
+                        return nil
+                    }
+                    let value = line[line.index(after: separator)...]
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return value.isEmpty ? nil : value
+                }
+            let unique = uniqueSorted(urls)
+            if !unique.isEmpty {
+                return unique
+            }
+        }
+
+        guard let output = runGit(["remote", "-v"], cwd: cwd),
+              output.exitCode == 0
+        else {
+            return []
+        }
+        let urls = output.stdout
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line -> String? in
+                let parts = line.split(whereSeparator: \.isWhitespace)
+                guard parts.count >= 2 else {
+                    return nil
+                }
+                let value = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
+        return uniqueSorted(urls)
+    }
+
     private static func gitRemotes(cwd: URL) -> [String]? {
         guard let output = runGit(["remote"], cwd: cwd),
               output.exitCode == 0
@@ -390,6 +427,10 @@ public enum GitInfoCollector {
             }
         }
         return nil
+    }
+
+    private static func uniqueSorted(_ values: [String]) -> [String] {
+        Array(Set(values)).sorted()
     }
 
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {

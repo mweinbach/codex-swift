@@ -152,7 +152,50 @@ private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async thro
             exitCode: outcome.status == .success ? 0 : 1,
             stdoutMessage: outcome.message
         )
+    case let .exec(query, environment, branch, attempts):
+        let prompt = try readCloudExecPrompt(query: query)
+        let url = try await client.createTask(
+            prompt: prompt.prompt,
+            environment: environment,
+            branch: branch,
+            attempts: attempts
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: url,
+            stderrMessage: prompt.stderrMessage
+        )
     }
+}
+
+private struct CloudExecPrompt {
+    let prompt: String
+    let stderrMessage: String?
+}
+
+private struct CloudExecPromptError: Error, CustomStringConvertible {
+    let description: String
+}
+
+private func readCloudExecPrompt(query: String?) throws -> CloudExecPrompt {
+    if let query, query != "-" {
+        return CloudExecPrompt(prompt: query, stderrMessage: nil)
+    }
+
+    let forceStdin = query == "-"
+    if isatty(STDIN_FILENO) != 0, !forceStdin {
+        throw CloudExecPromptError(description: "no query provided. Pass one as an argument or pipe it via stdin.")
+    }
+
+    let stderrMessage = forceStdin ? nil : "Reading query from stdin..."
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    guard let input = String(data: data, encoding: .utf8) else {
+        throw CloudExecPromptError(description: "failed to read query from stdin: stream did not contain valid UTF-8")
+    }
+    guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw CloudExecPromptError(description: "no query provided via stdin (received empty input).")
+    }
+    return CloudExecPrompt(prompt: input, stderrMessage: stderrMessage)
 }
 
 private struct APIKeyReadResult {

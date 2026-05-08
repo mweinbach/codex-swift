@@ -70,6 +70,7 @@ public struct CodexCLI: Sendable {
         case status(taskID: String)
         case diff(taskID: String, attempt: Int?)
         case apply(taskID: String, attempt: Int?)
+        case exec(query: String?, environment: String, branch: String?, attempts: Int)
     }
 
     public struct CloudCommandRequest: Equatable, Sendable {
@@ -523,7 +524,7 @@ public struct CodexCLI: Sendable {
                 return .failure(message, exitCode)
             }
         case "exec":
-            return .failure("codex-swift: command 'cloud exec' runtime is not complete yet.", 78)
+            return parseCloudExec(Array(arguments.dropFirst()))
         default:
             return .failure("codex-swift: unsupported cloud subcommand: \(subcommand)", 64)
         }
@@ -589,6 +590,73 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'cloud \(command)': <TASK_ID>", 64)
         }
         return .success((taskID: taskID, attempt: attempt))
+    }
+
+    private func parseCloudExec(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
+        var query: String?
+        var environment: String?
+        var branch: String?
+        var attempts = 1
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--env" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --env", 64)
+                }
+                environment = value
+                continue
+            }
+            if argument.hasPrefix("--env=") {
+                environment = String(argument.dropFirst("--env=".count))
+                continue
+            }
+            if argument == "--branch" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --branch", 64)
+                }
+                branch = value
+                continue
+            }
+            if argument.hasPrefix("--branch=") {
+                branch = String(argument.dropFirst("--branch=".count))
+                continue
+            }
+            if argument == "--attempts" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --attempts", 64)
+                }
+                switch parseCloudAttempt(value) {
+                case let .success(parsed):
+                    attempts = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("--attempts=") {
+                let value = String(argument.dropFirst("--attempts=".count))
+                switch parseCloudAttempt(value) {
+                case let .success(parsed):
+                    attempts = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'cloud exec': \(argument)", 64)
+            }
+            if query != nil {
+                return .failure("codex-swift: unexpected argument for command 'cloud exec': \(argument)", 64)
+            }
+            query = argument
+        }
+
+        guard let environment else {
+            return .failure("codex-swift: missing required option for command 'cloud exec': --env <ENV_ID>", 64)
+        }
+        return .success(.exec(query: query, environment: environment, branch: branch, attempts: attempts))
     }
 
     private func parseCloudAttempt(_ value: String) -> ParseResult<Int> {

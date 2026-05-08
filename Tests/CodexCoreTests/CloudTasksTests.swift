@@ -98,6 +98,17 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertEqual(envB.map(\.environmentLabel), ["Env B", "Env B"])
     }
 
+    func testMockClientListEnvironmentsMatchesRustRows() async throws {
+        let client = CloudMockClient(now: fixedCloudDate)
+
+        let environments = try await client.listEnvironments().get()
+
+        XCTAssertEqual(environments, [
+            CloudEnvironmentRow(id: "env-A", label: "Env A", isPinned: true, repoHints: "mock/repo"),
+            CloudEnvironmentRow(id: "env-B", label: "Env B")
+        ])
+    }
+
     func testMockClientTaskAccessAndApplyOutcomes() async throws {
         let client = CloudMockClient(now: fixedCloudDate)
 
@@ -246,6 +257,43 @@ final class CloudTasksTests: XCTestCase {
                 isReview: true,
                 attemptTotal: 2
             )
+        ])
+    }
+
+    func testHTTPClientListEnvironmentsMergesRepoAndGlobalRows() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            [
+              { "id": "env-B", "label": "Repo Env", "is_pinned": true, "task_count": 7 }
+            ]
+            """)),
+            .success(cloudResponse("""
+            [
+              { "id": "env-A", "label": "Alpha", "is_pinned": false },
+              { "id": "env-B", "label": "Repo Env Global", "is_pinned": false }
+            ]
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(bearerToken: "tok", accountID: "acct"),
+            gitOriginURLs: { ["git@github.com:owner/repo.git"] },
+            errorLog: { _ in }
+        )
+
+        let environments = try await client.listEnvironments().get()
+
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments/by-repo/github/owner/repo",
+            "https://chatgpt.com/backend-api/wham/environments"
+        ])
+        XCTAssertEqual(transport.executeRequests.map(\.method), [.get, .get])
+        XCTAssertEqual(transport.executeRequests[0].headers["authorization"], "Bearer tok")
+        XCTAssertEqual(transport.executeRequests[0].headers["ChatGPT-Account-ID"], "acct")
+        XCTAssertEqual(environments, [
+            CloudEnvironmentRow(id: "env-B", label: "Repo Env", isPinned: true, repoHints: "owner/repo"),
+            CloudEnvironmentRow(id: "env-A", label: "Alpha", isPinned: false, repoHints: nil)
         ])
     }
 

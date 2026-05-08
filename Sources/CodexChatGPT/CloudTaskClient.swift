@@ -25,6 +25,10 @@ public enum CloudTaskClientError: Error, Equatable, CustomStringConvertible, Sen
     case cloudTaskFailed(CloudTaskError)
     case applyDidNotSucceed(CloudApplyOutcome)
     case emptyTaskID
+    case emptyEnvironmentID
+    case noCloudEnvironmentsAvailable
+    case environmentNotFound(String)
+    case ambiguousEnvironmentLabel(String)
     case noAttemptsAvailable
     case noDiffAvailable(taskID: String)
     case attemptUnavailable(requested: Int, available: Int)
@@ -41,6 +45,14 @@ public enum CloudTaskClientError: Error, Equatable, CustomStringConvertible, Sen
             return outcome.message
         case .emptyTaskID:
             return "task id must not be empty"
+        case .emptyEnvironmentID:
+            return "environment id must not be empty"
+        case .noCloudEnvironmentsAvailable:
+            return "no cloud environments are available for this workspace"
+        case let .environmentNotFound(environment):
+            return "environment '\(environment)' not found; run `codex cloud` to list available environments"
+        case let .ambiguousEnvironmentLabel(label):
+            return "environment label '\(label)' is ambiguous; run `codex cloud` to pick the desired environment id"
         case .noAttemptsAvailable:
             return "No attempts available"
         case let .noDiffAvailable(taskID):
@@ -53,12 +65,15 @@ public enum CloudTaskClientError: Error, Equatable, CustomStringConvertible, Sen
 
 public struct CloudTaskClient<Transport: APITransport>: Sendable {
     public typealias TokenLoader = @Sendable () async throws -> AuthTokenData?
+    public typealias BranchNameResolver = @Sendable (URL) -> String?
 
     public let configuration: CloudTaskClientConfiguration
     public let transport: Transport
 
     private let tokenLoader: TokenLoader
     private let currentDirectory: @Sendable () -> URL
+    private let currentBranchName: BranchNameResolver
+    private let defaultBranchName: BranchNameResolver
     private let applyGitPatch: CloudGitApply
     private let errorLog: CloudTaskErrorLog
 
@@ -69,6 +84,8 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
         currentDirectory: @escaping @Sendable () -> URL = {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         },
+        currentBranchName: @escaping BranchNameResolver = GitInfoCollector.currentBranchName,
+        defaultBranchName: @escaping BranchNameResolver = GitInfoCollector.defaultBranchName,
         applyGitPatch: @escaping CloudGitApply = CloudTaskCodexGitApplier.apply,
         errorLog: @escaping CloudTaskErrorLog = CloudTaskErrorLogger.append
     ) {
@@ -81,6 +98,8 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
             )
         }
         self.currentDirectory = currentDirectory
+        self.currentBranchName = currentBranchName
+        self.defaultBranchName = defaultBranchName
         self.applyGitPatch = applyGitPatch
         self.errorLog = errorLog
     }
@@ -117,6 +136,34 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
         return try await applyTaskOutcome(taskID: id.rawValue, diffOverride: diff)
     }
 
+    public func createTask(
+        prompt: String,
+        environment requestedEnvironment: String,
+        branch branchOverride: String? = nil,
+        attempts: Int = 1
+    ) async throws -> String {
+        let backend = try await makeBackend()
+        let environmentID = try await resolveEnvironmentID(requestedEnvironment, backend: backend)
+        let gitRef = resolveGitRef(branchOverride: branchOverride)
+        let created: CloudCreatedTask
+        switch await backend.createTask(
+            environmentID: environmentID,
+            prompt: prompt,
+            gitRef: gitRef,
+            qaMode: false,
+            bestOfN: attempts
+        ) {
+        case let .success(value):
+            created = value
+        case let .failure(error):
+            throw CloudTaskClientError.cloudTaskFailed(error)
+        }
+        return CloudTaskCommandFormatter.taskURL(
+            baseURL: configuration.chatgptBaseURL,
+            taskID: created.id.rawValue
+        )
+    }
+
     public static func parseTaskID(_ raw: String) throws -> CloudTaskID {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -149,6 +196,58 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
             applyGitPatch: applyGitPatch,
             errorLog: errorLog
         )
+    }
+
+    private func resolveEnvironmentID(
+        _ requested: String,
+        backend: CloudHTTPClient<Transport, StaticAPIAuthProvider>
+    ) async throws -> String {
+        let trimmed = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw CloudTaskClientError.emptyEnvironmentID
+        }
+
+        let environments: [CloudEnvironmentRow]
+        switch await backend.listEnvironments() {
+        case let .success(rows):
+            environments = rows
+        case let .failure(error):
+            throw CloudTaskClientError.cloudTaskFailed(error)
+        }
+        guard !environments.isEmpty else {
+            throw CloudTaskClientError.noCloudEnvironmentsAvailable
+        }
+
+        if let exact = environments.first(where: { $0.id == trimmed }) {
+            return exact.id
+        }
+
+        let labelMatches = environments.filter { row in
+            row.label?.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+        guard let first = labelMatches.first else {
+            throw CloudTaskClientError.environmentNotFound(trimmed)
+        }
+        if labelMatches.dropFirst().allSatisfy({ $0.id == first.id }) {
+            return first.id
+        }
+        throw CloudTaskClientError.ambiguousEnvironmentLabel(trimmed)
+    }
+
+    private func resolveGitRef(branchOverride: String?) -> String {
+        if let branch = branchOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !branch.isEmpty {
+            return branch
+        }
+
+        let cwd = currentDirectory()
+        if let branch = currentBranchName(cwd), !branch.isEmpty {
+            return branch
+        }
+        if let branch = defaultBranchName(cwd), !branch.isEmpty {
+            return branch
+        }
+        return "main"
     }
 
     private func applyTaskOutcome(taskID: String, diffOverride: String?) async throws -> CloudApplyOutcome {
@@ -308,6 +407,20 @@ public enum CloudTaskCommandFormatter {
         let day = Calendar.current.component(.day, from: timestamp)
         return "\(monthFormatter.string(from: timestamp)) \(String(format: "%2d", day)) \(timeFormatter.string(from: timestamp))"
     }
+
+    public static func taskURL(baseURL: String, taskID: String) -> String {
+        let normalized = CloudHTTPClient<URLSessionAPITransport, StaticAPIAuthProvider>.normalizedBaseURL(baseURL)
+        if normalized.hasSuffix("/backend-api") {
+            return "\(String(normalized.dropLast("/backend-api".count)))/codex/tasks/\(taskID)"
+        }
+        if normalized.hasSuffix("/api/codex") {
+            return "\(String(normalized.dropLast("/api/codex".count)))/codex/tasks/\(taskID)"
+        }
+        if normalized.hasSuffix("/codex") {
+            return "\(normalized)/tasks/\(taskID)"
+        }
+        return "\(normalized)/codex/tasks/\(taskID)"
+    }
 }
 
 public extension CloudTaskClient where Transport == URLSessionAPITransport {
@@ -317,6 +430,8 @@ public extension CloudTaskClient where Transport == URLSessionAPITransport {
         currentDirectory: @escaping @Sendable () -> URL = {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         },
+        currentBranchName: @escaping BranchNameResolver = GitInfoCollector.currentBranchName,
+        defaultBranchName: @escaping BranchNameResolver = GitInfoCollector.defaultBranchName,
         applyGitPatch: @escaping CloudGitApply = CloudTaskCodexGitApplier.apply,
         errorLog: @escaping CloudTaskErrorLog = CloudTaskErrorLogger.append
     ) {
@@ -325,6 +440,8 @@ public extension CloudTaskClient where Transport == URLSessionAPITransport {
             transport: URLSessionAPITransport(),
             tokenLoader: tokenLoader,
             currentDirectory: currentDirectory,
+            currentBranchName: currentBranchName,
+            defaultBranchName: defaultBranchName,
             applyGitPatch: applyGitPatch,
             errorLog: errorLog
         )
