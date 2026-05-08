@@ -12,13 +12,12 @@ let exitCode = await cli.runAsync(
     arguments: Array(CommandLine.arguments.dropFirst()),
     applyRunner: { request in
         let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
-        let client = ChatGPTTaskClient(configuration: ChatGPTClientConfiguration(
+        let client = CloudTaskClient(configuration: CloudTaskClientConfiguration(
             chatgptBaseURL: settings.chatgptBaseURL,
             codexHome: codexHome,
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode
         ))
-        _ = try await client.applyTask(taskID: request.taskID)
-        return "Successfully applied diff"
+        return try await client.applyTask(taskID: request.taskID).message
     },
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
