@@ -523,6 +523,31 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func turnInterruptResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        guard let turnID = stringParam(params?["turnId"]), !turnID.isEmpty else {
+            throw AppServerError.invalidRequest("missing turnId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.turnAborted(TurnAbortedEvent(reason: .interrupted)))
+        ])
+        try recorder.shutdown()
+        return [:]
+    }
+
     fileprivate static func threadArchiveResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -744,6 +769,21 @@ public enum CodexAppServer {
             "params": [
                 "threadId": threadID,
                 "turn": turn
+            ]
+        ]
+    }
+
+    fileprivate static func turnCompletedNotification(threadID: String, turnID: String, status: String) -> [String: Any] {
+        [
+            "method": "turn/completed",
+            "params": [
+                "threadId": threadID,
+                "turn": [
+                    "id": turnID,
+                    "items": [],
+                    "status": status,
+                    "error": NSNull()
+                ]
             ]
         ]
     }
@@ -2700,6 +2740,19 @@ final class CodexAppServerMessageProcessor {
                     if let threadID = params?["threadId"] as? String,
                        let turn = result["turn"] as? [String: Any] {
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
+                    }
+                case "turn/interrupt":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.turnInterruptResult(params: params, configuration: configuration)
+                    )
+                    if let threadID = params?["threadId"] as? String,
+                       let turnID = params?["turnId"] as? String {
+                        notifications.append(CodexAppServer.turnCompletedNotification(
+                            threadID: threadID,
+                            turnID: turnID,
+                            status: "interrupted"
+                        ))
                     }
                 case "thread/archive":
                     response = CodexAppServer.responseObject(

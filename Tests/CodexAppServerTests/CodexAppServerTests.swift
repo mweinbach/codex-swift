@@ -134,6 +134,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
     }
 
+    func testTurnInterruptRecordsAbortAndEmitsCompletedNotification() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Interrupt me"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        XCTAssertEqual(messages[1]["method"] as? String, "turn/completed")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, threadID)
+        let completedTurn = try XCTUnwrap(params["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, turnID)
+        XCTAssertEqual((completedTurn["items"] as? [Any])?.count, 0)
+        XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
+        XCTAssertEqual(completedTurn["error"] as? NSNull, NSNull())
+
+        let resume = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
+    }
+
     func testThreadResumeReturnsThreadWithRebuiltTurns() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
