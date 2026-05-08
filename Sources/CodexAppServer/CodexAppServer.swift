@@ -215,6 +215,27 @@ public enum CodexAppServer {
         return ["files": files]
     }
 
+    fileprivate static func commandExecResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let command = stringArrayParam(params?["command"]) else {
+            throw AppServerError.invalidRequest("missing command")
+        }
+        guard !command.isEmpty else {
+            throw AppServerError.invalidRequest("command must not be empty")
+        }
+
+        let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let timeout = intParam(params?["timeoutMs"] ?? params?["timeout_ms"], defaultValue: 0)
+        return try runOneOffCommand(
+            command,
+            cwd: cwd,
+            timeoutMilliseconds: timeout > 0 ? timeout : nil,
+            environment: configuration.environment
+        )
+    }
+
     fileprivate static func loginApiKeyResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -625,6 +646,61 @@ public enum CodexAppServer {
 
     private static func fileName(fromRelativePath path: String) -> String {
         path.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? path
+    }
+
+    private static func runOneOffCommand(
+        _ command: [String],
+        cwd: URL?,
+        timeoutMilliseconds: Int?,
+        environment: [String: String]
+    ) throws -> [String: Any] {
+        let process = Process()
+        if command[0].contains("/") {
+            process.executableURL = URL(fileURLWithPath: command[0])
+            process.arguments = Array(command.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = command
+        }
+        if let cwd {
+            process.currentDirectoryURL = cwd
+        }
+        process.environment = environment
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("exec failed: \(error)")
+        }
+
+        var timedOut = false
+        if let timeoutMilliseconds {
+            let deadline = Date().addingTimeInterval(TimeInterval(timeoutMilliseconds) / 1000)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning {
+                timedOut = true
+                process.terminate()
+            }
+        }
+
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        var stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if timedOut, stderr.isEmpty {
+            stderr = "command timed out"
+        }
+        return [
+            "exitCode": timedOut ? -1 : Int(process.terminationStatus),
+            "stdout": stdout,
+            "stderr": stderr
+        ]
     }
 
     private static func layerObject(_ layer: ConfigLayerEntry) -> [String: Any] {
@@ -1107,6 +1183,14 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.fuzzyFileSearchResult(params: params)
+                    )
+                case "command/exec", "execOneOffCommand":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.commandExecResult(
+                            params: params,
+                            configuration: configuration
+                        )
                     )
                 case "loginApiKey":
                     response = CodexAppServer.responseObject(

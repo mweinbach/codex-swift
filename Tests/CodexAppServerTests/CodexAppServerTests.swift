@@ -674,6 +674,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
     }
 
+    func testCommandExecReturnsStdoutStderrAndExitCode() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","pwd; echo err >&2"],"cwd":"\#(cwd.url.path)"}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(
+            (result["stdout"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
+            cwd.url.path + "\n"
+        )
+        XCTAssertEqual(result["stderr"] as? String, "err\n")
+    }
+
+    func testExecOneOffCommandResolvesExecutableThroughEnvironmentPath() throws {
+        let codexHome = try TemporaryDirectory()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: codexHome.url,
+            environment: [
+                "PATH": "/bin:/usr/bin",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let response = try decode(
+            processor.processLine(
+                Data(#"{"id":1,"method":"execOneOffCommand","params":{"command":["sh","-c","printf legacy"]}}"#.utf8)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "legacy")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
+    func testExecOneOffCommandRejectsEmptyCommand() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"execOneOffCommand","params":{"command":[]}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "command must not be empty")
+    }
+
     func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
