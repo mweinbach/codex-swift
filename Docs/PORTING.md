@@ -155,6 +155,8 @@ Source baseline inspected for this scaffold:
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`
   - response-item to turn-item projection for user/assistant/reasoning/web-search items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
+- Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
+  - non-tool output item projection, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
 - `codex-rs/core/src/context_manager/normalize.rs`
   - function/custom/local-shell call-output invariant repair, synthetic aborted outputs for missing pairs, orphan output removal, and paired-item removal helpers for transcript trimming
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`
@@ -244,7 +246,6 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - completion generation
 - platform-specific process hardening
 - local image loading/resizing into data URLs
-- MCP `CallToolResult` conversion into function-call output payloads
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO, full non-apply config loading, and managed requirements
 - apply-patch invocation detection from arbitrary shell commands/heredocs

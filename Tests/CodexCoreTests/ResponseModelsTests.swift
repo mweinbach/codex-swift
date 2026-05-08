@@ -28,6 +28,59 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(output[1]["image_url"] as? String, "data:image/png;base64,BASE64")
     }
 
+    func testMcpCallToolResultStructuredContentBecomesOutputPayload() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [.text(McpTextContent(text: "ignored"))],
+            structuredContent: .object(["answer": .integer(42)])
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertNil(payload.contentItems)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload.content.utf8)) as? [String: Any])
+        XCTAssertEqual(object["answer"] as? Int, 42)
+    }
+
+    func testMcpCallToolResultImageContentBecomesContentItems() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: "caption")),
+                .image(McpImageContent(data: "BASE64", mimeType: "image/png"))
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputText(text: "caption"),
+            .inputImage(imageURL: "data:image/png;base64,BASE64")
+        ])
+    }
+
+    func testMcpCallToolResultUnsupportedBlocksSkipContentItems() {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: "caption")),
+                .resourceLink(McpResourceLink(name: "doc", uri: "file:///tmp/doc.md"))
+            ],
+            isError: true
+        ))
+
+        XCTAssertEqual(payload.success, false)
+        XCTAssertNil(payload.contentItems)
+    }
+
+    func testResponseInputItemRoundTripsMcpToolCallOutput() throws {
+        let item = ResponseInputItem.mcpToolCallOutput(
+            callID: "call-mcp",
+            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "hello"))]))
+        )
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(ResponseInputItem.self, from: data), item)
+        let object = try JSONObject(item)
+        XCTAssertEqual(object["type"] as? String, "mcp_tool_call_output")
+        XCTAssertEqual(object["call_id"] as? String, "call-mcp")
+    }
+
     func testDeserializesArrayPayloadIntoItems() throws {
         let json = #"""
         [

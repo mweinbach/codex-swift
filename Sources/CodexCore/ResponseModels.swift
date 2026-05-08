@@ -107,6 +107,37 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         self.success = success
     }
 
+    public init(callToolResult: McpCallToolResult) {
+        let isSuccess = callToolResult.isError != true
+
+        if let structuredContent = callToolResult.structuredContent,
+           structuredContent != .null
+        {
+            do {
+                let data = try JSONEncoder.codexCompact.encode(structuredContent)
+                self.init(
+                    content: String(data: data, encoding: .utf8) ?? "null",
+                    success: isSuccess
+                )
+            } catch {
+                self.init(content: String(describing: error), success: false)
+            }
+            return
+        }
+
+        do {
+            let data = try JSONEncoder.codexCompact.encode(callToolResult.content)
+            let serializedContent = String(data: data, encoding: .utf8) ?? "[]"
+            self.init(
+                content: serializedContent,
+                contentItems: Self.contentItems(from: callToolResult.content),
+                success: isSuccess
+            )
+        } catch {
+            self.init(content: String(describing: error), success: false)
+        }
+    }
+
     public var description: String {
         content
     }
@@ -131,11 +162,41 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
             try container.encode(content)
         }
     }
+
+    private static func contentItems(
+        from blocks: [McpContentBlock]
+    ) -> [FunctionCallOutputContentItem]? {
+        var sawImage = false
+        var items: [FunctionCallOutputContentItem] = []
+
+        for block in blocks {
+            switch block {
+            case let .text(text):
+                items.append(.inputText(text: text.text))
+            case let .image(image):
+                sawImage = true
+                let imageURL: String
+                if image.data.hasPrefix("data:") {
+                    imageURL = image.data
+                } else {
+                    imageURL = "data:\(image.mimeType);base64,\(image.data)"
+                }
+                items.append(.inputImage(imageURL: imageURL))
+            case .audio,
+                 .resourceLink,
+                 .embeddedResource:
+                return nil
+            }
+        }
+
+        return sawImage ? items : nil
+    }
 }
 
 public enum ResponseInputItem: Equatable, Codable, Sendable {
     case message(role: String, content: [ContentItem])
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
+    case mcpToolCallOutput(callID: String, result: McpToolCallResult)
     case customToolCallOutput(callID: String, output: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -144,11 +205,13 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case content
         case callID = "call_id"
         case output
+        case result
     }
 
     private enum ItemType: String, Codable {
         case message
         case functionCallOutput = "function_call_output"
+        case mcpToolCallOutput = "mcp_tool_call_output"
         case customToolCallOutput = "custom_tool_call_output"
     }
 
@@ -164,6 +227,11 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
             self = .functionCallOutput(
                 callID: try container.decode(String.self, forKey: .callID),
                 output: try container.decode(FunctionCallOutputPayload.self, forKey: .output)
+            )
+        case .mcpToolCallOutput:
+            self = .mcpToolCallOutput(
+                callID: try container.decode(String.self, forKey: .callID),
+                result: try container.decode(McpToolCallResult.self, forKey: .result)
             )
         case .customToolCallOutput:
             self = .customToolCallOutput(
@@ -184,6 +252,10 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
             try container.encode(ItemType.functionCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(output, forKey: .output)
+        case let .mcpToolCallOutput(callID, result):
+            try container.encode(ItemType.mcpToolCallOutput, forKey: .type)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(result, forKey: .result)
         case let .customToolCallOutput(callID, output):
             try container.encode(ItemType.customToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
