@@ -898,6 +898,60 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(blankError["message"] as? String, "gitInfo.branch must not be empty")
     }
 
+    func testThreadCompactStartAndShellCommandReturnEmptyResults() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-00-00",
+            timestamp: "2025-01-06T08:00:00Z",
+            preview: "thread operation",
+            provider: "mock_provider"
+        )
+
+        let compact = try appServerResponse(
+            #"{"id":1,"method":"thread/compact/start","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let compactResult = try XCTUnwrap(compact["result"] as? [String: Any])
+        XCTAssertTrue(compactResult.isEmpty)
+
+        let shell = try appServerResponse(
+            #"{"id":2,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"  git status --short  "}}"#,
+            codexHome: temp.url
+        )
+        let shellResult = try XCTUnwrap(shell["result"] as? [String: Any])
+        XCTAssertTrue(shellResult.isEmpty)
+    }
+
+    func testThreadCompactStartAndShellCommandValidateInputs() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = UUID().uuidString.lowercased()
+
+        let emptyCommand = try appServerResponse(
+            #"{"id":1,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"   "}}"#,
+            codexHome: temp.url
+        )
+        let emptyCommandError = try XCTUnwrap(emptyCommand["error"] as? [String: Any])
+        XCTAssertEqual(emptyCommandError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyCommandError["message"] as? String, "command must not be empty")
+
+        let invalidThread = try appServerResponse(
+            #"{"id":2,"method":"thread/compact/start","params":{"threadId":"not-a-thread-id"}}"#,
+            codexHome: temp.url
+        )
+        let invalidThreadError = try XCTUnwrap(invalidThread["error"] as? [String: Any])
+        XCTAssertEqual(invalidThreadError["code"] as? Int, -32600)
+        XCTAssertTrue((invalidThreadError["message"] as? String)?.contains("invalid thread id") == true)
+
+        let missingThread = try appServerResponse(
+            #"{"id":3,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"pwd"}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadError = try XCTUnwrap(missingThread["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(threadID)")
+    }
+
     func testThreadGoalMethodsReturnRustDisabledFeatureErrorByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()

@@ -1224,6 +1224,29 @@ public enum CodexAppServer {
         throw AppServerError.methodNotFound("\(method) is not supported yet")
     }
 
+    fileprivate static func threadCompactStartResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        _ = try materializedThreadID(params: params, configuration: configuration)
+        return [:]
+    }
+
+    fileprivate static func threadShellCommandResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let rawCommand = stringParam(params?["command"]) else {
+            throw AppServerError.invalidRequest("missing command")
+        }
+        let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else {
+            throw AppServerError.invalidRequest("command must not be empty")
+        }
+        _ = try materializedThreadID(params: params, configuration: configuration)
+        return [:]
+    }
+
     fileprivate static func threadGoalSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -1313,6 +1336,13 @@ public enum CodexAppServer {
     }
 
     private static func materializedGoalThreadID(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> String {
+        try materializedThreadID(params: params, configuration: configuration)
+    }
+
+    private static func materializedThreadID(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> String {
@@ -5423,6 +5453,16 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
+                    )
+                case "thread/compact/start":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadCompactStartResult(params: params, configuration: configuration)
+                    )
+                case "thread/shellCommand":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadShellCommandResult(params: params, configuration: configuration)
                     )
                 case "thread/goal/set":
                     let result = try CodexAppServer.threadGoalSetResult(params: params, configuration: configuration)
