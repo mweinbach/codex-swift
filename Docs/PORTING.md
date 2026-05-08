@@ -177,7 +177,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
-  - constrained config values, Rust-matching constraint error strings, admin allowed approval policy constraints, sandbox-mode requirement constraints, and unset-field requirements merging
+  - constrained config values, Rust-matching constraint error strings, admin allowed approval policy constraints, sandbox-mode requirement constraints, unset-field requirements merging, `/etc/codex/requirements.toml` loading, and legacy `managed_config.toml`/MDM requirement derivation
 - `codex-rs/app-server-protocol/src/protocol/v2.rs` config-layer models plus `codex-rs/core/src/config_loader/state.rs` and `codex-rs/core/src/config_loader/fingerprint.rs`
   - config layer source wire tags, precedence ordering, layer metadata, deterministic SHA256 layer versions, user-layer replacement, effective config merging, origin tracking, and project-layer root-to-cwd validation
 - `codex-rs/core/src/bash.rs`, `codex-rs/core/src/command_safety/is_safe_command.rs`, `codex-rs/core/src/command_safety/windows_safe_commands.rs`, and `codex-rs/core/src/command_safety/is_dangerous_command.rs`
@@ -352,7 +352,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Rust-complete apply-patch approval caching, subprocess self-invocation, sandbox retry/escalation, and diff event plumbing
 - cloud tasks TUI list/browse runtime
 - full Rust command parser parity for complex Bash/Powershell AST cases
-- config-layer file IO, full non-apply config loading, and managed requirements
+- config-layer file IO and full non-apply config loading
 - full apply-patch approval/diff event plumbing across shell-intercept and live-tool paths
 - Starlark-compatible execpolicy parser completeness
 - full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items

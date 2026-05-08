@@ -188,6 +188,119 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertEqual(stack.layersHighToLow().first?.name, .legacyManagedConfigTomlFromMdm)
     }
 
+    func testRequirementsTomlConstrainLayerStackLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_approval_policies = ["never", "on-request"]
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.requirements.approvalPolicy.value, .never)
+        XCTAssertNoThrow(try stack.requirements.approvalPolicy.canSet(.onRequest).get())
+        XCTAssertConstraintFailure(
+            stack.requirements.approvalPolicy.canSet(.onFailure),
+            .invalidValue(candidate: "OnFailure", allowed: "[Never, OnRequest]")
+        )
+        XCTAssertNoThrow(try stack.requirements.sandboxPolicy.canSet(.workspaceWrite(
+            writableRoots: [try AbsolutePath(absolutePath: "/repo")],
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false
+        )).get())
+        XCTAssertConstraintFailure(
+            stack.requirements.sandboxPolicy.canSet(.dangerFullAccess),
+            .invalidValue(candidate: "DangerFullAccess", allowed: "[ReadOnly, WorkspaceWrite]")
+        )
+    }
+
+    func testLegacyManagedConfigFillsUnsetRequirementsWithoutOverridingRequirementsToml() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_approval_policies = ["on-request"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let managedPath = dir.url.appendingPathComponent("managed_config.toml")
+        try """
+        approval_policy = "never"
+        sandbox_mode = "read-only"
+        """.write(to: managedPath, atomically: true, encoding: .utf8)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: managedPath,
+                requirementsPath: requirementsPath
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.requirements.approvalPolicy.value, .onRequest)
+        XCTAssertConstraintFailure(
+            stack.requirements.approvalPolicy.canSet(.never),
+            .invalidValue(candidate: "Never", allowed: "[OnRequest]")
+        )
+        XCTAssertNoThrow(try stack.requirements.sandboxPolicy.canSet(.readOnly).get())
+        XCTAssertConstraintFailure(
+            stack.requirements.sandboxPolicy.canSet(.dangerFullAccess),
+            .invalidValue(candidate: "DangerFullAccess", allowed: "[ReadOnly]")
+        )
+    }
+
+    func testLegacyMdmRequirementsWinOverLegacyManagedConfigFileForUnsetFields() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let managedPath = dir.url.appendingPathComponent("managed_config.toml")
+        try """
+        approval_policy = "never"
+        sandbox_mode = "danger-full-access"
+        """.write(to: managedPath, atomically: true, encoding: .utf8)
+
+        let managedPreferences = Data("""
+        approval_policy = "on-request"
+        sandbox_mode = "read-only"
+        """.utf8)
+            .base64EncodedString()
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: managedPath,
+                managedPreferencesBase64: managedPreferences
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.requirements.approvalPolicy.value, .onRequest)
+        XCTAssertConstraintFailure(
+            stack.requirements.approvalPolicy.canSet(.never),
+            .invalidValue(candidate: "Never", allowed: "[OnRequest]")
+        )
+        XCTAssertNoThrow(try stack.requirements.sandboxPolicy.canSet(.readOnly).get())
+        XCTAssertConstraintFailure(
+            stack.requirements.sandboxPolicy.canSet(.dangerFullAccess),
+            .invalidValue(candidate: "DangerFullAccess", allowed: "[ReadOnly]")
+        )
+    }
+
     func testLayerStackReturnsEmptyUserLayerWhenAllFilesMissing() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)
@@ -357,5 +470,19 @@ private final class ConfigLayerTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private func XCTAssertConstraintFailure(
+    _ result: ConstraintResult<Void>,
+    _ expected: ConstraintError,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    switch result {
+    case .success:
+        XCTFail("expected constraint failure", file: file, line: line)
+    case let .failure(error):
+        XCTAssertEqual(error, expected, file: file, line: line)
     }
 }

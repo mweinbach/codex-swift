@@ -3,10 +3,16 @@ import Foundation
 public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
     public var managedConfigPath: URL?
     public var managedPreferencesBase64: String?
+    public var requirementsPath: URL?
 
-    public init(managedConfigPath: URL? = nil, managedPreferencesBase64: String? = nil) {
+    public init(
+        managedConfigPath: URL? = nil,
+        managedPreferencesBase64: String? = nil,
+        requirementsPath: URL? = nil
+    ) {
         self.managedConfigPath = managedConfigPath
         self.managedPreferencesBase64 = managedPreferencesBase64
+        self.requirementsPath = requirementsPath
     }
 }
 
@@ -55,6 +61,14 @@ public enum CodexConfigLayerLoader {
     public static let managedPreferencesApplicationID = "com.openai.codex"
     public static let managedPreferencesConfigKey = "config_toml_base64"
 
+    public static func defaultRequirementsTomlFile() -> URL? {
+        #if os(Windows)
+        return nil
+        #else
+        return URL(fileURLWithPath: "/etc/codex/requirements.toml", isDirectory: false)
+        #endif
+    }
+
     public static func managedConfigDefaultPath(
         codexHome: URL,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -102,12 +116,18 @@ public enum CodexConfigLayerLoader {
         fileManager: FileManager = .default,
         systemConfigFile: URL? = CodexConfigLoader.defaultSystemConfigFile()
     ) throws -> ConfigLayerStack {
+        var requirementsToml = ConfigRequirementsToml()
+        if let requirementsPath = overrides.requirementsPath ?? defaultRequirementsTomlFile() {
+            try loadRequirementsToml(into: &requirementsToml, from: requirementsPath, fileManager: fileManager)
+        }
+
         let loadedConfigLayers = try loadConfigLayers(
             codexHome: codexHome,
             overrides: overrides,
             environment: environment,
             fileManager: fileManager
         )
+        try loadRequirementsFromLegacyScheme(into: &requirementsToml, loadedConfigLayers: loadedConfigLayers)
 
         var layers: [ConfigLayerEntry] = []
 
@@ -165,7 +185,7 @@ public enum CodexConfigLayerLoader {
             ))
         }
 
-        return try ConfigLayerStack(layers: layers)
+        return try ConfigLayerStack(layers: layers, requirements: try requirementsToml.requirements())
     }
 
     public static func readConfig(
@@ -229,6 +249,41 @@ public enum CodexConfigLayerLoader {
         return value
     }
 
+    public static func loadRequirementsToml(
+        into requirementsToml: inout ConfigRequirementsToml,
+        from url: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        let contents: String
+        do {
+            contents = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            throw ConfigLayerLoadError.readFailed(path: url.path, message: String(describing: error))
+        }
+
+        do {
+            requirementsToml.mergeUnsetFields(from: try ConfigRequirementsToml.parse(contents))
+        } catch {
+            throw ConfigLayerLoadError.parseFailed(path: url.path, message: String(describing: error))
+        }
+    }
+
+    public static func loadRequirementsFromLegacyScheme(
+        into requirementsToml: inout ConfigRequirementsToml,
+        loadedConfigLayers: LoadedConfigLayers
+    ) throws {
+        for config in [
+            loadedConfigLayers.managedConfigFromMDM,
+            loadedConfigLayers.managedConfig.map(\.managedConfig)
+        ].compactMap({ $0 }) {
+            requirementsToml.mergeUnsetFields(from: try legacyRequirements(from: config))
+        }
+    }
+
     public static func resolveRelativePaths(in value: ConfigValue, baseDirectory: URL) throws -> ConfigValue {
         switch value {
         case let .array(values):
@@ -267,6 +322,37 @@ public enum CodexConfigLayerLoader {
             return try AbsolutePath(absolutePath: path).path
         }
         return try AbsolutePath.resolve(path, against: baseDirectory.standardizedFileURL.path).path
+    }
+
+    private static func legacyRequirements(from config: ConfigValue) throws -> ConfigRequirementsToml {
+        guard case let .table(table) = config else {
+            return ConfigRequirementsToml()
+        }
+
+        var requirements = ConfigRequirementsToml()
+        if let approvalValue = table["approval_policy"] {
+            guard case let .string(rawApproval) = approvalValue,
+                  let approvalPolicy = AskForApproval(rawValue: rawApproval)
+            else {
+                throw ConfigLayerLoadError.invalidData(
+                    "Failed to parse config requirements as TOML: invalid approval_policy"
+                )
+            }
+            requirements.allowedApprovalPolicies = [approvalPolicy]
+        }
+
+        if let sandboxValue = table["sandbox_mode"] {
+            guard case let .string(rawSandboxMode) = sandboxValue,
+                  let sandboxMode = SandboxMode(rawValue: rawSandboxMode)
+            else {
+                throw ConfigLayerLoadError.invalidData(
+                    "Failed to parse config requirements as TOML: invalid sandbox_mode"
+                )
+            }
+            requirements.allowedSandboxModes = [SandboxModeRequirement(sandboxMode: sandboxMode)]
+        }
+
+        return requirements
     }
 
     private static func mergedConfig(layers: [ConfigLayerEntry]) -> ConfigValue {
