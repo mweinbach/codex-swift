@@ -168,6 +168,8 @@ Source baseline inspected for this scaffold:
   - turn-local task ordering/replacement/removal semantics, pending approval map behavior, pending input buffering, take-and-clear behavior, and active-turn pending cleanup
 - `codex-rs/login/src/pkce.rs`
   - PKCE verifier generation from 64 random bytes, base64url no-padding encoding, and S256 code-challenge derivation
+- `codex-rs/ollama/src/url.rs` and `codex-rs/ollama/src/parser.rs`
+  - OpenAI-compatible Ollama `/v1` base-URL normalization and pull status/progress event parsing
 
 ## Known Gaps
 
