@@ -558,12 +558,61 @@ public enum McpAuthStatusResolver {
         })
     }
 
+    public static func authStatuses(
+        for servers: [String: McpServerConfig],
+        codexHome: URL,
+        storeMode: OAuthCredentialsStoreMode,
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) -> [String: McpAuthStatus] {
+        Dictionary(uniqueKeysWithValues: servers.map { name, server in
+            (
+                name,
+                authStatus(
+                    name: name,
+                    server: server,
+                    codexHome: codexHome,
+                    storeMode: storeMode,
+                    keyringStore: keyringStore
+                )
+            )
+        })
+    }
+
     public static func authStatus(for server: McpServerConfig) -> McpAuthStatus {
         switch server.transport {
         case .stdio:
             return .unsupported
         case let .streamableHttp(_, bearerTokenEnvVar, _, _):
             return bearerTokenEnvVar == nil ? .unsupported : .bearerToken
+        }
+    }
+
+    public static func authStatus(
+        name: String,
+        server: McpServerConfig,
+        codexHome: URL,
+        storeMode: OAuthCredentialsStoreMode,
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) -> McpAuthStatus {
+        switch server.transport {
+        case .stdio:
+            return .unsupported
+        case let .streamableHttp(url, bearerTokenEnvVar, _, _):
+            if bearerTokenEnvVar != nil {
+                return .bearerToken
+            }
+            do {
+                return try McpOAuthCredentialStore.hasOAuthTokens(
+                    serverName: name,
+                    url: url,
+                    codexHome: codexHome,
+                    mode: storeMode,
+                    keyringStore: keyringStore
+                ) ? .oauth : .unsupported
+            } catch {
+                // Rust falls back to Unsupported when auth-status detection fails.
+                return .unsupported
+            }
         }
     }
 }

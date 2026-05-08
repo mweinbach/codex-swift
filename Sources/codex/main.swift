@@ -172,19 +172,24 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
 
     switch request.action {
     case let .list(json):
-        let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        let servers = settings.mcpServers
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
             stdoutMessage: try McpCommandFormatter.list(
                 servers: servers,
                 json: json,
-                authStatuses: McpAuthStatusResolver.authStatuses(for: servers)
+                authStatuses: McpAuthStatusResolver.authStatuses(
+                    for: servers,
+                    codexHome: codexHome,
+                    storeMode: settings.mcpOAuthCredentialsStoreMode
+                )
             )
         )
 
     case let .get(name, json):
-        let servers = try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome)
-        guard let server = servers[name] else {
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        guard let server = settings.mcpServers[name] else {
             return CodexCLI.CommandExecutionResult(
                 exitCode: 1,
                 stderrMessage: "No MCP server named '\(name)' found."
@@ -243,17 +248,58 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
             stdoutMessage: "No MCP server named '\(name)' found."
         )
 
-    case .login:
+    case let .login(name, _):
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        guard let server = settings.mcpServers[name] else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "No MCP server named '\(name)' found."
+            )
+        }
+        guard case .streamableHttp = server.transport else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "OAuth login is only supported for streamable HTTP servers."
+            )
+        }
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
             stderrMessage: "codex-swift: mcp login runtime is not complete yet."
         )
 
-    case .logout:
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: mcp logout runtime is not complete yet."
-        )
+    case let .logout(name):
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        guard let server = settings.mcpServers[name] else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "No MCP server named '\(name)' found in configuration."
+            )
+        }
+        guard case let .streamableHttp(url, _, _, _) = server.transport else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "OAuth logout is only supported for streamable_http transports."
+            )
+        }
+        do {
+            let removed = try McpOAuthCredentialStore.deleteOAuthTokens(
+                serverName: name,
+                url: url,
+                codexHome: codexHome,
+                mode: settings.mcpOAuthCredentialsStoreMode
+            )
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 0,
+                stdoutMessage: removed
+                    ? "Removed OAuth credentials for '\(name)'."
+                    : "No OAuth credentials stored for '\(name)'."
+            )
+        } catch {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "failed to delete OAuth credentials: \(String(describing: error))"
+            )
+        }
     }
 }
 
