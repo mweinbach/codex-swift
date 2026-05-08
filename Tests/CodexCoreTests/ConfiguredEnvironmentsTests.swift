@@ -1,0 +1,253 @@
+@testable import CodexCore
+import XCTest
+
+final class ConfiguredEnvironmentsTests: XCTestCase {
+    func testMissingEnvironmentsTomlFallsBackToLegacyExecServerURL() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(
+            codexHome: temp.url,
+            environment: [
+                ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: " ws://127.0.0.1:8765 "
+            ]
+        )
+
+        XCTAssertEqual(snapshot.environments.map(\.id), ["local", "remote"])
+        XCTAssertEqual(snapshot.environment(id: "remote")?.execServerURL, "ws://127.0.0.1:8765")
+        XCTAssertEqual(snapshot.defaultEnvironment, .environmentID("remote"))
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), ["remote", "local"])
+        XCTAssertEqual(snapshot.defaultThreadEnvironmentSelections(cwd: "/repo"), [
+            TurnEnvironmentSelection(environmentID: "remote", cwd: "/repo"),
+            TurnEnvironmentSelection(environmentID: "local", cwd: "/repo")
+        ])
+    }
+
+    func testMissingEnvironmentsTomlKeepsLegacyDisabledDefault() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(
+            codexHome: temp.url,
+            environment: [
+                ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "none"
+            ]
+        )
+
+        XCTAssertEqual(snapshot.environments.map(\.id), ["local"])
+        XCTAssertEqual(snapshot.defaultEnvironment, .disabled)
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), [])
+    }
+
+    func testLoadCodexHomeEnvironmentsTomlUsesDefaultFirstSelections() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        default = "dev"
+
+        [[environments]]
+        id = "dev"
+        program = "ssh"
+        args = ["dev", "cd /tmp && codex exec-server --listen stdio"]
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let selections = try ConfiguredEnvironmentLoader.defaultThreadEnvironmentSelections(
+            codexHome: temp.url,
+            cwd: "/workspace",
+            environment: [
+                ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://legacy.example"
+            ]
+        )
+
+        XCTAssertEqual(selections, [
+            TurnEnvironmentSelection(environmentID: "dev", cwd: "/workspace"),
+            TurnEnvironmentSelection(environmentID: "local", cwd: "/workspace")
+        ])
+    }
+
+    func testLoadCodexHomeEnvironmentsTomlParsesWebsocketAndStdioEntries() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        default = "ssh-dev"
+
+        [[environments]]
+        id = "devbox"
+        url = " ws://127.0.0.1:4512 "
+
+        [[environments]]
+        id = "ssh-dev"
+        program = " ssh "
+        args = ["dev", "codex exec-server --listen stdio"]
+        cwd = "workspace"
+        [environments.env]
+        CODEX_LOG = "debug"
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(codexHome: temp.url, environment: [:])
+
+        XCTAssertEqual(snapshot.environments.map(\.id), ["local", "devbox", "ssh-dev"])
+        XCTAssertEqual(snapshot.environment(id: "devbox")?.execServerURL, "ws://127.0.0.1:4512")
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), ["ssh-dev", "local", "devbox"])
+        XCTAssertEqual(
+            snapshot.environment(id: "ssh-dev")?.transport,
+            .stdio(StdioConfiguredEnvironmentCommand(
+                program: "ssh",
+                args: ["dev", "codex exec-server --listen stdio"],
+                env: ["CODEX_LOG": "debug"],
+                cwd: temp.url.appendingPathComponent("workspace", isDirectory: true).standardizedFileURL.path
+            ))
+        )
+    }
+
+    func testEnvironmentsTomlDefaultOmittedSelectsLocalAndNoneDisablesDefault() throws {
+        let localSnapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: "")
+        XCTAssertEqual(localSnapshot.defaultEnvironment, .environmentID("local"))
+        XCTAssertEqual(localSnapshot.defaultEnvironmentIDs(), ["local"])
+
+        let disabledSnapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: #"default = "none""#)
+        XCTAssertEqual(disabledSnapshot.defaultEnvironment, .disabled)
+        XCTAssertEqual(disabledSnapshot.defaultEnvironmentIDs(), [])
+    }
+
+    func testEnvironmentsTomlRejectsInvalidEnvironmentDefinitions() throws {
+        let cases: [(String, String)] = [
+            (
+                """
+                [[environments]]
+                id = "local"
+                url = "ws://127.0.0.1:8765"
+                """,
+                "environment id `local` is reserved"
+            ),
+            (
+                """
+                [[environments]]
+                id = " devbox "
+                url = "ws://127.0.0.1:8765"
+                """,
+                "environment id ` devbox ` must not contain surrounding whitespace"
+            ),
+            (
+                """
+                [[environments]]
+                id = "dev box"
+                url = "ws://127.0.0.1:8765"
+                """,
+                "environment id `dev box` must contain only ASCII letters, numbers, '-' or '_'"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                url = "http://127.0.0.1:8765"
+                """,
+                "environment url `http://127.0.0.1:8765` must use ws:// or wss://"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                url = "ws://127.0.0.1:8765"
+                program = "codex"
+                """,
+                "environment `devbox` must set exactly one of url or program"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                program = " "
+                """,
+                "environment `devbox` program cannot be empty"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                args = []
+                """,
+                "environment `devbox` args, env, and cwd require program"
+            )
+        ]
+
+        for (toml, expected) in cases {
+            XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: toml)) { error in
+                XCTAssertEqual((error as? ConfiguredEnvironmentLoadError)?.description, "exec-server protocol error: \(expected)")
+            }
+        }
+    }
+
+    func testEnvironmentsTomlRejectsDuplicateUnknownDefaultAndMalformedURL() throws {
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        [[environments]]
+        id = "devbox"
+        url = "ws://127.0.0.1:8765"
+
+        [[environments]]
+        id = "devbox"
+        program = "codex"
+        """)) { error in
+            XCTAssertEqual(
+                (error as? ConfiguredEnvironmentLoadError)?.description,
+                "exec-server protocol error: environment id `devbox` is duplicated"
+            )
+        }
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: #"default = "missing""#)) { error in
+            XCTAssertEqual(
+                (error as? ConfiguredEnvironmentLoadError)?.description,
+                "exec-server protocol error: default environment `missing` is not configured"
+            )
+        }
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        [[environments]]
+        id = "devbox"
+        url = "ws://"
+        """)) { error in
+            XCTAssertEqual(
+                (error as? ConfiguredEnvironmentLoadError)?.description,
+                "exec-server protocol error: environment url `ws://` is invalid"
+            )
+        }
+    }
+
+    func testLoadEnvironmentsTomlWrapsUnknownFieldAsParseError() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        [[environments]]
+        id = "devbox"
+        url = "ws://127.0.0.1:4512"
+        unknown = true
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.load(codexHome: temp.url)) { error in
+            let description = (error as? ConfiguredEnvironmentLoadError)?.description ?? ""
+            XCTAssertTrue(description.contains("failed to parse environment config"))
+            XCTAssertTrue(description.contains("unknown field `unknown`"))
+        }
+    }
+}
+
+private final class ConfiguredEnvironmentTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
+}
