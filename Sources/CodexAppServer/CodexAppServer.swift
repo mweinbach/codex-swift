@@ -1180,6 +1180,39 @@ public enum CodexAppServer {
         return ([:], threadID.description, name)
     }
 
+    fileprivate static func threadMetadataUpdateResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let rawThreadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        guard let gitInfo = params?["gitInfo"] as? [String: Any] else {
+            throw AppServerError.invalidRequest("gitInfo must include at least one field")
+        }
+        let patch = try GitInfoPatch(params: gitInfo)
+        guard patch.hasAnyField else {
+            throw AppServerError.invalidRequest("gitInfo must include at least one field")
+        }
+
+        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        let updatedPath = try updateRolloutSessionGitInfo(rolloutPath: rolloutPath, patch: patch)
+        let item = ConversationItem(path: updatedPath, head: [], createdAt: nil, updatedAt: nil)
+        return [
+            "thread": try threadObject(
+                for: item,
+                defaultProvider: configuration.defaultModelProvider,
+                turns: []
+            )
+        ]
+    }
+
     fileprivate static func threadMemoryModeSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -5035,6 +5068,11 @@ final class CodexAppServerMessageProcessor {
                         threadID: result.threadID,
                         threadName: result.threadName
                     ))
+                case "thread/metadata/update":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
+                    )
                 case "thread/memoryMode/set":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -5852,4 +5890,109 @@ private extension Dictionary where Key == String, Value == Any {
             return value
         }
     }
+}
+
+private enum NullableStringPatch {
+    case absent
+    case clear
+    case set(String)
+
+    var isPresent: Bool {
+        switch self {
+        case .absent:
+            return false
+        case .clear, .set:
+            return true
+        }
+    }
+
+    func apply(to value: String?) -> String? {
+        switch self {
+        case .absent:
+            return value
+        case .clear:
+            return nil
+        case let .set(value):
+            return value
+        }
+    }
+}
+
+private struct GitInfoPatch {
+    let sha: NullableStringPatch
+    let branch: NullableStringPatch
+    let originURL: NullableStringPatch
+
+    var hasAnyField: Bool {
+        sha.isPresent || branch.isPresent || originURL.isPresent
+    }
+
+    init(params: [String: Any]) throws {
+        self.sha = try Self.patch(params: params, key: "sha", name: "gitInfo.sha")
+        self.branch = try Self.patch(params: params, key: "branch", name: "gitInfo.branch")
+        self.originURL = try Self.patch(params: params, key: "originUrl", name: "gitInfo.originUrl")
+    }
+
+    func apply(to git: GitInfo?) -> GitInfo? {
+        let updated = GitInfo(
+            commitHash: sha.apply(to: git?.commitHash),
+            branch: branch.apply(to: git?.branch),
+            repositoryURL: originURL.apply(to: git?.repositoryURL)
+        )
+        if updated.commitHash == nil,
+           updated.branch == nil,
+           updated.repositoryURL == nil {
+            return nil
+        }
+        return updated
+    }
+
+    private static func patch(params: [String: Any], key: String, name: String) throws -> NullableStringPatch {
+        guard let rawValue = params[key] else {
+            return .absent
+        }
+        if rawValue is NSNull {
+            return .clear
+        }
+        guard let value = rawValue as? String else {
+            throw AppServerError.invalidRequest("\(name) must be a string or null")
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw AppServerError.invalidRequest("\(name) must not be empty")
+        }
+        return .set(trimmed)
+    }
+}
+
+private func updateRolloutSessionGitInfo(rolloutPath: String, patch: GitInfoPatch) throws -> String {
+    let url = URL(fileURLWithPath: rolloutPath, isDirectory: false)
+    let text = try String(contentsOf: url, encoding: .utf8)
+    let encoder = JSONEncoder()
+    var updated = false
+    let outputLines = try text.split(separator: "\n", omittingEmptySubsequences: false).map { rawLine -> String in
+        let lineText = String(rawLine)
+        guard !updated,
+              let data = lineText.data(using: .utf8),
+              let line = try? JSONDecoder().decode(RolloutLine.self, from: data),
+              case let .sessionMeta(sessionMeta) = line.item
+        else {
+            return lineText
+        }
+
+        let updatedLine = RolloutLine(
+            timestamp: line.timestamp,
+            item: .sessionMeta(SessionMetaLine(
+                meta: sessionMeta.meta,
+                git: patch.apply(to: sessionMeta.git)
+            ))
+        )
+        updated = true
+        return String(data: try encoder.encode(updatedLine), encoding: .utf8) ?? lineText
+    }
+    guard updated else {
+        throw RolloutRecorderError.missingConversationID
+    }
+    try outputLines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    return rolloutPath
 }

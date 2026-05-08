@@ -815,6 +815,89 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "no rollout found for conversation id \(missingID)")
     }
 
+    func testThreadMetadataUpdatePatchesGitInfoAndThreadReadSeesIt() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            gitInfo: GitInfo(commitHash: "abc123", branch: "main", repositoryURL: "git@example.com:openai/codex.git")
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let update = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"branch":"  feature/sidebar-pr  ","originUrl":null}}}"#.utf8
+        )))
+        let updateResult = try XCTUnwrap(update["result"] as? [String: Any])
+        let updatedThread = try XCTUnwrap(updateResult["thread"] as? [String: Any])
+        let updatedGitInfo = try XCTUnwrap(updatedThread["gitInfo"] as? [String: Any])
+        XCTAssertEqual(updatedThread["id"] as? String, threadID)
+        XCTAssertEqual(updatedThread["sessionId"] as? String, threadID)
+        XCTAssertEqual(updatedThread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(updatedGitInfo["sha"] as? String, "abc123")
+        XCTAssertEqual(updatedGitInfo["branch"] as? String, "feature/sidebar-pr")
+        XCTAssertNil(updatedGitInfo["originUrl"] as? String)
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let readThread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        let readGitInfo = try XCTUnwrap(readThread["gitInfo"] as? [String: Any])
+        XCTAssertEqual(readGitInfo["sha"] as? String, "abc123")
+        XCTAssertEqual(readGitInfo["branch"] as? String, "feature/sidebar-pr")
+        XCTAssertNil(readGitInfo["originUrl"] as? String)
+    }
+
+    func testThreadMetadataUpdateCanClearAllGitInfo() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-30-00",
+            timestamp: "2025-01-06T08:30:00Z",
+            preview: "Stored thread preview",
+            provider: "mock_provider",
+            gitInfo: GitInfo(commitHash: "abc123", branch: "feature/sidebar-pr", repositoryURL: "git@example.com:openai/codex.git")
+        )
+
+        let update = try appServerResponse(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"sha":null,"branch":null,"originUrl":null}}}"#,
+            codexHome: temp.url
+        )
+        let updateResult = try XCTUnwrap(update["result"] as? [String: Any])
+        let updatedThread = try XCTUnwrap(updateResult["thread"] as? [String: Any])
+        XCTAssertEqual(updatedThread["gitInfo"] as? NSNull, NSNull())
+    }
+
+    func testThreadMetadataUpdateRejectsEmptyAndInvalidGitFields() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+
+        let empty = try appServerResponse(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{}}}"#,
+            codexHome: temp.url
+        )
+        let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
+        XCTAssertEqual(emptyError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyError["message"] as? String, "gitInfo must include at least one field")
+
+        let blank = try appServerResponse(
+            #"{"id":2,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"branch":"   "}}}"#,
+            codexHome: temp.url
+        )
+        let blankError = try XCTUnwrap(blank["error"] as? [String: Any])
+        XCTAssertEqual(blankError["code"] as? Int, -32600)
+        XCTAssertEqual(blankError["message"] as? String, "gitInfo.branch must not be empty")
+    }
+
     func testThreadMemoryModeSetAppendsSessionMetaMarker() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -3600,7 +3683,8 @@ final class CodexAppServerTests: XCTestCase {
         timestamp: String,
         preview: String,
         provider: String?,
-        source: SessionSource = .cli
+        source: SessionSource = .cli,
+        gitInfo: GitInfo? = nil
     ) throws -> String {
         let id = UUID().uuidString.lowercased()
         let path = codexHome
@@ -3621,7 +3705,7 @@ final class CodexAppServerTests: XCTestCase {
                 cliVersion: "0.0.0",
                 source: source,
                 modelProvider: provider
-            )))
+            ), git: gitInfo))
         )
         let user = RolloutLine(
             timestamp: timestamp,
