@@ -9,6 +9,43 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(String(data: try JSONEncoder().encode(AuthCredentialsStoreMode.file), encoding: .utf8), #""file""#)
     }
 
+    func testKnownChatGPTPlanWireValuesAndAliasesMatchRust() throws {
+        let cases: [(KnownChatGPTPlan, String, String)] = [
+            (.free, "free", "Free"),
+            (.go, "go", "Go"),
+            (.plus, "plus", "Plus"),
+            (.pro, "pro", "Pro"),
+            (.proLite, "prolite", "Pro Lite"),
+            (.team, "team", "Team"),
+            (.selfServeBusinessUsageBased, "self_serve_business_usage_based", "Self Serve Business Usage Based"),
+            (.business, "business", "Business"),
+            (.enterpriseCbpUsageBased, "enterprise_cbp_usage_based", "Enterprise CBP Usage Based"),
+            (.enterprise, "enterprise", "Enterprise"),
+            (.edu, "edu", "Edu")
+        ]
+
+        for (plan, rawValue, displayName) in cases {
+            XCTAssertEqual(try JSONDecoder().decode(KnownChatGPTPlan.self, from: Data("\"\(rawValue)\"".utf8)), plan)
+            XCTAssertEqual(String(data: try JSONEncoder().encode(plan), encoding: .utf8), "\"\(rawValue)\"")
+            XCTAssertEqual(plan.rustDebugDescription, displayName)
+        }
+
+        XCTAssertEqual(KnownChatGPTPlan.fromRawValue("hc"), .enterprise)
+        XCTAssertEqual(KnownChatGPTPlan.fromRawValue("education"), .edu)
+        XCTAssertNil(KnownChatGPTPlan.fromRawValue("future-plan"))
+    }
+
+    func testKnownChatGPTPlanWorkspaceHelperMatchesRust() {
+        XCTAssertTrue(KnownChatGPTPlan.team.isWorkspaceAccount)
+        XCTAssertTrue(KnownChatGPTPlan.selfServeBusinessUsageBased.isWorkspaceAccount)
+        XCTAssertTrue(KnownChatGPTPlan.business.isWorkspaceAccount)
+        XCTAssertTrue(KnownChatGPTPlan.enterpriseCbpUsageBased.isWorkspaceAccount)
+        XCTAssertTrue(KnownChatGPTPlan.enterprise.isWorkspaceAccount)
+        XCTAssertTrue(KnownChatGPTPlan.edu.isWorkspaceAccount)
+        XCTAssertFalse(KnownChatGPTPlan.pro.isWorkspaceAccount)
+        XCTAssertFalse(KnownChatGPTPlan.go.isWorkspaceAccount)
+    }
+
     func testLoadsFileBackedAuthJSONTokenData() throws {
         let dir = try AuthTemporaryDirectory()
         let jwt = Self.fakeJWT(plan: "pro", accountID: "jwt-account-id")
@@ -444,6 +481,22 @@ final class AuthTests: XCTestCase {
         let jwt = Self.fakeJWT(plan: "mystery-tier", accountID: nil)
 
         XCTAssertEqual(try IdTokenParser.parse(jwt).getChatGPTPlanType(), "mystery-tier")
+    }
+
+    func testParsesIDTokenPlanAliasesAndUsageBasedPlans() throws {
+        XCTAssertEqual(try IdTokenParser.parse(Self.fakeJWT(plan: "hc", accountID: nil)).getChatGPTPlanType(), "Enterprise")
+        XCTAssertEqual(try IdTokenParser.parse(Self.fakeJWT(plan: "education", accountID: nil)).getChatGPTPlanType(), "Edu")
+        XCTAssertEqual(try IdTokenParser.parse(Self.fakeJWT(plan: "prolite", accountID: nil)).getChatGPTPlanType(), "Pro Lite")
+        XCTAssertEqual(
+            try IdTokenParser.parse(Self.fakeJWT(plan: "self_serve_business_usage_based", accountID: nil))
+                .getChatGPTPlanType(),
+            "Self Serve Business Usage Based"
+        )
+        XCTAssertEqual(
+            try IdTokenParser.parse(Self.fakeJWT(plan: "enterprise_cbp_usage_based", accountID: nil))
+                .getChatGPTPlanType(),
+            "Enterprise CBP Usage Based"
+        )
     }
 
     func testIDTokenRejectsInvalidShape() {

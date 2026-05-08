@@ -205,7 +205,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
   - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading, exec approval requirement derivation, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
-  - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
+  - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
   - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, and default shell fallback ordering
 - `codex-rs/core/src/environment_context.rs`

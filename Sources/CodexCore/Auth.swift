@@ -14,25 +14,116 @@ public enum OAuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
     case keyring
 }
 
-public enum KnownChatGPTPlan: String, Codable, Equatable, Sendable {
+public enum KnownChatGPTPlan: Equatable, Codable, Sendable {
     case free
+    case go
     case plus
     case pro
+    case proLite
     case team
+    case selfServeBusinessUsageBased
     case business
+    case enterpriseCbpUsageBased
     case enterprise
     case edu
+
+    public var rawValue: String {
+        switch self {
+        case .free:
+            return "free"
+        case .go:
+            return "go"
+        case .plus:
+            return "plus"
+        case .pro:
+            return "pro"
+        case .proLite:
+            return "prolite"
+        case .team:
+            return "team"
+        case .selfServeBusinessUsageBased:
+            return "self_serve_business_usage_based"
+        case .business:
+            return "business"
+        case .enterpriseCbpUsageBased:
+            return "enterprise_cbp_usage_based"
+        case .enterprise:
+            return "enterprise"
+        case .edu:
+            return "edu"
+        }
+    }
 
     public var rustDebugDescription: String {
         switch self {
         case .free: "Free"
+        case .go: "Go"
         case .plus: "Plus"
         case .pro: "Pro"
+        case .proLite: "Pro Lite"
         case .team: "Team"
+        case .selfServeBusinessUsageBased: "Self Serve Business Usage Based"
         case .business: "Business"
+        case .enterpriseCbpUsageBased: "Enterprise CBP Usage Based"
         case .enterprise: "Enterprise"
         case .edu: "Edu"
         }
+    }
+
+    public var isWorkspaceAccount: Bool {
+        switch self {
+        case .team, .selfServeBusinessUsageBased, .business, .enterpriseCbpUsageBased, .enterprise, .edu:
+            return true
+        case .free, .go, .plus, .pro, .proLite:
+            return false
+        }
+    }
+
+    public static func fromRawValue(_ rawValue: String) -> KnownChatGPTPlan? {
+        switch rawValue.lowercased() {
+        case "free":
+            return .free
+        case "go":
+            return .go
+        case "plus":
+            return .plus
+        case "pro":
+            return .pro
+        case "prolite":
+            return .proLite
+        case "team":
+            return .team
+        case "self_serve_business_usage_based":
+            return .selfServeBusinessUsageBased
+        case "business":
+            return .business
+        case "enterprise_cbp_usage_based":
+            return .enterpriseCbpUsageBased
+        case "enterprise", "hc":
+            return .enterprise
+        case "education", "edu":
+            return .edu
+        default:
+            return nil
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if let plan = Self.fromRawValue(value) {
+            self = plan
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "unknown ChatGPT plan type: \(value)"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -221,7 +312,7 @@ extension ChatGPTPlanType: Decodable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let value = try container.decode(String.self)
-        if let known = KnownChatGPTPlan(rawValue: value) {
+        if let known = KnownChatGPTPlan.fromRawValue(value) {
             self = .known(known)
         } else {
             self = .unknown(value)
