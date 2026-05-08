@@ -21,8 +21,185 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(stdout, ["done"])
         XCTAssertEqual(receivedRequest, CodexCLI.ExecCommandRequest(
             arguments: ["--json", "ship it"],
+            action: .run(prompt: "ship it"),
+            options: CodexCLI.ExecCommandOptions(json: true),
             configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5\""])
         ))
+    }
+
+    func testRunAsyncExecParsesPreflightOptions() async {
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "exec",
+                "--skip-git-repo-check",
+                "--output-schema",
+                "/tmp/schema.json",
+                "--output-last-message=/tmp/last.txt",
+                "--image",
+                "one.png,two.png",
+                "ship it"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .run(prompt: "ship it"))
+        XCTAssertEqual(receivedRequest?.options, CodexCLI.ExecCommandOptions(
+            imagePaths: ["one.png", "two.png"],
+            outputSchemaPath: "/tmp/schema.json",
+            lastMessageFile: "/tmp/last.txt",
+            skipGitRepoCheck: true
+        ))
+    }
+
+    func testRunAsyncExecParsesReviewSubcommand() async {
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "review", "--base", "main"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .review(.baseBranch(branch: "main")))
+    }
+
+    func testRunAsyncExecResumePreservesRustLastPromptSemantics() async {
+        var receivedRequests: [CodexCLI.ExecCommandRequest] = []
+
+        for arguments in [
+            ["exec", "resume", "--last", "fix it"],
+            ["exec", "resume", "123e4567-e89b-12d3-a456-426614174000", "follow up"]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                execRunner: { request in
+                    receivedRequests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0)
+        }
+
+        XCTAssertEqual(receivedRequests.map(\.action), [
+            .resume(CodexCLI.ExecResumeCommand(sessionID: "fix it", last: true, prompt: nil)),
+            .resume(CodexCLI.ExecResumeCommand(
+                sessionID: "123e4567-e89b-12d3-a456-426614174000",
+                last: false,
+                prompt: "follow up"
+            ))
+        ])
+    }
+
+    func testRunAsyncExecResumeUsesRootPromptBeforeSubcommand() async {
+        var receivedRequests: [CodexCLI.ExecCommandRequest] = []
+
+        for arguments in [
+            ["exec", "follow up", "resume", "--last"],
+            ["exec", "follow up", "resume", "123e4567-e89b-12d3-a456-426614174000"],
+            ["exec", "root prompt", "resume", "--last", "subcommand prompt"]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                execRunner: { request in
+                    receivedRequests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0)
+        }
+
+        XCTAssertEqual(receivedRequests.map(\.action), [
+            .resume(CodexCLI.ExecResumeCommand(sessionID: nil, last: true, prompt: "follow up")),
+            .resume(CodexCLI.ExecResumeCommand(
+                sessionID: "123e4567-e89b-12d3-a456-426614174000",
+                last: false,
+                prompt: "follow up"
+            )),
+            .resume(CodexCLI.ExecResumeCommand(sessionID: "subcommand prompt", last: true, prompt: nil))
+        ])
+    }
+
+    func testExecCommandRequestResolvesPromptAndOutputSchema() throws {
+        let request = CodexCLI.ExecCommandRequest(
+            arguments: [],
+            action: .run(prompt: nil),
+            options: CodexCLI.ExecCommandOptions(outputSchemaPath: "/tmp/schema.json")
+        )
+
+        let operation = try request.resolvedInitialOperation(
+            stdinIsTerminal: false,
+            readStdin: { "from pipe" },
+            readFile: { path in
+                XCTAssertEqual(path, "/tmp/schema.json")
+                return Data(#"{"type":"object"}"#.utf8)
+            }
+        )
+
+        XCTAssertEqual(operation, .userTurn(
+            prompt: NonInteractivePromptResolution(
+                prompt: "from pipe",
+                stderrMessage: "Reading prompt from stdin..."
+            ),
+            outputSchema: .object(["type": .string("object")])
+        ))
+    }
+
+    func testExecCommandRequestResolvesResumePromptAndSchema() throws {
+        let request = CodexCLI.ExecCommandRequest(
+            arguments: [],
+            action: .resume(CodexCLI.ExecResumeCommand(sessionID: "fix it", last: true, prompt: nil)),
+            options: CodexCLI.ExecCommandOptions(outputSchemaPath: "/tmp/schema.json")
+        )
+
+        let operation = try request.resolvedInitialOperation(
+            stdinIsTerminal: true,
+            readStdin: { throw TestError("stdin should not be read") },
+            readFile: { _ in Data(#"{"type":"string"}"#.utf8) }
+        )
+
+        XCTAssertEqual(operation, .resume(
+            sessionID: nil,
+            last: true,
+            prompt: NonInteractivePromptResolution(prompt: "fix it"),
+            outputSchema: .object(["type": .string("string")])
+        ))
+    }
+
+    func testRunAsyncExecRejectsInvalidPreflightArgumentsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (["exec", "--output-schema"], "codex-swift: missing value for --output-schema"),
+            (["exec", "ship", "extra"], "codex-swift: unexpected argument for command 'exec': extra"),
+            (["exec", "resume", "--all"], "codex-swift: unsupported option for command 'exec resume': --all")
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                execRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
     }
 
     func testRunAsyncComputerUseParsesGuiFlagAndDelegatesExecArguments() async {
@@ -297,6 +474,14 @@ final class CommandSurfaceCLITests: XCTestCase {
                 ["codex-swift: command '\(command)' is registered but its runtime port is not complete yet."],
                 command
             )
+        }
+    }
+
+    private struct TestError: Error, Equatable, CustomStringConvertible, Sendable {
+        let description: String
+
+        init(_ description: String) {
+            self.description = description
         }
     }
 }

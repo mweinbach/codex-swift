@@ -129,11 +129,86 @@ final class NonInteractiveInputTests: XCTestCase {
         }
     }
 
+    func testWriteLastMessageWritesContentAndWarnsForMissingMessage() {
+        let capture = LastMessageWriteCapture()
+
+        let result = NonInteractiveInput.writeLastMessage(
+            nil,
+            path: "/tmp/last-message.txt",
+            writeFile: { path, contents in
+                capture.writes.append((path, contents))
+            }
+        )
+
+        XCTAssertEqual(capture.writes.count, 1)
+        XCTAssertEqual(capture.writes.first?.path, "/tmp/last-message.txt")
+        XCTAssertEqual(capture.writes.first?.contents, "")
+        XCTAssertEqual(result.stderrMessages, [
+            "Warning: no last agent message; wrote empty content to /tmp/last-message.txt"
+        ])
+    }
+
+    func testWriteLastMessageReportsWriteErrors() {
+        let result = NonInteractiveInput.writeLastMessage(
+            "final answer",
+            path: "/tmp/last-message.txt",
+            writeFile: { _, _ in throw TestError("permission denied") }
+        )
+
+        XCTAssertEqual(result.stderrMessages, [
+            #"Failed to write last message file "/tmp/last-message.txt": permission denied"#
+        ])
+    }
+
+    func testEnforceGitRepositoryHonorsSkipAndRejectsMissingRepository() throws {
+        let cwd = URL(fileURLWithPath: "/tmp/work")
+        let capture = GitResolverCapture()
+
+        try NonInteractiveInput.enforceGitRepository(
+            cwd: cwd,
+            skipGitRepoCheck: true,
+            gitRepoRoot: { _ in
+                capture.calls += 1
+                return nil
+            }
+        )
+        XCTAssertEqual(capture.calls, 0)
+
+        try NonInteractiveInput.enforceGitRepository(
+            cwd: cwd,
+            skipGitRepoCheck: false,
+            gitRepoRoot: { receivedURL in
+                XCTAssertEqual(receivedURL, cwd)
+                return cwd
+            }
+        )
+
+        XCTAssertThrowsError(try NonInteractiveInput.enforceGitRepository(
+            cwd: cwd,
+            skipGitRepoCheck: false,
+            gitRepoRoot: { _ in nil }
+        )) { error in
+            XCTAssertEqual(error as? NonInteractiveInputError, .notInsideTrustedDirectory)
+            XCTAssertEqual(
+                String(describing: error),
+                "Not inside a trusted directory and --skip-git-repo-check was not specified."
+            )
+        }
+    }
+
     private struct TestError: Error, Equatable, CustomStringConvertible, Sendable {
         let description: String
 
         init(_ description: String) {
             self.description = description
         }
+    }
+
+    private final class LastMessageWriteCapture: @unchecked Sendable {
+        var writes: [(path: String, contents: String)] = []
+    }
+
+    private final class GitResolverCapture: @unchecked Sendable {
+        var calls = 0
     }
 }

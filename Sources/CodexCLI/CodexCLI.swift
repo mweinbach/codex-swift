@@ -1075,12 +1075,262 @@ public struct CodexCLI: Sendable {
         _ arguments: [String],
         rootArguments: [String]
     ) -> ParseResult<ExecCommandRequest> {
+        var json = false
+        var imagePaths: [String] = []
+        var outputSchemaPath: String?
+        var lastMessageFile: String?
+        var skipGitRepoCheck = false
+        var actionTokens: [String] = []
+        var index = 0
+
+        func value(after option: String, at index: Int) -> ParseResult<String> {
+            guard index + 1 < arguments.count else {
+                return .failure("codex-swift: missing value for \(option)", 64)
+            }
+            return .success(arguments[index + 1])
+        }
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                actionTokens = Array(arguments.dropFirst(index + 1))
+                break
+            }
+
+            switch argument {
+            case "--json", "--experimental-json":
+                json = true
+                index += 1
+                continue
+            case "--skip-git-repo-check":
+                skipGitRepoCheck = true
+                index += 1
+                continue
+            case "--output-schema":
+                switch value(after: argument, at: index) {
+                case let .success(path):
+                    outputSchemaPath = path
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            case "--output-last-message", "-o":
+                switch value(after: argument, at: index) {
+                case let .success(path):
+                    lastMessageFile = path
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            case "--image", "-i":
+                switch value(after: argument, at: index) {
+                case let .success(paths):
+                    imagePaths.append(contentsOf: splitCommaDelimited(paths))
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            default:
+                break
+            }
+
+            if argument.hasPrefix("--output-schema=") {
+                outputSchemaPath = String(argument.dropFirst("--output-schema=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("--output-last-message=") {
+                lastMessageFile = String(argument.dropFirst("--output-last-message=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                lastMessageFile = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("--image=") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst("--image=".count))))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
+                index += 1
+                continue
+            }
+
+            if execOptionConsumesValue(argument) {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                index += 2
+                continue
+            }
+            if execFlagWithoutValue(argument) || argument.contains("=") && execAssignmentOption(argument) {
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'exec': \(argument)", 64)
+            }
+
+            actionTokens = Array(arguments.dropFirst(index))
+            break
+        }
+
+        let action: ExecCommandAction
+        if actionTokens.first == "review" {
+            switch parseReviewCommand(Array(actionTokens.dropFirst()), rootArguments: rootArguments) {
+            case let .success(request):
+                action = .review(request.target)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        } else if actionTokens.first == "resume" {
+            switch parseExecResumeCommand(Array(actionTokens.dropFirst()), rootPrompt: nil) {
+            case let .success(resume):
+                action = .resume(resume)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        } else if actionTokens.count >= 2, actionTokens[1] == "resume" {
+            switch parseExecResumeCommand(Array(actionTokens.dropFirst(2)), rootPrompt: actionTokens[0]) {
+            case let .success(resume):
+                action = .resume(resume)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        } else {
+            switch parseExecRunPrompt(actionTokens) {
+            case let .success(prompt):
+                action = .run(prompt: prompt)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        }
+
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
-            return .success(ExecCommandRequest(arguments: arguments, configOverrides: configOverrides))
+            return .success(ExecCommandRequest(
+                arguments: arguments,
+                action: action,
+                options: ExecCommandOptions(
+                    json: json,
+                    imagePaths: imagePaths,
+                    outputSchemaPath: outputSchemaPath,
+                    lastMessageFile: lastMessageFile,
+                    skipGitRepoCheck: skipGitRepoCheck
+                ),
+                configOverrides: configOverrides
+            ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
         }
+    }
+
+    private func parseExecRunPrompt(_ tokens: [String]) -> ParseResult<String?> {
+        if tokens.isEmpty {
+            return .success(nil)
+        }
+        guard tokens.count == 1 else {
+            return .failure("codex-swift: unexpected argument for command 'exec': \(tokens[1])", 64)
+        }
+        return .success(tokens[0])
+    }
+
+    private func parseExecResumeCommand(
+        _ arguments: [String],
+        rootPrompt: String?
+    ) -> ParseResult<ExecResumeCommand> {
+        var last = false
+        var positionals: [String] = []
+
+        for argument in arguments {
+            if argument == "--last" {
+                last = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'exec resume': \(argument)", 64)
+            }
+            positionals.append(argument)
+        }
+
+        guard positionals.count <= 2 else {
+            return .failure("codex-swift: unexpected argument for command 'exec resume': \(positionals[2])", 64)
+        }
+
+        let prompt: String?
+        if positionals.count > 1 {
+            prompt = positionals[1]
+        } else if positionals.isEmpty || !last {
+            prompt = rootPrompt
+        } else {
+            prompt = nil
+        }
+
+        return .success(ExecResumeCommand(
+            sessionID: positionals.first,
+            last: last,
+            prompt: prompt
+        ))
+    }
+
+    private func splitCommaDelimited(_ value: String) -> [String] {
+        value
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    private func execOptionConsumesValue(_ argument: String) -> Bool {
+        if argument.contains("=") {
+            return false
+        }
+        return [
+            "-m",
+            "--model",
+            "--local-provider",
+            "-p",
+            "--profile",
+            "-s",
+            "--sandbox",
+            "-a",
+            "--ask-for-approval",
+            "-C",
+            "--cd",
+            "--add-dir",
+            "-c",
+            "--config",
+            "--color"
+        ].contains(argument)
+    }
+
+    private func execFlagWithoutValue(_ argument: String) -> Bool {
+        [
+            "--oss",
+            "--full-auto",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--yolo"
+        ].contains(argument)
+    }
+
+    private func execAssignmentOption(_ argument: String) -> Bool {
+        [
+            "--model=",
+            "--local-provider=",
+            "--profile=",
+            "--sandbox=",
+            "--ask-for-approval=",
+            "--cd=",
+            "--add-dir=",
+            "-c=",
+            "--config=",
+            "--color="
+        ].contains { argument.hasPrefix($0) }
     }
 
     private func parseComputerUseCommand(

@@ -10,12 +10,21 @@ public struct NonInteractivePromptResolution: Equatable, Sendable {
     }
 }
 
+public struct NonInteractiveLastMessageWriteResult: Equatable, Sendable {
+    public let stderrMessages: [String]
+
+    public init(stderrMessages: [String] = []) {
+        self.stderrMessages = stderrMessages
+    }
+}
+
 public enum NonInteractiveInputError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingPrompt
     case emptyStdinPrompt
     case stdinReadFailed(String)
     case outputSchemaReadFailed(path: String, message: String)
     case outputSchemaInvalidJSON(path: String, message: String)
+    case notInsideTrustedDirectory
 
     public var description: String {
         switch self {
@@ -29,6 +38,8 @@ public enum NonInteractiveInputError: Error, Equatable, CustomStringConvertible,
             return "Failed to read output schema file \(path): \(message)"
         case let .outputSchemaInvalidJSON(path, message):
             return "Output schema file \(path) is not valid JSON: \(message)"
+        case .notInsideTrustedDirectory:
+            return "Not inside a trusted directory and --skip-git-repo-check was not specified."
         }
     }
 }
@@ -36,6 +47,8 @@ public enum NonInteractiveInputError: Error, Equatable, CustomStringConvertible,
 public enum NonInteractiveInput {
     public typealias StdinReader = @Sendable () throws -> String
     public typealias FileReader = @Sendable (_ path: String) throws -> Data
+    public typealias FileWriter = @Sendable (_ path: String, _ contents: String) throws -> Void
+    public typealias GitRepoRootResolver = @Sendable (_ cwd: URL) -> URL?
 
     public static func resolvePrompt(
         _ promptArgument: String?,
@@ -93,6 +106,43 @@ public enum NonInteractiveInput {
                 path: path,
                 message: errorDescription(error)
             )
+        }
+    }
+
+    public static func writeLastMessage(
+        _ lastAgentMessage: String?,
+        path: String?,
+        writeFile: FileWriter
+    ) -> NonInteractiveLastMessageWriteResult {
+        guard let path else {
+            return NonInteractiveLastMessageWriteResult()
+        }
+
+        var stderrMessages: [String] = []
+        let contents = lastAgentMessage ?? ""
+        do {
+            try writeFile(path, contents)
+        } catch {
+            stderrMessages.append("Failed to write last message file \"\(path)\": \(errorDescription(error))")
+        }
+
+        if lastAgentMessage == nil {
+            stderrMessages.append("Warning: no last agent message; wrote empty content to \(path)")
+        }
+
+        return NonInteractiveLastMessageWriteResult(stderrMessages: stderrMessages)
+    }
+
+    public static func enforceGitRepository(
+        cwd: URL,
+        skipGitRepoCheck: Bool,
+        gitRepoRoot: GitRepoRootResolver = { cwd in GitInfoCollector.gitRepoRoot(baseDir: cwd) }
+    ) throws {
+        guard !skipGitRepoCheck else {
+            return
+        }
+        guard gitRepoRoot(cwd) != nil else {
+            throw NonInteractiveInputError.notInsideTrustedDirectory
         }
     }
 
