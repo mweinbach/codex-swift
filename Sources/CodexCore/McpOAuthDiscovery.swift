@@ -3,10 +3,21 @@ import Foundation
 public struct McpOAuthDiscoveryHTTPResponse: Equatable, Sendable {
     public let statusCode: Int
     public let body: Data
+    public let headers: [String: [String]]
 
-    public init(statusCode: Int, body: Data) {
+    public init(statusCode: Int, body: Data, headers: [String: [String]] = [:]) {
         self.statusCode = statusCode
         self.body = body
+        self.headers = headers
+    }
+
+    public func headerValues(named name: String) -> [String] {
+        headers.reduce(into: []) { values, entry in
+            guard entry.key.compare(name, options: [.caseInsensitive]) == .orderedSame else {
+                return
+            }
+            values.append(contentsOf: entry.value)
+        }
     }
 }
 
@@ -72,8 +83,12 @@ public enum McpOAuthDiscovery {
     }
 
     public static func discoveryPaths(basePath: String) -> [String] {
+        wellKnownPaths(basePath: basePath, resource: "oauth-authorization-server")
+    }
+
+    public static func wellKnownPaths(basePath: String, resource: String) -> [String] {
         let trimmed = basePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let canonical = "/.well-known/oauth-authorization-server"
+        let canonical = "/.well-known/\(resource)"
         guard !trimmed.isEmpty else {
             return [canonical]
         }
@@ -86,12 +101,12 @@ public enum McpOAuthDiscovery {
         }
 
         pushUnique("\(canonical)/\(trimmed)")
-        pushUnique("/\(trimmed)/.well-known/oauth-authorization-server")
+        pushUnique("/\(trimmed)/.well-known/\(resource)")
         pushUnique(canonical)
         return candidates
     }
 
-    private static func discoveryURL(baseURL: URL, path: String) -> URL? {
+    static func discoveryURL(baseURL: URL, path: String) -> URL? {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             return nil
         }
@@ -99,7 +114,7 @@ public enum McpOAuthDiscovery {
         return components.url
     }
 
-    private static func defaultHeaders(
+    static func defaultHeaders(
         httpHeaders: [String: String]?,
         envHttpHeaders: [String: String]?,
         environment: [String: String]
@@ -142,12 +157,23 @@ public enum McpOAuthDiscovery {
         }
     }
 
-    private static func urlSessionTransport(_ request: URLRequest) async throws -> McpOAuthDiscoveryHTTPResponse {
+    static func urlSessionTransport(_ request: URLRequest) async throws -> McpOAuthDiscoveryHTTPResponse {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw McpOAuthDiscoveryError.nonHTTPResponse
         }
-        return McpOAuthDiscoveryHTTPResponse(statusCode: httpResponse.statusCode, body: data)
+        var headers: [String: [String]] = [:]
+        for (name, value) in httpResponse.allHeaderFields {
+            guard let name = name as? String else {
+                continue
+            }
+            if let values = value as? [String] {
+                headers[name] = values
+            } else {
+                headers[name] = [String(describing: value)]
+            }
+        }
+        return McpOAuthDiscoveryHTTPResponse(statusCode: httpResponse.statusCode, body: data, headers: headers)
     }
 }
 
