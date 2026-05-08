@@ -2049,6 +2049,45 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func commandExecWriteResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try commandExecProcessID(params: params)
+        let deltaBase64 = stringParam(params?["deltaBase64"])
+        let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
+        guard deltaBase64 != nil || closeStdin else {
+            throw AppServerError.invalidParams("command/exec/write requires deltaBase64 or closeStdin")
+        }
+        if let deltaBase64, Data(base64Encoded: deltaBase64) == nil {
+            throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        }
+        throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+    }
+
+    fileprivate static func commandExecTerminateResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try commandExecProcessID(params: params)
+        throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+    }
+
+    fileprivate static func commandExecResizeResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try commandExecProcessID(params: params)
+        guard let size = params?["size"] as? [String: Any],
+              let rows = size["rows"] as? Int,
+              let cols = size["cols"] as? Int
+        else {
+            throw AppServerError.invalidParams("command/exec/resize requires size rows and cols")
+        }
+        guard rows > 0, cols > 0 else {
+            throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
+        }
+        throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+    }
+
+    private static func commandExecProcessID(params: [String: Any]?) throws -> String {
+        guard let processID = stringParam(params?["processId"]), !processID.isEmpty else {
+            throw AppServerError.invalidRequest("missing processId")
+        }
+        return processID
+    }
+
     fileprivate static func loginApiKeyResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -4484,13 +4523,14 @@ private enum SkillParseError: Error, CustomStringConvertible {
 
 private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
+    case invalidParams(String)
     case invalidRequestWithData(String, data: [String: String])
     case methodNotFound(String)
     case internalError(String)
 
     var description: String {
         switch self {
-        case let .invalidRequest(message), let .invalidRequestWithData(message, _):
+        case let .invalidRequest(message), let .invalidParams(message), let .invalidRequestWithData(message, _):
             return message
         case let .methodNotFound(message):
             return message
@@ -4503,7 +4543,7 @@ private enum AppServerError: Error, CustomStringConvertible {
         switch self {
         case let .invalidRequestWithData(_, data):
             return data
-        case .invalidRequest, .methodNotFound, .internalError:
+        case .invalidRequest, .invalidParams, .methodNotFound, .internalError:
             return nil
         }
     }
@@ -5329,6 +5369,21 @@ final class CodexAppServerMessageProcessor {
                             configuration: configuration
                         )
                     )
+                case "command/exec/write":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.commandExecWriteResult(params: params)
+                    )
+                case "command/exec/resize":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.commandExecResizeResult(params: params)
+                    )
+                case "command/exec/terminate":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.commandExecTerminateResult(params: params)
+                    )
                 case "loginApiKey":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -5398,6 +5453,8 @@ final class CodexAppServerMessageProcessor {
                         message: error.description,
                         data: error.data
                     )
+                case .invalidParams:
+                    response = CodexAppServer.errorObject(id: id, code: -32602, message: error.description)
                 case .methodNotFound:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: error.description)
                 case .internalError:

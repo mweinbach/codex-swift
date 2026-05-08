@@ -3524,6 +3524,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "command must not be empty")
     }
 
+    func testCommandExecFollowUpsReportNoActiveProcess() throws {
+        let temp = try TemporaryDirectory()
+
+        let write = try appServerResponse(
+            #"{"id":1,"method":"command/exec/write","params":{"processId":"proc-1","deltaBase64":"aGk="}}"#,
+            codexHome: temp.url
+        )
+        let writeError = try XCTUnwrap(write["error"] as? [String: Any])
+        XCTAssertEqual(writeError["code"] as? Int, -32600)
+        XCTAssertEqual(writeError["message"] as? String, #"no active command/exec for process id "proc-1""#)
+
+        let resize = try appServerResponse(
+            #"{"id":2,"method":"command/exec/resize","params":{"processId":"proc-1","size":{"rows":24,"cols":80}}}"#,
+            codexHome: temp.url
+        )
+        let resizeError = try XCTUnwrap(resize["error"] as? [String: Any])
+        XCTAssertEqual(resizeError["code"] as? Int, -32600)
+        XCTAssertEqual(resizeError["message"] as? String, #"no active command/exec for process id "proc-1""#)
+
+        let terminate = try appServerResponse(
+            #"{"id":3,"method":"command/exec/terminate","params":{"processId":"proc-1"}}"#,
+            codexHome: temp.url
+        )
+        let terminateError = try XCTUnwrap(terminate["error"] as? [String: Any])
+        XCTAssertEqual(terminateError["code"] as? Int, -32600)
+        XCTAssertEqual(terminateError["message"] as? String, #"no active command/exec for process id "proc-1""#)
+    }
+
+    func testCommandExecFollowUpsValidateWriteAndResizeParams() throws {
+        let temp = try TemporaryDirectory()
+
+        let emptyWrite = try appServerResponse(
+            #"{"id":1,"method":"command/exec/write","params":{"processId":"proc-1"}}"#,
+            codexHome: temp.url
+        )
+        let emptyWriteError = try XCTUnwrap(emptyWrite["error"] as? [String: Any])
+        XCTAssertEqual(emptyWriteError["code"] as? Int, -32602)
+        XCTAssertEqual(emptyWriteError["message"] as? String, "command/exec/write requires deltaBase64 or closeStdin")
+
+        let badBase64 = try appServerResponse(
+            #"{"id":2,"method":"command/exec/write","params":{"processId":"proc-1","deltaBase64":"%%%bad%%%"}}"#,
+            codexHome: temp.url
+        )
+        let badBase64Error = try XCTUnwrap(badBase64["error"] as? [String: Any])
+        XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
+        XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: invalid base64 data")
+
+        let zeroSize = try appServerResponse(
+            #"{"id":3,"method":"command/exec/resize","params":{"processId":"proc-1","size":{"rows":0,"cols":80}}}"#,
+            codexHome: temp.url
+        )
+        let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
+        XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)
+        XCTAssertEqual(zeroSizeError["message"] as? String, "command/exec size rows and cols must be greater than 0")
+    }
+
     func testSetDefaultModelPersistsTopLevelModelAndClearsReasoningEffort() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
