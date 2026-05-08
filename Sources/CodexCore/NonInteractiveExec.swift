@@ -1,3 +1,4 @@
+import CodexApplyPatch
 import Darwin
 import Foundation
 
@@ -220,6 +221,17 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 truncationPolicy: truncationPolicy,
+                environment: environment
+            )
+
+        case let .customToolCall(_, _, callID, name, input):
+            return executeCustomToolCall(
+                name: name,
+                input: input,
+                callID: callID,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
                 environment: environment
             )
 
@@ -467,6 +479,16 @@ public enum NonInteractiveExec {
                     )
                 }
 
+            case "apply_patch":
+                return executeApplyPatchFunctionCall(
+                    arguments: arguments,
+                    callID: callID,
+                    cwd: cwd,
+                    approvalPolicy: approvalPolicy,
+                    sandboxPolicy: sandboxPolicy,
+                    environment: environment
+                )
+
             default:
                 return functionOutput(
                     callID: callID,
@@ -587,12 +609,11 @@ public enum NonInteractiveExec {
     private static func toolCalls(from items: [ResponseItem]) -> [ResponseItem] {
         items.filter { item in
             switch item {
-            case .functionCall, .localShellCall:
+            case .functionCall, .customToolCall, .localShellCall:
                 return true
             case .message,
                  .reasoning,
                  .functionCallOutput,
-                 .customToolCall,
                  .customToolCallOutput,
                  .webSearchCall,
                  .compaction,
@@ -617,6 +638,96 @@ public enum NonInteractiveExec {
             callID: callID,
             output: FunctionCallOutputPayload(content: content, success: success)
         )
+    }
+
+    private struct ApplyPatchJSONArguments: Decodable {
+        let input: String
+    }
+
+    private static func executeCustomToolCall(
+        name: String,
+        input: String,
+        callID: String,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        environment: [String: String]
+    ) -> ResponseItem {
+        guard name == "apply_patch" else {
+            return .customToolCallOutput(callID: callID, output: "unsupported custom tool: \(name)")
+        }
+
+        let result = executeApplyPatch(
+            patch: input,
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            environment: environment
+        )
+        return .customToolCallOutput(callID: callID, output: result.content)
+    }
+
+    private static func executeApplyPatchFunctionCall(
+        arguments: String,
+        callID: String,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        environment: [String: String]
+    ) -> ResponseItem {
+        let patch: String
+        if let data = arguments.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(ApplyPatchJSONArguments.self, from: data)
+        {
+            patch = decoded.input
+        } else {
+            patch = arguments
+        }
+
+        let result = executeApplyPatch(
+            patch: patch,
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            environment: environment
+        )
+        return functionOutput(callID: callID, content: result.content, success: result.success)
+    }
+
+    private static func executeApplyPatch(
+        patch: String,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        environment: [String: String]
+    ) -> (content: String, success: Bool) {
+        let parsed: ApplyPatchArgs
+        do {
+            parsed = try ApplyPatch.parsePatch(patch)
+        } catch {
+            let result = ApplyPatch.apply(patch, cwd: cwd)
+            return (result.stderr.isEmpty ? result.stdout : result.stderr, result.stderr.isEmpty)
+        }
+
+        guard let absoluteCwd = try? AbsolutePath(absolutePath: cwd.standardizedFileURL.path) else {
+            return ("invalid sandbox cwd: \(cwd.path)", false)
+        }
+
+        switch PatchSafety.assessPatchSafety(
+            hunks: parsed.hunks,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            cwd: absoluteCwd,
+            environment: environment
+        ) {
+        case .autoApprove:
+            let result = ApplyPatch.apply(patch, cwd: cwd)
+            return (result.stderr.isEmpty ? result.stdout : result.stderr, result.stderr.isEmpty)
+        case let .reject(reason):
+            return ("apply_patch rejected: \(reason)", false)
+        case .askUser:
+            return ("apply_patch requires approval", false)
+        }
     }
 
     private static func resolveWorkdir(_ workdir: String?, relativeTo cwd: URL) -> URL {

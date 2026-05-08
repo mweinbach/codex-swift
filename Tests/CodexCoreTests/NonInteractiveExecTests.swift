@@ -177,6 +177,35 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testResponsesLoopExecutesCustomToolCallAndContinues() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "patch")])
+        ])
+        let script = CustomToolLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .customToolCall(_, _, callID, name, _) = item else {
+                    return .customToolCallOutput(callID: "bad", output: "bad")
+                }
+                return .customToolCallOutput(callID: callID, output: "\(name) ok")
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].input.contains(.customToolCallOutput(callID: "custom-1", output: "apply_patch ok")))
+        XCTAssertEqual(result.transcriptItems, [
+            .customToolCall(callID: "custom-1", name: "apply_patch", input: "*** Begin Patch\n*** End Patch"),
+            .customToolCallOutput(callID: "custom-1", output: "apply_patch ok"),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
     func testShellCommandFunctionCallRunsUserShellCommand() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let item = ResponseItem.functionCall(
@@ -227,6 +256,107 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(callID, "call-escalated")
         XCTAssertEqual(payload.success, false)
         XCTAssertTrue(payload.content.contains("reject command"))
+    }
+
+    func testApplyPatchFunctionCallAppliesJsonInput() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let patch = """
+        *** Begin Patch
+        *** Add File: created.txt
+        +hello
+        *** End Patch
+        """
+        let encodedPatch = try Self.jsonString(patch)
+        let item = ResponseItem.functionCall(
+            name: "apply_patch",
+            arguments: #"{"input":\#(encodedPatch)}"#,
+            callID: "call-patch"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-patch")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Success. Updated the following files:"))
+        XCTAssertTrue(payload.content.contains("A created.txt"))
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("created.txt"), encoding: .utf8),
+            "hello\n"
+        )
+    }
+
+    func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let patch = """
+        *** Begin Patch
+        *** Add File: custom.txt
+        +custom
+        *** End Patch
+        """
+        let item = ResponseItem.customToolCall(callID: "custom-patch", name: "apply_patch", input: patch)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        XCTAssertEqual(
+            output,
+            .customToolCallOutput(
+                callID: "custom-patch",
+                output: "Success. Updated the following files:\nA custom.txt\n"
+            )
+        )
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("custom.txt"), encoding: .utf8),
+            "custom\n"
+        )
+    }
+
+    func testApplyPatchCustomToolCallRejectsReadOnlySandboxWithNeverApproval() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let patch = """
+        *** Begin Patch
+        *** Add File: blocked.txt
+        +blocked
+        *** End Patch
+        """
+        let item = ResponseItem.customToolCall(callID: "custom-patch", name: "apply_patch", input: patch)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        XCTAssertEqual(
+            output,
+            .customToolCallOutput(
+                callID: "custom-patch",
+                output: "apply_patch rejected: writing outside of the project; rejected by user approval settings"
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("blocked.txt").path))
     }
 
     func testUnifiedExecCommandPersistsSessionAndWriteStdinContinuesIt() async throws {
@@ -405,6 +535,11 @@ private extension NonInteractiveExecTests {
         }
         return Int(line.dropFirst(prefix.count))
     }
+
+    static func jsonString(_ value: String) throws -> String {
+        let data = try JSONEncoder().encode(value)
+        return String(decoding: data, as: UTF8.self)
+    }
 }
 
 private actor ExecLoopScript {
@@ -421,6 +556,36 @@ private actor ExecLoopScript {
                     name: "shell_command",
                     arguments: #"{"command":"echo hi"}"#,
                     callID: "call-1"
+                ))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
+            .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor CustomToolLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(.customToolCall(
+                    callID: "custom-1",
+                    name: "apply_patch",
+                    input: "*** Begin Patch\n*** End Patch"
                 ))),
                 .success(.completed(responseID: "resp-1", tokenUsage: nil))
             ]
