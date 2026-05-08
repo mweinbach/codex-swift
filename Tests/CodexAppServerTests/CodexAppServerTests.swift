@@ -2048,6 +2048,27 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testCollaborationModeListReturnsRustPresets() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"collaborationMode/list","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 2)
+        XCTAssertEqual(data[0]["name"] as? String, "Plan")
+        XCTAssertEqual(data[0]["mode"] as? String, "plan")
+        XCTAssertTrue(data[0]["model"] is NSNull)
+        XCTAssertEqual(data[0]["reasoning_effort"] as? String, "medium")
+        XCTAssertEqual(data[1]["name"] as? String, "Default")
+        XCTAssertEqual(data[1]["mode"] as? String, "default")
+        XCTAssertTrue(data[1]["model"] is NSNull)
+        XCTAssertTrue(data[1]["reasoning_effort"] is NSNull)
+    }
+
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """

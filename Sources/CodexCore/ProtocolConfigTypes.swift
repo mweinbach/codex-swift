@@ -62,3 +62,73 @@ public enum TrustLevel: String, Codable, CaseIterable, Equatable, Sendable {
     case trusted
     case untrusted
 }
+
+public enum CollaborationModeKind: String, Codable, CaseIterable, Equatable, Sendable {
+    case plan
+    case defaultMode = "default"
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        switch rawValue {
+        case "plan":
+            self = .plan
+        case "default", "code", "pair_programming", "execute", "custom":
+            self = .defaultMode
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown collaboration mode kind: \(rawValue)"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public var displayName: String {
+        switch self {
+        case .plan:
+            return "Plan"
+        case .defaultMode:
+            return "Default"
+        }
+    }
+}
+
+public struct CollaborationModeMask: Equatable, Sendable {
+    public var name: String
+    public var mode: CollaborationModeKind?
+    public var model: String?
+    public var reasoningEffort: ReasoningEffort?
+
+    public init(
+        name: String,
+        mode: CollaborationModeKind? = nil,
+        model: String? = nil,
+        reasoningEffort: ReasoningEffort? = nil
+    ) {
+        self.name = name
+        self.mode = mode
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+    }
+}
+
+public enum CollaborationModeRegistry {
+    public static let tuiVisibleModes: [CollaborationModeKind] = [.defaultMode, .plan]
+
+    public static let builtinPresets: [CollaborationModeMask] = [
+        CollaborationModeMask(
+            name: CollaborationModeKind.plan.displayName,
+            mode: .plan,
+            reasoningEffort: .medium
+        ),
+        CollaborationModeMask(
+            name: CollaborationModeKind.defaultMode.displayName,
+            mode: .defaultMode
+        )
+    ]
+}

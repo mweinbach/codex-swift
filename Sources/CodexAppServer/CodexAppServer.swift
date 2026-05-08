@@ -1452,6 +1452,19 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func collaborationModeListResult() -> [String: Any] {
+        [
+            "data": CollaborationModeRegistry.builtinPresets.map { preset in
+                [
+                    "name": preset.name,
+                    "mode": preset.mode?.rawValue as Any? ?? NSNull(),
+                    "model": preset.model as Any? ?? NSNull(),
+                    "reasoning_effort": preset.reasoningEffort?.rawValue as Any? ?? NSNull()
+                ]
+            }
+        ]
+    }
+
     fileprivate static func configReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -4052,6 +4065,11 @@ final class CodexAppServerMessageProcessor {
                             params: params,
                             configuration: configuration
                         )
+                    )
+                case "collaborationMode/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.collaborationModeListResult()
                     )
                 case "config/read":
                     response = CodexAppServer.responseObject(
