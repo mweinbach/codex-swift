@@ -118,6 +118,8 @@ Source baseline inspected for this scaffold:
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
+- `codex-rs/core/src/shell.rs`
+  - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, and default shell fallback ordering
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 - `codex-rs/common/src/config_summary.rs`
