@@ -31,6 +31,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case agentReasoningSectionBreak(AgentReasoningSectionBreakEvent)
     case mcpStartupUpdate(McpStartupUpdateEvent)
     case mcpStartupComplete(McpStartupCompleteEvent)
+    case mcpToolCallBegin(McpToolCallBeginEvent)
+    case mcpToolCallEnd(McpToolCallEndEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
     case execCommandBegin(ExecCommandBeginEvent)
@@ -83,6 +85,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case agentReasoningSectionBreak = "agent_reasoning_section_break"
         case mcpStartupUpdate = "mcp_startup_update"
         case mcpStartupComplete = "mcp_startup_complete"
+        case mcpToolCallBegin = "mcp_tool_call_begin"
+        case mcpToolCallEnd = "mcp_tool_call_end"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
         case execCommandBegin = "exec_command_begin"
@@ -150,6 +154,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .mcpStartupUpdate(try McpStartupUpdateEvent(from: decoder))
         case .mcpStartupComplete:
             self = .mcpStartupComplete(try McpStartupCompleteEvent(from: decoder))
+        case .mcpToolCallBegin:
+            self = .mcpToolCallBegin(try McpToolCallBeginEvent(from: decoder))
+        case .mcpToolCallEnd:
+            self = .mcpToolCallEnd(try McpToolCallEndEvent(from: decoder))
         case .webSearchBegin:
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
@@ -263,6 +271,12 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .mcpStartupComplete(event):
             try container.encode(EventType.mcpStartupComplete, forKey: .type)
+            try event.encode(to: encoder)
+        case let .mcpToolCallBegin(event):
+            try container.encode(EventType.mcpToolCallBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .mcpToolCallEnd(event):
+            try container.encode(EventType.mcpToolCallEnd, forKey: .type)
             try event.encode(to: encoder)
         case let .webSearchBegin(event):
             try container.encode(EventType.webSearchBegin, forKey: .type)

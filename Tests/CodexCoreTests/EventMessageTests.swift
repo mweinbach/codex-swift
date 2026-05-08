@@ -61,6 +61,25 @@ final class EventMessageTests: XCTestCase {
             "chunk": "3q0="
         ])
 
+        try XCTAssertJSONObjectEqual(EventMessage.mcpToolCallBegin(McpToolCallBeginEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .object(["path": .string("/tmp/a.txt")])
+            )
+        )), [
+            "type": "mcp_tool_call_begin",
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": [
+                    "path": "/tmp/a.txt"
+                ]
+            ]
+        ])
+
         try XCTAssertJSONObjectEqual(EventMessage.agentMessageContentDelta(AgentMessageContentDeltaEvent(
             threadID: "thread-1",
             turnID: "turn-1",
@@ -89,6 +108,39 @@ final class EventMessageTests: XCTestCase {
             turnID: "turn-1",
             itemID: "item-1",
             delta: "thinking"
+        )))
+
+        let mcpEnd = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "mcp_tool_call_end",
+          "call_id": "mcp-1",
+          "invocation": {
+            "server": "filesystem",
+            "tool": "read_file",
+            "arguments": null
+          },
+          "duration": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "result": {
+            "Ok": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "done"
+                }
+              ]
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(mcpEnd, .mcpToolCallEnd(McpToolCallEndEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+            duration: ProtocolDuration(secs: 1),
+            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "done"))]))
         )))
     }
 
@@ -124,7 +176,7 @@ final class EventMessageTests: XCTestCase {
     func testUnsupportedEventMessageVariantThrows() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             EventMessage.self,
-            from: Data(#"{"type":"mcp_tool_call_begin","call_id":"tool-1"}"#.utf8)
+            from: Data(#"{"type":"session_configured"}"#.utf8)
         ))
     }
 }

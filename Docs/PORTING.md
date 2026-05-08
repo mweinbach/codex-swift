@@ -178,6 +178,8 @@ Source baseline inspected for this scaffold:
   - exec command begin/end payloads, Rust duration wire shape, exec command source/stream wire values, base64 command-output deltas, terminal interaction events, view-image tool events, and background messages
 - `codex-rs/protocol/src/protocol.rs` MCP startup/auth event models
   - MCP startup update/complete/failure payloads, internally tagged startup status, and auth status wire/display values
+- `codex-rs/protocol/src/protocol.rs` MCP tool-call event models plus `codex-rs/mcp-types/src/lib.rs`
+  - MCP invocation payloads, arbitrary JSON arguments/structured content, Rust `Result` Ok/Err encoding, CallToolResult content blocks, Duration-backed tool-call end events, and success classification
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
   - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
@@ -192,7 +194,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - interactive TUI runtime
 - non-interactive `exec`
 - exec runtime event emission
-- full `EventMsg` variant coverage for unported MCP/history/session/raw-response payloads
+- full `EventMsg` variant coverage for MCP list-tools, history, session, and raw-response payloads
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Sentry feedback upload and rollout attachment plumbing

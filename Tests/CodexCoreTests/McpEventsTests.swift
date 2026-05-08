@@ -59,6 +59,207 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testInvocationEncodesMissingArgumentsAsNull() throws {
+        try XCTAssertJSONObjectEqual(McpInvocation(server: "filesystem", tool: "read_file"), [
+            "server": "filesystem",
+            "tool": "read_file",
+            "arguments": NSNull()
+        ])
+    }
+
+    func testToolCallBeginEventWireShape() throws {
+        let event = McpToolCallBeginEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .object([
+                    "path": .string("/tmp/notes.txt"),
+                    "limit": .integer(100)
+                ])
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": [
+                    "path": "/tmp/notes.txt",
+                    "limit": 100
+                ]
+            ]
+        ])
+    }
+
+    func testToolCallEndEventOkWireShapeAndSuccess() throws {
+        let event = McpToolCallEndEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+            duration: ProtocolDuration(secs: 2, nanos: 500),
+            result: .ok(McpCallToolResult(
+                content: [
+                    .text(McpTextContent(text: "done"))
+                ],
+                isError: false,
+                structuredContent: .object([
+                    "exit": .integer(0),
+                    "cached": .bool(true)
+                ])
+            ))
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": NSNull()
+            ],
+            "duration": [
+                "secs": 2,
+                "nanos": 500
+            ],
+            "result": [
+                "Ok": [
+                    "content": [
+                        [
+                            "text": "done",
+                            "type": "text"
+                        ]
+                    ],
+                    "isError": false,
+                    "structuredContent": [
+                        "exit": 0,
+                        "cached": true
+                    ]
+                ]
+            ]
+        ])
+        XCTAssertTrue(event.isSuccess)
+    }
+
+    func testToolCallEndEventErrWireShapeAndFailure() throws {
+        let json = """
+        {
+          "call_id": "mcp-2",
+          "invocation": {
+            "server": "github",
+            "tool": "search",
+            "arguments": null
+          },
+          "duration": {
+            "secs": 0,
+            "nanos": 1
+          },
+          "result": {
+            "Err": "server disconnected"
+          }
+        }
+        """
+
+        let event = try JSONDecoder().decode(McpToolCallEndEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event, McpToolCallEndEvent(
+            callID: "mcp-2",
+            invocation: McpInvocation(server: "github", tool: "search"),
+            duration: ProtocolDuration(secs: 0, nanos: 1),
+            result: .err("server disconnected")
+        ))
+        XCTAssertFalse(event.isSuccess)
+    }
+
+    func testToolCallEndTreatsMcpErrorResultAsFailure() {
+        let event = McpToolCallEndEvent(
+            callID: "mcp-3",
+            invocation: McpInvocation(server: "github", tool: "search"),
+            duration: ProtocolDuration(secs: 0),
+            result: .ok(McpCallToolResult(
+                content: [.text(McpTextContent(text: "not found"))],
+                isError: true
+            ))
+        )
+
+        XCTAssertFalse(event.isSuccess)
+    }
+
+    func testMcpContentBlocksCoverRustUntaggedVariantEncoding() throws {
+        let result = McpCallToolResult(content: [
+            .image(McpImageContent(data: "iVBORw0=", mimeType: "image/png")),
+            .audio(McpAudioContent(data: "AAAA", mimeType: "audio/wav")),
+            .resourceLink(McpResourceLink(
+                name: "readme",
+                uri: "file:///tmp/README.md",
+                description: "docs",
+                mimeType: "text/markdown",
+                size: 42,
+                title: "README"
+            )),
+            .embeddedResource(McpEmbeddedResource(resource: .text(McpTextResourceContents(
+                text: "hello",
+                uri: "file:///tmp/hello.txt",
+                mimeType: "text/plain"
+            )))),
+            .embeddedResource(McpEmbeddedResource(resource: .blob(McpBlobResourceContents(
+                blob: "AAEC",
+                uri: "file:///tmp/blob.bin",
+                mimeType: "application/octet-stream"
+            ))))
+        ])
+
+        try XCTAssertJSONObjectEqual(result, [
+            "content": [
+                [
+                    "data": "iVBORw0=",
+                    "mimeType": "image/png",
+                    "type": "image"
+                ],
+                [
+                    "data": "AAAA",
+                    "mimeType": "audio/wav",
+                    "type": "audio"
+                ],
+                [
+                    "description": "docs",
+                    "mimeType": "text/markdown",
+                    "name": "readme",
+                    "size": 42,
+                    "title": "README",
+                    "type": "resource_link",
+                    "uri": "file:///tmp/README.md"
+                ],
+                [
+                    "resource": [
+                        "mimeType": "text/plain",
+                        "text": "hello",
+                        "uri": "file:///tmp/hello.txt"
+                    ],
+                    "type": "resource"
+                ],
+                [
+                    "resource": [
+                        "blob": "AAEC",
+                        "mimeType": "application/octet-stream",
+                        "uri": "file:///tmp/blob.bin"
+                    ],
+                    "type": "resource"
+                ]
+            ]
+        ])
+    }
+
+    func testMcpContentBlockDecodingFollowsRustUntaggedOrder() throws {
+        let block = try JSONDecoder().decode(McpContentBlock.self, from: Data("""
+        {
+          "type": "audio",
+          "data": "AAAA",
+          "mimeType": "audio/wav"
+        }
+        """.utf8))
+
+        XCTAssertEqual(block, .image(McpImageContent(data: "AAAA", mimeType: "audio/wav", type: "audio")))
+    }
+
     func testAuthStatusWireValuesAndDisplayMatchRust() throws {
         XCTAssertEqual(try encode(McpAuthStatus.unsupported), #""unsupported""#)
         XCTAssertEqual(try encode(McpAuthStatus.notLoggedIn), #""not_logged_in""#)
