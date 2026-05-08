@@ -311,7 +311,8 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         )
         try CodexAppServer.run(configuration: CodexAppServerConfiguration(
             codexHome: codexHome,
-            defaultModelProvider: settings.selectedModelProviderID
+            defaultModelProvider: settings.selectedModelProviderID,
+            version: CodexCLI.version
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case .generateTS,

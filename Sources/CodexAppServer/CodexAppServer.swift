@@ -4,10 +4,19 @@ import Foundation
 public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let codexHome: URL
     public let defaultModelProvider: String
+    public let originator: String
+    public let version: String
 
-    public init(codexHome: URL, defaultModelProvider: String = "openai") {
+    public init(
+        codexHome: URL,
+        defaultModelProvider: String = "openai",
+        originator: String = "codex_swift",
+        version: String = "0.0.0"
+    ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
+        self.originator = originator
+        self.version = version
     }
 }
 
@@ -22,6 +31,7 @@ public enum CodexAppServer {
         stdout: FileHandle = .standardOutput
     ) throws {
         var buffer = Data()
+        let processor = CodexAppServerMessageProcessor(configuration: configuration)
         while true {
             let data = stdin.availableData
             if data.isEmpty {
@@ -34,12 +44,12 @@ public enum CodexAppServer {
                 guard !line.isEmpty else {
                     continue
                 }
-                try write(processLine(Data(line), configuration: configuration), to: stdout)
+                try write(processor.processLine(Data(line)), to: stdout)
             }
         }
 
         if !buffer.isEmpty {
-            try write(processLine(buffer, configuration: configuration), to: stdout)
+            try write(processor.processLine(buffer), to: stdout)
         }
     }
 
@@ -47,45 +57,10 @@ public enum CodexAppServer {
         _ data: Data,
         configuration: CodexAppServerConfiguration
     ) -> Data? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = object["id"],
-              let method = object["method"] as? String
-        else {
-            return nil
-        }
-
-        let params = object["params"] as? [String: Any]
-        let response: [String: Any]
-        do {
-            switch method {
-            case "initialize":
-                response = responseObject(id: id, result: [
-                    "userAgent": "codex_cli_swift/0.0.0"
-                ])
-            case "thread/list":
-                response = responseObject(
-                    id: id,
-                    result: try threadListResult(params: params, configuration: configuration)
-                )
-            case "listConversations":
-                response = responseObject(
-                    id: id,
-                    result: try listConversationsResult(params: params, configuration: configuration)
-                )
-            default:
-                response = errorObject(id: id, code: -32601, message: "method not found: \(method)")
-            }
-        } catch {
-            response = errorObject(id: id, code: -32603, message: String(describing: error))
-        }
-
-        guard JSONSerialization.isValidJSONObject(response) else {
-            return nil
-        }
-        return try? JSONSerialization.data(withJSONObject: response)
+        CodexAppServerMessageProcessor(configuration: configuration).processLine(data)
     }
 
-    private static func threadListResult(
+    fileprivate static func threadListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
@@ -103,7 +78,7 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
-    private static func listConversationsResult(
+    fileprivate static func listConversationsResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
@@ -119,6 +94,44 @@ public enum CodexAppServer {
             "items": try page.items.map { try conversationObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
             "nextCursor": page.nextCursor?.token as Any
         ].nullStripped()
+    }
+
+    fileprivate static func buildUserAgent(
+        configuration: CodexAppServerConfiguration,
+        params: [String: Any]?,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let clientInfo = params?["clientInfo"] as? [String: Any]
+        let clientName = (clientInfo?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
+        return sanitizeHeaderValue(
+            "\(configuration.originator)/\(configuration.version) \(Terminal.userAgent(environment: environment))\(suffix)"
+        )
+    }
+
+    fileprivate static func responseObject(id: Any, result: [String: Any]) -> [String: Any] {
+        [
+            "id": id,
+            "result": result
+        ]
+    }
+
+    fileprivate static func errorObject(id: Any, code: Int, message: String) -> [String: Any] {
+        [
+            "id": id,
+            "error": [
+                "code": code,
+                "message": message
+            ]
+        ]
+    }
+
+    fileprivate static func encodeResponse(_ response: [String: Any]) -> Data? {
+        guard JSONSerialization.isValidJSONObject(response) else {
+            return nil
+        }
+        return try? JSONSerialization.data(withJSONObject: response)
     }
 
     private static func threadObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
@@ -196,21 +209,10 @@ public enum CodexAppServer {
         return providers.isEmpty ? nil : providers
     }
 
-    private static func responseObject(id: Any, result: [String: Any]) -> [String: Any] {
-        [
-            "id": id,
-            "result": result
-        ]
-    }
-
-    private static func errorObject(id: Any, code: Int, message: String) -> [String: Any] {
-        [
-            "id": id,
-            "error": [
-                "code": code,
-                "message": message
-            ]
-        ]
+    private static func sanitizeHeaderValue(_ value: String) -> String {
+        value.map { character in
+            character.asciiValue.map { (0x20...0x7E).contains($0) } == true ? character : "_"
+        }.map(String.init).joined()
     }
 
     private static func write(_ data: Data?, to stdout: FileHandle) throws {
@@ -219,6 +221,59 @@ public enum CodexAppServer {
         }
         try stdout.write(contentsOf: data)
         try stdout.write(contentsOf: Data([0x0A]))
+    }
+}
+
+final class CodexAppServerMessageProcessor {
+    private var initialized = false
+    private let configuration: CodexAppServerConfiguration
+
+    init(configuration: CodexAppServerConfiguration) {
+        self.configuration = configuration
+    }
+
+    func processLine(_ data: Data) -> Data? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = object["id"],
+              let method = object["method"] as? String
+        else {
+            return nil
+        }
+
+        let params = object["params"] as? [String: Any]
+        let response: [String: Any]
+        if method == "initialize" {
+            if initialized {
+                response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
+            } else {
+                initialized = true
+                response = CodexAppServer.responseObject(id: id, result: [
+                    "userAgent": CodexAppServer.buildUserAgent(configuration: configuration, params: params)
+                ])
+            }
+        } else if !initialized {
+            response = CodexAppServer.errorObject(id: id, code: -32600, message: "Not initialized")
+        } else {
+            do {
+                switch method {
+                case "thread/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadListResult(params: params, configuration: configuration)
+                    )
+                case "listConversations":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.listConversationsResult(params: params, configuration: configuration)
+                    )
+                default:
+                    response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")
+                }
+            } catch {
+                response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
+            }
+        }
+        return CodexAppServer.encodeResponse(response)
     }
 }
 

@@ -162,19 +162,47 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let response = try appServerResponse(
             #"{"id":9,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            initializeFirst: false
         )
         XCTAssertEqual(response["id"] as? Int, 9)
         XCTAssertNil(response["jsonrpc"])
         let result = try XCTUnwrap(response["result"] as? [String: Any])
-        XCTAssertEqual(result["userAgent"] as? String, "codex_cli_swift/0.0.0")
+        let userAgent = try XCTUnwrap(result["userAgent"] as? String)
+        XCTAssertTrue(userAgent.hasPrefix("codex_swift/0.0.0 "))
+        XCTAssertTrue(userAgent.hasSuffix(" (test; 0)"))
     }
 
-    private func appServerResponse(_ line: String, codexHome: URL) throws -> [String: Any] {
-        let data = try XCTUnwrap(CodexAppServer.processLine(
-            Data(line.utf8),
-            configuration: CodexAppServerConfiguration(codexHome: codexHome)
-        ))
+    func testRequestsRequireInitializeAndRejectDuplicateInitialize() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))
+
+        let beforeInit = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/list","params":{}}"#.utf8)))
+        let beforeError = try XCTUnwrap(beforeInit["error"] as? [String: Any])
+        XCTAssertEqual(beforeError["code"] as? Int, -32600)
+        XCTAssertEqual(beforeError["message"] as? String, "Not initialized")
+
+        _ = try decode(processor.processLine(Data(#"{"id":2,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        let duplicate = try decode(processor.processLine(Data(#"{"id":3,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        let duplicateError = try XCTUnwrap(duplicate["error"] as? [String: Any])
+        XCTAssertEqual(duplicateError["code"] as? Int, -32600)
+        XCTAssertEqual(duplicateError["message"] as? String, "Already initialized")
+    }
+
+    private func appServerResponse(
+        _ line: String,
+        codexHome: URL,
+        initializeFirst: Bool = true
+    ) throws -> [String: Any] {
+        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: codexHome))
+        if initializeFirst {
+            _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        }
+        return try decode(processor.processLine(Data(line.utf8)))
+    }
+
+    private func decode(_ data: Data?) throws -> [String: Any] {
+        let data = try XCTUnwrap(data)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
