@@ -1,4 +1,5 @@
 import CodexCore
+import CryptoKit
 import Foundation
 
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
@@ -1421,6 +1422,26 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func hooksListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) -> [String: Any] {
+        let rawCwds = stringArrayParam(params?["cwds"]) ?? []
+        let cwds = rawCwds.isEmpty ? [FileManager.default.currentDirectoryPath] : rawCwds
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let hooks = userHookObjects(configFile: configFile)
+        return [
+            "data": cwds.map { cwd in
+                [
+                    "cwd": cwd,
+                    "hooks": hooks,
+                    "warnings": [],
+                    "errors": []
+                ]
+            }
+        ]
+    }
+
     fileprivate static func experimentalFeatureListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -2424,6 +2445,232 @@ public enum CodexAppServer {
             "enabled": features.isEnabled(spec.id),
             "defaultEnabled": spec.defaultEnabled
         ].nullStripped(keepNulls: true)
+    }
+
+    private struct ParsedUserHookGroup {
+        var eventName: HookEventName
+        var matcher: String?
+        var handlers: [ParsedUserHookHandler] = []
+    }
+
+    private struct ParsedUserHookHandler {
+        var type: String?
+        var command: String?
+        var timeoutSec: UInt64?
+        var statusMessage: String?
+    }
+
+    private static func userHookObjects(configFile: URL) -> [[String: Any]] {
+        guard let contents = try? String(contentsOf: configFile, encoding: .utf8) else {
+            return []
+        }
+        let parsed = parseUserHookConfig(contents)
+        guard parsed.enabled else {
+            return []
+        }
+        let sourcePath = configFile.standardizedFileURL.path
+        var displayOrder: Int64 = 0
+        var output: [[String: Any]] = []
+        for (groupIndex, group) in parsed.groups.enumerated() {
+            for (handlerIndex, handler) in group.handlers.enumerated() {
+                guard handler.type == "command", let command = handler.command else {
+                    continue
+                }
+                let timeoutSec = handler.timeoutSec ?? 600
+                output.append([
+                    "key": HooksProtocol.hookKey(
+                        keySource: sourcePath,
+                        eventName: group.eventName,
+                        groupIndex: groupIndex,
+                        handlerIndex: handlerIndex
+                    ),
+                    "eventName": appServerHookEventName(group.eventName),
+                    "handlerType": "command",
+                    "matcher": group.matcher as Any? ?? NSNull(),
+                    "command": command,
+                    "timeoutSec": Int(timeoutSec),
+                    "statusMessage": handler.statusMessage as Any? ?? NSNull(),
+                    "sourcePath": sourcePath,
+                    "source": "user",
+                    "pluginId": NSNull(),
+                    "displayOrder": displayOrder,
+                    "enabled": true,
+                    "isManaged": false,
+                    "currentHash": userHookHash(
+                        eventName: group.eventName,
+                        matcher: group.matcher,
+                        command: command,
+                        timeoutSec: timeoutSec,
+                        statusMessage: handler.statusMessage
+                    ),
+                    "trustStatus": "untrusted"
+                ])
+                displayOrder += 1
+            }
+        }
+        return output
+    }
+
+    private static func parseUserHookConfig(_ contents: String) -> (enabled: Bool, groups: [ParsedUserHookGroup]) {
+        var enabled = true
+        var groups: [ParsedUserHookGroup] = []
+        var table: [String] = []
+        var currentGroupIndex: Int?
+        var currentHandlerIndex: Int?
+
+        for rawLine in contents.split(whereSeparator: \.isNewline) {
+            let line = stripTomlComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if line.hasPrefix("[["), line.hasSuffix("]]") {
+                let body = String(line.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                table = body.split(separator: ".").map(String.init)
+                currentHandlerIndex = nil
+                if table.count == 2, table[0] == "hooks", let eventName = hookEventName(configLabel: table[1]) {
+                    groups.append(ParsedUserHookGroup(eventName: eventName))
+                    currentGroupIndex = groups.count - 1
+                } else if table.count == 3, table[0] == "hooks", table[2] == "hooks",
+                          let groupIndex = currentGroupIndex {
+                    groups[groupIndex].handlers.append(ParsedUserHookHandler())
+                    currentHandlerIndex = groups[groupIndex].handlers.count - 1
+                }
+                continue
+            }
+
+            if line.hasPrefix("["), line.hasSuffix("]") {
+                let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+                table = body.split(separator: ".").map(String.init)
+                currentGroupIndex = nil
+                currentHandlerIndex = nil
+                continue
+            }
+
+            guard let equalsIndex = firstEqualsIndex(in: line) else {
+                continue
+            }
+            let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueText = String(line[line.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if table == ["features"], key == "hooks", valueText == "false" {
+                enabled = false
+                continue
+            }
+            guard table.first == "hooks", let groupIndex = currentGroupIndex else {
+                continue
+            }
+
+            if let handlerIndex = currentHandlerIndex {
+                if key == "type" {
+                    groups[groupIndex].handlers[handlerIndex].type = tomlString(valueText)
+                } else if key == "command" {
+                    groups[groupIndex].handlers[handlerIndex].command = tomlString(valueText)
+                } else if key == "timeout" || key == "timeoutSec" || key == "timeout_sec" {
+                    groups[groupIndex].handlers[handlerIndex].timeoutSec = UInt64(valueText)
+                } else if key == "statusMessage" || key == "status_message" {
+                    groups[groupIndex].handlers[handlerIndex].statusMessage = tomlString(valueText)
+                }
+            } else if key == "matcher" {
+                groups[groupIndex].matcher = tomlString(valueText)
+            }
+        }
+
+        return (enabled, groups)
+    }
+
+    private static func hookEventName(configLabel: String) -> HookEventName? {
+        HookEventName.allCases.first { $0.configLabel == configLabel }
+    }
+
+    private static func appServerHookEventName(_ eventName: HookEventName) -> String {
+        switch eventName {
+        case .preToolUse: return "preToolUse"
+        case .permissionRequest: return "permissionRequest"
+        case .postToolUse: return "postToolUse"
+        case .preCompact: return "preCompact"
+        case .postCompact: return "postCompact"
+        case .sessionStart: return "sessionStart"
+        case .userPromptSubmit: return "userPromptSubmit"
+        case .stop: return "stop"
+        }
+    }
+
+    private static func userHookHash(
+        eventName: HookEventName,
+        matcher: String?,
+        command: String,
+        timeoutSec: UInt64,
+        statusMessage: String?
+    ) -> String {
+        let identity = [
+            eventName.rawValue,
+            matcher ?? "",
+            command,
+            String(timeoutSec),
+            statusMessage ?? ""
+        ].joined(separator: "\u{1f}")
+        let digest = SHA256.hash(data: Data(identity.utf8))
+        return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func tomlString(_ raw: String) -> String? {
+        guard case let .string(value) = try? ConfigValueParser.parseTomlLiteral(raw) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func firstEqualsIndex(in line: String) -> String.Index? {
+        var quote: Character?
+        var previousWasBackslash = false
+        for index in line.indices {
+            let character = line[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                previousWasBackslash = false
+                continue
+            }
+            if character == "=" {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private static func stripTomlComment(from line: String) -> String {
+        var quote: Character?
+        var previousWasBackslash = false
+        for index in line.indices {
+            let character = line[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                previousWasBackslash = false
+                continue
+            }
+            if character == "#" {
+                return String(line[..<index])
+            }
+        }
+        return line
     }
 
     private static func experimentalFeatureStageObject(_ stage: FeatureStage) -> String {
@@ -4085,6 +4332,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.skillsListResult(params: params, configuration: configuration)
+                    )
+                case "hooks/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.hooksListResult(params: params, configuration: configuration)
                     )
                 case "experimentalFeature/list":
                     response = CodexAppServer.responseObject(

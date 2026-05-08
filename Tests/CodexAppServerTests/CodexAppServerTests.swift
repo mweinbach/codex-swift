@@ -2263,6 +2263,80 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(errors[0]["message"] as? String, "missing field `description`")
     }
 
+    func testHooksListReturnsUserCommandHooks() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        try """
+        [hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 /tmp/listed-hook.py"
+        timeout = 5
+        statusMessage = "running listed hook"
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.path)
+        XCTAssertEqual((data[0]["warnings"] as? [Any])?.count, 0)
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["eventName"] as? String, "preToolUse")
+        XCTAssertEqual(hooks[0]["handlerType"] as? String, "command")
+        XCTAssertEqual(hooks[0]["matcher"] as? String, "Bash")
+        XCTAssertEqual(hooks[0]["command"] as? String, "python3 /tmp/listed-hook.py")
+        XCTAssertEqual(hooks[0]["timeoutSec"] as? Int, 5)
+        XCTAssertEqual(hooks[0]["statusMessage"] as? String, "running listed hook")
+        XCTAssertEqual(hooks[0]["source"] as? String, "user")
+        XCTAssertTrue(hooks[0]["pluginId"] is NSNull)
+        XCTAssertEqual(hooks[0]["displayOrder"] as? Int, 0)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(hooks[0]["isManaged"] as? Bool, false)
+        XCTAssertTrue((hooks[0]["currentHash"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
+    }
+
+    func testHooksListRespectsDisabledHooksFeature() throws {
+        let codexHome = try TemporaryDirectory()
+        try """
+        [features]
+        hooks = false
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "echo hidden"
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual((data[0]["hooks"] as? [Any])?.count, 0)
+    }
+
     func testConfigReadReturnsEffectiveConfigOriginsAndLayers() throws {
         let temp = try TemporaryDirectory()
         try """
