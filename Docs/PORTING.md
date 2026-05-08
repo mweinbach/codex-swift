@@ -178,7 +178,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/safety.rs`
   - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
-  - Swift-native prefix-rule policy model, parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, exec approval requirement derivation, amendment proposals, and default allow-prefix file appending
+  - Swift-native prefix-rule policy model, parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading, exec approval requirement derivation, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
@@ -309,7 +309,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - config-layer file IO, full non-apply config loading, and managed requirements
 - shell-intercept apply-patch runtime execution and full approval/diff event plumbing
 - Windows PowerShell safe-command AST allowlist parity
-- execpolicy config-layer file discovery and Starlark-compatible parser completeness
+- Starlark-compatible execpolicy parser completeness
 - keyring storage for `codex apply <task_id>`
 - ChatGPT browser login, device-code login, runtime forced-login-method logout enforcement, and keyring storage for login/status/logout
 - rollout recorder flows, full `RolloutItem` serialization, and structured payload models for persisted tool-call/reasoning response items

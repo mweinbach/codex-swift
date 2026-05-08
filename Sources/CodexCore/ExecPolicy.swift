@@ -80,6 +80,23 @@ public enum ExecPolicyAmendError: Error, Equatable, CustomStringConvertible, Sen
     }
 }
 
+public enum ExecPolicyLoadError: Error, Equatable, CustomStringConvertible, Sendable {
+    case readDirectory(dir: String, message: String)
+    case readFile(path: String, message: String)
+    case parsePolicy(path: String, message: String)
+
+    public var description: String {
+        switch self {
+        case let .readDirectory(dir, message):
+            return "failed to read execpolicy files from \(dir): \(message)"
+        case let .readFile(path, message):
+            return "failed to read execpolicy file \(path): \(message)"
+        case let .parsePolicy(path, message):
+            return "failed to parse execpolicy file \(path): \(message)"
+        }
+    }
+}
+
 public enum PatternToken: Equatable, Sendable {
     case single(String)
     case alts([String])
@@ -592,6 +609,8 @@ public enum ExecApprovalRequirement: Equatable, Sendable {
 }
 
 public final class ExecPolicyManager: @unchecked Sendable {
+    public static let rulesDirectoryName = "rules"
+    public static let defaultPolicyFileName = "default.rules"
     public static let forbiddenReason = "execpolicy forbids this command"
     public static let promptConflictReason = "execpolicy requires approval for this command, but AskForApproval is set to Never"
     public static let promptReason = "execpolicy requires approval for this command"
@@ -604,6 +623,95 @@ public final class ExecPolicyManager: @unchecked Sendable {
 
     public func current() -> ExecPolicy {
         policy
+    }
+
+    public static func load(
+        features: FeatureStates,
+        configStack: ConfigLayerStack,
+        fileManager: FileManager = .default
+    ) throws -> ExecPolicyManager {
+        guard features.isEnabled(.execPolicy) else {
+            return ExecPolicyManager(policy: .empty())
+        }
+        return ExecPolicyManager(policy: try loadExecPolicy(configStack: configStack, fileManager: fileManager))
+    }
+
+    public static func loadExecPolicy(
+        configStack: ConfigLayerStack,
+        fileManager: FileManager = .default
+    ) throws -> ExecPolicy {
+        var policyPaths: [URL] = []
+        for layer in configStack.getLayers(ordering: .lowestPrecedenceFirst) {
+            guard let configFolder = layer.configFolder() else {
+                continue
+            }
+            let policyDirectory = URL(fileURLWithPath: configFolder.path, isDirectory: true)
+                .appendingPathComponent(rulesDirectoryName, isDirectory: true)
+            policyPaths.append(contentsOf: try collectPolicyFiles(in: policyDirectory, fileManager: fileManager))
+        }
+
+        let parser = PolicyParser()
+        for policyPath in policyPaths {
+            let contents: String
+            do {
+                contents = try String(contentsOf: policyPath, encoding: .utf8)
+            } catch {
+                throw ExecPolicyLoadError.readFile(path: policyPath.path, message: String(describing: error))
+            }
+
+            do {
+                try parser.parse(policyPath.path, contents)
+            } catch {
+                throw ExecPolicyLoadError.parsePolicy(path: policyPath.path, message: String(describing: error))
+            }
+        }
+
+        return parser.build()
+    }
+
+    public static func collectPolicyFiles(
+        in policyDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> [URL] {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: policyDirectory.path, isDirectory: &isDirectory) else {
+            return []
+        }
+        guard isDirectory.boolValue else {
+            throw ExecPolicyLoadError.readDirectory(
+                dir: policyDirectory.path,
+                message: "path is not a directory"
+            )
+        }
+
+        let contents: [URL]
+        do {
+            contents = try fileManager.contentsOfDirectory(
+                at: policyDirectory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: []
+            )
+        } catch {
+            throw ExecPolicyLoadError.readDirectory(
+                dir: policyDirectory.path,
+                message: String(describing: error)
+            )
+        }
+
+        return try contents.filter { url in
+            guard url.pathExtension == "rules" else {
+                return false
+            }
+            do {
+                return try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+            } catch {
+                throw ExecPolicyLoadError.readDirectory(
+                    dir: policyDirectory.path,
+                    message: String(describing: error)
+                )
+            }
+        }
+        .sorted { $0.path < $1.path }
     }
 
     public func createExecApprovalRequirementForCommand(
@@ -661,8 +769,8 @@ public final class ExecPolicyManager: @unchecked Sendable {
 
     public static func defaultPolicyPath(codexHome: URL) -> URL {
         codexHome
-            .appendingPathComponent("rules", isDirectory: true)
-            .appendingPathComponent("default.rules", isDirectory: false)
+            .appendingPathComponent(rulesDirectoryName, isDirectory: true)
+            .appendingPathComponent(defaultPolicyFileName, isDirectory: false)
     }
 
     public static func blockingAppendAllowPrefixRule(

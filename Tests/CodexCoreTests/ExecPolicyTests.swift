@@ -286,6 +286,126 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testCollectPolicyFilesReturnsSortedRulesAndIgnoresOtherEntries() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let policyDir = tempDir.url.appendingPathComponent("rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: policyDir, withIntermediateDirectories: true)
+        try "".write(to: policyDir.appendingPathComponent("z.rules"), atomically: true, encoding: .utf8)
+        try "".write(to: policyDir.appendingPathComponent("a.rules"), atomically: true, encoding: .utf8)
+        try "".write(to: policyDir.appendingPathComponent("ignore.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: policyDir.appendingPathComponent("nested.rules", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertEqual(
+            try ExecPolicyManager.collectPolicyFiles(in: policyDir).map(\.lastPathComponent),
+            ["a.rules", "z.rules"]
+        )
+        XCTAssertEqual(
+            try ExecPolicyManager.collectPolicyFiles(
+                in: tempDir.url.appendingPathComponent("missing", isDirectory: true)
+            ),
+            []
+        )
+    }
+
+    func testLoadExecPolicyLoadsRulesFromConfigLayerFolders() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let userFolder = tempDir.url.appendingPathComponent("user-codex", isDirectory: true)
+        let projectDotCodex = tempDir.url
+            .appendingPathComponent("repo", isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: userFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectDotCodex, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: userFolder.appendingPathComponent("rules", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: projectDotCodex.appendingPathComponent("rules", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try #"prefix_rule(pattern=["rm"], decision="forbidden")"#.write(
+            to: userFolder.appendingPathComponent("rules/user.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"prefix_rule(pattern=["ls"], decision="prompt")"#.write(
+            to: projectDotCodex.appendingPathComponent("rules/project.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"prefix_rule(pattern=["pwd"], decision="forbidden")"#.write(
+            to: projectDotCodex.appendingPathComponent("root.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: userFolder.appendingPathComponent("config.toml").path)),
+                config: .table([:])
+            ),
+            ConfigLayerEntry(
+                name: .project(dotCodexFolder: try AbsolutePath(absolutePath: projectDotCodex.path)),
+                config: .table([:])
+            )
+        ])
+        let policy = try ExecPolicyManager.load(features: .withDefaults(), configStack: stack).current()
+
+        XCTAssertEqual(
+            policy.check(tokens("rm", "-rf", "/tmp"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .forbidden,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("rm"), decision: .forbidden)]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(tokens("ls"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .prompt,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("ls"), decision: .prompt)]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(tokens("pwd"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("pwd"), decision: .allow)]
+            )
+        )
+    }
+
+    func testLoadExecPolicyReturnsEmptyWhenFeatureDisabled() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let policyDir = tempDir.url.appendingPathComponent("rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: policyDir, withIntermediateDirectories: true)
+        try "prefix_rule(pattern=)".write(
+            to: policyDir.appendingPathComponent("invalid.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: tempDir.url.appendingPathComponent("config.toml").path)),
+                config: .table([:])
+            )
+        ])
+        var features = FeatureStates.withDefaults()
+        features.set(.execPolicy, enabled: false)
+
+        let policy = try ExecPolicyManager.load(features: features, configStack: stack).current()
+
+        XCTAssertEqual(
+            policy.check(tokens("rm"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("rm"), decision: .allow)]
+            )
+        )
+    }
+
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")
