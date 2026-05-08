@@ -595,6 +595,9 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let type = stringParam(params?["type"])
+        if type == "chatgpt", try forcedLoginMethod(configuration: configuration) == "api" {
+            throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
+        }
         guard type == "apiKey" else {
             throw AppServerError.invalidRequest("ChatGPT login is not yet supported")
         }

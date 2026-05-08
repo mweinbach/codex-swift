@@ -413,6 +413,24 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginChatGPTRejectedWhenForcedAPI() throws {
+        let temp = try TemporaryDirectory()
+        try #"forced_login_method = "api""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/login/start","params":{"type":"chatgpt"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "ChatGPT login is disabled. Use API key login instead.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
     func testAccountLoginCancelReturnsNotFoundForUnknownLoginID() throws {
         let temp = try TemporaryDirectory()
         let loginID = "11111111-1111-1111-1111-111111111111"
