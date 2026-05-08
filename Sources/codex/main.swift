@@ -312,7 +312,9 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         try CodexAppServer.run(configuration: CodexAppServerConfiguration(
             codexHome: codexHome,
             defaultModelProvider: settings.selectedModelProviderID,
-            version: CodexCLI.version
+            version: CodexCLI.version,
+            requiresOpenAIAuth: settings.selectedModelProvider?.requiresOpenAIAuth ?? true,
+            authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case .generateTS,

@@ -175,7 +175,7 @@ final class CodexAppServerTests: XCTestCase {
 
     func testRequestsRequireInitializeAndRejectDuplicateInitialize() throws {
         let temp = try TemporaryDirectory()
-        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
 
         let beforeInit = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/list","params":{}}"#.utf8)))
         let beforeError = try XCTUnwrap(beforeInit["error"] as? [String: Any])
@@ -191,7 +191,7 @@ final class CodexAppServerTests: XCTestCase {
 
     func testGetUserAgentReturnsInitializedUserAgent() throws {
         let temp = try TemporaryDirectory()
-        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
 
         let initialize = try decode(processor.processLine(Data(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-app-server-tests","version":"0.1.0"}}}"#.utf8)))
         let initializedAgent = try XCTUnwrap((initialize["result"] as? [String: Any])?["userAgent"] as? String)
@@ -202,16 +202,146 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(initializedAgent.hasSuffix(" (codex-app-server-tests; 0.1.0)"))
     }
 
+    func testGetAuthStatusReportsAPIKeyAndOptionalToken() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
+
+        let status = try appServerResponse(
+            #"{"id":1,"method":"getAuthStatus","params":{}}"#,
+            codexHome: temp.url
+        )
+        let statusResult = try XCTUnwrap(status["result"] as? [String: Any])
+        XCTAssertEqual(statusResult["authMethod"] as? String, "apikey")
+        XCTAssertTrue(statusResult["authToken"] is NSNull)
+        XCTAssertEqual(statusResult["requiresOpenAIAuth"] as? Bool, true)
+
+        let withToken = try appServerResponse(
+            #"{"id":2,"method":"getAuthStatus","params":{"includeToken":true}}"#,
+            codexHome: temp.url
+        )
+        let tokenResult = try XCTUnwrap(withToken["result"] as? [String: Any])
+        XCTAssertEqual(tokenResult["authMethod"] as? String, "apikey")
+        XCTAssertEqual(tokenResult["authToken"] as? String, "sk-test")
+        XCTAssertEqual(tokenResult["requiresOpenAIAuth"] as? Bool, true)
+    }
+
+    func testAccountAndUserInfoReportChatGPTIdentity() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
+
+        let accountResponse = try appServerResponse(
+            #"{"id":1,"method":"account/read","params":{"refreshToken":false}}"#,
+            codexHome: temp.url
+        )
+        let accountResult = try XCTUnwrap(accountResponse["result"] as? [String: Any])
+        let account = try XCTUnwrap(accountResult["account"] as? [String: Any])
+        XCTAssertEqual(account["type"] as? String, "chatgpt")
+        XCTAssertEqual(account["email"] as? String, "user@example.com")
+        XCTAssertEqual(account["planType"] as? String, "pro")
+        XCTAssertEqual(accountResult["requiresOpenAIAuth"] as? Bool, true)
+
+        let userInfoResponse = try appServerResponse(
+            #"{"id":2,"method":"userInfo"}"#,
+            codexHome: temp.url
+        )
+        let userInfo = try XCTUnwrap(userInfoResponse["result"] as? [String: Any])
+        XCTAssertEqual(userInfo["allegedUserEmail"] as? String, "user@example.com")
+    }
+
+    func testAuthReadAPIsRespectProviderWithoutOpenAIAuth() throws {
+        let temp = try TemporaryDirectory()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [:]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let status = try decode(processor.processLine(Data(#"{"id":1,"method":"getAuthStatus","params":{"includeToken":true}}"#.utf8)))
+        let statusResult = try XCTUnwrap(status["result"] as? [String: Any])
+        XCTAssertTrue(statusResult["authMethod"] is NSNull)
+        XCTAssertTrue(statusResult["authToken"] is NSNull)
+        XCTAssertEqual(statusResult["requiresOpenAIAuth"] as? Bool, false)
+
+        let accountResponse = try decode(processor.processLine(Data(#"{"id":2,"method":"account/read","params":{}}"#.utf8)))
+        let accountResult = try XCTUnwrap(accountResponse["result"] as? [String: Any])
+        XCTAssertTrue(accountResult["account"] is NSNull)
+        XCTAssertEqual(accountResult["requiresOpenAIAuth"] as? Bool, false)
+    }
+
+    func testModelListReturnsRustV2ShapeAndPaginates() throws {
+        let temp = try TemporaryDirectory()
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"model/list","params":{"limit":2}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.count, 2)
+        XCTAssertEqual(firstData[0]["id"] as? String, "gpt-5.1-codex-max")
+        XCTAssertEqual(firstData[0]["displayName"] as? String, "gpt-5.1-codex-max")
+        XCTAssertEqual(firstData[0]["defaultReasoningEffort"] as? String, "medium")
+        XCTAssertEqual(firstData[0]["isDefault"] as? Bool, true)
+        let efforts = try XCTUnwrap(firstData[0]["supportedReasoningEfforts"] as? [[String: Any]])
+        XCTAssertEqual(efforts[0]["reasoningEffort"] as? String, "low")
+        XCTAssertNotNil(firstResult["nextCursor"] as? String)
+
+        let second = try appServerResponse(
+            #"{"id":2,"method":"model/list","params":{"limit":2,"cursor":"\#(firstResult["nextCursor"] as! String)"}}"#,
+            codexHome: temp.url
+        )
+        let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
+        let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
+        XCTAssertFalse(secondData.isEmpty)
+        XCTAssertNotEqual(secondData[0]["id"] as? String, firstData[0]["id"] as? String)
+    }
+
+    func testModelListRejectsInvalidCursorWithRustErrorCode() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"model/list","params":{"cursor":"bogus"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+    }
+
     private func appServerResponse(
         _ line: String,
         codexHome: URL,
         initializeFirst: Bool = true
     ) throws -> [String: Any] {
-        let processor = CodexAppServerMessageProcessor(configuration: CodexAppServerConfiguration(codexHome: codexHome))
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: codexHome))
         if initializeFirst {
             _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
         }
         return try decode(processor.processLine(Data(line.utf8)))
+    }
+
+    private func initializedProcessor(configuration: CodexAppServerConfiguration) throws -> CodexAppServerMessageProcessor {
+        let processor = CodexAppServerMessageProcessor(configuration: configuration)
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        return processor
+    }
+
+    private func testConfiguration(
+        codexHome: URL,
+        requiresOpenAIAuth: Bool = true
+    ) -> CodexAppServerConfiguration {
+        CodexAppServerConfiguration(
+            codexHome: codexHome,
+            requiresOpenAIAuth: requiresOpenAIAuth,
+            environment: [:]
+        )
     }
 
     private func decode(_ data: Data?) throws -> [String: Any] {
@@ -259,6 +389,30 @@ final class CodexAppServerTests: XCTestCase {
         }.joined(separator: "\n")
         try lines.write(to: path, atomically: true, encoding: .utf8)
         return id
+    }
+
+    private func fakeJWT(email: String, plan: String) throws -> String {
+        let header = ["alg": "none", "typ": "JWT"]
+        let payload: [String: Any] = [
+            "email": email,
+            "https://api.openai.com/auth": [
+                "chatgpt_plan_type": plan,
+                "chatgpt_account_id": "acct-test"
+            ]
+        ]
+        return try [
+            base64URL(header),
+            base64URL(payload),
+            "signature"
+        ].joined(separator: ".")
+    }
+
+    private func base64URL(_ object: Any) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

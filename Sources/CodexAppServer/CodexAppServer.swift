@@ -6,17 +6,26 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let defaultModelProvider: String
     public let originator: String
     public let version: String
+    public let requiresOpenAIAuth: Bool
+    public let authCredentialsStoreMode: AuthCredentialsStoreMode
+    public let environment: [String: String]
 
     public init(
         codexHome: URL,
         defaultModelProvider: String = "openai",
         originator: String = "codex_swift",
-        version: String = "0.0.0"
+        version: String = "0.0.0",
+        requiresOpenAIAuth: Bool = true,
+        authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
         self.originator = originator
         self.version = version
+        self.requiresOpenAIAuth = requiresOpenAIAuth
+        self.authCredentialsStoreMode = authCredentialsStoreMode
+        self.environment = environment
     }
 }
 
@@ -96,18 +105,119 @@ public enum CodexAppServer {
         ].nullStripped()
     }
 
+    fileprivate static func modelListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let remoteModels = try ModelsCache.load(from: ModelsManager.cachePath(codexHome: configuration.codexHome))?.models ?? []
+        let chatGPTMode = (try currentAuth(configuration: configuration))?.method == "chatgpt"
+        let availableModels = ModelsManager.buildAvailableModels(
+            remoteModels: remoteModels,
+            localModels: ModelsManager.builtinModelPresets(),
+            chatGPTMode: chatGPTMode
+        )
+        let defaultModel = ModelsManager.defaultModel(
+            explicitModel: nil,
+            isChatGPT: chatGPTMode,
+            availableModels: availableModels
+        )
+        let models = availableModels.map { $0.withIsDefault($0.model == defaultModel) }
+        let total = models.count
+        let start = try modelListStart(cursor: stringParam(params?["cursor"]), total: total)
+        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
+        let end = min(start + effectiveLimit, total)
+        let items = start < end ? Array(models[start..<end]) : []
+
+        return [
+            "data": items.map(modelObject),
+            "nextCursor": (end < total ? String(end) : nil) as Any
+        ].nullStripped()
+    }
+
     fileprivate static func buildUserAgent(
         configuration: CodexAppServerConfiguration,
         params: [String: Any]?,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String]? = nil
     ) -> String {
         let clientInfo = params?["clientInfo"] as? [String: Any]
         let clientName = (clientInfo?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
         return sanitizeHeaderValue(
-            "\(configuration.originator)/\(configuration.version) \(Terminal.userAgent(environment: environment))\(suffix)"
+            "\(configuration.originator)/\(configuration.version) \(Terminal.userAgent(environment: environment ?? configuration.environment))\(suffix)"
         )
+    }
+
+    fileprivate static func authStatusResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard configuration.requiresOpenAIAuth else {
+            return [
+                "authMethod": NSNull(),
+                "authToken": NSNull(),
+                "requiresOpenAIAuth": false
+            ]
+        }
+
+        let includeToken = boolParam(params?["includeToken"], defaultValue: false)
+        let auth = try currentAuth(configuration: configuration)
+        return [
+            "authMethod": auth?.method ?? NSNull(),
+            "authToken": includeToken ? (auth?.token ?? NSNull()) : NSNull(),
+            "requiresOpenAIAuth": true
+        ].nullStripped(keepNulls: true)
+    }
+
+    fileprivate static func accountResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        guard configuration.requiresOpenAIAuth else {
+            return [
+                "account": NSNull(),
+                "requiresOpenAIAuth": false
+            ]
+        }
+
+        guard let auth = try currentAuth(configuration: configuration) else {
+            return [
+                "account": NSNull(),
+                "requiresOpenAIAuth": true
+            ]
+        }
+
+        let account: [String: Any]
+        switch auth.kind {
+        case .apiKey:
+            account = ["type": "apiKey"]
+        case let .chatGPT(idToken):
+            guard let email = idToken.email,
+                  let planType = planTypeWireValue(idToken.chatGPTPlanType)
+            else {
+                throw AppServerError.invalidRequest("email and plan type are required for chatgpt authentication")
+            }
+            account = [
+                "type": "chatgpt",
+                "email": email,
+                "planType": planType
+            ]
+        }
+
+        return [
+            "account": account,
+            "requiresOpenAIAuth": true
+        ]
+    }
+
+    fileprivate static func userInfoResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        let auth = try currentAuth(configuration: configuration)
+        let email: String?
+        if case let .chatGPT(idToken)? = auth?.kind {
+            email = idToken.email
+        } else {
+            email = nil
+        }
+        return [
+            "allegedUserEmail": email ?? NSNull()
+        ].nullStripped(keepNulls: true)
     }
 
     fileprivate static func responseObject(id: Any, result: [String: Any]) -> [String: Any] {
@@ -184,12 +294,35 @@ public enum CodexAppServer {
         min(max(intParam(value, defaultValue: defaultListLimit), 1), maxListLimit)
     }
 
+    private static func modelListStart(cursor: String?, total: Int) throws -> Int {
+        guard let cursor else {
+            return 0
+        }
+        guard let start = Int(cursor) else {
+            throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+        }
+        guard start <= total else {
+            throw AppServerError.invalidRequest("cursor \(start) exceeds total models \(total)")
+        }
+        return start
+    }
+
     private static func intParam(_ value: Any?, defaultValue: Int) -> Int {
         if let int = value as? Int {
             return int
         }
         if let number = value as? NSNumber {
             return number.intValue
+        }
+        return defaultValue
+    }
+
+    private static func boolParam(_ value: Any?, defaultValue: Bool) -> Bool {
+        if let bool = value as? Bool {
+            return bool
+        }
+        if let number = value as? NSNumber {
+            return number.boolValue
         }
         return defaultValue
     }
@@ -215,12 +348,83 @@ public enum CodexAppServer {
         }.map(String.init).joined()
     }
 
+    private static func modelObject(_ preset: ModelPreset) -> [String: Any] {
+        [
+            "id": preset.id,
+            "model": preset.model,
+            "displayName": preset.displayName,
+            "description": preset.description,
+            "supportedReasoningEfforts": preset.supportedReasoningEfforts.map { effort in
+                [
+                    "reasoningEffort": effort.effort.rawValue,
+                    "description": effort.description
+                ]
+            },
+            "defaultReasoningEffort": preset.defaultReasoningEffort.rawValue,
+            "isDefault": preset.isDefault
+        ]
+    }
+
+    private static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
+        if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(configuration.environment)
+            ?? CodexAuthStorage.readOpenAIAPIKeyFromEnvironment(configuration.environment) {
+            return AppServerAuth(method: "apikey", token: apiKey, kind: .apiKey)
+        }
+
+        guard let auth = try CodexAuthStorage.loadAuthDotJSON(
+            codexHome: configuration.codexHome,
+            mode: configuration.authCredentialsStoreMode
+        ) else {
+            return nil
+        }
+        if let apiKey = auth.openAIAPIKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return AppServerAuth(method: "apikey", token: apiKey, kind: .apiKey)
+        }
+        if let tokens = auth.tokens, !tokens.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return AppServerAuth(method: "chatgpt", token: tokens.accessToken, kind: .chatGPT(tokens.idToken))
+        }
+        return nil
+    }
+
+    private static func planTypeWireValue(_ planType: ChatGPTPlanType?) -> String? {
+        switch planType {
+        case let .known(plan):
+            return plan.rawValue
+        case .unknown:
+            return "unknown"
+        case nil:
+            return nil
+        }
+    }
+
     private static func write(_ data: Data?, to stdout: FileHandle) throws {
         guard let data else {
             return
         }
         try stdout.write(contentsOf: data)
         try stdout.write(contentsOf: Data([0x0A]))
+    }
+}
+
+private struct AppServerAuth {
+    let method: String
+    let token: String
+    let kind: AppServerAuthKind
+}
+
+private enum AppServerAuthKind {
+    case apiKey
+    case chatGPT(IdTokenInfo)
+}
+
+private enum AppServerError: Error, CustomStringConvertible {
+    case invalidRequest(String)
+
+    var description: String {
+        switch self {
+        case let .invalidRequest(message):
+            return message
+        }
     }
 }
 
@@ -273,9 +477,31 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: [
                         "userAgent": userAgent
                     ])
+                case "getAuthStatus":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.authStatusResult(params: params, configuration: configuration)
+                    )
+                case "account/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.accountResult(configuration: configuration)
+                    )
+                case "userInfo":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.userInfoResult(configuration: configuration)
+                    )
+                case "model/list":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                    )
                 default:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: "method not found: \(method)")
                 }
+            } catch let error as AppServerError {
+                response = CodexAppServer.errorObject(id: id, code: -32600, message: error.description)
             } catch {
                 response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
             }
@@ -386,8 +612,11 @@ private struct RolloutSummary {
 }
 
 private extension Dictionary where Key == String, Value == Any {
-    func nullStripped() -> [String: Any] {
+    func nullStripped(keepNulls: Bool = false) -> [String: Any] {
         compactMapValues { value in
+            if keepNulls, value is NSNull {
+                return value
+            }
             if value is NSNull {
                 return nil
             }

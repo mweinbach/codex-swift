@@ -318,7 +318,7 @@ Source baseline inspected for this scaffold:
 - Initial `codex-rs/mcp-server` stdio surface
   - executable `codex mcp-server` now runs a Swift-native newline-delimited JSON-RPC loop with initialize, ping, tools/list, and tools/call handling; the `codex` MCP tool delegates to the existing non-interactive exec runtime with model/profile/cwd/approval/sandbox/config overrides, while `codex-reply` remains a listed but not-yet-wired tool
 - Initial `codex-rs/app-server` rollout-listing surface
-  - executable `codex app-server` now runs a Swift-native newline-delimited app-server JSON-RPC loop for initialize, `getUserAgent`, v2 `thread/list`, and legacy `listConversations`, backed by saved rollout files with provider filtering, pagination cursors, preview extraction, session source mapping, and thread/conversation response shapes
+  - executable `codex app-server` now runs a Swift-native newline-delimited app-server JSON-RPC loop for initialize, `getUserAgent`, v2 `thread/list`, v2 `model/list`, v2 `account/read`, legacy `getAuthStatus`, legacy `userInfo`, and legacy `listConversations`, backed by saved rollout files with provider filtering, pagination cursors, preview extraction, session source mapping, model picker data, auth/account status projection, and thread/conversation response shapes
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
 
 ## Known Gaps
