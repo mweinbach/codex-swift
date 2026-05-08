@@ -23,6 +23,7 @@ let exitCode = await cli.runAsync(
     loginRunner: runLoginCommand,
     logoutRunner: runLogoutCommand,
     featuresRunner: runFeaturesCommand,
+    resumeRunner: runResumeCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
     mcpRunner: runMcpCommand,
@@ -192,6 +193,23 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
             exitCode: 1,
             stderrMessage: "Windows sandbox is only available on Windows"
         )
+    }
+}
+
+private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let codexHome = try CodexHome.find()
+    let resolution = try ResumeCommandResolver.resolve(request, codexHome: codexHome)
+    let output = ResumeCommandFormatter.render(resolution)
+
+    switch resolution {
+    case .session:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stdoutMessage: output,
+            stderrMessage: "codex-swift: resume target resolved, but interactive resume runtime is not complete yet."
+        )
+    case .picker:
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
     }
 }
 

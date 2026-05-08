@@ -267,6 +267,8 @@ Source baseline inspected for this scaffold:
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
   - conversation path response payloads, resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
+- `codex-rs/exec/src/lib.rs` resume target resolution
+  - `codex resume` parser-to-runtime bridge for explicit session IDs, `--last`, provider-filtered newest-session lookup, `--all` provider bypass, and non-interactive picker listing over saved rollout files
 - `codex-rs/protocol/src/protocol.rs` session configuration event model
   - session-configured payloads with conversation id, model/provider, approval and sandbox policies, history metadata, optional reasoning effort, optional recursive initial messages, and rollout path
 - `codex-rs/protocol/src/protocol.rs` response-wrapper event models
@@ -308,6 +310,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 
 - interactive TUI runtime
 - non-interactive `exec`
+- full resume continuation after rollout target resolution
 - exec runtime event emission
 - model provider configuration and auth
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
