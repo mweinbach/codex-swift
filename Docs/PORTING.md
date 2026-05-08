@@ -166,6 +166,8 @@ Source baseline inspected for this scaffold:
   - rollout response-item and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
 - `codex-rs/core/src/state/turn.rs`
   - turn-local task ordering/replacement/removal semantics, pending approval map behavior, pending input buffering, take-and-clear behavior, and active-turn pending cleanup
+- `codex-rs/login/src/pkce.rs`
+  - PKCE verifier generation from 64 random bytes, base64url no-padding encoding, and S256 code-challenge derivation
 
 ## Known Gaps
 
