@@ -120,6 +120,8 @@ Source baseline inspected for this scaffold:
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
   - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, and default shell fallback ordering
+- `codex-rs/core/src/environment_context.rs`
+  - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, and readiness dispatch/error-wrapping seam
 - `codex-rs/common/src/config_summary.rs`
