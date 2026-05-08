@@ -118,6 +118,8 @@ Source baseline inspected for this scaffold:
   - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
+- `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
+  - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, Chat Completions tool JSON rewriting, static tool ordering, and parallel-tool-call support flags
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
@@ -165,6 +167,7 @@ The executable is not functionally equivalent yet. It currently exposes the comm
 - LM Studio/Ollama provider clients, model download/load readiness, and local-provider runtime wiring
 - Responses API streaming and tool orchestration
 - sandbox execution
+- tool handler registry dispatch and dynamic MCP tool conversion
 - MCP server/client management
 - app-server protocol and server runtime
 - apply-patch runtime
