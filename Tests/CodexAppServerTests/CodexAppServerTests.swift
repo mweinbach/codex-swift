@@ -5,6 +5,27 @@ import XCTest
 
 final class CodexAppServerTests: XCTestCase {
     private var retainedTemporaryDirectories: [TemporaryDirectory] = []
+    private static let rateLimitsUsageJSON = """
+    {
+      "plan_type": "pro",
+      "rate_limit": {
+        "allowed": true,
+        "limit_reached": false,
+        "primary_window": {
+          "used_percent": 42,
+          "limit_window_seconds": 3600,
+          "reset_after_seconds": 120,
+          "reset_at": 1737000000
+        },
+        "secondary_window": {
+          "used_percent": 5,
+          "limit_window_seconds": 86400,
+          "reset_after_seconds": 43200,
+          "reset_at": 1737043200
+        }
+      }
+    }
+    """
 
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
         let temp = try TemporaryDirectory()
@@ -510,6 +531,127 @@ final class CodexAppServerTests: XCTestCase {
         )
         let userInfo = try XCTUnwrap(userInfoResponse["result"] as? [String: Any])
         XCTAssertEqual(userInfo["allegedUserEmail"] as? String, "user@example.com")
+    }
+
+    func testAccountRateLimitsReadRequiresAuthentication() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "codex account authentication required to read rate limits")
+    }
+
+    func testAccountRateLimitsReadRequiresChatGPTAuthentication() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "chatgpt authentication required to read rate limits")
+    }
+
+    func testAccountRateLimitsReadUsesFetcherAndReturnsV2Shape() async throws {
+        let temp = try TemporaryDirectory()
+        try #"chatgpt_base_url = "https://chatgpt.test/base/""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
+        let fetcher = AppServerRecordingAccountRateLimitsFetcher(snapshot: RateLimitSnapshot(
+            primary: RateLimitWindow(usedPercent: 42, windowMinutes: 60, resetsAt: 1_737_000_000),
+            secondary: RateLimitWindow(usedPercent: 5, windowMinutes: 1_440, resetsAt: 1_737_043_200),
+            credits: nil,
+            planType: .pro
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, accountRateLimitsFetcher: fetcher)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            configuration: configuration
+        )
+
+        let requests = await fetcher.requests
+        XCTAssertEqual(requests, [
+            AppServerRecordingAccountRateLimitsFetcher.Request(
+                baseURL: "https://chatgpt.test/base/",
+                accessToken: "access-token",
+                accountID: "acct-test"
+            )
+        ])
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let rateLimits = try XCTUnwrap(result["rateLimits"] as? [String: Any])
+        XCTAssertEqual(rateLimits["planType"] as? String, "pro")
+        XCTAssertTrue(rateLimits["credits"] is NSNull)
+
+        let primary = try XCTUnwrap(rateLimits["primary"] as? [String: Any])
+        XCTAssertEqual(primary["usedPercent"] as? Double, 42)
+        XCTAssertEqual(primary["windowDurationMins"] as? Int, 60)
+        XCTAssertEqual(primary["resetsAt"] as? Int, 1_737_000_000)
+
+        let secondary = try XCTUnwrap(rateLimits["secondary"] as? [String: Any])
+        XCTAssertEqual(secondary["usedPercent"] as? Double, 5)
+        XCTAssertEqual(secondary["windowDurationMins"] as? Int, 1_440)
+        XCTAssertEqual(secondary["resetsAt"] as? Int, 1_737_043_200)
+    }
+
+    func testURLSessionAccountRateLimitsFetcherUsesCodexAPIUsagePath() async throws {
+        let capture = AppServerRequestCapture()
+        let fetcher = URLSessionAccountRateLimitsFetcher { request in
+            await capture.append(request)
+            return AccountRateLimitsHTTPResponse(statusCode: 200, body: Data(Self.rateLimitsUsageJSON.utf8))
+        }
+
+        let snapshot = try await fetcher.fetchRateLimits(
+            baseURL: "https://api.example.test/",
+            accessToken: "chatgpt-token",
+            accountID: "account-123"
+        )
+
+        let requests = await capture.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.url, URL(string: "https://api.example.test/api/codex/usage"))
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.headers["Authorization"] ?? nil, "Bearer chatgpt-token")
+        XCTAssertEqual(request.headers["chatgpt-account-id"] ?? nil, "account-123")
+        XCTAssertEqual(snapshot.primary?.usedPercent, 42)
+        XCTAssertEqual(snapshot.primary?.windowMinutes, 60)
+        XCTAssertEqual(snapshot.secondary?.windowMinutes, 1_440)
+        XCTAssertEqual(snapshot.planType, .pro)
+    }
+
+    func testURLSessionAccountRateLimitsFetcherUsesWhamUsagePathForChatGPTBackend() async throws {
+        let capture = AppServerRequestCapture()
+        let fetcher = URLSessionAccountRateLimitsFetcher { request in
+            await capture.append(request)
+            return AccountRateLimitsHTTPResponse(statusCode: 200, body: Data(Self.rateLimitsUsageJSON.utf8))
+        }
+
+        _ = try await fetcher.fetchRateLimits(
+            baseURL: "https://chatgpt.com/",
+            accessToken: "chatgpt-token",
+            accountID: "account-123"
+        )
+
+        let requests = await capture.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.url, URL(string: "https://chatgpt.com/backend-api/wham/usage"))
     }
 
     func testAuthReadAPIsRespectProviderWithoutOpenAIAuth() throws {
@@ -1148,7 +1290,8 @@ final class CodexAppServerTests: XCTestCase {
         codexHome: URL,
         requiresOpenAIAuth: Bool = true,
         feedback: CodexFeedback = CodexFeedback(),
-        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
+        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher()
     ) -> CodexAppServerConfiguration {
         CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -1159,7 +1302,8 @@ final class CodexAppServerTests: XCTestCase {
                     .path
             ],
             feedback: feedback,
-            feedbackUploadTransport: feedbackUploadTransport
+            feedbackUploadTransport: feedbackUploadTransport,
+            accountRateLimitsFetcher: accountRateLimitsFetcher
         )
     }
 
@@ -1313,6 +1457,44 @@ private actor AppServerRecordingFeedbackUploadTransport: FeedbackUploadTransport
 
     func upload(_ request: FeedbackUploadRequest) async throws {
         requests.append(request)
+    }
+}
+
+private actor AppServerRequestCapture {
+    struct Request: Equatable {
+        let url: URL?
+        let method: String?
+        let headers: [String: String]
+    }
+
+    private(set) var requests: [Request] = []
+
+    func append(_ request: URLRequest) {
+        requests.append(Request(
+            url: request.url,
+            method: request.httpMethod,
+            headers: request.allHTTPHeaderFields ?? [:]
+        ))
+    }
+}
+
+private actor AppServerRecordingAccountRateLimitsFetcher: AccountRateLimitsFetching {
+    struct Request: Equatable {
+        let baseURL: String
+        let accessToken: String
+        let accountID: String
+    }
+
+    private let snapshot: RateLimitSnapshot
+    private(set) var requests: [Request] = []
+
+    init(snapshot: RateLimitSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot {
+        requests.append(Request(baseURL: baseURL, accessToken: accessToken, accountID: accountID))
+        return snapshot
     }
 }
 

@@ -12,6 +12,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let activeProfile: String?
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
+    public let accountRateLimitsFetcher: any AccountRateLimitsFetching
 
     public init(
         codexHome: URL,
@@ -23,7 +24,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
-        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
+        feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher()
     ) {
         self.codexHome = codexHome
         self.defaultModelProvider = defaultModelProvider
@@ -35,6 +37,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.activeProfile = activeProfile
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
+        self.accountRateLimitsFetcher = accountRateLimitsFetcher
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -46,6 +49,150 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.authCredentialsStoreMode == rhs.authCredentialsStoreMode &&
             lhs.environment == rhs.environment &&
             lhs.activeProfile == rhs.activeProfile
+    }
+}
+
+public protocol AccountRateLimitsFetching: Sendable {
+    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot
+}
+
+public struct AccountRateLimitsHTTPResponse: Sendable {
+    public let statusCode: Int
+    public let body: Data
+
+    public init(statusCode: Int, body: Data) {
+        self.statusCode = statusCode
+        self.body = body
+    }
+}
+
+public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
+    public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
+
+    private let transport: Transport
+
+    public init() {
+        self.transport = URLSessionAccountRateLimitsFetcher.urlSessionTransport
+    }
+
+    public init(transport: @escaping Transport) {
+        self.transport = transport
+    }
+
+    public func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot {
+        let normalizedBaseURL = Self.normalizedBaseURL(baseURL)
+        let usagePath = normalizedBaseURL.contains("/backend-api") ? "/wham/usage" : "/api/codex/usage"
+        let endpointText = normalizedBaseURL + usagePath
+        guard let url = URL(string: endpointText) else {
+            throw AccountRateLimitsFetchError.invalidURL(endpointText)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+
+        let response = try await transport(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw AccountRateLimitsFetchError.httpStatus(response.statusCode)
+        }
+
+        let payload = try JSONDecoder().decode(AccountRateLimitsUsageResponse.self, from: response.body)
+        return payload.snapshot
+    }
+
+    private static func urlSessionTransport(_ request: URLRequest) async throws -> AccountRateLimitsHTTPResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AccountRateLimitsFetchError.nonHTTPResponse
+        }
+        return AccountRateLimitsHTTPResponse(statusCode: httpResponse.statusCode, body: data)
+    }
+
+    private static func normalizedBaseURL(_ baseURL: String) -> String {
+        var normalized = baseURL
+        while normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        if (normalized.hasPrefix("https://chatgpt.com") || normalized.hasPrefix("https://chat.openai.com"))
+            && !normalized.contains("/backend-api")
+        {
+            normalized += "/backend-api"
+        }
+        return normalized
+    }
+}
+
+private enum AccountRateLimitsFetchError: Error, CustomStringConvertible {
+    case invalidURL(String)
+    case nonHTTPResponse
+    case httpStatus(Int)
+
+    var description: String {
+        switch self {
+        case let .invalidURL(url):
+            return "invalid usage URL: \(url)"
+        case .nonHTTPResponse:
+            return "non-HTTP response"
+        case let .httpStatus(status):
+            return "HTTP status \(status)"
+        }
+    }
+}
+
+private struct AccountRateLimitsUsageResponse: Decodable {
+    let planType: PlanType?
+    let rateLimit: AccountUsageRateLimit?
+
+    private enum CodingKeys: String, CodingKey {
+        case planType = "plan_type"
+        case rateLimit = "rate_limit"
+    }
+
+    var snapshot: RateLimitSnapshot {
+        RateLimitSnapshot(
+            primary: rateLimit?.primaryWindow?.rateLimitWindow,
+            secondary: rateLimit?.secondaryWindow?.rateLimitWindow,
+            credits: nil,
+            planType: planType
+        )
+    }
+}
+
+private struct AccountUsageRateLimit: Decodable {
+    let primaryWindow: AccountUsageWindow?
+    let secondaryWindow: AccountUsageWindow?
+
+    private enum CodingKeys: String, CodingKey {
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
+    }
+}
+
+private struct AccountUsageWindow: Decodable {
+    let usedPercent: Double
+    let limitWindowSeconds: Int64?
+    let resetAt: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case usedPercent = "used_percent"
+        case limitWindowSeconds = "limit_window_seconds"
+        case resetAt = "reset_at"
+    }
+
+    var rateLimitWindow: RateLimitWindow {
+        RateLimitWindow(
+            usedPercent: usedPercent,
+            windowMinutes: Self.windowMinutes(from: limitWindowSeconds),
+            resetsAt: resetAt
+        )
+    }
+
+    private static func windowMinutes(from seconds: Int64?) -> Int64? {
+        guard let seconds, seconds > 0 else {
+            return nil
+        }
+        return (seconds + 59) / 60
     }
 }
 
@@ -637,6 +784,48 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func accountRateLimitsResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+        guard let auth = try currentAuth(configuration: configuration) else {
+            throw AppServerError.invalidRequest("codex account authentication required to read rate limits")
+        }
+        guard case .chatGPT = auth.kind else {
+            throw AppServerError.invalidRequest("chatgpt authentication required to read rate limits")
+        }
+        guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accountID.isEmpty
+        else {
+            throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
+        }
+
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to construct backend client: \(error)")
+        }
+
+        do {
+            let snapshot = try runAsyncBlocking {
+                try await configuration.accountRateLimitsFetcher.fetchRateLimits(
+                    baseURL: runtimeConfig.chatgptBaseURL,
+                    accessToken: auth.token,
+                    accountID: accountID
+                )
+            }
+            return [
+                "rateLimits": rateLimitSnapshotObject(snapshot)
+            ].nullStripped(keepNulls: true)
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("failed to fetch codex rate limits: \(error)")
+        }
+    }
+
     fileprivate static func userInfoResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         let auth = try currentAuth(configuration: configuration)
         let email: String?
@@ -647,6 +836,37 @@ public enum CodexAppServer {
         }
         return [
             "allegedUserEmail": email ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func rateLimitSnapshotObject(_ snapshot: RateLimitSnapshot) -> [String: Any] {
+        [
+            "primary": rateLimitWindowObject(snapshot.primary),
+            "secondary": rateLimitWindowObject(snapshot.secondary),
+            "credits": creditsSnapshotObject(snapshot.credits),
+            "planType": snapshot.planType?.rawValue ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func rateLimitWindowObject(_ window: RateLimitWindow?) -> Any {
+        guard let window else {
+            return NSNull()
+        }
+        return [
+            "usedPercent": window.usedPercent,
+            "windowDurationMins": window.windowMinutes ?? NSNull(),
+            "resetsAt": window.resetsAt ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func creditsSnapshotObject(_ credits: CreditsSnapshot?) -> Any {
+        guard let credits else {
+            return NSNull()
+        }
+        return [
+            "hasCredits": credits.hasCredits,
+            "unlimited": credits.unlimited,
+            "balance": credits.balance ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
 
@@ -678,20 +898,19 @@ public enum CodexAppServer {
         return try? JSONSerialization.data(withJSONObject: response)
     }
 
-    private static func runAsyncBlocking(_ operation: @escaping @Sendable () async throws -> Void) throws {
+    private static func runAsyncBlocking<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
-        let result = BlockingAsyncResult()
+        let result = BlockingAsyncResult<T>()
         Task {
             do {
-                try await operation()
-                result.set(.success(()))
+                result.set(.success(try await operation()))
             } catch {
                 result.set(.failure(error))
             }
             semaphore.signal()
         }
         semaphore.wait()
-        try result.get().get()
+        return try result.get().get()
     }
 
     fileprivate static func encodeMessages(_ messages: [[String: Any]]) -> Data? {
@@ -1804,7 +2023,7 @@ public enum CodexAppServer {
     private static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
         if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(configuration.environment)
             ?? CodexAuthStorage.readOpenAIAPIKeyFromEnvironment(configuration.environment) {
-            return AppServerAuth(method: "apikey", token: apiKey, kind: .apiKey)
+            return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
         }
 
         guard let auth = try CodexAuthStorage.loadAuthDotJSON(
@@ -1814,10 +2033,15 @@ public enum CodexAppServer {
             return nil
         }
         if let apiKey = auth.openAIAPIKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return AppServerAuth(method: "apikey", token: apiKey, kind: .apiKey)
+            return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
         }
         if let tokens = auth.tokens, !tokens.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return AppServerAuth(method: "chatgpt", token: tokens.accessToken, kind: .chatGPT(tokens.idToken))
+            return AppServerAuth(
+                method: "chatgpt",
+                token: tokens.accessToken,
+                accountID: tokens.accountID ?? tokens.idToken.chatGPTAccountID,
+                kind: .chatGPT(tokens.idToken)
+            )
         }
         return nil
     }
@@ -1845,6 +2069,7 @@ public enum CodexAppServer {
 private struct AppServerAuth {
     let method: String
     let token: String
+    let accountID: String?
     let kind: AppServerAuthKind
 }
 
@@ -1853,17 +2078,17 @@ private enum AppServerAuthKind {
     case chatGPT(IdTokenInfo)
 }
 
-private final class BlockingAsyncResult: @unchecked Sendable {
+private final class BlockingAsyncResult<T>: @unchecked Sendable {
     private let lock = NSLock()
-    private var result: Result<Void, Error>?
+    private var result: Result<T, Error>?
 
-    func set(_ result: Result<Void, Error>) {
+    func set(_ result: Result<T, Error>) {
         lock.lock()
         self.result = result
         lock.unlock()
     }
 
-    func get() -> Result<Void, Error> {
+    func get() -> Result<T, Error> {
         lock.lock()
         defer { lock.unlock() }
         return result ?? .failure(AppServerError.internalError("async operation did not complete"))
@@ -1986,6 +2211,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.accountResult(configuration: configuration)
+                    )
+                case "account/rateLimits/read":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.accountRateLimitsResult(configuration: configuration)
                     )
                 case "userInfo":
                     response = CodexAppServer.responseObject(
