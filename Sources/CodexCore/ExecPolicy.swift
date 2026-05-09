@@ -1859,7 +1859,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split"].contains(methodName)
         else {
             return nil
         }
@@ -1899,9 +1899,60 @@ public final class PolicyParser {
         case "endswith":
             let suffix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .bool(receiver.hasSuffix(suffix))
+        case "lower":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .string(receiver.lowercased())
+        case "upper":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .string(receiver.uppercased())
+        case "strip":
+            let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .string(trimmingStarlarkString(receiver, characters: characters, edges: [.leading, .trailing]))
+        case "lstrip":
+            let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .string(trimmingStarlarkString(receiver, characters: characters, edges: .leading))
+        case "rstrip":
+            let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .string(trimmingStarlarkString(receiver, characters: characters, edges: .trailing))
+        case "split":
+            let separator = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            guard !separator.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return .array(receiver.components(separatedBy: separator).map(ConfigValue.string))
         default:
             return nil
         }
+    }
+
+    private struct StarlarkTrimEdges: OptionSet {
+        let rawValue: Int
+
+        static let leading = StarlarkTrimEdges(rawValue: 1 << 0)
+        static let trailing = StarlarkTrimEdges(rawValue: 1 << 1)
+    }
+
+    private static func requireNoStringMethodArguments(_ rawArguments: [String], expression: String) throws {
+        guard rawArguments.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func parseOptionalStringMethodArgument(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> String? {
+        if rawArguments.isEmpty {
+            return nil
+        }
+        return try parseSingleStringMethodArgument(
+            rawArguments,
+            expression: expression,
+            constants: constants,
+            functions: functions
+        )
     }
 
     private static func parseSingleStringMethodArgument(
@@ -1920,6 +1971,38 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
         return value
+    }
+
+    private static func trimmingStarlarkString(
+        _ string: String,
+        characters: String?,
+        edges: StarlarkTrimEdges
+    ) -> String {
+        let shouldTrim: (Character) -> Bool
+        if let characters {
+            let trimCharacters = Set(characters)
+            shouldTrim = { trimCharacters.contains($0) }
+        } else {
+            shouldTrim = { $0.isWhitespace || $0.isNewline }
+        }
+
+        var lowerBound = string.startIndex
+        var upperBound = string.endIndex
+        if edges.contains(.leading) {
+            while lowerBound < upperBound, shouldTrim(string[lowerBound]) {
+                lowerBound = string.index(after: lowerBound)
+            }
+        }
+        if edges.contains(.trailing) {
+            while upperBound > lowerBound {
+                let previous = string.index(before: upperBound)
+                guard shouldTrim(string[previous]) else {
+                    break
+                }
+                upperBound = previous
+            }
+        }
+        return String(string[lowerBound..<upperBound])
     }
 
     private static func topLevelMethodDotIndex(in text: String) -> String.Index? {

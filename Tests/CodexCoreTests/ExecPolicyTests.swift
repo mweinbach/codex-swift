@@ -1155,6 +1155,54 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
+        let policy = try parsePolicy("""
+        RAW_TOOL = " Git "
+        TOOL = RAW_TOOL.strip().lower()
+        COMMANDS = "status,diff,log".split(",")
+        HOST_PARTS = "api.github.com".split(".")
+        PATH = ("//usr/bin/" + TOOL + "//").strip("/")
+        UPPER_TOOL = TOOL.upper()
+        PREFIX = "xxstatus".lstrip("x")
+        SUFFIX = "log!!".rstrip("!")
+
+        def normalize(raw):
+            return raw.strip().lower()
+
+        for command in COMMANDS:
+            if command == PREFIX or command == SUFFIX:
+                prefix_rule(
+                    [TOOL, command],
+                    "prompt",
+                    match = [f"{TOOL} {command}"],
+                    justification = "inspect " + normalize(f" {UPPER_TOOL} {command} "),
+                )
+
+        if ".".join(HOST_PARTS) == "api.github.com":
+            network_rule(".".join(HOST_PARTS), "https", "allow")
+
+        if PATH == "usr/bin/git":
+            host_executable(TOOL, ["/" + PATH])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "inspect git status"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .prompt,
+                justification: "inspect git log"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkConditionalExpressions() throws {
         let policy = try parsePolicy("""
         USE_GIT = False
