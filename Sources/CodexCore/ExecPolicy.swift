@@ -638,29 +638,37 @@ public final class PolicyParser {
     public func parse(_ policyIdentifier: String, _ policyFileContents: String) throws {
         let pendingValidationStartIndex = pendingExampleValidations.count
         let source = Self.stripLineComments(from: policyFileContents)
-        let prefixRuleBodies = try Self.extractCallBodies(
-            named: "prefix_rule",
-            from: source,
-            identifier: policyIdentifier
-        )
-        for body in prefixRuleBodies {
-            try addPrefixRule(from: body)
-        }
-        let networkRuleBodies = try Self.extractCallBodies(
-            named: "network_rule",
-            from: source,
-            identifier: policyIdentifier
-        )
-        for body in networkRuleBodies {
-            try addNetworkRule(from: body)
-        }
-        let hostExecutableBodies = try Self.extractCallBodies(
-            named: "host_executable",
-            from: source,
-            identifier: policyIdentifier
-        )
-        for body in hostExecutableBodies {
-            try addHostExecutable(from: body)
+        var constants: [String: ConfigValue] = [:]
+        for statement in Self.topLevelStatements(from: source) {
+            if let assignment = try Self.parseTopLevelLiteralAssignment(statement, constants: constants) {
+                constants[assignment.key] = assignment.value
+                continue
+            }
+
+            let prefixRuleBodies = try Self.extractCallBodies(
+                named: "prefix_rule",
+                from: statement,
+                identifier: policyIdentifier
+            )
+            for body in prefixRuleBodies {
+                try addPrefixRule(from: body, constants: constants)
+            }
+            let networkRuleBodies = try Self.extractCallBodies(
+                named: "network_rule",
+                from: statement,
+                identifier: policyIdentifier
+            )
+            for body in networkRuleBodies {
+                try addNetworkRule(from: body, constants: constants)
+            }
+            let hostExecutableBodies = try Self.extractCallBodies(
+                named: "host_executable",
+                from: statement,
+                identifier: policyIdentifier
+            )
+            for body in hostExecutableBodies {
+                try addHostExecutable(from: body, constants: constants)
+            }
         }
         try validatePendingExamples(from: pendingValidationStartIndex)
     }
@@ -669,8 +677,8 @@ public final class PolicyParser {
         policy
     }
 
-    private func addPrefixRule(from body: String) throws {
-        let arguments = try Self.parseArguments(body)
+    private func addPrefixRule(from body: String, constants: [String: ConfigValue]) throws {
+        let arguments = try Self.parseArguments(body, constants: constants)
         guard let patternValue = arguments["pattern"] else {
             throw ExecPolicyError.invalidPattern("missing pattern")
         }
@@ -711,8 +719,8 @@ public final class PolicyParser {
         pendingExampleValidations.append((rules, matchExamples, notMatchExamples))
     }
 
-    private func addNetworkRule(from body: String) throws {
-        let arguments = try Self.parseArguments(body)
+    private func addNetworkRule(from body: String, constants: [String: ConfigValue]) throws {
+        let arguments = try Self.parseArguments(body, constants: constants)
         let host = try Self.requireStringArgument(arguments, key: "host", function: "network_rule")
         let rawProtocol = try Self.requireStringArgument(arguments, key: "protocol", function: "network_rule")
         let rawDecision = try Self.requireStringArgument(arguments, key: "decision", function: "network_rule")
@@ -724,8 +732,8 @@ public final class PolicyParser {
         )
     }
 
-    private func addHostExecutable(from body: String) throws {
-        let arguments = try Self.parseArguments(body)
+    private func addHostExecutable(from body: String, constants: [String: ConfigValue]) throws {
+        let arguments = try Self.parseArguments(body, constants: constants)
         let name = try Self.requireStringArgument(arguments, key: "name", function: "host_executable")
         guard let pathsValue = arguments["paths"] else {
             throw ExecPolicyError.invalidRule("host_executable missing paths")
@@ -921,7 +929,92 @@ public final class PolicyParser {
         character == "_" || character.isLetter || character.isNumber
     }
 
-    private static func parseArguments(_ body: String) throws -> [String: ConfigValue] {
+    private static func parseTopLevelLiteralAssignment(
+        _ statement: String,
+        constants: [String: ConfigValue]
+    ) throws -> (key: String, value: ConfigValue)? {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let equalsIndex = trimmed.firstIndex(of: "=")
+        else {
+            return nil
+        }
+
+        let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(key) else {
+            return nil
+        }
+        let valueStart = trimmed.index(after: equalsIndex)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            return (key, try parsePolicyLiteral(valueText, constants: constants))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func topLevelStatements(from source: String) -> [String] {
+        var statements: [String] = []
+        var current = ""
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+
+        for character in source {
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "[":
+                squareDepth += 1
+                current.append(character)
+            case "]":
+                squareDepth -= 1
+                current.append(character)
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+            case "\n" where squareDepth == 0 && parenDepth == 0:
+                statements.append(current)
+                current = ""
+            case ";" where squareDepth == 0 && parenDepth == 0:
+                statements.append(current)
+                current = ""
+            default:
+                current.append(character)
+            }
+        }
+
+        statements.append(current)
+        return statements
+    }
+
+    private static func isStarlarkIdentifier(_ value: String) -> Bool {
+        guard let first = value.first,
+              first == "_" || first.isLetter
+        else {
+            return false
+        }
+        return value.dropFirst().allSatisfy(isStarlarkIdentifierCharacter)
+    }
+
+    private static func parseArguments(_ body: String, constants: [String: ConfigValue]) throws -> [String: ConfigValue] {
         var arguments: [String: ConfigValue] = [:]
         for piece in splitTopLevel(body, separator: ",") {
             let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -932,7 +1025,7 @@ public final class PolicyParser {
             let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
             let valueStart = trimmed.index(after: equalsIndex)
             let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            arguments[key] = try parsePolicyLiteral(valueText)
+            arguments[key] = try parsePolicyLiteral(valueText, constants: constants)
         }
         return arguments
     }
@@ -964,11 +1057,31 @@ public final class PolicyParser {
         return raw
     }
 
-    private static func parsePolicyLiteral(_ valueText: String) throws -> ConfigValue {
+    private static func parsePolicyLiteral(
+        _ valueText: String,
+        constants: [String: ConfigValue] = [:]
+    ) throws -> ConfigValue {
+        let trimmed = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let constant = constants[trimmed] {
+            return constant
+        }
+        if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
+            let body = String(trimmed.dropFirst().dropLast())
+            if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .array([])
+            }
+            return .array(try splitTopLevel(body, separator: ",").compactMap { item in
+                guard !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return nil
+                }
+                return try parsePolicyLiteral(item, constants: constants)
+            })
+        }
+
         do {
-            return try ConfigValueParser.parseTomlLiteral(valueText)
+            return try ConfigValueParser.parseTomlLiteral(trimmed)
         } catch {
-            return try ConfigValueParser.parseTomlLiteral(removingTrailingArrayCommas(from: valueText))
+            return try ConfigValueParser.parseTomlLiteral(removingTrailingArrayCommas(from: trimmed))
         }
     }
 

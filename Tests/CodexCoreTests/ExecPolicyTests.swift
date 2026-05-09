@@ -461,6 +461,91 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testParserResolvesTopLevelLiteralConstantsLikeRustStarlark() throws {
+        let policy = try parsePolicy("""
+        GIT = "git"
+        STATUS_PATTERN = [GIT, "status"]
+        PROMPT = "prompt"
+        MATCHES = [[GIT, "status"], "git status"]
+        GITHUB_HOST = "api.github.com"
+        GIT_PATHS = ["/usr/bin/git", "/usr/bin/git"]
+
+        prefix_rule(
+            pattern = STATUS_PATTERN,
+            decision = PROMPT,
+            match = MATCHES,
+        )
+        network_rule(host = GITHUB_HOST, protocol = "https", decision = "allow")
+        host_executable(name = GIT, paths = GIT_PATHS)
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
+    func testParserResolvesLiteralConstantsInNestedPatternAlternatives() throws {
+        let policy = try parsePolicy("""
+        PACKAGE_MANAGERS = ["npm", "pnpm"]
+        INSTALL = "install"
+        LEGACY_FLAGS = ["--legacy-peer-deps", "--no-save"]
+        pattern = [PACKAGE_MANAGERS, INSTALL, LEGACY_FLAGS]
+
+        prefix_rule(pattern = pattern)
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "npm"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(
+                        first: "npm",
+                        rest: [.single("install"), .alts(["--legacy-peer-deps", "--no-save"])]
+                    ),
+                    decision: .allow
+                )
+            ]
+        )
+        XCTAssertEqual(
+            policy.check(tokens("pnpm", "install", "--no-save"), heuristicsFallback: promptAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: tokens("pnpm", "install", "--no-save"),
+                    decision: .allow
+                )]
+            )
+        )
+    }
+
+    func testParserIgnoresUnsupportedUnusedAssignmentsLikeRustStarlarkAllows() throws {
+        let policy = try parsePolicy("""
+        UNUSED = [value for value in ["git"]]
+
+        prefix_rule(pattern = ["git", "status"])
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .allow
+                )
+            ]
+        )
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
