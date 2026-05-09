@@ -412,6 +412,26 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testPermissionProfileRuntimePermissionsMatchRust() throws {
+        let readOnly = PermissionProfile.readOnly()
+        XCTAssertEqual(readOnly.fileSystemSandboxPolicy, .restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ]))
+        XCTAssertEqual(readOnly.runtimePermissions.network, .restricted)
+
+        let unrestrictedManaged = PermissionProfile.managed(fileSystem: .unrestricted, network: .restricted)
+        XCTAssertEqual(unrestrictedManaged.fileSystemSandboxPolicy, .unrestricted)
+        XCTAssertEqual(unrestrictedManaged.runtimePermissions.network, .restricted)
+
+        let disabled = PermissionProfile.disabled
+        XCTAssertEqual(disabled.fileSystemSandboxPolicy, .unrestricted)
+        XCTAssertEqual(disabled.runtimePermissions.network, .enabled)
+
+        let external = PermissionProfile.external(network: .restricted)
+        XCTAssertEqual(external.fileSystemSandboxPolicy, .externalSandbox)
+        XCTAssertEqual(external.runtimePermissions.network, .restricted)
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

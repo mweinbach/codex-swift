@@ -402,6 +402,23 @@ public enum ManagedFileSystemPermissions: Equatable, Codable, Sendable {
     }
 }
 
+public enum FileSystemSandboxPolicy: Equatable, Sendable {
+    case restricted(entries: [FileSystemSandboxEntry], globScanMaxDepth: Int? = nil)
+    case unrestricted
+    case externalSandbox
+}
+
+public extension ManagedFileSystemPermissions {
+    var fileSystemSandboxPolicy: FileSystemSandboxPolicy {
+        switch self {
+        case let .restricted(entries, globScanMaxDepth):
+            return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+        case .unrestricted:
+            return .unrestricted
+        }
+    }
+}
+
 public enum PermissionProfile: Equatable, Codable, Sendable {
     case managed(fileSystem: ManagedFileSystemPermissions, network: NetworkSandboxPolicy)
     case disabled
@@ -484,6 +501,21 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
         case .disabled:
             return .enabled
         }
+    }
+
+    public var fileSystemSandboxPolicy: FileSystemSandboxPolicy {
+        switch self {
+        case let .managed(fileSystem, _):
+            return fileSystem.fileSystemSandboxPolicy
+        case .disabled:
+            return .unrestricted
+        case .external:
+            return .externalSandbox
+        }
+    }
+
+    public var runtimePermissions: (fileSystem: FileSystemSandboxPolicy, network: NetworkSandboxPolicy) {
+        (fileSystemSandboxPolicy, networkSandboxPolicy)
     }
 
     public static func readOnly() -> PermissionProfile {

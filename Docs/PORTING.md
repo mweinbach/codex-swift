@@ -515,6 +515,8 @@ Source baseline inspected for this scaffold:
   - Added Swift constructors for Rust's canonical read-only and workspace-write typed permission profiles, including special-path entries for project roots, temp roots, and protected metadata subpaths.
 - `codex-rs/protocol/src/models.rs` legacy sandbox to permission profile conversion
   - Added Swift helpers that derive `SandboxEnforcement`, `NetworkSandboxPolicy`, and typed `PermissionProfile` values from legacy `SandboxPolicy` inputs.
+- `codex-rs/protocol/src/models.rs` permission profile runtime permissions
+  - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 
 ## Known Gaps
 
