@@ -95,7 +95,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` review decision model
   - approval response wire strings, timeout decision, externally tagged execpolicy/network-policy amendment approval payloads, and denied default
 - `codex-rs/protocol/src/user_input.rs`
-  - tagged user input variants for text, images, local images, and skills
+  - tagged user input variants for text, images, local images, and skills, including `text_elements` byte ranges/placeholders
 - `codex-rs/protocol/src/plan_tool.rs`
   - update-plan argument wire shapes
 - `codex-rs/protocol/src/custom_prompts.rs`
@@ -107,7 +107,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, optional message phases, content items, function-call namespace preservation, function/custom-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, compaction alias decoding, and context-compaction item optional payload encoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
-  - turn item wire tags, user/hook-prompt/agent/plan/reasoning/web-search/image-view/image-generation/file-change/MCP-tool-call/context-compaction item models, hook-prompt XML continuation parsing/serialization, item IDs, legacy message/reasoning/web-search/image-view/image-generation/patch/MCP/context-compaction events, item started/completed timing fields, and item started/completed legacy bridging
+  - turn item wire tags, user/hook-prompt/agent/plan/reasoning/web-search/image-view/image-generation/file-change/MCP-tool-call/context-compaction item models, hook-prompt XML continuation parsing/serialization, item IDs, user-message local-image/text-element legacy metadata, legacy message/reasoning/web-search/image-view/image-generation/patch/MCP/context-compaction events, item started/completed timing fields, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper

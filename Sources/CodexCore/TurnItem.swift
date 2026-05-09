@@ -234,7 +234,7 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
 
     public var message: String {
         content.map { input in
-            if case let .text(text) = input {
+            if case let .text(text, _) = input {
                 return text
             }
             return ""
@@ -250,8 +250,34 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
         }
     }
 
+    public var localImagePaths: [String] {
+        content.compactMap { input in
+            if case let .localImage(path) = input {
+                return path
+            }
+            return nil
+        }
+    }
+
+    public var textElements: [TextElement] {
+        var rebasedElements: [TextElement] = []
+        var offset = 0
+        for input in content {
+            if case let .text(text, elements) = input {
+                rebasedElements.append(contentsOf: elements.map { $0.rebased(by: offset, in: text) })
+                offset += text.utf8.count
+            }
+        }
+        return rebasedElements
+    }
+
     public func asLegacyEvent() -> LegacyEventMessage {
-        .userMessage(UserMessageEvent(message: message, images: imageURLs))
+        .userMessage(UserMessageEvent(
+            message: message,
+            images: imageURLs,
+            localImages: localImagePaths,
+            textElements: textElements
+        ))
     }
 }
 

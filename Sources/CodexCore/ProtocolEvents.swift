@@ -11,27 +11,49 @@ public struct AgentMessageEvent: Equatable, Codable, Sendable {
 public struct UserMessageEvent: Equatable, Codable, Sendable {
     public let message: String
     public let images: [String]?
+    public let localImages: [String]
+    public let textElements: [TextElement]
 
     private enum CodingKeys: String, CodingKey {
         case message
         case images
+        case localImages = "local_images"
+        case textElements = "text_elements"
     }
 
     public init(message: String, images: [String]? = nil) {
         self.message = message
         self.images = images
+        self.localImages = []
+        self.textElements = []
+    }
+
+    public init(
+        message: String,
+        images: [String]?,
+        localImages: [String],
+        textElements: [TextElement]
+    ) {
+        self.message = message
+        self.images = images
+        self.localImages = localImages
+        self.textElements = textElements
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.message = try container.decode(String.self, forKey: .message)
         self.images = try container.decodeIfPresent([String].self, forKey: .images)
+        self.localImages = try container.decodeIfPresent([String].self, forKey: .localImages) ?? []
+        self.textElements = try container.decodeIfPresent([TextElement].self, forKey: .textElements) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(images, forKey: .images)
+        try container.encode(localImages, forKey: .localImages)
+        try container.encode(textElements, forKey: .textElements)
     }
 }
 

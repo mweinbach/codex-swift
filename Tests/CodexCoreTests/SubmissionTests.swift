@@ -12,7 +12,8 @@ final class SubmissionTests: XCTestCase {
                 "items": [
                     [
                         "type": "text",
-                        "text": "hello"
+                        "text": "hello",
+                        "text_elements": []
                     ]
                 ]
             ]
@@ -84,7 +85,8 @@ final class SubmissionTests: XCTestCase {
             "items": [
                 [
                     "type": "text",
-                    "text": "build"
+                    "text": "build",
+                    "text_elements": []
                 ]
             ],
             "cwd": "/repo",
@@ -208,7 +210,8 @@ final class SubmissionTests: XCTestCase {
             "items": [
                 [
                     "type": "text",
-                    "text": "ship it"
+                    "text": "ship it",
+                    "text_elements": []
                 ]
             ],
             "environments": [

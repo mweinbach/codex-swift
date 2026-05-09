@@ -77,7 +77,9 @@ final class SessionConfiguredEventTests: XCTestCase {
             "initial_messages": [
                 [
                     "type": "user_message",
-                    "message": "hello"
+                    "message": "hello",
+                    "local_images": [],
+                    "text_elements": []
                 ],
                 [
                     "type": "agent_message",

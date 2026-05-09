@@ -6,19 +6,33 @@ final class TurnItemTests: XCTestCase {
         let item = UserMessageItem(
             id: "user-1",
             content: [
-                .text("hello"),
+                .text("hello", textElements: [
+                    TextElement(byteRange: ByteRange(start: 0, end: 5), placeholder: nil)
+                ]),
                 .image(imageURL: "data:image/png;base64,aaa"),
                 .localImage(path: "/tmp/local.png"),
-                .text(" world"),
+                .text(" world", textElements: [
+                    TextElement(byteRange: ByteRange(start: 1, end: 6), placeholder: "earth")
+                ]),
                 .skill(name: "swift", path: "/skills/swift/SKILL.md")
             ]
         )
 
         XCTAssertEqual(item.message, "hello world")
         XCTAssertEqual(item.imageURLs, ["data:image/png;base64,aaa"])
+        XCTAssertEqual(item.localImagePaths, ["/tmp/local.png"])
+        XCTAssertEqual(item.textElements, [
+            TextElement(byteRange: ByteRange(start: 0, end: 5), placeholder: "hello"),
+            TextElement(byteRange: ByteRange(start: 6, end: 11), placeholder: "earth")
+        ])
         XCTAssertEqual(item.asLegacyEvent(), .userMessage(UserMessageEvent(
             message: "hello world",
-            images: ["data:image/png;base64,aaa"]
+            images: ["data:image/png;base64,aaa"],
+            localImages: ["/tmp/local.png"],
+            textElements: [
+                TextElement(byteRange: ByteRange(start: 0, end: 5), placeholder: "hello"),
+                TextElement(byteRange: ByteRange(start: 6, end: 11), placeholder: "earth")
+            ]
         )))
     }
 
@@ -28,7 +42,9 @@ final class TurnItemTests: XCTestCase {
         try XCTAssertJSONObjectEqual(event, [
             "type": "user_message",
             "message": "hello",
-            "images": []
+            "images": [],
+            "local_images": [],
+            "text_elements": []
         ])
     }
 
@@ -37,7 +53,9 @@ final class TurnItemTests: XCTestCase {
 
         try XCTAssertJSONObjectEqual(event, [
             "type": "user_message",
-            "message": "hello"
+            "message": "hello",
+            "local_images": [],
+            "text_elements": []
         ])
     }
 

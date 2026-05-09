@@ -209,7 +209,8 @@ final class RequestResponseOperationTests: XCTestCase {
             "items": [
                 [
                     "type": "text",
-                    "text": "deploy"
+                    "text": "deploy",
+                    "text_elements": []
                 ]
             ],
             "environments": [

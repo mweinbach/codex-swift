@@ -353,7 +353,7 @@ public extension ResponseInputItem {
 
     private static func contentItems(from input: UserInput, imageIndex: inout Int) -> [ContentItem] {
         switch input {
-        case let .text(text):
+        case let .text(text, _):
             return [.inputText(text: text)]
         case let .image(imageURL):
             imageIndex += 1
