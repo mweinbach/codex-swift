@@ -14312,21 +14312,37 @@ final class CodexAppServerMessageProcessor {
                         result: try commandExecTerminateResult(params: params)
                     )
                 case "process/spawn":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "process/spawn",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try processSpawnResult(params: params)
                     )
                 case "process/writeStdin":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "process/writeStdin",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try processWriteStdinResult(params: params)
                     )
                 case "process/resizePty":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "process/resizePty",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try processResizePtyResult(params: params)
                     )
                 case "process/kill":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "process/kill",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try processKillResult(params: params)

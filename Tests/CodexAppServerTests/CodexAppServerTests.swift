@@ -8419,12 +8419,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(zeroSizeError["message"] as? String, "command/exec size rows and cols must be greater than 0")
     }
 
+    func testProcessRoutesRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        for (index, method) in ["process/spawn", "process/writeStdin", "process/resizePty", "process/kill"].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(method)","params":{}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(method) requires experimentalApi capability")
+        }
+    }
+
     func testProcessFollowUpsReportNoActiveProcess() throws {
         let temp = try TemporaryDirectory()
 
         let write = try appServerResponse(
             #"{"id":1,"method":"process/writeStdin","params":{"processHandle":"proc-1","deltaBase64":"aGk="}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let writeError = try XCTUnwrap(write["error"] as? [String: Any])
         XCTAssertEqual(writeError["code"] as? Int, -32600)
@@ -8432,7 +8447,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let resize = try appServerResponse(
             #"{"id":2,"method":"process/resizePty","params":{"processHandle":"proc-1","size":{"rows":24,"cols":80}}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let resizeError = try XCTUnwrap(resize["error"] as? [String: Any])
         XCTAssertEqual(resizeError["code"] as? Int, -32600)
@@ -8440,7 +8456,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let kill = try appServerResponse(
             #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-1"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let killError = try XCTUnwrap(kill["error"] as? [String: Any])
         XCTAssertEqual(killError["code"] as? Int, -32600)
@@ -8452,7 +8469,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let emptyCommand = try appServerResponse(
             #"{"id":1,"method":"process/spawn","params":{"command":[],"processHandle":"proc-1","cwd":"\#(temp.url.path)"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let emptyCommandError = try XCTUnwrap(emptyCommand["error"] as? [String: Any])
         XCTAssertEqual(emptyCommandError["code"] as? Int, -32600)
@@ -8460,7 +8478,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let emptyHandle = try appServerResponse(
             #"{"id":2,"method":"process/spawn","params":{"command":["echo"],"processHandle":"","cwd":"\#(temp.url.path)"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let emptyHandleError = try XCTUnwrap(emptyHandle["error"] as? [String: Any])
         XCTAssertEqual(emptyHandleError["code"] as? Int, -32600)
@@ -8468,7 +8487,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let relativeCwd = try appServerResponse(
             #"{"id":3,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"relative"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let relativeCwdError = try XCTUnwrap(relativeCwd["error"] as? [String: Any])
         XCTAssertEqual(relativeCwdError["code"] as? Int, -32600)
@@ -8479,7 +8499,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let sizeWithoutTty = try appServerResponse(
             #"{"id":4,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","size":{"rows":24,"cols":80}}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let sizeWithoutTtyError = try XCTUnwrap(sizeWithoutTty["error"] as? [String: Any])
         XCTAssertEqual(sizeWithoutTtyError["code"] as? Int, -32602)
@@ -8487,7 +8508,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let negativeTimeout = try appServerResponse(
             #"{"id":5,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","timeoutMs":-1}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let negativeTimeoutError = try XCTUnwrap(negativeTimeout["error"] as? [String: Any])
         XCTAssertEqual(negativeTimeoutError["code"] as? Int, -32602)
@@ -8498,7 +8520,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let zeroSize = try appServerResponse(
             #"{"id":6,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","tty":true,"size":{"rows":0,"cols":80}}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
         XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)
@@ -8513,7 +8536,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let messages = try decodeMessages(processor.processLine(Data(
@@ -8559,7 +8583,8 @@ final class CodexAppServerTests: XCTestCase {
             ),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let messages = try decodeMessages(processor.processLine(Data(
@@ -8590,7 +8615,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         _ = try decodeMessages(processor.processLine(Data(
@@ -8625,7 +8651,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         _ = try decodeMessages(processor.processLine(Data(
@@ -8657,7 +8684,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8688,7 +8716,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8717,7 +8746,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8746,7 +8776,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8773,7 +8804,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8811,7 +8843,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decode(processor.processLine(Data(
@@ -8835,7 +8868,8 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             notificationSink: { data in
                 await notificationCapture.append(data)
-            }
+            },
+            experimentalAPIEnabled: true
         )
 
         let spawn = try decodeMessages(processor.processLine(Data(
@@ -8867,7 +8901,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let emptyWrite = try appServerResponse(
             #"{"id":1,"method":"process/writeStdin","params":{"processHandle":"proc-1"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let emptyWriteError = try XCTUnwrap(emptyWrite["error"] as? [String: Any])
         XCTAssertEqual(emptyWriteError["code"] as? Int, -32602)
@@ -8875,7 +8910,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let badBase64 = try appServerResponse(
             #"{"id":2,"method":"process/writeStdin","params":{"processHandle":"proc-1","deltaBase64":"%%%bad%%%"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let badBase64Error = try XCTUnwrap(badBase64["error"] as? [String: Any])
         XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
@@ -8883,7 +8919,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let zeroSize = try appServerResponse(
             #"{"id":3,"method":"process/resizePty","params":{"processHandle":"proc-1","size":{"rows":0,"cols":80}}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
         XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)

@@ -612,6 +612,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's method-level experimental API guard for `thread/turns/list` and `thread/turns/items/list`, while preserving the unsupported-items-list response once clients opt into `experimentalApi`.
 - `codex-rs/app-server-protocol` experimental memory-route gating
   - matched Rust's method-level experimental API guard for `thread/memoryMode/set` and `memory/reset`, while preserving memory-mode validation and memory-root reset behavior after opt-in.
+- `codex-rs/app-server-protocol` experimental process-route gating
+  - matched Rust's method-level experimental API guard for `process/spawn`, `process/writeStdin`, `process/resizePty`, and `process/kill`, preserving live process lifecycle behavior after opt-in.
 
 ## Known Gaps
 
