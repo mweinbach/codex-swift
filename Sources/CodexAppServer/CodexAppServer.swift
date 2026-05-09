@@ -2034,7 +2034,7 @@ public enum CodexAppServer {
         }
         let source = summary["source"] as? [String: Any]
         let sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let manifest = sourcePath.map(localPluginManifest(root:)) ?? (interface: NSNull(), keywords: [], description: nil)
+        let manifest = sourcePath.map(localPluginManifest(root:)) ?? (interface: NSNull(), keywords: [], description: nil, version: nil)
         let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config) } ?? []
         let hooks = sourcePath.map {
             localPluginHooks(
@@ -2087,7 +2087,7 @@ public enum CodexAppServer {
         }.standardizedFileURL
     }
 
-    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String], description: String?) {
+    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String], description: String?, version: String?) {
         let candidates = [
             root.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
             root.appendingPathComponent(".claude-plugin/plugin.json", isDirectory: false)
@@ -2096,13 +2096,14 @@ public enum CodexAppServer {
               let data = try? Data(contentsOf: path),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return (NSNull(), [], nil)
+            return (NSNull(), [], nil, nil)
         }
         let keywords = object["keywords"] as? [String] ?? []
         return (
             pluginInterfaceObject(object["interface"], pluginRoot: root),
             keywords,
-            object["description"] as? String
+            object["description"] as? String,
+            object["version"] as? String
         )
     }
 
@@ -2269,6 +2270,29 @@ public enum CodexAppServer {
         return boolConfig(entry, "enabled") ?? true
     }
 
+    private static func setLocalPluginEnabled(id: String, enabled: Bool, in config: inout ConfigValue) {
+        var root = configTable(config) ?? [:]
+        var plugins = root["plugins"].flatMap(configTable) ?? [:]
+        plugins[id] = .table(["enabled": .bool(enabled)])
+        root["plugins"] = .table(plugins)
+        config = .table(root)
+    }
+
+    private static func removeLocalPluginConfig(id: String, from config: inout ConfigValue) {
+        guard var root = configTable(config),
+              var plugins = root["plugins"].flatMap(configTable)
+        else {
+            return
+        }
+        plugins.removeValue(forKey: id)
+        if plugins.isEmpty {
+            root.removeValue(forKey: "plugins")
+        } else {
+            root["plugins"] = .table(plugins)
+        }
+        config = .table(root)
+    }
+
     private static func marketplaceRoot(forManifestPath manifestPath: URL) throws -> URL {
         let suffixes = [
             ".agents/plugins/marketplace.json",
@@ -2329,21 +2353,84 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
     }
 
-    fileprivate static func pluginInstallResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginInstallResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
         let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
-        _ = stringParam(params?["pluginName"]) ?? ""
+        let pluginName = stringParam(params?["pluginName"]) ?? ""
         switch (marketplacePath, remoteMarketplaceName) {
         case (.some, .some), (.none, .none):
             throw AppServerError.invalidRequest("plugin/install requires exactly one of marketplacePath or remoteMarketplaceName")
-        case (.some, .none):
-            throw AppServerError.invalidRequest("local plugin install is not implemented")
+        case (.some(let marketplacePath), .none):
+            return try localPluginInstallResult(
+                marketplacePath: marketplacePath,
+                pluginName: pluginName,
+                configuration: configuration
+            )
         case (.none, .some(let remoteMarketplaceName)):
             throw AppServerError.invalidRequest("remote plugin install is not enabled for marketplace \(remoteMarketplaceName)")
         }
     }
 
-    fileprivate static func pluginUninstallResult(params: [String: Any]?) throws -> [String: Any] {
+    private static func localPluginInstallResult(
+        marketplacePath: String,
+        pluginName: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let manifestPath = URL(fileURLWithPath: marketplacePath, isDirectory: false)
+        let marketplace = try pluginMarketplaceEntry(manifestPath: manifestPath, config: config)
+        let marketplaceName = marketplace["name"] as? String ?? ""
+        let summaries = marketplace["plugins"] as? [[String: Any]] ?? []
+        guard let summary = summaries.first(where: { $0["name"] as? String == pluginName }),
+              let source = summary["source"] as? [String: Any],
+              let sourcePath = (source["path"] as? String).map({ URL(fileURLWithPath: $0, isDirectory: true) })
+        else {
+            throw AppServerError.invalidRequest(
+                "plugin `\(pluginName)` was not found in marketplace `\(marketplaceName)`"
+            )
+        }
+        guard isDirectory(sourcePath) else {
+            throw AppServerError.invalidRequest("path does not exist or is not a directory")
+        }
+        let manifest = localPluginManifest(root: sourcePath)
+        let version = manifest.version?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? manifest.version!
+            : "local"
+        let installedRoot = configuration.codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .appendingPathComponent(pluginName, isDirectory: true)
+            .appendingPathComponent(version, isDirectory: true)
+        do {
+            if FileManager.default.fileExists(atPath: installedRoot.path) {
+                try FileManager.default.removeItem(at: installedRoot)
+            }
+            try FileManager.default.createDirectory(
+                at: installedRoot.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.copyItem(at: sourcePath, to: installedRoot)
+            setLocalPluginEnabled(id: "\(pluginName)@\(marketplaceName)", enabled: true, in: &config)
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        } catch {
+            throw AppServerError.internalError("failed to install local plugin: \(error)")
+        }
+
+        let summaryPolicy = summary["authPolicy"] as? String
+        return [
+            "authPolicy": summaryPolicy ?? "ON_INSTALL",
+            "appsNeedingAuth": []
+        ]
+    }
+
+    fileprivate static func pluginUninstallResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         let pluginID = stringParam(params?["pluginId"]) ?? ""
         guard isValidRemotePluginID(pluginID) || isLikelyLocalPluginID(pluginID) else {
             throw AppServerError.invalidRequest("invalid remote plugin id")
@@ -2351,7 +2438,35 @@ public enum CodexAppServer {
         if isValidRemotePluginID(pluginID) {
             throw AppServerError.invalidRequest("remote plugin uninstall is not enabled")
         }
-        throw AppServerError.invalidRequest("local plugin uninstall is not implemented")
+        try localPluginUninstall(pluginID: pluginID, configuration: configuration)
+        return [:]
+    }
+
+    private static func localPluginUninstall(
+        pluginID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let parts = pluginID.split(separator: "@", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        let pluginName = parts[0]
+        let marketplaceName = parts[1]
+        let cacheRoot = configuration.codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .appendingPathComponent(pluginName, isDirectory: true)
+        do {
+            if FileManager.default.fileExists(atPath: cacheRoot.path) {
+                try FileManager.default.removeItem(at: cacheRoot)
+            }
+            let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+            var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+            removeLocalPluginConfig(id: pluginID, from: &config)
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        } catch {
+            throw AppServerError.internalError("failed to uninstall local plugin: \(error)")
+        }
     }
 
     fileprivate static func marketplaceUpgradeResult(
@@ -7048,12 +7163,12 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/install":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginInstallResult(params: params)
+                        result: try CodexAppServer.pluginInstallResult(params: params, configuration: configuration)
                     )
                 case "plugin/uninstall":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginUninstallResult(params: params)
+                        result: try CodexAppServer.pluginUninstallResult(params: params, configuration: configuration)
                     )
                 case "marketplace/add":
                     response = CodexAppServer.responseObject(

@@ -2012,6 +2012,43 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginInstallAndUninstallLocalPluginCacheAndConfig() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let installedRoot = temp.url
+            .appendingPathComponent("plugins/cache/debug/weather/local", isDirectory: true)
+        let installedManifest = installedRoot
+            .appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false)
+
+        let install = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let installResult = try XCTUnwrap(install["result"] as? [String: Any])
+        XCTAssertEqual(installResult["authPolicy"] as? String, "ON_USE")
+        XCTAssertEqual((installResult["appsNeedingAuth"] as? [Any])?.count, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: installedManifest.path))
+        let configAfterInstall = try String(
+            contentsOf: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(configAfterInstall.contains(#"[plugins."weather@debug"]"#))
+        XCTAssertTrue(configAfterInstall.contains("enabled = true"))
+
+        let uninstall = try appServerResponse(
+            #"{"id":2,"method":"plugin/uninstall","params":{"pluginId":"weather@debug"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(uninstall["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: installedRoot.path))
+        let configAfterUninstall = try String(
+            contentsOf: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertFalse(configAfterUninstall.contains(#"[plugins."weather@debug"]"#))
+    }
+
     func testPluginUninstallValidatesIdsAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
 
