@@ -1375,6 +1375,47 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkHelperFunctionLocalStatements() throws {
+        let policy = try parsePolicy("""
+        def pattern(tool, raw_commands):
+            commands = raw_commands.split()
+            head, subcommand = [tool, commands[0]]
+            result = [head]
+            result.append(subcommand)
+            return result
+
+        def review_decision():
+            decisions = ["allow"]
+            decisions.append("prompt")
+            return decisions[1]
+
+        def host_from(parts):
+            parts.append("com")
+            return ".".join(parts)
+
+        def path(tool):
+            value = "/usr"
+            value += "/bin/" + tool
+            return value
+
+        prefix_rule(pattern("git", "status diff"), review_decision(), justification = "local helper")
+        network_rule(host_from(["api", "github"]), "https", "allow")
+        host_executable("git", [path("git")])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "local helper"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkDictLiteralsAndStringIndexing() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

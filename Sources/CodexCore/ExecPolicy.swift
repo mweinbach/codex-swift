@@ -632,7 +632,7 @@ public struct ExecPolicy: Equatable, Sendable {
 public final class PolicyParser {
     private struct StarlarkFunction {
         let parameters: [String]
-        let returnExpression: String
+        let body: [String]
     }
 
     private enum StarlarkStatementFlow: Equatable {
@@ -1837,20 +1837,13 @@ public final class PolicyParser {
         let nonEmpty = body
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard nonEmpty.count == 1,
-              let statement = nonEmpty.first,
-              let returnRange = topLevelKeywordRange("return", in: statement),
-              returnRange.lowerBound == statement.startIndex
+        guard nonEmpty.contains(where: { statement in
+            topLevelKeywordRange("return", in: statement)?.lowerBound == statement.startIndex
+        })
         else {
             throw ConfigOverrideError.invalidLiteral(body.joined(separator: "\n"))
         }
-
-        let expression = String(statement[returnRange.upperBound...])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !expression.isEmpty else {
-            throw ConfigOverrideError.invalidLiteral(statement)
-        }
-        return StarlarkFunction(parameters: parameters, returnExpression: expression)
+        return StarlarkFunction(parameters: parameters, body: nonEmpty)
     }
 
     private static func parseTopLevelForHeader(_ statement: String) throws -> (
@@ -3077,7 +3070,66 @@ public final class PolicyParser {
                 functions: functions
             )
         }
-        return try parsePolicyLiteral(function.returnExpression, constants: scopedConstants, functions: functions)
+        return try evaluateStarlarkFunction(function, constants: &scopedConstants, functions: functions, expression: text)
+    }
+
+    private static func evaluateStarlarkFunction(
+        _ function: StarlarkFunction,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> ConfigValue {
+        for statement in function.body {
+            if let returnRange = topLevelKeywordRange("return", in: statement),
+               returnRange.lowerBound == statement.startIndex {
+                let returnExpression = String(statement[returnRange.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !returnExpression.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(statement)
+                }
+                return try parsePolicyLiteral(returnExpression, constants: constants, functions: functions)
+            }
+
+            if try parseStarlarkLocalStatement(statement, constants: &constants, functions: functions) {
+                continue
+            }
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        throw ConfigOverrideError.invalidLiteral(expression)
+    }
+
+    private static func parseStarlarkLocalStatement(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        if try parseTopLevelDestructuringAssignment(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkDictMutationStatement(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkListMutationStatement(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkDeleteStatement(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkIndexedAssignment(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkAugmentedAdditionAssignment(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if let assignment = try parseTopLevelLiteralAssignment(
+            statement,
+            constants: constants,
+            functions: functions
+        ) {
+            constants[assignment.key] = assignment.value
+            return true
+        }
+        return false
     }
 
     private static func parseStarlarkBuiltinFunctionCall(
