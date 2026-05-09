@@ -1939,6 +1939,75 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func marketplaceAddResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let source = stringParam(params?["source"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let refName = stringParam(params?["refName"])
+        let sparsePaths = stringArrayParam(params?["sparsePaths"]) ?? []
+        guard !source.isEmpty else {
+            throw AppServerError.invalidRequest("marketplace source must not be empty")
+        }
+
+        let parsed = try parseMarketplaceSource(source, explicitRef: refName)
+        if !sparsePaths.isEmpty && parsed.kind != .git {
+            throw AppServerError.invalidRequest("--sparse is only supported for git marketplace sources")
+        }
+        guard parsed.kind == .local, let sourcePath = parsed.localPath else {
+            throw AppServerError.invalidRequest("git marketplace add is not implemented")
+        }
+
+        let marketplaceName = try validateLocalMarketplaceSourceRoot(sourcePath)
+        if marketplaceName == "openai-curated" {
+            throw AppServerError.invalidRequest(
+                "marketplace 'openai-curated' is reserved and cannot be added from this source"
+            )
+        }
+
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        if let existingRoot = configuredMarketplaceRootForLocalSource(sourcePath.path, in: config),
+           (try? validateLocalMarketplaceSourceRoot(URL(fileURLWithPath: existingRoot, isDirectory: true))) != nil {
+            try recordMarketplaceConfig(
+                name: marketplaceName,
+                sourceType: "local",
+                source: sourcePath.path,
+                refName: nil,
+                sparsePaths: [],
+                in: &config
+            )
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+            return [
+                "marketplaceName": marketplaceName,
+                "installedRoot": existingRoot,
+                "alreadyAdded": true
+            ]
+        }
+
+        if let existingRoot = configuredMarketplaceRoot(named: marketplaceName, in: config),
+           (try? validateLocalMarketplaceSourceRoot(URL(fileURLWithPath: existingRoot, isDirectory: true))) != nil {
+            throw AppServerError.invalidRequest(
+                "marketplace '\(marketplaceName)' is already added from a different source; remove it before adding this source"
+            )
+        }
+
+        try recordMarketplaceConfig(
+            name: marketplaceName,
+            sourceType: "local",
+            source: sourcePath.path,
+            refName: nil,
+            sparsePaths: [],
+            in: &config
+        )
+        try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        return [
+            "marketplaceName": marketplaceName,
+            "installedRoot": sourcePath.path,
+            "alreadyAdded": false
+        ]
+    }
+
     fileprivate static func externalAgentConfigDetectResult(params _: [String: Any]?) -> [String: Any] {
         ["items": []]
     }
@@ -3425,6 +3494,16 @@ public enum CodexAppServer {
         return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
     }
 
+    private enum MarketplaceSourceKind {
+        case local
+        case git
+    }
+
+    private struct ParsedMarketplaceSource {
+        let kind: MarketplaceSourceKind
+        let localPath: URL?
+    }
+
     private static func configuredGitMarketplaceNames(in stack: ConfigLayerStack) -> [String] {
         guard let userLayer = stack.getUserLayer(),
               let userConfig = configTable(userLayer.config),
@@ -3495,6 +3574,219 @@ public enum CodexAppServer {
             )
         }
         return root.path
+    }
+
+    private static func parseMarketplaceSource(_ source: String, explicitRef: String?) throws -> ParsedMarketplaceSource {
+        let split = splitMarketplaceSourceRef(source)
+        let baseSource = split.source
+        let refName = explicitRef ?? split.refName
+        if looksLikeLocalMarketplacePath(baseSource) {
+            if refName != nil {
+                throw AppServerError.invalidRequest("--ref is only supported for git marketplace sources")
+            }
+            let path = try resolveLocalMarketplaceSourcePath(baseSource)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory) else {
+                throw AppServerError.invalidRequest("failed to resolve local marketplace source path: No such file or directory (os error 2)")
+            }
+            guard isDirectory.boolValue else {
+                throw AppServerError.invalidRequest("local marketplace source must be a directory, not a file")
+            }
+            return ParsedMarketplaceSource(kind: .local, localPath: path)
+        }
+
+        if isGitMarketplaceSource(baseSource) || looksLikeGitHubMarketplaceShorthand(baseSource) {
+            return ParsedMarketplaceSource(kind: .git, localPath: nil)
+        }
+
+        throw AppServerError.invalidRequest(
+            "invalid marketplace source format; expected owner/repo, a git URL, or a local marketplace path"
+        )
+    }
+
+    private static func splitMarketplaceSourceRef(_ source: String) -> (source: String, refName: String?) {
+        if let range = source.range(of: "#", options: .backwards) {
+            let base = String(source[..<range.lowerBound])
+            let ref = String(source[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (base, ref.isEmpty ? nil : ref)
+        }
+        if !source.contains("://"),
+           !isSSHGitMarketplaceSource(source),
+           let range = source.range(of: "@", options: .backwards) {
+            let base = String(source[..<range.lowerBound])
+            let ref = String(source[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (base, ref.isEmpty ? nil : ref)
+        }
+        return (source, nil)
+    }
+
+    private static func looksLikeLocalMarketplacePath(_ source: String) -> Bool {
+        source.hasPrefix("/")
+            || source.hasPrefix("./")
+            || source.hasPrefix("../")
+            || source.hasPrefix("~/")
+            || source == "."
+            || source == ".."
+    }
+
+    private static func resolveLocalMarketplaceSourcePath(_ source: String) throws -> URL {
+        let expanded: String
+        if source.hasPrefix("~/") {
+            expanded = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(String(source.dropFirst(2)))
+                .path
+        } else {
+            expanded = source
+        }
+        let url = expanded.hasPrefix("/")
+            ? URL(fileURLWithPath: expanded, isDirectory: true)
+            : URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                .appendingPathComponent(expanded, isDirectory: true)
+        return url.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    private static func isGitMarketplaceSource(_ source: String) -> Bool {
+        source.hasPrefix("http://") || source.hasPrefix("https://") || isSSHGitMarketplaceSource(source)
+    }
+
+    private static func isSSHGitMarketplaceSource(_ source: String) -> Bool {
+        source.hasPrefix("ssh://") || (source.hasPrefix("git@") && source.contains(":"))
+    }
+
+    private static func looksLikeGitHubMarketplaceShorthand(_ source: String) -> Bool {
+        let parts = source.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty }) else {
+            return false
+        }
+        return parts.allSatisfy { part in
+            part.allSatisfy { character in
+                character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_" || character == ".")
+            }
+        }
+    }
+
+    private static func validateLocalMarketplaceSourceRoot(_ root: URL) throws -> String {
+        let manifestPath = localMarketplaceManifestPath(in: root)
+        guard let manifestPath else {
+            throw AppServerError.invalidRequest(
+                "invalid marketplace file `\(root.path)`: marketplace root does not contain a supported manifest"
+            )
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifestPath)
+        } catch {
+            throw AppServerError.internalError("failed to read marketplace file: \(error)")
+        }
+        let object: [String: Any]
+        do {
+            object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        } catch {
+            throw AppServerError.invalidRequest(
+                "invalid marketplace file `\(manifestPath.path)`: \(error)"
+            )
+        }
+        guard let name = object["name"] as? String else {
+            throw AppServerError.invalidRequest(
+                "invalid marketplace file `\(manifestPath.path)`: missing field `name`"
+            )
+        }
+        guard object["plugins"] is [Any] else {
+            throw AppServerError.invalidRequest(
+                "invalid marketplace file `\(manifestPath.path)`: missing field `plugins`"
+            )
+        }
+        try validatePluginSegment(name, kind: "marketplace name")
+        return name
+    }
+
+    private static func localMarketplaceManifestPath(in root: URL) -> URL? {
+        let candidates = [
+            root.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false),
+            root.appendingPathComponent(".claude-plugin/marketplace.json", isDirectory: false)
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private static func configuredMarketplaceRootForLocalSource(_ source: String, in config: ConfigValue) -> String? {
+        guard let marketplaces = marketplaceConfigTable(in: config) else {
+            return nil
+        }
+        for (name, value) in marketplaces {
+            guard let entry = configTable(value),
+                  stringConfig(entry, "source_type") == "local",
+                  stringConfig(entry, "source") == source
+            else {
+                continue
+            }
+            return configuredMarketplaceRoot(name: name, entry: entry)
+        }
+        return nil
+    }
+
+    private static func configuredMarketplaceRoot(named marketplaceName: String, in config: ConfigValue) -> String? {
+        guard let marketplaces = marketplaceConfigTable(in: config),
+              let value = marketplaces[marketplaceName],
+              let entry = configTable(value)
+        else {
+            return nil
+        }
+        return configuredMarketplaceRoot(name: marketplaceName, entry: entry)
+    }
+
+    private static func marketplaceConfigTable(in config: ConfigValue) -> [String: ConfigValue]? {
+        guard let root = configTable(config),
+              let marketplacesValue = root["marketplaces"],
+              let marketplaces = configTable(marketplacesValue)
+        else {
+            return nil
+        }
+        return marketplaces
+    }
+
+    private static func configuredMarketplaceRoot(name: String, entry: [String: ConfigValue]) -> String? {
+        switch stringConfig(entry, "source_type") {
+        case "local":
+            return stringConfig(entry, "source")
+        case "git":
+            return stringConfig(entry, "installed_root")
+                ?? FileManager.default.currentDirectoryPath + "/.tmp/marketplaces/" + name
+        default:
+            return nil
+        }
+    }
+
+    private static func recordMarketplaceConfig(
+        name: String,
+        sourceType: String,
+        source: String,
+        refName: String?,
+        sparsePaths: [String],
+        in config: inout ConfigValue
+    ) throws {
+        var root = configTable(config) ?? [:]
+        var marketplaces = root["marketplaces"].flatMap(configTable) ?? [:]
+        var entry: [String: ConfigValue] = [
+            "last_updated": .string(marketplaceTimestamp()),
+            "source_type": .string(sourceType),
+            "source": .string(source)
+        ]
+        if let refName {
+            entry["ref"] = .string(refName)
+        }
+        if !sparsePaths.isEmpty {
+            entry["sparse_paths"] = .array(sparsePaths.map(ConfigValue.string))
+        }
+        marketplaces[name] = .table(entry)
+        root["marketplaces"] = .table(marketplaces)
+        config = .table(root)
+    }
+
+    private static func marketplaceTimestamp() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: Date())
     }
 
     private struct FilesystemMetadata {
@@ -6293,6 +6585,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginUninstallResult(params: params)
+                    )
+                case "marketplace/add":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.marketplaceAddResult(params: params, configuration: configuration)
                     )
                 case "marketplace/remove":
                     response = CodexAppServer.responseObject(

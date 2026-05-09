@@ -1941,6 +1941,120 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testMarketplaceAddRecordsLocalDirectoryAndDuplicateSource() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url)
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        let sourceJSON = jsonString(sourcePath)
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":\#(sourceJSON)}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        XCTAssertEqual(firstResult["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(firstResult["installedRoot"] as? String, sourcePath)
+        XCTAssertEqual(firstResult["alreadyAdded"] as? Bool, false)
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains("[marketplaces.debug]"))
+        XCTAssertTrue(config.contains(#"source_type = "local""#))
+        XCTAssertTrue(config.contains(#"source = "\#(sourcePath)""#))
+
+        let duplicate = try appServerResponse(
+            #"{"id":2,"method":"marketplace/add","params":{"source":\#(sourceJSON)}}"#,
+            codexHome: temp.url
+        )
+        let duplicateResult = try XCTUnwrap(duplicate["result"] as? [String: Any])
+        XCTAssertEqual(duplicateResult["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(duplicateResult["installedRoot"] as? String, sourcePath)
+        XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
+    }
+
+    func testMarketplaceAddRejectsConflictingLocalSourceForExistingName() throws {
+        let temp = try TemporaryDirectory()
+        let firstRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url, suffix: "one")
+        let secondRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url, suffix: "two")
+        let firstJSON = jsonString(firstRoot.resolvingSymlinksInPath().standardizedFileURL.path)
+        let secondJSON = jsonString(secondRoot.resolvingSymlinksInPath().standardizedFileURL.path)
+
+        _ = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":\#(firstJSON)}}"#,
+            codexHome: temp.url
+        )
+
+        let conflict = try appServerResponse(
+            #"{"id":2,"method":"marketplace/add","params":{"source":\#(secondJSON)}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(conflict["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "marketplace 'debug' is already added from a different source; remove it before adding this source"
+        )
+    }
+
+    func testMarketplaceAddValidatesLocalSourceBeforeConfigMutation() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url)
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        let sourceJSON = jsonString(sourcePath)
+
+        let sparse = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":\#(sourceJSON),"sparsePaths":["plugins/debug"]}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (sparse["error"] as? [String: Any])?["message"] as? String,
+            "--sparse is only supported for git marketplace sources"
+        )
+
+        let ref = try appServerResponse(
+            #"{"id":2,"method":"marketplace/add","params":{"source":\#(sourceJSON),"refName":"main"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (ref["error"] as? [String: Any])?["message"] as? String,
+            "--ref is only supported for git marketplace sources"
+        )
+
+        let file = temp.url.appendingPathComponent("marketplace-file.json", isDirectory: false)
+        try "{}".write(to: file, atomically: true, encoding: .utf8)
+        let filePathJSON = jsonString(file.path)
+        let fileResponse = try appServerResponse(
+            #"{"id":3,"method":"marketplace/add","params":{"source":\#(filePathJSON)}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (fileResponse["error"] as? [String: Any])?["message"] as? String,
+            "local marketplace source must be a directory, not a file"
+        )
+
+        let invalid = try appServerResponse(
+            #"{"id":4,"method":"marketplace/add","params":{"source":"not a source"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (invalid["error"] as? [String: Any])?["message"] as? String,
+            "invalid marketplace source format; expected owner/repo, a git URL, or a local marketplace path"
+        )
+
+        let missingManifestRoot = temp.url.appendingPathComponent("missing-manifest", isDirectory: true)
+        try FileManager.default.createDirectory(at: missingManifestRoot, withIntermediateDirectories: true)
+        let missingManifestJSON = jsonString(missingManifestRoot.path)
+        let missingManifest = try appServerResponse(
+            #"{"id":5,"method":"marketplace/add","params":{"source":\#(missingManifestJSON)}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (missingManifest["error"] as? [String: Any])?["message"] as? String,
+            "invalid marketplace file `\(missingManifestRoot.path)`: marketplace root does not contain a supported manifest"
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("config.toml").path))
+    }
+
     func testMarketplaceRemoveDeletesConfigAndInstalledRoot() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -4779,6 +4893,27 @@ final class CodexAppServerTests: XCTestCase {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    private func makeLocalMarketplaceRoot(
+        named name: String,
+        in parent: URL,
+        suffix: String = "source"
+    ) throws -> URL {
+        let root = parent.appendingPathComponent("marketplace-\(suffix)", isDirectory: true)
+        let manifestDirectory = root.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "\(name)",
+          "plugins": []
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        return root
     }
 }
 
