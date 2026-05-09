@@ -675,6 +675,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `dict(...)` construction from no arguments, existing dictionaries, iterable string-key pairs, and keyword arguments, covering map-driven prefix rules plus host and network generation.
 - `codex-rs/execpolicy/src/parser.rs` Starlark minimum and maximum builtins
   - Added Swift execpolicy parser support for `min(...)` and `max(...)` over supported comparable positional values or single iterables, including `key = len` and supported helper-function key callables for generated rule values.
+- `codex-rs/execpolicy/src/parser.rs` Starlark numeric absolute-value builtin
+  - Added Swift execpolicy parser support for `abs(...)` over supported integer and floating-point policy expressions, covering generated rule values, hosts, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes

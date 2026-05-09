@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "str", "int", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "str", "int", "bool"].contains(name) else {
             return nil
         }
 
@@ -3470,6 +3470,13 @@ public final class PolicyParser {
                 constants: constants,
                 functions: functions,
                 selectsMinimum: false
+            )
+        case "abs":
+            return try parseStarlarkAbsoluteValueCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
             )
         case "str":
             return try parseStarlarkStringConversionCall(
@@ -3780,6 +3787,31 @@ public final class PolicyParser {
             constants: scopedConstants,
             functions: functions
         )
+    }
+
+    private static func parseStarlarkAbsoluteValueCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        switch value {
+        case let .integer(value):
+            guard value != Int64.min else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return .integer(abs(value))
+        case let .double(value):
+            return .double(abs(value))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func parseStarlarkStringConversionCall(
