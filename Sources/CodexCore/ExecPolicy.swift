@@ -1510,6 +1510,13 @@ public final class PolicyParser {
         if trimmed == "False" {
             return .bool(false)
         }
+        if let conditional = try parseStarlarkConditionalExpression(
+            trimmed,
+            constants: constants,
+            functions: functions
+        ) {
+            return conditional
+        }
         let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         if additivePieces.count > 1 {
@@ -2484,6 +2491,34 @@ public final class PolicyParser {
         case let .double(value):
             return value != 0
         }
+    }
+
+    private static func parseStarlarkConditionalExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard let ifRange = topLevelKeywordRange("if", in: text),
+              let elseRange = topLevelKeywordRange("else", in: text, startingAt: ifRange.upperBound)
+        else {
+            return nil
+        }
+
+        let consequence = String(text[..<ifRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let condition = String(text[ifRange.upperBound..<elseRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let alternative = String(text[elseRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !consequence.isEmpty,
+              !condition.isEmpty,
+              !alternative.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let selected = try evaluateStarlarkCondition(condition, constants: constants, functions: functions)
+            ? consequence
+            : alternative
+        return try parsePolicyLiteral(selected, constants: constants, functions: functions)
     }
 
     private static func evaluateStarlarkAddition(

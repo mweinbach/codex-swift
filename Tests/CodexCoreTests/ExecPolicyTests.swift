@@ -1109,6 +1109,45 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkConditionalExpressions() throws {
+        let policy = try parsePolicy("""
+        USE_GIT = False
+        TOOL = "jj" if USE_GIT else "git"
+        RAW_COMMANDS = ["status", "publish"]
+        COMMANDS = [command if command.startswith("s") else "diff" for command in RAW_COMMANDS]
+        DECISION = "prompt" if len(COMMANDS) == 2 and TOOL == "git" else "allow"
+        PUBLIC_HOST = True if DECISION == "prompt" else False
+        MATCH = f"{TOOL} {COMMANDS[0]}" if DECISION == "prompt" else "jj log"
+
+        def path(tool):
+            return "/usr/bin/" + (tool if tool == "git" else "jj")
+
+        def host(public):
+            return "api.github.com" if public else "blocked.example.com"
+
+        prefix_rule(
+            [TOOL, COMMANDS[0] if TOOL == "git" else "log"],
+            DECISION,
+            match = [MATCH],
+            justification = "inspect " + ("git state" if TOOL == "git" else "jj state"),
+        )
+        network_rule(host(PUBLIC_HOST), "https", "allow")
+        host_executable(TOOL, [path(TOOL)])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "inspect git state"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
