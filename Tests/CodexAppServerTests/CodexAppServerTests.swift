@@ -23,7 +23,23 @@ final class CodexAppServerTests: XCTestCase {
           "reset_after_seconds": 43200,
           "reset_at": 1737043200
         }
-      }
+      },
+      "additional_rate_limits": [
+        {
+          "limit_name": "codex_other",
+          "metered_feature": "codex_other",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 88,
+              "limit_window_seconds": 1800,
+              "reset_after_seconds": 600,
+              "reset_at": 1735693200
+            }
+          }
+        }
+      ]
     }
     """
 
@@ -5358,11 +5374,31 @@ final class CodexAppServerTests: XCTestCase {
             accessToken: "access-token",
             refreshToken: "refresh-token"
         )
-        let fetcher = AppServerRecordingAccountRateLimitsFetcher(snapshot: RateLimitSnapshot(
-            primary: RateLimitWindow(usedPercent: 42, windowMinutes: 60, resetsAt: 1_737_000_000),
-            secondary: RateLimitWindow(usedPercent: 5, windowMinutes: 1_440, resetsAt: 1_737_043_200),
-            credits: nil,
-            planType: .pro
+        let fetcher = AppServerRecordingAccountRateLimitsFetcher(result: AccountRateLimitsResult(
+            rateLimits: RateLimitSnapshot(
+                limitID: "codex",
+                primary: RateLimitWindow(usedPercent: 42, windowMinutes: 60, resetsAt: 1_737_000_000),
+                secondary: RateLimitWindow(usedPercent: 5, windowMinutes: 1_440, resetsAt: 1_737_043_200),
+                credits: nil,
+                planType: .pro
+            ),
+            rateLimitsByLimitID: [
+                "codex": RateLimitSnapshot(
+                    limitID: "codex",
+                    primary: RateLimitWindow(usedPercent: 42, windowMinutes: 60, resetsAt: 1_737_000_000),
+                    secondary: RateLimitWindow(usedPercent: 5, windowMinutes: 1_440, resetsAt: 1_737_043_200),
+                    credits: nil,
+                    planType: .pro
+                ),
+                "codex_other": RateLimitSnapshot(
+                    limitID: "codex_other",
+                    limitName: "codex_other",
+                    primary: RateLimitWindow(usedPercent: 88, windowMinutes: 30, resetsAt: 1_735_693_200),
+                    secondary: nil,
+                    credits: nil,
+                    planType: .pro
+                )
+            ]
         ))
         let configuration = testConfiguration(codexHome: temp.url, accountRateLimitsFetcher: fetcher)
 
@@ -5393,6 +5429,15 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondary["usedPercent"] as? Double, 5)
         XCTAssertEqual(secondary["windowDurationMins"] as? Int, 1_440)
         XCTAssertEqual(secondary["resetsAt"] as? Int, 1_737_043_200)
+
+        let byLimitID = try XCTUnwrap(result["rateLimitsByLimitId"] as? [String: Any])
+        let codexOther = try XCTUnwrap(byLimitID["codex_other"] as? [String: Any])
+        XCTAssertEqual(codexOther["limitId"] as? String, "codex_other")
+        XCTAssertEqual(codexOther["limitName"] as? String, "codex_other")
+        let codexOtherPrimary = try XCTUnwrap(codexOther["primary"] as? [String: Any])
+        XCTAssertEqual(codexOtherPrimary["usedPercent"] as? Double, 88)
+        XCTAssertEqual(codexOtherPrimary["windowDurationMins"] as? Int, 30)
+        XCTAssertEqual(codexOtherPrimary["resetsAt"] as? Int, 1_735_693_200)
     }
 
     func testURLSessionAccountRateLimitsFetcherUsesCodexAPIUsagePath() async throws {
@@ -5402,7 +5447,7 @@ final class CodexAppServerTests: XCTestCase {
             return AccountRateLimitsHTTPResponse(statusCode: 200, body: Data(Self.rateLimitsUsageJSON.utf8))
         }
 
-        let snapshot = try await fetcher.fetchRateLimits(
+        let result = try await fetcher.fetchRateLimits(
             baseURL: "https://api.example.test/",
             accessToken: "chatgpt-token",
             accountID: "account-123"
@@ -5414,10 +5459,15 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(request.method, "GET")
         XCTAssertEqual(request.headers["Authorization"] ?? nil, "Bearer chatgpt-token")
         XCTAssertEqual(request.headers["chatgpt-account-id"] ?? nil, "account-123")
+        let snapshot = result.rateLimits
         XCTAssertEqual(snapshot.primary?.usedPercent, 42)
         XCTAssertEqual(snapshot.primary?.windowMinutes, 60)
         XCTAssertEqual(snapshot.secondary?.windowMinutes, 1_440)
         XCTAssertEqual(snapshot.planType, .pro)
+        XCTAssertEqual(result.rateLimitsByLimitID["codex"]?.primary?.usedPercent, 42)
+        XCTAssertEqual(result.rateLimitsByLimitID["codex_other"]?.limitName, "codex_other")
+        XCTAssertEqual(result.rateLimitsByLimitID["codex_other"]?.primary?.usedPercent, 88)
+        XCTAssertEqual(result.rateLimitsByLimitID["codex_other"]?.primary?.windowMinutes, 30)
     }
 
     func testURLSessionAddCreditsNudgeEmailSenderPostsExpectedBody() async throws {
@@ -7868,16 +7918,20 @@ private actor AppServerRecordingAccountRateLimitsFetcher: AccountRateLimitsFetch
         let accountID: String
     }
 
-    private let snapshot: RateLimitSnapshot
+    private let result: AccountRateLimitsResult
     private(set) var requests: [Request] = []
 
     init(snapshot: RateLimitSnapshot) {
-        self.snapshot = snapshot
+        self.result = AccountRateLimitsResult(rateLimits: snapshot)
     }
 
-    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot {
+    init(result: AccountRateLimitsResult) {
+        self.result = result
+    }
+
+    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> AccountRateLimitsResult {
         requests.append(Request(baseURL: baseURL, accessToken: accessToken, accountID: accountID))
-        return snapshot
+        return result
     }
 }
 

@@ -161,11 +161,26 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
 }
 
 public protocol AccountRateLimitsFetching: Sendable {
-    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot
+    func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> AccountRateLimitsResult
 }
 
 public protocol AddCreditsNudgeEmailSending: Sendable {
     func send(baseURL: String, accessToken: String, accountID: String, creditType: AddCreditsNudgeCreditType) async throws -> AddCreditsNudgeEmailStatus
+}
+
+public struct AccountRateLimitsResult: Equatable, Sendable {
+    public let rateLimits: RateLimitSnapshot
+    public let rateLimitsByLimitID: [String: RateLimitSnapshot]
+
+    public init(rateLimits: RateLimitSnapshot, rateLimitsByLimitID: [String: RateLimitSnapshot]) {
+        self.rateLimits = rateLimits
+        self.rateLimitsByLimitID = rateLimitsByLimitID
+    }
+
+    public init(rateLimits: RateLimitSnapshot) {
+        let limitID = rateLimits.limitID ?? "codex"
+        self.init(rateLimits: rateLimits, rateLimitsByLimitID: [limitID: rateLimits])
+    }
 }
 
 public struct AccountRateLimitsHTTPResponse: Sendable {
@@ -299,7 +314,7 @@ public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
         self.transport = transport
     }
 
-    public func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot {
+    public func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> AccountRateLimitsResult {
         let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(baseURL)
         let usagePath = AccountBackendEndpoint.isChatGPTPathStyle(normalizedBaseURL) ? "/wham/usage" : "/api/codex/usage"
         let endpointText = normalizedBaseURL + usagePath
@@ -318,7 +333,7 @@ public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
         }
 
         let payload = try JSONDecoder().decode(AccountRateLimitsUsageResponse.self, from: response.body)
-        return payload.snapshot
+        return payload.result
     }
 
     private static func urlSessionTransport(_ request: URLRequest) async throws -> AccountRateLimitsHTTPResponse {
@@ -423,18 +438,51 @@ private enum AccountRateLimitsFetchError: Error, CustomStringConvertible {
 private struct AccountRateLimitsUsageResponse: Decodable {
     let planType: PlanType?
     let rateLimit: AccountUsageRateLimit?
+    let additionalRateLimits: [AccountUsageAdditionalRateLimit]
 
     private enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
         case rateLimit = "rate_limit"
+        case additionalRateLimits = "additional_rate_limits"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.planType = try container.decodeIfPresent(PlanType.self, forKey: .planType)
+        self.rateLimit = try container.decodeIfPresent(AccountUsageRateLimit.self, forKey: .rateLimit)
+        self.additionalRateLimits = try container.decodeIfPresent(
+            [AccountUsageAdditionalRateLimit].self,
+            forKey: .additionalRateLimits
+        ) ?? []
     }
 
     var snapshot: RateLimitSnapshot {
         RateLimitSnapshot(
+            limitID: "codex",
             primary: rateLimit?.primaryWindow?.rateLimitWindow,
             secondary: rateLimit?.secondaryWindow?.rateLimitWindow,
             credits: nil,
             planType: planType
+        )
+    }
+
+    var result: AccountRateLimitsResult {
+        let primary = snapshot
+        var snapshots = [primary] + additionalRateLimits.map { $0.snapshot(planType: planType) }
+        if let codex = snapshots.first(where: { $0.limitID == "codex" }) {
+            return AccountRateLimitsResult(
+                rateLimits: codex,
+                rateLimitsByLimitID: Dictionary(uniqueKeysWithValues: snapshots.map {
+                    (($0.limitID ?? "codex"), $0)
+                })
+            )
+        }
+        let fallback = snapshots.removeFirst()
+        return AccountRateLimitsResult(
+            rateLimits: fallback,
+            rateLimitsByLimitID: Dictionary(uniqueKeysWithValues: ([fallback] + snapshots).map {
+                (($0.limitID ?? "codex"), $0)
+            })
         )
     }
 }
@@ -446,6 +494,29 @@ private struct AccountUsageRateLimit: Decodable {
     private enum CodingKeys: String, CodingKey {
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
+    }
+}
+
+private struct AccountUsageAdditionalRateLimit: Decodable {
+    let limitName: String?
+    let meteredFeature: String?
+    let rateLimit: AccountUsageRateLimit?
+
+    private enum CodingKeys: String, CodingKey {
+        case limitName = "limit_name"
+        case meteredFeature = "metered_feature"
+        case rateLimit = "rate_limit"
+    }
+
+    func snapshot(planType: PlanType?) -> RateLimitSnapshot {
+        RateLimitSnapshot(
+            limitID: meteredFeature ?? limitName,
+            limitName: limitName,
+            primary: rateLimit?.primaryWindow?.rateLimitWindow,
+            secondary: rateLimit?.secondaryWindow?.rateLimitWindow,
+            credits: nil,
+            planType: planType
+        )
     }
 }
 
@@ -8214,7 +8285,7 @@ public enum CodexAppServer {
         }
 
         do {
-            let snapshot = try runAsyncBlocking {
+            let result = try runAsyncBlocking {
                 try await configuration.accountRateLimitsFetcher.fetchRateLimits(
                     baseURL: runtimeConfig.chatgptBaseURL,
                     accessToken: auth.token,
@@ -8222,7 +8293,8 @@ public enum CodexAppServer {
                 )
             }
             return [
-                "rateLimits": rateLimitSnapshotObject(snapshot)
+                "rateLimits": rateLimitSnapshotObject(result.rateLimits),
+                "rateLimitsByLimitId": result.rateLimitsByLimitID.mapValues(rateLimitSnapshotObject)
             ].nullStripped(keepNulls: true)
         } catch let error as AppServerError {
             throw error
@@ -8296,10 +8368,13 @@ public enum CodexAppServer {
 
     private static func rateLimitSnapshotObject(_ snapshot: RateLimitSnapshot) -> [String: Any] {
         [
+            "limitId": snapshot.limitID ?? NSNull(),
+            "limitName": snapshot.limitName ?? NSNull(),
             "primary": rateLimitWindowObject(snapshot.primary),
             "secondary": rateLimitWindowObject(snapshot.secondary),
             "credits": creditsSnapshotObject(snapshot.credits),
-            "planType": snapshot.planType?.rawValue ?? NSNull()
+            "planType": snapshot.planType?.rawValue ?? NSNull(),
+            "rateLimitReachedType": snapshot.rateLimitReachedType?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
 
