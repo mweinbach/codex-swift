@@ -702,7 +702,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence builtins and assignment destructuring
   - Added Swift execpolicy parser support for `enumerate(...)` and `zip(...)` over supported list/string iterables, including shortest-input zip behavior, enumerate start offsets, loop-target destructuring over generated pairs, and simple destructuring assignments inside supported policy blocks.
 - `codex-rs/execpolicy/src/parser.rs` Starlark iterable builtins and dictionary iteration
-  - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, covering deterministic map-driven rule, network, and host executable generation.
+  - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, including `sorted(..., key = ..., reverse = ...)` keyword handling for supported key callables, covering deterministic map-driven rule, network, and host executable generation.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary comprehensions and iterable loops
   - Added Swift execpolicy parser support for single-generator dictionary comprehensions with optional `if` filters, plus direct string and dictionary iteration in top-level loops and list comprehensions for map-driven rules, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark unary plus and default split

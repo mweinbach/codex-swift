@@ -3703,17 +3703,77 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
-        guard rawArguments.count == 1,
-              let rawArgument = rawArguments.first
+        var positionalArguments: [String] = []
+        var rawKeyFunction: String?
+        var reverse = false
+        var sawReverse = false
+        var sawKeywordArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawKeywordArgument = true
+                let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                switch rawName {
+                case "key":
+                    guard rawKeyFunction == nil,
+                          isStarlarkIdentifier(rawValue)
+                    else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    rawKeyFunction = rawValue
+                case "reverse":
+                    guard !sawReverse else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    let value = try parsePolicyLiteral(rawValue, constants: constants, functions: functions)
+                    guard case let .bool(reverseValue) = value else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    reverse = reverseValue
+                    sawReverse = true
+                default:
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                continue
+            }
+
+            guard !sawKeywordArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            positionalArguments.append(rawArgument)
+        }
+
+        guard positionalArguments.count == 1,
+              let rawArgument = positionalArguments.first
         else {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
 
         let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         let items = try starlarkIterableItems(iterable, expression: expression)
-        return try .array(items.sorted { lhs, rhs in
-            try compareStarlarkValues(lhs, rhs, expression: expression) < 0
-        })
+        let keyedItems = try items.enumerated().map { index, item in
+            (
+                index: index,
+                value: item,
+                key: try starlarkComparableKey(
+                    for: item,
+                    rawKeyFunction: rawKeyFunction,
+                    constants: constants,
+                    functions: functions,
+                    expression: expression
+                )
+            )
+        }
+        let sortedItems = try keyedItems.sorted { lhs, rhs in
+            let comparison = try compareStarlarkValues(lhs.key, rhs.key, expression: expression)
+            if comparison == 0 {
+                return lhs.index < rhs.index
+            }
+            return reverse ? comparison > 0 : comparison < 0
+        }
+        return .array(sortedItems.map(\.value))
     }
 
     private static func parseStarlarkReversedCall(

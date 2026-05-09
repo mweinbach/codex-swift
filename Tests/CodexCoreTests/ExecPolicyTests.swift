@@ -938,6 +938,38 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkSortedKeywordArguments() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log", "show"]
+        BY_LENGTH_DESC = sorted(COMMANDS, key = len, reverse = True)
+        ALPHA_DESC = sorted(["b", "a", "c"], reverse = True)
+
+        def score(command):
+            return len(command)
+
+        CUSTOM_DESC = sorted(COMMANDS, key = score, reverse = True)
+
+        prefix_rule([TOOL, BY_LENGTH_DESC[0]], "allow", justification = "sorted " + BY_LENGTH_DESC[1] + "/" + BY_LENGTH_DESC[2])
+
+        if BY_LENGTH_DESC == CUSTOM_DESC and ALPHA_DESC == ["c", "b", "a"]:
+            network_rule("api" + ALPHA_DESC[0] + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + BY_LENGTH_DESC[-1] + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "sorted diff/show"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "apic.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/log/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkDictComprehensionsAndDirectIteration() throws {
         let policy = try parsePolicy("""
         BASE = {
