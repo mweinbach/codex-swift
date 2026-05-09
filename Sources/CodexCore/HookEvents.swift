@@ -365,6 +365,16 @@ public struct HookStopOutput: Equatable, Sendable {
     }
 }
 
+public struct HookSessionStartOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let additionalContext: String?
+
+    public init(universal: HookUniversalOutput, additionalContext: String?) {
+        self.universal = universal
+        self.additionalContext = additionalContext
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -556,6 +566,27 @@ public enum HooksProtocol {
             shouldBlock: shouldBlock && invalidBlockReason == nil,
             reason: reason,
             invalidBlockReason: invalidBlockReason
+        )
+    }
+
+    public static func parseSessionStartOutput(_ stdout: String) -> HookSessionStartOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(object, extraAllowedKeys: ["hookSpecificOutput"])
+        else {
+            return nil
+        }
+
+        let hookSpecific = parseAdditionalContextHookSpecificOutput(
+            object["hookSpecificOutput"],
+            allowedKeys: ["hookEventName", "additionalContext"]
+        )
+        guard hookSpecific.valid else {
+            return nil
+        }
+
+        return HookSessionStartOutput(
+            universal: universal,
+            additionalContext: hookSpecific.additionalContext
         )
     }
 

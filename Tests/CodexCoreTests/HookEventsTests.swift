@@ -449,6 +449,41 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNil(HooksProtocol.parseStopOutput(#"{"reason":7}"#))
     }
 
+    func testSessionStartOutputParsesAdditionalContextAndUniversalFieldsLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseSessionStartOutput("""
+        {
+          "continue": false,
+          "stopReason": "stop now",
+          "suppressOutput": true,
+          "systemMessage": "hello",
+          "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": "session note"
+          }
+        }
+        """))
+        XCTAssertEqual(parsed.universal.continueProcessing, false)
+        XCTAssertEqual(parsed.universal.stopReason, "stop now")
+        XCTAssertEqual(parsed.universal.suppressOutput, true)
+        XCTAssertEqual(parsed.universal.systemMessage, "hello")
+        XCTAssertEqual(parsed.additionalContext, "session note")
+    }
+
+    func testSessionStartOutputDefaultsWithoutHookSpecificOutputLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseSessionStartOutput("{}"))
+        XCTAssertEqual(parsed.universal, HookUniversalOutput())
+        XCTAssertNil(parsed.additionalContext)
+    }
+
+    func testSessionStartOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"decision":"block"}"#))
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"hookSpecificOutput":{"additionalContext":"missing event"}}"#))
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":3}}"#))
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"hookSpecificOutput":{"hookEventName":"SessionStart","extra":1}}"#))
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
+        XCTAssertNil(HooksProtocol.parseSessionStartOutput(#"{"hookSpecificOutput":1}"#))
+    }
+
     func testPermissionRequestOutputParsesAllowAndDenyDecisionsLikeRust() throws {
         let allowed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
         {
