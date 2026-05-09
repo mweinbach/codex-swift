@@ -77,6 +77,8 @@ public struct LMStudioDownloadCommand: Equatable, Sendable {
 
 public struct LMStudioClient {
     public typealias Send = (URLRequest) async throws -> LMStudioHTTPResponse
+    public typealias DownloadRunner = (LMStudioDownloadCommand) throws -> Int32?
+    public typealias StandardErrorWriter = (String) -> Void
 
     public let baseURL: String
     private let send: Send
@@ -162,6 +164,31 @@ public struct LMStudioClient {
         }
     }
 
+    public func downloadModel(
+        _ model: String,
+        findLMS: () throws -> String = { try LMStudioClient.findLMS() },
+        runDownloadCommand: DownloadRunner = LMStudioClient.runDownloadCommand,
+        writeStandardError: StandardErrorWriter = LMStudioClient.writeStandardErrorLine
+    ) throws {
+        let lms = try findLMS()
+        writeStandardError("Downloading model: \(model)")
+
+        let command = Self.downloadCommand(for: model, lmsExecutable: lms)
+        let exitCode: Int32?
+        do {
+            exitCode = try runDownloadCommand(command)
+        } catch {
+            throw LMStudioClientError.downloadExecutionFailed(
+                command: command.displayCommand,
+                underlying: String(describing: error)
+            )
+        }
+
+        guard exitCode == 0 else {
+            throw LMStudioClientError.downloadFailed(exitCode: exitCode)
+        }
+    }
+
     private func endpointURL(_ path: String) throws -> URL {
         guard let url = URL(string: baseURL + path) else {
             throw LMStudioClientError.connectionUnavailable
@@ -206,6 +233,31 @@ public struct LMStudioClient {
 
     public static func downloadCommand(for model: String, lmsExecutable: String) -> LMStudioDownloadCommand {
         LMStudioDownloadCommand(executable: lmsExecutable, arguments: ["get", "--yes", model])
+    }
+
+    public static func runDownloadCommand(_ command: LMStudioDownloadCommand) throws -> Int32? {
+        let process = Process()
+        if command.executable.contains("/") || command.executable.contains("\\") {
+            process.executableURL = URL(fileURLWithPath: command.executable)
+            process.arguments = command.arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command.executable] + command.arguments
+        }
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.nullDevice
+
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationReason == .exit {
+            return process.terminationStatus
+        }
+        return nil
+    }
+
+    public static func writeStandardErrorLine(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
     }
 
     private static func pathContainsLMS(

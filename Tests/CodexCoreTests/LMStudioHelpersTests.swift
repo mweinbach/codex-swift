@@ -190,6 +190,101 @@ final class LMStudioHelpersTests: XCTestCase {
             "Model download failed with exit code: -1"
         )
     }
+
+    func testDownloadModelFindsLMSPrintsAndRunsCommandLikeRust() throws {
+        let client = LMStudioClient(baseURL: "http://lmstudio.example")
+        var stderrLines: [String] = []
+        var capturedCommand: LMStudioDownloadCommand?
+
+        try client.downloadModel(
+            "openai/gpt-oss-20b",
+            findLMS: { "lms" },
+            runDownloadCommand: { command in
+                capturedCommand = command
+                return 0
+            },
+            writeStandardError: { stderrLines.append($0) }
+        )
+
+        XCTAssertEqual(stderrLines, ["Downloading model: openai/gpt-oss-20b"])
+        XCTAssertEqual(capturedCommand?.executable, "lms")
+        XCTAssertEqual(capturedCommand?.arguments, ["get", "--yes", "openai/gpt-oss-20b"])
+        XCTAssertEqual(capturedCommand?.displayCommand, "lms get --yes openai/gpt-oss-20b")
+    }
+
+    func testDownloadModelPropagatesMissingLMSBeforeRunning() throws {
+        let client = LMStudioClient(baseURL: "http://lmstudio.example")
+        var didRun = false
+
+        do {
+            try client.downloadModel(
+                "openai/gpt-oss-20b",
+                findLMS: { throw LMStudioClientError.lmsNotFound },
+                runDownloadCommand: { _ in
+                    didRun = true
+                    return 0
+                },
+                writeStandardError: { _ in }
+            )
+            XCTFail("expected missing lms")
+        } catch let error as LMStudioClientError {
+            XCTAssertEqual(error, .lmsNotFound)
+            XCTAssertFalse(didRun)
+        }
+    }
+
+    func testDownloadModelMapsExecutionFailureLikeRust() throws {
+        let client = LMStudioClient(baseURL: "http://lmstudio.example")
+
+        do {
+            try client.downloadModel(
+                "openai/gpt-oss-20b",
+                findLMS: { "lms" },
+                runDownloadCommand: { _ in throw BoomError() },
+                writeStandardError: { _ in }
+            )
+            XCTFail("expected execution failure")
+        } catch let error as LMStudioClientError {
+            XCTAssertEqual(
+                error,
+                .downloadExecutionFailed(command: "lms get --yes openai/gpt-oss-20b", underlying: "boom")
+            )
+            XCTAssertEqual(
+                String(describing: error),
+                "Failed to execute 'lms get --yes openai/gpt-oss-20b': boom"
+            )
+        }
+    }
+
+    func testDownloadModelMapsExitStatusLikeRust() throws {
+        let client = LMStudioClient(baseURL: "http://lmstudio.example")
+
+        do {
+            try client.downloadModel(
+                "openai/gpt-oss-20b",
+                findLMS: { "lms" },
+                runDownloadCommand: { _ in 7 },
+                writeStandardError: { _ in }
+            )
+            XCTFail("expected nonzero exit")
+        } catch let error as LMStudioClientError {
+            XCTAssertEqual(error, .downloadFailed(exitCode: 7))
+            XCTAssertEqual(String(describing: error), "Model download failed with exit code: 7")
+        }
+
+        do {
+            try client.downloadModel(
+                "openai/gpt-oss-20b",
+                findLMS: { "lms" },
+                runDownloadCommand: { _ in nil },
+                writeStandardError: { _ in }
+            )
+            XCTFail("expected signal exit")
+        } catch let error as LMStudioClientError {
+            XCTAssertEqual(error, .downloadFailed(exitCode: nil))
+            XCTAssertEqual(String(describing: error), "Model download failed with exit code: -1")
+        }
+    }
 }
 
 private struct BoomError: Error, CustomStringConvertible {
