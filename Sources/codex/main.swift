@@ -260,7 +260,8 @@ private func runExecCommand(
             arguments: request.arguments,
             configOverrides: request.configOverrides,
             cwd: cwd,
-            baseInstructionsOverride: baseInstructionsOverride
+            baseInstructionsOverride: baseInstructionsOverride,
+            sessionStartSource: .startup
         )
 
     case let .review(reviewRequest):
@@ -276,7 +277,8 @@ private func runExecCommand(
             arguments: request.arguments,
             configOverrides: request.configOverrides,
             cwd: cwd,
-            baseInstructionsOverride: baseInstructionsOverride
+            baseInstructionsOverride: baseInstructionsOverride,
+            sessionStartSource: .startup
         )
 
     case let .resume(sessionID, last, promptResolution, outputSchema):
@@ -303,7 +305,8 @@ private func runExecCommand(
             conversationID: session.conversationID,
             history: responseHistory,
             rolloutPath: URL(fileURLWithPath: session.path),
-            baseInstructionsOverride: baseInstructionsOverride
+            baseInstructionsOverride: baseInstructionsOverride,
+            sessionStartSource: .resume
         )
     }
 }
@@ -666,7 +669,8 @@ private func runNonInteractiveExec(
     conversationID: ConversationId = ConversationId(),
     history: [ResponseItem] = [],
     rolloutPath: URL? = nil,
-    baseInstructionsOverride: String? = nil
+    baseInstructionsOverride: String? = nil,
+    sessionStartSource: HookSessionStartSource = .startup
 ) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
         cwd: cwd,
@@ -756,7 +760,18 @@ private func runNonInteractiveExec(
         )
     }
     let userPromptItem = prompt.input.last
-    let hookInputCount = prompt.input.count
+    let sessionStartHookInputCount = prompt.input.count
+    let sessionStartOutcome = await NonInteractiveExec.runSessionStartHooks(
+        handlers: hookHandlers,
+        prompt: &prompt,
+        conversationID: conversationID,
+        cwd: cwd,
+        model: resolvedModel,
+        approvalPolicy: approvalPolicy,
+        source: sessionStartSource
+    )
+    let sessionStartHookAdditionalItems = Array(prompt.input.dropFirst(sessionStartHookInputCount))
+    let userPromptSubmitHookInputCount = prompt.input.count
     let userPromptSubmitOutcome = await NonInteractiveExec.runUserPromptSubmitHooks(
         handlers: hookHandlers,
         prompt: &prompt,
@@ -767,7 +782,7 @@ private func runNonInteractiveExec(
         model: resolvedModel,
         approvalPolicy: approvalPolicy
     )
-    let hookAdditionalItems = Array(prompt.input.dropFirst(hookInputCount))
+    let userPromptSubmitHookAdditionalItems = Array(prompt.input.dropFirst(userPromptSubmitHookInputCount))
 
     let recorder = try createExecRolloutRecorder(
         codexHome: codexHome,
@@ -793,8 +808,16 @@ private func runNonInteractiveExec(
     if let newUserItem = userPromptItem {
         try recorder.recordItems([.responseItem(newUserItem)])
     }
+    let hookAdditionalItems = sessionStartHookAdditionalItems + userPromptSubmitHookAdditionalItems
     if !hookAdditionalItems.isEmpty {
         try recorder.recordItems(hookAdditionalItems.map(RolloutRecordItem.responseItem))
+    }
+    if sessionStartOutcome.shouldStop {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: sessionStartOutcome.stopReason,
+            stderrMessage: nil
+        )
     }
     if userPromptSubmitOutcome.shouldStop {
         return CodexCLI.CommandExecutionResult(

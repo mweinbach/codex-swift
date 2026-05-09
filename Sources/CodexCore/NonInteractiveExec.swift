@@ -249,6 +249,48 @@ public enum NonInteractiveExec {
         return outcome
     }
 
+    public static func runSessionStartHooks(
+        handlers: [ConfiguredHookHandler],
+        prompt: inout Prompt,
+        conversationID: ConversationId,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval,
+        source: HookSessionStartSource
+    ) async -> HookSessionStartOutcome {
+        let request: HookSessionStartRequest
+        do {
+            request = try HookSessionStartRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                cwd: AbsolutePath(absolutePath: cwd.standardizedFileURL.path),
+                model: model,
+                permissionMode: hookPermissionMode(approvalPolicy),
+                source: source
+            )
+        } catch {
+            return HookSessionStartOutcome(
+                hookEvents: [],
+                shouldStop: false,
+                stopReason: nil,
+                additionalContexts: []
+            )
+        }
+
+        let outcome = await HookSessionStart.run(
+            handlers: handlers,
+            shell: HookCommandShell(),
+            request: request,
+            turnID: nil
+        )
+        guard !outcome.shouldStop else {
+            return outcome
+        }
+        prompt.input.append(contentsOf: outcome.additionalContexts.map { context in
+            ResponseInputItem(userInputs: [.text(context)]).responseItem()
+        })
+        return outcome
+    }
+
     public static func executeFunctionCall(
         _ item: ResponseItem,
         cwd: URL,
