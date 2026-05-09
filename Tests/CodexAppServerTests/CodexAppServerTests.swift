@@ -6647,6 +6647,73 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
     }
 
+    func testHooksListReturnsEnabledPluginCommandHooks() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let manifestRoot = pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try #"{"name":"demo"}"#.write(
+            to: manifestRoot.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "echo plugin hook",
+                    "timeout": 7,
+                    "statusMessage": "running plugin hook"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+        try """
+        [features]
+        plugins = true
+        plugin_hooks = true
+        hooks = true
+
+        [plugins."demo@test"]
+        enabled = true
+        """.write(to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, "demo@test:hooks/hooks.json:pre_tool_use:0:0")
+        XCTAssertEqual(hooks[0]["eventName"] as? String, "preToolUse")
+        XCTAssertEqual(hooks[0]["handlerType"] as? String, "command")
+        XCTAssertEqual(hooks[0]["matcher"] as? String, "Bash")
+        XCTAssertEqual(hooks[0]["command"] as? String, "echo plugin hook")
+        XCTAssertEqual(hooks[0]["timeoutSec"] as? Int, 7)
+        XCTAssertEqual(hooks[0]["statusMessage"] as? String, "running plugin hook")
+        XCTAssertEqual(hooks[0]["sourcePath"] as? String, hooksRoot.appendingPathComponent("hooks.json").standardizedFileURL.path)
+        XCTAssertEqual(hooks[0]["source"] as? String, "plugin")
+        XCTAssertEqual(hooks[0]["pluginId"] as? String, "demo@test")
+        XCTAssertEqual(hooks[0]["displayOrder"] as? Int, 0)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(hooks[0]["isManaged"] as? Bool, false)
+        XCTAssertTrue((hooks[0]["currentHash"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """

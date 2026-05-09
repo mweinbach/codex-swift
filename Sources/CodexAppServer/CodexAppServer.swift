@@ -2626,26 +2626,8 @@ public enum CodexAppServer {
         guard enabled else {
             return []
         }
-        let hookConfigs: [LocalPluginInlineHooks]
-        if !manifest.inlineHooks.isEmpty {
-            hookConfigs = manifest.inlineHooks
-        } else {
-            let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
-            hookConfigs = hookPaths.compactMap { hooksPath -> LocalPluginInlineHooks? in
-                guard let data = try? Data(contentsOf: hooksPath),
-                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let hooks = object["hooks"] as? [String: Any]
-                else {
-                    return nil
-                }
-                return LocalPluginInlineHooks(
-                    sourcePath: localPluginRelativePath(root: root, path: hooksPath),
-                    hooks: hooks
-                )
-            }
-        }
         var summaries: [[String: Any]] = []
-        for config in hookConfigs {
+        for config in localPluginHookConfigs(root: root, manifest: manifest) {
             for (eventKey, value) in config.hooks {
                 guard let eventName = localPluginHookEventName(eventKey),
                       let groups = value as? [[String: Any]]
@@ -2667,6 +2649,97 @@ public enum CodexAppServer {
             ($0["key"] as? String ?? "") < ($1["key"] as? String ?? "")
         }
         return summaries
+    }
+
+    private static func localPluginHookMetadata(root: URL, pluginID: String, manifest: LocalPluginManifest) -> [[String: Any]] {
+        var metadata: [[String: Any]] = []
+        var displayOrder = 0
+        for config in localPluginHookConfigs(root: root, manifest: manifest) {
+            for (eventKey, value) in config.hooks {
+                guard let eventName = localPluginHookEventName(eventKey),
+                      let groups = value as? [[String: Any]]
+                else {
+                    continue
+                }
+                for (groupIndex, group) in groups.enumerated() {
+                    let matcher = group["matcher"] as? String
+                    let handlers = group["hooks"] as? [[String: Any]] ?? []
+                    for (handlerIndex, handler) in handlers.enumerated() {
+                        guard (handler["type"] as? String) == "command",
+                              let command = handler["command"] as? String
+                        else {
+                            continue
+                        }
+                        let timeoutSec = hookTimeoutSec(handler["timeout"] ?? handler["timeoutSec"] ?? handler["timeout_sec"])
+                            ?? 600
+                        let statusMessage = handler["statusMessage"] as? String ?? handler["status_message"] as? String
+                        metadata.append([
+                            "key": "\(pluginID):\(config.sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
+                            "eventName": appServerHookEventName(eventName),
+                            "handlerType": "command",
+                            "matcher": matcher as Any? ?? NSNull(),
+                            "command": command,
+                            "timeoutSec": Int(timeoutSec),
+                            "statusMessage": statusMessage as Any? ?? NSNull(),
+                            "sourcePath": root.appendingPathComponent(config.sourcePath, isDirectory: false).standardizedFileURL.path,
+                            "source": "plugin",
+                            "pluginId": pluginID,
+                            "displayOrder": displayOrder,
+                            "enabled": true,
+                            "isManaged": false,
+                            "currentHash": userHookHash(
+                                eventName: eventName,
+                                matcher: matcher,
+                                command: command,
+                                timeoutSec: timeoutSec,
+                                statusMessage: statusMessage
+                            ),
+                            "trustStatus": "untrusted"
+                        ])
+                        displayOrder += 1
+                    }
+                }
+            }
+        }
+        metadata.sort {
+            ($0["key"] as? String ?? "") < ($1["key"] as? String ?? "")
+        }
+        return metadata
+    }
+
+    private static func localPluginHookConfigs(root: URL, manifest: LocalPluginManifest) -> [LocalPluginInlineHooks] {
+        if !manifest.inlineHooks.isEmpty {
+            return manifest.inlineHooks
+        }
+        let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
+        return hookPaths.compactMap { hooksPath -> LocalPluginInlineHooks? in
+            guard let data = try? Data(contentsOf: hooksPath),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let hooks = object["hooks"] as? [String: Any]
+            else {
+                return nil
+            }
+            return LocalPluginInlineHooks(
+                sourcePath: localPluginRelativePath(root: root, path: hooksPath),
+                hooks: hooks
+            )
+        }
+    }
+
+    private static func hookTimeoutSec(_ value: Any?) -> UInt64? {
+        if let value = value as? UInt64 {
+            return value
+        }
+        if let value = value as? Int, value >= 0 {
+            return UInt64(value)
+        }
+        if let value = value as? Double, value >= 0, value.rounded() == value {
+            return UInt64(value)
+        }
+        if let value = value as? String {
+            return UInt64(value)
+        }
+        return nil
     }
 
     private static func localPluginHookEventName(_ raw: String) -> HookEventName? {
@@ -7481,7 +7554,8 @@ public enum CodexAppServer {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let hooks = userHookObjects(configFile: configFile)
+        let config = (try? CodexConfigLayerLoader.readConfig(from: configFile)) ?? .table([:])
+        let hooks = catalogHookObjects(config: config, configFile: configFile, codexHome: configuration.codexHome)
         return [
             "data": cwds.map { cwd in
                 [
@@ -7492,6 +7566,43 @@ public enum CodexAppServer {
                 ]
             }
         ]
+    }
+
+    private static func catalogHookObjects(config: ConfigValue, configFile: URL, codexHome: URL) -> [[String: Any]] {
+        guard configFeatureEnabled("hooks", in: config, defaultValue: true) else {
+            return []
+        }
+        var hooks = userHookObjects(configFile: configFile)
+        guard configFeatureEnabled("plugins", in: config, defaultValue: false),
+              configFeatureEnabled("plugin_hooks", in: config, defaultValue: false)
+        else {
+            return hooks
+        }
+        for pluginID in enabledLocalPluginIDs(config: config) {
+            guard let root = activeLocalPluginRoot(id: pluginID, codexHome: codexHome) else {
+                continue
+            }
+            hooks.append(contentsOf: localPluginHookMetadata(
+                root: root,
+                pluginID: pluginID,
+                manifest: localPluginManifest(root: root)
+            ))
+        }
+        return hooks
+    }
+
+    private static func enabledLocalPluginIDs(config: ConfigValue) -> [String] {
+        guard let root = configTable(config),
+              let plugins = root["plugins"].flatMap(configTable)
+        else {
+            return []
+        }
+        return plugins.keys.filter { id in
+            guard let pluginConfig = plugins[id].flatMap(configTable) else {
+                return false
+            }
+            return boolConfig(pluginConfig, "enabled") == true
+        }.sorted()
     }
 
     fileprivate static func experimentalFeatureListResult(
