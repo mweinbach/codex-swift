@@ -7129,6 +7129,26 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "err\n")
     }
 
+    func testCommandExecResolvesRelativeCwdAgainstConfiguredServerCwd() throws {
+        let codexHome = try TemporaryDirectory()
+        let serverCwd = try TemporaryDirectory()
+        let nested = serverCwd.url.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let configuration = testConfiguration(codexHome: codexHome.url, cwd: serverCwd.url)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/pwd"],"cwd":"nested"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(
+            (result["stdout"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
+            nested.path.replacingOccurrences(of: "/private/var/", with: "/var/") + "\n"
+        )
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecBufferedTimeoutReportsRustExitCode() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7258,6 +7278,34 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["exitCode"] as? Int, 0)
         XCTAssertEqual(result["stdout"] as? String, "hello")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
+    func testCommandExecProcessIDSessionResolvesRelativeCwdAgainstConfiguredServerCwd() async throws {
+        let codexHome = try TemporaryDirectory()
+        let serverCwd = try TemporaryDirectory()
+        let nested = serverCwd.url.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url, cwd: serverCwd.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/pwd"],"processId":"cmd-relative-cwd","cwd":"nested"}}"#.utf8
+        )))
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(
+            (result["stdout"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
+            nested.path.replacingOccurrences(of: "/private/var/", with: "/var/") + "\n"
+        )
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
@@ -8044,6 +8092,7 @@ final class CodexAppServerTests: XCTestCase {
 
     private func testConfiguration(
         codexHome: URL,
+        cwd: URL? = nil,
         requiresOpenAIAuth: Bool = true,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
@@ -8064,6 +8113,7 @@ final class CodexAppServerTests: XCTestCase {
         mergedEnvironment.merge(environment) { _, new in new }
         return CodexAppServerConfiguration(
             codexHome: codexHome,
+            cwd: cwd ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
             requiresOpenAIAuth: requiresOpenAIAuth,
             environment: mergedEnvironment,
             feedback: feedback,

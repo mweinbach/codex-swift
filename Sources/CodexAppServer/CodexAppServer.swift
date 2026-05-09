@@ -96,6 +96,7 @@ private actor AppServerMcpOAuthAuthorizationURLCapture {
 
 public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let codexHome: URL
+    public let cwd: URL
     public let defaultModelProvider: String
     public let originator: String
     public let version: String
@@ -115,6 +116,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
 
     public init(
         codexHome: URL,
+        cwd: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
         defaultModelProvider: String = "openai",
         originator: String = "codex_swift",
         version: String = "0.0.0",
@@ -133,6 +135,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) {
         self.codexHome = codexHome
+        self.cwd = cwd
         self.defaultModelProvider = defaultModelProvider
         self.originator = originator
         self.version = version
@@ -153,6 +156,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
         lhs.codexHome == rhs.codexHome &&
+            lhs.cwd == rhs.cwd &&
             lhs.defaultModelProvider == rhs.defaultModelProvider &&
             lhs.originator == rhs.originator &&
             lhs.version == rhs.version &&
@@ -7748,7 +7752,7 @@ public enum CodexAppServer {
         else {
             throw AppServerError.invalidRequest("live command/exec session is not implemented")
         }
-        let cwd = parsed.cwd.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let cwd = commandExecCwd(parsed.cwd, configuration: configuration)
         return try runOneOffCommand(
             parsed.command,
             cwd: cwd,
@@ -7758,6 +7762,16 @@ public enum CodexAppServer {
                 overrides: parsed.environmentOverrides
             )
         )
+    }
+
+    fileprivate static func commandExecCwd(_ cwd: String?, configuration: CodexAppServerConfiguration) -> URL {
+        guard let cwd, !cwd.isEmpty else {
+            return configuration.cwd
+        }
+        if cwd.hasPrefix("/") {
+            return URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        return configuration.cwd.appendingPathComponent(cwd, isDirectory: true)
     }
 
     fileprivate static func commandExecParams(params: [String: Any]?) throws -> AppServerCommandExecParams {
@@ -12021,6 +12035,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     init(
         params: AppServerCommandExecParams,
         requestID: Any,
+        cwd: URL,
         environment: [String: String],
         notificationSink: AppServerNotificationSink?,
         onExit: @escaping @Sendable (String) -> Void
@@ -12036,9 +12051,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = params.command
         }
-        if let cwd = params.cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-        }
+        process.currentDirectoryURL = cwd
         process.environment = CodexAppServer.commandExecEnvironment(
             base: environment,
             overrides: params.environmentOverrides
@@ -13010,6 +13023,7 @@ final class CodexAppServerMessageProcessor {
         let session = AppServerCommandExecProcess(
             params: parsed,
             requestID: id,
+            cwd: CodexAppServer.commandExecCwd(parsed.cwd, configuration: configuration),
             environment: configuration.environment,
             notificationSink: notificationSink,
             onExit: { processID in
