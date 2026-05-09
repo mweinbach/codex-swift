@@ -484,6 +484,38 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
     case restricted(entries: [FileSystemSandboxEntry], globScanMaxDepth: Int? = nil)
     case unrestricted
     case externalSandbox
+
+    public var hasDeniedReadRestrictions: Bool {
+        guard case let .restricted(entries, _) = self else {
+            return false
+        }
+        return entries.contains { $0.access == .none }
+    }
+
+    public mutating func preserveDenyReadRestrictions(from existing: FileSystemSandboxPolicy) {
+        guard existing.hasDeniedReadRestrictions else {
+            return
+        }
+
+        if self == .unrestricted {
+            self = .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write)
+            ])
+        }
+
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self,
+              case let .restricted(existingEntries, existingGlobScanMaxDepth) = existing
+        else {
+            return
+        }
+
+        var entries = currentEntries
+        let effectiveGlobScanMaxDepth = globScanMaxDepth ?? existingGlobScanMaxDepth
+        for entry in existingEntries where entry.access == .none && !entries.contains(entry) {
+            entries.append(entry)
+        }
+        self = .restricted(entries: entries, globScanMaxDepth: effectiveGlobScanMaxDepth)
+    }
 }
 
 extension FileSystemSandboxPolicy: Codable {

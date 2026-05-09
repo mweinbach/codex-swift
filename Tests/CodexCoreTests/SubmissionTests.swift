@@ -528,6 +528,40 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyPreservesConfiguredDenyReadsLikeRust() {
+        let readableEntry = FileSystemSandboxEntry(path: .path("/tmp/project"), access: .read)
+        let denyEntry = FileSystemSandboxEntry(path: .globPattern("/tmp/project/**/*.env"), access: .none)
+        var replacement = FileSystemSandboxPolicy.restricted(entries: [readableEntry])
+        let configured = FileSystemSandboxPolicy.restricted(entries: [denyEntry], globScanMaxDepth: 2)
+
+        replacement.preserveDenyReadRestrictions(from: configured)
+
+        XCTAssertEqual(
+            replacement,
+            .restricted(entries: [readableEntry, denyEntry], globScanMaxDepth: 2)
+        )
+        XCTAssertTrue(replacement.hasDeniedReadRestrictions)
+    }
+
+    func testFileSystemSandboxPolicyPreservesDenyReadsWhenReplacementIsUnrestrictedLikeRust() {
+        let denyEntry = FileSystemSandboxEntry(path: .globPattern("/tmp/project/**/*.env"), access: .none)
+        var replacement = FileSystemSandboxPolicy.unrestricted
+        let configured = FileSystemSandboxPolicy.restricted(entries: [denyEntry], globScanMaxDepth: 2)
+
+        replacement.preserveDenyReadRestrictions(from: configured)
+
+        XCTAssertEqual(
+            replacement,
+            .restricted(
+                entries: [
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+                    denyEntry
+                ],
+                globScanMaxDepth: 2
+            )
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
