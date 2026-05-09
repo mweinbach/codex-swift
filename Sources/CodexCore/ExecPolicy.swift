@@ -828,6 +828,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkDeleteStatement(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if try Self.parseStarlarkIndexedAssignment(
             statement,
             constants: &constants,
@@ -1387,6 +1395,34 @@ public final class PolicyParser {
         return true
     }
 
+    private static func parseStarlarkDeleteStatement(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("del ") else {
+            return false
+        }
+
+        let targetText = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let target = try parseStarlarkIndexedAssignmentTarget(targetText, expression: trimmed),
+              var existingValue = constants[target.root]
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        try deleteStarlarkIndexedValue(
+            &existingValue,
+            indexes: target.indexes,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        )
+        constants[target.root] = existingValue
+        return true
+    }
+
     private static func parseStarlarkIndexedAssignment(
         _ statement: String,
         constants: inout [String: ConfigValue],
@@ -1572,6 +1608,72 @@ public final class PolicyParser {
                     &nested,
                     indexes: remainingIndexes,
                     assignedValue: assignedValue,
+                    constants: constants,
+                    functions: functions,
+                    expression: expression
+                )
+                items[key] = nested
+            }
+            value = .table(items)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func deleteStarlarkIndexedValue(
+        _ value: inout ConfigValue,
+        indexes: [String],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
+        guard let indexText = indexes.first else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let remainingIndexes = Array(indexes.dropFirst())
+
+        switch value {
+        case var .array(items):
+            let itemIndex = try parseStarlarkInteger(
+                indexText,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
+            guard items.indices.contains(resolvedIndex) else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if remainingIndexes.isEmpty {
+                items.remove(at: resolvedIndex)
+            } else {
+                var nested = items[resolvedIndex]
+                try deleteStarlarkIndexedValue(
+                    &nested,
+                    indexes: remainingIndexes,
+                    constants: constants,
+                    functions: functions,
+                    expression: expression
+                )
+                items[resolvedIndex] = nested
+            }
+            value = .array(items)
+        case var .table(items):
+            let key = try parsePolicyLiteral(indexText, constants: constants, functions: functions)
+            guard case let .string(key) = key else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if remainingIndexes.isEmpty {
+                guard items.removeValue(forKey: key) != nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+            } else {
+                guard var nested = items[key] else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                try deleteStarlarkIndexedValue(
+                    &nested,
+                    indexes: remainingIndexes,
                     constants: constants,
                     functions: functions,
                     expression: expression
