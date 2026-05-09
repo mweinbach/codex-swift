@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2793,6 +2793,12 @@ public final class PolicyParser {
                 ? parseStarlarkInteger(rawArguments[2], constants: constants, functions: functions, expression: text)
                 : -1
             return .string(replacingStarlarkString(receiver, oldValue: oldValue, newValue: newValue, count: count))
+        case "removeprefix":
+            let prefix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .string(removingStarlarkPrefix(prefix, from: receiver))
+        case "removesuffix":
+            let suffix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .string(removingStarlarkSuffix(suffix, from: receiver))
         case "isalnum":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .bool(starlarkStringIsAlphanumeric(receiver))
@@ -3037,6 +3043,25 @@ public final class PolicyParser {
             }
         }
         return result
+    }
+
+    private static func removingStarlarkPrefix(_ prefix: String, from string: String) -> String {
+        guard !prefix.isEmpty,
+              let range = string.range(of: prefix, options: .anchored)
+        else {
+            return string
+        }
+        return String(string[range.upperBound...])
+    }
+
+    private static func removingStarlarkSuffix(_ suffix: String, from string: String) -> String {
+        guard !suffix.isEmpty,
+              let range = string.range(of: suffix, options: .backwards),
+              range.upperBound == string.endIndex
+        else {
+            return string
+        }
+        return String(string[..<range.lowerBound])
     }
 
     private static func starlarkStringIsAlphanumeric(_ string: String) -> Bool {

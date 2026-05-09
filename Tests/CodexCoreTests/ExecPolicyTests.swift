@@ -2198,6 +2198,34 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/Codex Helper/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringRemoveAffixMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "status"
+        PREFIXED = "tool:git".removeprefix("tool:")
+        SUFFIXED = "status command".removesuffix(" command")
+        UNCHANGED = "git".removeprefix("") + "/" + "status".removesuffix("")
+
+        prefix_rule([PREFIXED, SUFFIXED], "allow", justification = UNCHANGED)
+
+        if "Hello, World!".removeprefix("Goodbye") == "Hello, World!" and "Hello, World!".removesuffix("World") == "Hello, World!":
+            network_rule("affix.example.com", "https", "allow")
+            host_executable(PREFIXED, ["/opt/" + "git.exe".removesuffix(".exe")])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "git/status"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "affix.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "
