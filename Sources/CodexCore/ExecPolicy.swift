@@ -59,9 +59,11 @@ public enum ExecPolicyError: Error, Equatable, CustomStringConvertible, Sendable
 
 public enum ExecPolicyAmendError: Error, Equatable, CustomStringConvertible, Sendable {
     case emptyPrefix
+    case invalidNetworkRule(String)
     case missingParent(path: String)
     case createPolicyDirectory(dir: String, message: String)
     case serializePrefix(message: String)
+    case serializeNetworkRule(message: String)
     case readPolicyFile(path: String, message: String)
     case writePolicyFile(path: String, message: String)
 
@@ -69,12 +71,16 @@ public enum ExecPolicyAmendError: Error, Equatable, CustomStringConvertible, Sen
         switch self {
         case .emptyPrefix:
             return "prefix rule requires at least one token"
+        case let .invalidNetworkRule(message):
+            return "invalid network rule: \(message)"
         case let .missingParent(path):
             return "policy path has no parent: \(path)"
         case let .createPolicyDirectory(dir, message):
             return "failed to create policy directory \(dir): \(message)"
         case let .serializePrefix(message):
             return "failed to format prefix tokens: \(message)"
+        case let .serializeNetworkRule(message):
+            return "failed to serialize network rule field: \(message)"
         case let .readPolicyFile(path, message):
             return "failed to read policy file \(path): \(message)"
         case let .writePolicyFile(path, message):
@@ -202,6 +208,19 @@ public enum NetworkRuleProtocol: String, Equatable, Sendable {
             throw ExecPolicyError.invalidRule(
                 "network_rule protocol must be one of http, https, socks5_tcp, socks5_udp (got \(raw))"
             )
+        }
+    }
+
+    fileprivate var policyString: String {
+        switch self {
+        case .http:
+            return "http"
+        case .https:
+            return "https"
+        case .socks5Tcp:
+            return "socks5_tcp"
+        case .socks5Udp:
+            return "socks5_udp"
         }
     }
 }
@@ -408,7 +427,7 @@ public struct ExecPolicy: Equatable, Sendable {
         domains.append(host)
     }
 
-    private static func normalizeNetworkRuleHost(_ raw: String) throws -> String {
+    fileprivate static func normalizeNetworkRuleHost(_ raw: String) throws -> String {
         var host = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else {
             throw ExecPolicyError.invalidRule("network_rule host cannot be empty")
@@ -1368,6 +1387,62 @@ public final class ExecPolicyManager: @unchecked Sendable {
         guard !prefix.isEmpty else {
             throw ExecPolicyAmendError.emptyPrefix
         }
+        let tokens: [String]
+        do {
+            tokens = try prefix.map(jsonStringLiteral)
+        } catch {
+            throw ExecPolicyAmendError.serializePrefix(message: String(describing: error))
+        }
+
+        let rule = #"prefix_rule(pattern=\#("[" + tokens.joined(separator: ", ") + "]"), decision="allow")"#
+        try appendRuleLine(policyPath: policyPath, rule: rule)
+    }
+
+    public static func blockingAppendNetworkRule(
+        policyPath: URL,
+        host rawHost: String,
+        protocol: NetworkRuleProtocol,
+        decision: ExecPolicyDecision,
+        justification: String?
+    ) throws {
+        let host: String
+        do {
+            host = try ExecPolicy.normalizeNetworkRuleHost(rawHost)
+        } catch {
+            throw ExecPolicyAmendError.invalidNetworkRule(String(describing: error))
+        }
+        if let justification, justification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ExecPolicyAmendError.invalidNetworkRule("justification cannot be empty")
+        }
+
+        let hostLiteral: String
+        let protocolLiteral: String
+        let decisionLiteral: String
+        do {
+            hostLiteral = try jsonStringLiteral(host)
+            protocolLiteral = try jsonStringLiteral(`protocol`.policyString)
+            decisionLiteral = try jsonStringLiteral(decision.policyString)
+        } catch {
+            throw ExecPolicyAmendError.serializeNetworkRule(message: String(describing: error))
+        }
+
+        var arguments = [
+            "host=\(hostLiteral)",
+            "protocol=\(protocolLiteral)",
+            "decision=\(decisionLiteral)",
+        ]
+        if let justification {
+            do {
+                arguments.append("justification=\(try jsonStringLiteral(justification))")
+            } catch {
+                throw ExecPolicyAmendError.serializeNetworkRule(message: String(describing: error))
+            }
+        }
+
+        try appendRuleLine(policyPath: policyPath, rule: "network_rule(\(arguments.joined(separator: ", ")))")
+    }
+
+    private static func appendRuleLine(policyPath: URL, rule: String) throws {
         guard let dir = policyPath.deletingLastPathComponentIfPresent() else {
             throw ExecPolicyAmendError.missingParent(path: policyPath.path)
         }
@@ -1378,15 +1453,6 @@ public final class ExecPolicyManager: @unchecked Sendable {
             throw ExecPolicyAmendError.createPolicyDirectory(dir: dir.path, message: String(describing: error))
         }
 
-        let tokens: [String]
-        do {
-            tokens = try prefix.map(jsonStringLiteral)
-        } catch {
-            throw ExecPolicyAmendError.serializePrefix(message: String(describing: error))
-        }
-
-        let rule = #"prefix_rule(pattern=\#("[" + tokens.joined(separator: ", ") + "]"), decision="allow")"#
-        let line = rule + "\n"
         let existing: String
         if FileManager.default.fileExists(atPath: policyPath.path) {
             do {
@@ -1402,6 +1468,7 @@ public final class ExecPolicyManager: @unchecked Sendable {
             return
         }
 
+        let line = rule + "\n"
         let updated = existing.isEmpty || existing.hasSuffix("\n")
             ? existing + line
             : existing + "\n" + line
@@ -1470,6 +1537,19 @@ public final class ExecPolicyManager: @unchecked Sendable {
     private static func jsonStringLiteral(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private extension ExecPolicyDecision {
+    var policyString: String {
+        switch self {
+        case .allow:
+            return "allow"
+        case .prompt:
+            return "prompt"
+        case .forbidden:
+            return "deny"
+        }
     }
 }
 

@@ -769,6 +769,71 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testBlockingAppendNetworkRuleMatchesRustSerialization() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let policyPath = ExecPolicyManager.defaultPolicyPath(codexHome: tempDir.url)
+
+        try ExecPolicyManager.blockingAppendNetworkRule(
+            policyPath: policyPath,
+            host: "Api.GitHub.com",
+            protocol: .https,
+            decision: .allow,
+            justification: "Allow https_connect access to api.github.com"
+        )
+        try ExecPolicyManager.blockingAppendNetworkRule(
+            policyPath: policyPath,
+            host: "api.github.com",
+            protocol: .https,
+            decision: .allow,
+            justification: "Allow https_connect access to api.github.com"
+        )
+        try ExecPolicyManager.blockingAppendNetworkRule(
+            policyPath: policyPath,
+            host: "blocked.example.com",
+            protocol: .http,
+            decision: .forbidden,
+            justification: nil
+        )
+
+        let contents = try String(contentsOf: policyPath, encoding: .utf8)
+        XCTAssertEqual(
+            contents,
+            "network_rule(host=\"api.github.com\", protocol=\"https\", decision=\"allow\", justification=\"Allow https_connect access to api.github.com\")\n" +
+                "network_rule(host=\"blocked.example.com\", protocol=\"http\", decision=\"deny\")\n"
+        )
+    }
+
+    func testBlockingAppendNetworkRuleRejectsInvalidInputsLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let policyPath = ExecPolicyManager.defaultPolicyPath(codexHome: tempDir.url)
+
+        XCTAssertThrowsError(try ExecPolicyManager.blockingAppendNetworkRule(
+            policyPath: policyPath,
+            host: "*.example.com",
+            protocol: .https,
+            decision: .allow,
+            justification: nil
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "invalid network rule: invalid rule: network_rule host must be a specific host; wildcards are not allowed"
+            )
+        }
+
+        XCTAssertThrowsError(try ExecPolicyManager.blockingAppendNetworkRule(
+            policyPath: policyPath,
+            host: "api.github.com",
+            protocol: .https,
+            decision: .allow,
+            justification: "   "
+        )) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyAmendError,
+                .invalidNetworkRule("justification cannot be empty")
+            )
+        }
+    }
+
     func testAppendExecPolicyAmendmentRejectsEmptyPrefix() throws {
         let tempDir = try CoreTemporaryDirectory()
         XCTAssertThrowsError(try ExecPolicyManager().appendAmendmentAndUpdate(
