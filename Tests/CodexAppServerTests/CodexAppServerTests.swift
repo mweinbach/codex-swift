@@ -2545,6 +2545,118 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((noOpResult["errors"] as? [Any])?.count, 0)
     }
 
+    func testMarketplaceUpgradeRefreshesConfiguredGitSubdirPluginCache() throws {
+        let temp = try TemporaryDirectory()
+        let pluginRepo = temp.url.appendingPathComponent("plugin-repo", isDirectory: true)
+        try writePluginFixture(
+            root: pluginRepo,
+            relativePath: "plugins/sample",
+            pluginName: "sample",
+            version: "1.2.3",
+            marker: "from-git-subdir"
+        )
+        try runGit(["init"], cwd: pluginRepo)
+        try runGit(["config", "user.name", "Test User"], cwd: pluginRepo)
+        try runGit(["config", "user.email", "test@example.com"], cwd: pluginRepo)
+        try runGit(["add", "."], cwd: pluginRepo)
+        try runGit(["commit", "-m", "Initial plugin"], cwd: pluginRepo)
+
+        let marketplaceSource = temp.url.appendingPathComponent("marketplace-git-subdir", isDirectory: true)
+        let manifestDirectory = marketplaceSource.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        let pluginRepoURL = URL(fileURLWithPath: pluginRepo.path).absoluteString
+        try """
+        {
+          "name": "debug",
+          "plugins": [
+            {
+              "name": "sample",
+              "source": {
+                "source": "git-subdir",
+                "url": "\(pluginRepoURL)",
+                "path": "plugins/sample"
+              }
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["init"], cwd: marketplaceSource)
+        try runGit(["config", "user.name", "Test User"], cwd: marketplaceSource)
+        try runGit(["config", "user.email", "test@example.com"], cwd: marketplaceSource)
+        try runGit(["add", "."], cwd: marketplaceSource)
+        try runGit(["commit", "-m", "Initial marketplace"], cwd: marketplaceSource)
+        let marketplaceRemote = temp.url.appendingPathComponent("marketplace-git-subdir.git", isDirectory: true)
+        try runGit(["init", "--bare", marketplaceRemote.path], cwd: temp.url)
+        try runGit(["remote", "add", "origin", marketplaceRemote.path], cwd: marketplaceSource)
+        let branch = try runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd: marketplaceSource)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try runGit(["push", "-u", "origin", branch], cwd: marketplaceSource)
+
+        let gitConfig = temp.url.appendingPathComponent("gitconfig", isDirectory: false)
+        try """
+        [url "\(URL(fileURLWithPath: marketplaceRemote.path).absoluteString)"]
+            insteadOf = https://github.com/openai/debug-marketplace.git
+        """.write(to: gitConfig, atomically: true, encoding: .utf8)
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "GIT_CONFIG_GLOBAL": gitConfig.path,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+
+        let add = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","refName":"\#(branch)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNil(add["error"])
+
+        let staleCache = temp.url.appendingPathComponent("plugins/cache/debug/sample/local", isDirectory: true)
+        try FileManager.default.createDirectory(at: staleCache, withIntermediateDirectories: true)
+        try "stale".write(
+            to: staleCache.appendingPathComponent("marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let configPath = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try String(contentsOf: configPath, encoding: .utf8)
+        try (config + """
+
+        [plugins."sample@debug"]
+        enabled = true
+        """).write(to: configPath, atomically: true, encoding: .utf8)
+
+        try "touch".write(
+            to: marketplaceSource.appendingPathComponent("upgrade-marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "upgrade-marker.txt"], cwd: marketplaceSource)
+        try runGit(["commit", "-m", "Trigger marketplace upgrade"], cwd: marketplaceSource)
+        try runGit(["push", "origin", branch], cwd: marketplaceSource)
+
+        let upgrade = try appServerResponse(
+            #"{"id":2,"method":"marketplace/upgrade","params":{}}"#,
+            configuration: configuration
+        )
+        let upgradeResult = try XCTUnwrap(upgrade["result"] as? [String: Any])
+        XCTAssertEqual(upgradeResult["selectedMarketplaces"] as? [String], ["debug"])
+        XCTAssertEqual((upgradeResult["errors"] as? [Any])?.count, 0)
+        let refreshedMarker = temp.url
+            .appendingPathComponent("plugins/cache/debug/sample/1.2.3/marker.txt", isDirectory: false)
+        XCTAssertEqual(try String(contentsOf: refreshedMarker, encoding: .utf8), "from-git-subdir")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleCache.path))
+    }
+
     func testMarketplaceAddRecordsLocalDirectoryAndDuplicateSource() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url)
@@ -7054,6 +7166,35 @@ final class CodexAppServerTests: XCTestCase {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         try runGit(["push", "-u", "origin", branch], cwd: source)
         return (source, remote, branch)
+    }
+
+    private func writePluginFixture(
+        root: URL,
+        relativePath: String,
+        pluginName: String,
+        version: String?,
+        marker: String
+    ) throws {
+        let pluginRoot = root.appendingPathComponent(relativePath, isDirectory: true)
+        let pluginManifestDirectory = pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: pluginManifestDirectory, withIntermediateDirectories: true)
+        var manifest: [String: Any] = [
+            "name": pluginName,
+            "description": "Fixture plugin"
+        ]
+        if let version {
+            manifest["version"] = version
+        }
+        let manifestData = try JSONSerialization.data(
+            withJSONObject: manifest,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try manifestData.write(to: pluginManifestDirectory.appendingPathComponent("plugin.json", isDirectory: false))
+        try marker.write(
+            to: pluginRoot.appendingPathComponent("marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 
     private func makeLocalMarketplaceRootWithPlugin(

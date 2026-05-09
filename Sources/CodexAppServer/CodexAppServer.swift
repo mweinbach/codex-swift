@@ -2197,6 +2197,18 @@ public enum CodexAppServer {
     }
 
     private static func localPluginSourcePath(_ value: Any?, marketplaceRoot: URL) -> URL? {
+        guard case .local(let path) = marketplacePluginSource(value, marketplaceRoot: marketplaceRoot) else {
+            return nil
+        }
+        return path
+    }
+
+    private enum MarketplacePluginSource {
+        case local(URL)
+        case git(url: String, path: String?, refName: String?, sha: String?)
+    }
+
+    private static func marketplacePluginSource(_ value: Any?, marketplaceRoot: URL) -> MarketplacePluginSource? {
         let rawPath: String?
         if let path = value as? String {
             rawPath = path
@@ -2204,6 +2216,27 @@ public enum CodexAppServer {
                   let sourceType = source["source"] as? String,
                   sourceType == "local" {
             rawPath = source["path"] as? String
+        } else if let source = value as? [String: Any],
+                  let sourceType = source["source"] as? String,
+                  sourceType == "git-subdir",
+                  let url = source["url"] as? String,
+                  let path = source["path"] as? String {
+            return .git(
+                url: url,
+                path: path,
+                refName: source["ref"] as? String,
+                sha: source["sha"] as? String
+            )
+        } else if let source = value as? [String: Any],
+                  let sourceType = source["source"] as? String,
+                  sourceType == "url",
+                  let url = source["url"] as? String {
+            return .git(
+                url: url,
+                path: source["path"] as? String,
+                refName: source["ref"] as? String,
+                sha: source["sha"] as? String
+            )
         } else {
             rawPath = nil
         }
@@ -2218,9 +2251,10 @@ public enum CodexAppServer {
         guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
             return nil
         }
-        return components.reduce(marketplaceRoot) { partial, component in
+        let path = components.reduce(marketplaceRoot) { partial, component in
             partial.appendingPathComponent(String(component), isDirectory: true)
         }.standardizedFileURL
+        return .local(path)
     }
 
     private struct LocalPluginInlineHooks {
@@ -2799,6 +2833,7 @@ public enum CodexAppServer {
     private static func refreshNonCuratedPluginCache(
         codexHome: URL,
         roots: [URL],
+        environment: [String: String],
         forceReinstall: Bool
     ) throws -> Bool {
         let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
@@ -2809,7 +2844,7 @@ public enum CodexAppServer {
         }
 
         let configuredKeys = Set(configuredPluginIDs.map(\.key))
-        var pluginSources: [String: URL] = [:]
+        var pluginSources: [String: MarketplacePluginSource] = [:]
         for manifestPath in localMarketplaceManifestPaths(from: roots) {
             let marketplaceRoot = try marketplaceRoot(forManifestPath: manifestPath)
             let data = try Data(contentsOf: manifestPath)
@@ -2827,19 +2862,31 @@ public enum CodexAppServer {
                 let key = "\(pluginName)@\(marketplaceName)"
                 guard configuredKeys.contains(key),
                       pluginSources[key] == nil,
-                      let sourcePath = localPluginSourcePath(plugin["source"], marketplaceRoot: marketplaceRoot)
+                      let source = marketplacePluginSource(plugin["source"], marketplaceRoot: marketplaceRoot)
                 else {
                     continue
                 }
-                pluginSources[key] = sourcePath
+                pluginSources[key] = source
             }
         }
 
         var refreshed = false
         for pluginID in configuredPluginIDs {
-            guard let sourcePath = pluginSources[pluginID.key] else {
+            guard let source = pluginSources[pluginID.key] else {
                 continue
             }
+            let materialized = try materializeMarketplacePluginSource(
+                source,
+                codexHome: codexHome,
+                environment: environment
+            )
+            defer {
+                if let cleanupRoot = materialized.cleanupRoot,
+                   FileManager.default.fileExists(atPath: cleanupRoot.path) {
+                    try? FileManager.default.removeItem(at: cleanupRoot)
+                }
+            }
+            let sourcePath = materialized.path
             let version = try localPluginCacheVersion(
                 sourcePath: sourcePath,
                 pluginName: pluginID.pluginName
@@ -2858,6 +2905,87 @@ public enum CodexAppServer {
             refreshed = true
         }
         return refreshed
+    }
+
+    private struct MaterializedMarketplacePluginSource {
+        let path: URL
+        let cleanupRoot: URL?
+    }
+
+    private static func materializeMarketplacePluginSource(
+        _ source: MarketplacePluginSource,
+        codexHome: URL,
+        environment: [String: String]
+    ) throws -> MaterializedMarketplacePluginSource {
+        switch source {
+        case .local(let path):
+            return MaterializedMarketplacePluginSource(path: path, cleanupRoot: nil)
+        case .git(let url, let path, let refName, let sha):
+            let stagingRoot = codexHome
+                .appendingPathComponent("plugins", isDirectory: true)
+                .appendingPathComponent(".marketplace-plugin-source-staging", isDirectory: true)
+            let checkoutRoot = stagingRoot.appendingPathComponent(
+                "marketplace-plugin-source-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            try cloneGitPluginSource(
+                url: url,
+                refName: refName,
+                sha: sha,
+                sparseCheckoutPath: path,
+                destination: checkoutRoot,
+                environment: environment
+            )
+            let materializedPath = path.map {
+                checkoutRoot.appendingPathComponent($0, isDirectory: true).standardizedFileURL
+            } ?? checkoutRoot.standardizedFileURL
+            return MaterializedMarketplacePluginSource(path: materializedPath, cleanupRoot: checkoutRoot)
+        }
+    }
+
+    private static func cloneGitPluginSource(
+        url: String,
+        refName: String?,
+        sha: String?,
+        sparseCheckoutPath: String?,
+        destination: URL,
+        environment: [String: String]
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if let sparseCheckoutPath {
+            _ = try runMarketplaceGit(
+                ["clone", "--filter=blob:none", "--sparse", "--no-checkout", url, destination.path],
+                cwd: nil,
+                environment: environment
+            )
+            _ = try runMarketplaceGit(
+                ["sparse-checkout", "set", "--no-cone", "--", sparseCheckoutPath],
+                cwd: destination,
+                environment: environment
+            )
+        } else {
+            _ = try runMarketplaceGit(
+                ["clone", url, destination.path],
+                cwd: nil,
+                environment: environment
+            )
+        }
+        if let target = sha ?? refName {
+            _ = try runMarketplaceGit(
+                ["checkout", target],
+                cwd: destination,
+                environment: environment
+            )
+        } else if sparseCheckoutPath != nil {
+            _ = try runMarketplaceGit(
+                ["checkout"],
+                cwd: destination,
+                environment: environment
+            )
+        }
     }
 
     private static func configuredNonCuratedPluginIDs(in config: ConfigValue) -> [ConfiguredLocalPluginID] {
@@ -3045,6 +3173,7 @@ public enum CodexAppServer {
                 _ = try refreshNonCuratedPluginCache(
                     codexHome: configuration.codexHome,
                     roots: outcome.upgradedRoots.map { URL(fileURLWithPath: $0, isDirectory: true) },
+                    environment: configuration.environment,
                     forceReinstall: true
                 )
             } catch {
