@@ -947,10 +947,10 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             if !Self.shouldSkipReasoningContent(content) {
                 try container.encode(content, forKey: .content)
             }
-            try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
+            try container.encodePresentOrNull(encryptedContent, forKey: .encryptedContent)
         case let .localShellCall(_, callID, status, action):
             try container.encode("local_shell_call", forKey: .type)
-            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encodePresentOrNull(callID, forKey: .callID)
             try container.encode(status, forKey: .status)
             try container.encode(action, forKey: .action)
         case let .functionCall(_, name, namespace, arguments, callID):
@@ -961,7 +961,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(callID, forKey: .callID)
         case let .toolSearchCall(_, callID, status, execution, arguments):
             try container.encode("tool_search_call", forKey: .type)
-            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encodePresentOrNull(callID, forKey: .callID)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encode(execution, forKey: .execution)
             try container.encode(arguments, forKey: .arguments)
@@ -982,7 +982,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(output, forKey: .output)
         case let .toolSearchOutput(callID, status, execution, tools):
             try container.encode("tool_search_output", forKey: .type)
-            try container.encodeIfPresent(callID, forKey: .callID)
+            try container.encodePresentOrNull(callID, forKey: .callID)
             try container.encode(status, forKey: .status)
             try container.encode(execution, forKey: .execution)
             try container.encode(tools, forKey: .tools)
@@ -1034,5 +1034,15 @@ public extension ResponseItem {
 private extension JSONEncoder {
     static var codexCompact: JSONEncoder {
         JSONEncoder()
+    }
+}
+
+private extension KeyedEncodingContainer {
+    mutating func encodePresentOrNull<T: Encodable>(_ value: T?, forKey key: Key) throws {
+        if let value {
+            try encode(value, forKey: key)
+        } else {
+            try encodeNil(forKey: key)
+        }
     }
 }

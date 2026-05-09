@@ -487,6 +487,8 @@ Source baseline inspected for this scaffold:
   - `ResponseItem` now preserves streamed `id` fields while decoding message, reasoning, local-shell, function, tool-search, custom-tool, and web-search items, but omits those runtime IDs during normal serialization like Rust's `skip_serializing` fields; image generation IDs remain serialized because Rust keeps that field on the wire. The Responses request builder still reattaches IDs for its explicit request payload behavior.
 - `codex-rs/protocol/src/models.rs` MCP tool-call output input item
   - `ResponseInputItem.mcpToolCallOutput` now serializes and decodes Rust's `output` field for `CallToolResult` while retaining a decode-only `result` fallback for older Swift-authored artifacts.
+- `codex-rs/protocol/src/models.rs` response item null optionals
+  - `ResponseItem` now preserves Rust's non-skipped optional fields by serializing `null` for missing reasoning `encrypted_content` and local-shell/tool-search `call_id` values, while continuing to omit optionals Rust marks with `skip_serializing_if`.
 
 ## Known Gaps
 

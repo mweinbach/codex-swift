@@ -585,6 +585,23 @@ final class ResponseModelsTests: XCTestCase {
             execution: "server",
             tools: []
         ))
+
+        try XCTAssertJSONObjectEqual(call, [
+            "type": "tool_search_call",
+            "call_id": NSNull(),
+            "status": "completed",
+            "execution": "server",
+            "arguments": [
+                "paths": ["crm"]
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(output, [
+            "type": "tool_search_output",
+            "call_id": NSNull(),
+            "status": "completed",
+            "execution": "server",
+            "tools": []
+        ])
     }
 
     func testRoundTripsImageGenerationCallLikeRust() throws {
@@ -690,6 +707,29 @@ final class ResponseModelsTests: XCTestCase {
 
         let object = try JSONObject(item)
         XCTAssertNil(object["content"])
+        XCTAssertTrue(object["encrypted_content"] is NSNull)
+    }
+
+    func testResponseItemSerializesRustNullOptionals() throws {
+        try XCTAssertJSONObjectEqual(ResponseItem.reasoning(id: "rs_1", summary: []), [
+            "type": "reasoning",
+            "summary": [],
+            "encrypted_content": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(ResponseItem.localShellCall(
+            callID: nil,
+            status: .completed,
+            action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
+        ), [
+            "type": "local_shell_call",
+            "call_id": NSNull(),
+            "status": "completed",
+            "action": [
+                "type": "exec",
+                "command": ["echo", "hi"]
+            ]
+        ])
     }
 
     func testRoundTripsCallPairResponseItems() throws {
