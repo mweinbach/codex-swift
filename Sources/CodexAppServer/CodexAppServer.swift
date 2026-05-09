@@ -438,11 +438,13 @@ private enum AccountRateLimitsFetchError: Error, CustomStringConvertible {
 private struct AccountRateLimitsUsageResponse: Decodable {
     let planType: PlanType?
     let rateLimit: AccountUsageRateLimit?
+    let rateLimitReachedType: AccountRateLimitReachedTypePayload?
     let additionalRateLimits: [AccountUsageAdditionalRateLimit]
 
     private enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
         case rateLimit = "rate_limit"
+        case rateLimitReachedType = "rate_limit_reached_type"
         case additionalRateLimits = "additional_rate_limits"
     }
 
@@ -450,6 +452,10 @@ private struct AccountRateLimitsUsageResponse: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.planType = try container.decodeIfPresent(PlanType.self, forKey: .planType)
         self.rateLimit = try container.decodeIfPresent(AccountUsageRateLimit.self, forKey: .rateLimit)
+        self.rateLimitReachedType = try container.decodeIfPresent(
+            AccountRateLimitReachedTypePayload.self,
+            forKey: .rateLimitReachedType
+        )
         self.additionalRateLimits = try container.decodeIfPresent(
             [AccountUsageAdditionalRateLimit].self,
             forKey: .additionalRateLimits
@@ -462,7 +468,8 @@ private struct AccountRateLimitsUsageResponse: Decodable {
             primary: rateLimit?.primaryWindow?.rateLimitWindow,
             secondary: rateLimit?.secondaryWindow?.rateLimitWindow,
             credits: nil,
-            planType: planType
+            planType: planType,
+            rateLimitReachedType: rateLimitReachedType?.rateLimitReachedType
         )
     }
 
@@ -484,6 +491,14 @@ private struct AccountRateLimitsUsageResponse: Decodable {
                 (($0.limitID ?? "codex"), $0)
             })
         )
+    }
+}
+
+private struct AccountRateLimitReachedTypePayload: Decodable {
+    let type: String
+
+    var rateLimitReachedType: RateLimitReachedType? {
+        RateLimitReachedType(rawValue: type)
     }
 }
 

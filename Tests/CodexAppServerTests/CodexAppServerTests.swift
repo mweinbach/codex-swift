@@ -24,6 +24,9 @@ final class CodexAppServerTests: XCTestCase {
           "reset_at": 1737043200
         }
       },
+      "rate_limit_reached_type": {
+        "type": "workspace_member_usage_limit_reached"
+      },
       "additional_rate_limits": [
         {
           "limit_name": "codex_other",
@@ -5464,6 +5467,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(snapshot.primary?.windowMinutes, 60)
         XCTAssertEqual(snapshot.secondary?.windowMinutes, 1_440)
         XCTAssertEqual(snapshot.planType, .pro)
+        XCTAssertEqual(snapshot.rateLimitReachedType, .workspaceMemberUsageLimitReached)
         XCTAssertEqual(result.rateLimitsByLimitID["codex"]?.primary?.usedPercent, 42)
         XCTAssertEqual(result.rateLimitsByLimitID["codex_other"]?.limitName, "codex_other")
         XCTAssertEqual(result.rateLimitsByLimitID["codex_other"]?.primary?.usedPercent, 88)
