@@ -179,6 +179,12 @@ private struct AppServerProcessSpawnParams {
     let environmentOverrides: [String: String?]
 }
 
+private struct AppServerProcessWriteStdinParams {
+    let processHandle: String
+    let delta: Data
+    let closeStdin: Bool
+}
+
 public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
     public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
 
@@ -3572,17 +3578,32 @@ public enum CodexAppServer {
         return processID
     }
 
-    fileprivate static func processWriteStdinResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func processWriteStdinParams(params: [String: Any]?) throws -> AppServerProcessWriteStdinParams {
         let processHandle = try processHandle(params: params)
         let deltaBase64 = stringParam(params?["deltaBase64"])
         let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("process/writeStdin requires deltaBase64 or closeStdin")
         }
-        if let deltaBase64, Data(base64Encoded: deltaBase64) == nil {
-            throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        let delta: Data
+        if let deltaBase64 {
+            guard let decoded = Data(base64Encoded: deltaBase64) else {
+                throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+            }
+            delta = decoded
+        } else {
+            delta = Data()
         }
-        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+        return AppServerProcessWriteStdinParams(
+            processHandle: processHandle,
+            delta: delta,
+            closeStdin: closeStdin
+        )
+    }
+
+    fileprivate static func processWriteStdinResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try processWriteStdinParams(params: params)
+        throw AppServerError.invalidRequest("no active process for process handle \"\(parsed.processHandle)\"")
     }
 
     fileprivate static func processSpawnParams(params: [String: Any]?) throws -> AppServerProcessSpawnParams {
@@ -6887,6 +6908,8 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private let onExit: @Sendable (String) -> Void
     private let lock = NSLock()
     private let process = Process()
+    private var stdinPipe: Pipe?
+    private var stdinClosed = false
     private var terminated = false
 
     init(
@@ -6925,7 +6948,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         let stdout = Pipe()
         let stderr = Pipe()
         if params.streamStdin || params.tty {
-            process.standardInput = Pipe()
+            let stdin = Pipe()
+            stdinPipe = stdin
+            process.standardInput = stdin
         }
         process.standardOutput = stdout
         process.standardError = stderr
@@ -6935,14 +6960,45 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         }
     }
 
+    func writeStdin(delta: Data, closeStdin: Bool) throws {
+        let stdin = try lock.withLock {
+            guard let stdinPipe else {
+                throw AppServerError.invalidRequest("stdin streaming is not enabled for this process")
+            }
+            guard !stdinClosed else {
+                throw AppServerError.invalidRequest("stdin is already closed")
+            }
+            return stdinPipe
+        }
+        if !delta.isEmpty {
+            do {
+                try stdin.fileHandleForWriting.write(contentsOf: delta)
+            } catch {
+                throw AppServerError.invalidRequest("stdin is already closed")
+            }
+        }
+        if closeStdin {
+            lock.withLock {
+                stdinClosed = true
+            }
+            do {
+                try stdin.fileHandleForWriting.close()
+            } catch {
+                stdin.fileHandleForWriting.closeFile()
+            }
+        }
+    }
+
     func terminate() {
         let shouldTerminate = lock.withLock {
             guard !terminated else {
                 return false
             }
             terminated = true
+            stdinClosed = true
             return process.isRunning
         }
+        try? stdinPipe?.fileHandleForWriting.close()
         if shouldTerminate {
             process.terminate()
         }
@@ -7041,6 +7097,12 @@ private final class AppServerProcessRegistry: @unchecked Sendable {
     func remove(_ processHandle: String) -> AppServerSpawnedProcess? {
         lock.withLock {
             activeProcesses.removeValue(forKey: processHandle)
+        }
+    }
+
+    func get(_ processHandle: String) -> AppServerSpawnedProcess? {
+        lock.withLock {
+            activeProcesses[processHandle]
         }
     }
 
@@ -7322,6 +7384,15 @@ final class CodexAppServerMessageProcessor {
             _ = activeProcesses.remove(parsed.processHandle)
             throw AppServerError.internalError("process/spawn failed: \(error)")
         }
+        return [:]
+    }
+
+    private func processWriteStdinResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try CodexAppServer.processWriteStdinParams(params: params)
+        guard let session = activeProcesses.get(parsed.processHandle) else {
+            throw AppServerError.invalidRequest("no active process for process handle \"\(parsed.processHandle)\"")
+        }
+        try session.writeStdin(delta: parsed.delta, closeStdin: parsed.closeStdin)
         return [:]
     }
 
@@ -7923,7 +7994,7 @@ final class CodexAppServerMessageProcessor {
                 case "process/writeStdin":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.processWriteStdinResult(params: params)
+                        result: try processWriteStdinResult(params: params)
                     )
                 case "process/resizePty":
                     response = CodexAppServer.responseObject(

@@ -5139,6 +5139,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(exitedParams["stderr"] as? String, "")
     }
 
+    func testProcessWriteStdinFeedsStreamingProcessAndCanCloseStdin() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/cat"],"processHandle":"proc-stdin","cwd":"\#(cwd.url.path)","streamStdin":true}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/writeStdin","params":{"processHandle":"proc-stdin","deltaBase64":"aGVsbG8=","closeStdin":true}}"#.utf8
+        )))
+        XCTAssertEqual((write["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-stdin")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        XCTAssertEqual(params["stdout"] as? String, "hello")
+        XCTAssertEqual(params["stderr"] as? String, "")
+    }
+
+    func testProcessWriteStdinRejectsActiveProcessWithoutStdinStreaming() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-no-stdin","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/writeStdin","params":{"processHandle":"proc-no-stdin","deltaBase64":"aGk="}}"#.utf8
+        )))
+        let writeError = try XCTUnwrap(write["error"] as? [String: Any])
+        XCTAssertEqual(writeError["code"] as? Int, -32600)
+        XCTAssertEqual(writeError["message"] as? String, "stdin streaming is not enabled for this process")
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-no-stdin"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
+        _ = try await nextNotificationPayload(notificationCapture)
+    }
+
     func testProcessSpawnRejectsDuplicateHandleAndKillTerminatesActiveProcess() async throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
