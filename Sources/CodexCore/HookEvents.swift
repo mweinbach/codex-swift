@@ -280,6 +280,25 @@ public struct HookPermissionRequestOutput: Equatable, Sendable {
     }
 }
 
+public struct HookPreToolUseOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let blockReason: String?
+    public let additionalContext: String?
+    public let invalidReason: String?
+
+    public init(
+        universal: HookUniversalOutput,
+        blockReason: String?,
+        additionalContext: String?,
+        invalidReason: String? = nil
+    ) {
+        self.universal = universal
+        self.blockReason = blockReason
+        self.additionalContext = additionalContext
+        self.invalidReason = invalidReason
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -311,6 +330,52 @@ public enum HooksProtocol {
 
     public static func parsePostCompactOutput(_ stdout: String) -> HookStatelessOutput? {
         parseCompactOutput(stdout)
+    }
+
+    public static func parsePreToolUseOutput(_ stdout: String) -> HookPreToolUseOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(
+                object,
+                extraAllowedKeys: ["decision", "reason", "hookSpecificOutput"]
+              ),
+              let legacyDecision = optionalStringEnumValue(object["decision"], allowedValues: ["approve", "block"]),
+              let reason = optionalStringValue(object["reason"])
+        else {
+            return nil
+        }
+
+        let hookSpecific = parsePreToolUseHookSpecificOutput(object["hookSpecificOutput"])
+        guard hookSpecific.valid else {
+            return nil
+        }
+
+        let useHookSpecificDecision = hookSpecific.permissionDecision != nil
+            || hookSpecific.permissionDecisionReason != nil
+            || hookSpecific.hasUpdatedInput
+        let invalidReason = unsupportedPreToolUseUniversal(universal) ?? (
+            useHookSpecificDecision
+                ? unsupportedPreToolUseHookSpecificOutput(hookSpecific)
+                : unsupportedPreToolUseLegacyDecision(decision: legacyDecision, reason: reason)
+        )
+        let blockReason: String?
+        if invalidReason == nil {
+            if useHookSpecificDecision {
+                blockReason = hookSpecific.permissionDecision == "deny"
+                    ? trimmedReason(hookSpecific.permissionDecisionReason)
+                    : nil
+            } else {
+                blockReason = legacyDecision == "block" ? trimmedReason(reason) : nil
+            }
+        } else {
+            blockReason = nil
+        }
+
+        return HookPreToolUseOutput(
+            universal: universal,
+            blockReason: blockReason,
+            additionalContext: hookSpecific.additionalContext,
+            invalidReason: invalidReason
+        )
     }
 
     public static func parsePermissionRequestOutput(_ stdout: String) -> HookPermissionRequestOutput? {
@@ -394,6 +459,104 @@ public enum HooksProtocol {
             return defaultValue
         }
         return value as? Bool
+    }
+
+    private static func parsePreToolUseHookSpecificOutput(_ value: Any?) -> (
+        valid: Bool,
+        permissionDecision: String?,
+        permissionDecisionReason: String?,
+        hasUpdatedInput: Bool,
+        additionalContext: String?
+    ) {
+        guard let value else {
+            return (true, nil, nil, false, nil)
+        }
+        if value is NSNull {
+            return (true, nil, nil, false, nil)
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).isSubset(of: [
+                "hookEventName",
+                "permissionDecision",
+                "permissionDecisionReason",
+                "updatedInput",
+                "additionalContext",
+              ]),
+              let eventName = object["hookEventName"] as? String,
+              allHookEventWireNames.contains(eventName),
+              let permissionDecision = optionalStringEnumValue(
+                object["permissionDecision"],
+                allowedValues: ["allow", "deny", "ask"]
+              ),
+              let permissionDecisionReason = optionalStringValue(object["permissionDecisionReason"]),
+              let additionalContext = optionalStringValue(object["additionalContext"])
+        else {
+            return (false, nil, nil, false, nil)
+        }
+
+        return (
+            true,
+            permissionDecision,
+            permissionDecisionReason,
+            isNonNullJSONValue(object["updatedInput"]),
+            additionalContext
+        )
+    }
+
+    private static func unsupportedPreToolUseUniversal(_ universal: HookUniversalOutput) -> String? {
+        if !universal.continueProcessing {
+            return "PreToolUse hook returned unsupported continue:false"
+        }
+        if universal.stopReason != nil {
+            return "PreToolUse hook returned unsupported stopReason"
+        }
+        if universal.suppressOutput {
+            return "PreToolUse hook returned unsupported suppressOutput"
+        }
+        return nil
+    }
+
+    private static func unsupportedPreToolUseHookSpecificOutput(
+        _ output: (
+            valid: Bool,
+            permissionDecision: String?,
+            permissionDecisionReason: String?,
+            hasUpdatedInput: Bool,
+            additionalContext: String?
+        )
+    ) -> String? {
+        if output.hasUpdatedInput {
+            return "PreToolUse hook returned unsupported updatedInput"
+        }
+        switch output.permissionDecision {
+        case "allow":
+            return "PreToolUse hook returned unsupported permissionDecision:allow"
+        case "ask":
+            return "PreToolUse hook returned unsupported permissionDecision:ask"
+        case "deny":
+            return trimmedReason(output.permissionDecisionReason) == nil
+                ? invalidPreToolUseReasonMessage
+                : nil
+        case nil:
+            return output.permissionDecisionReason != nil
+                ? "PreToolUse hook returned permissionDecisionReason without permissionDecision"
+                : nil
+        default:
+            return nil
+        }
+    }
+
+    private static func unsupportedPreToolUseLegacyDecision(decision: String?, reason: String?) -> String? {
+        switch decision {
+        case "approve":
+            return "PreToolUse hook returned unsupported decision:approve"
+        case "block":
+            return trimmedReason(reason) == nil ? invalidBlockMessage("PreToolUse") : nil
+        case nil:
+            return reason != nil ? "PreToolUse hook returned reason without decision" : nil
+        default:
+            return nil
+        }
     }
 
     private static func parsePermissionRequestHookSpecificOutput(_ value: Any?) -> (
@@ -499,11 +662,31 @@ public enum HooksProtocol {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private static func invalidBlockMessage(_ eventName: String) -> String {
+        "\(eventName) hook returned decision:block without a non-empty reason"
+    }
+
+    private static let invalidPreToolUseReasonMessage =
+        "PreToolUse hook returned permissionDecision:deny without a non-empty permissionDecisionReason"
+
     private static func isNonNullJSONValue(_ value: Any?) -> Bool {
         guard let value else {
             return false
         }
         return !(value is NSNull)
+    }
+
+    private static func optionalStringEnumValue(_ value: Any?, allowedValues: Set<String>) -> String?? {
+        guard let value else {
+            return .some(nil)
+        }
+        if value is NSNull {
+            return .some(nil)
+        }
+        guard let string = value as? String, allowedValues.contains(string) else {
+            return nil
+        }
+        return .some(string)
     }
 
     private static let allHookEventWireNames: Set<String> = [

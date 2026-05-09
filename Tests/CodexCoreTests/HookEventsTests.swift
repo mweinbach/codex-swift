@@ -175,6 +175,113 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNil(HooksProtocol.parsePostCompactOutput(#"{"stopReason":7}"#))
     }
 
+    func testPreToolUseOutputParsesLegacyBlockDecisionLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"decision":"block","reason":"  policy blocked  ","systemMessage":"visible"}
+        """))
+        XCTAssertEqual(parsed.universal.systemMessage, "visible")
+        XCTAssertEqual(parsed.blockReason, "policy blocked")
+        XCTAssertNil(parsed.additionalContext)
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPreToolUseOutputParsesHookSpecificDenyAndAdditionalContextLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {
+          "decision": "block",
+          "reason": "legacy ignored",
+          "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "  hook denied  ",
+            "additionalContext": "remember this"
+          }
+        }
+        """))
+        XCTAssertEqual(parsed.blockReason, "hook denied")
+        XCTAssertEqual(parsed.additionalContext, "remember this")
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPreToolUseOutputUsesLegacyDecisionWhenHookSpecificOnlyAddsContextLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {
+          "decision": "block",
+          "reason": "legacy reason",
+          "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": "context only"
+          }
+        }
+        """))
+        XCTAssertEqual(parsed.blockReason, "legacy reason")
+        XCTAssertEqual(parsed.additionalContext, "context only")
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPreToolUseOutputReportsUnsupportedUniversalAndLegacyFieldsLikeRust() throws {
+        let stopped = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput(#"{"continue":false}"#))
+        XCTAssertNil(stopped.blockReason)
+        XCTAssertEqual(stopped.invalidReason, "PreToolUse hook returned unsupported continue:false")
+
+        let approve = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput(#"{"decision":"approve"}"#))
+        XCTAssertNil(approve.blockReason)
+        XCTAssertEqual(approve.invalidReason, "PreToolUse hook returned unsupported decision:approve")
+
+        let missingReason = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput(#"{"decision":"block","reason":"  "}"#))
+        XCTAssertNil(missingReason.blockReason)
+        XCTAssertEqual(
+            missingReason.invalidReason,
+            "PreToolUse hook returned decision:block without a non-empty reason"
+        )
+
+        let reasonOnly = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput(#"{"reason":""}"#))
+        XCTAssertNil(reasonOnly.blockReason)
+        XCTAssertEqual(reasonOnly.invalidReason, "PreToolUse hook returned reason without decision")
+    }
+
+    func testPreToolUseOutputReportsUnsupportedHookSpecificFieldsLikeRust() throws {
+        let allow = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}
+        """))
+        XCTAssertEqual(allow.invalidReason, "PreToolUse hook returned unsupported permissionDecision:allow")
+
+        let ask = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}
+        """))
+        XCTAssertEqual(ask.invalidReason, "PreToolUse hook returned unsupported permissionDecision:ask")
+
+        let denyWithoutReason = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"  "}}
+        """))
+        XCTAssertEqual(
+            denyWithoutReason.invalidReason,
+            "PreToolUse hook returned permissionDecision:deny without a non-empty permissionDecisionReason"
+        )
+
+        let reasonWithoutDecision = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecisionReason":"why"}}
+        """))
+        XCTAssertEqual(
+            reasonWithoutDecision.invalidReason,
+            "PreToolUse hook returned permissionDecisionReason without permissionDecision"
+        )
+
+        let updatedInput = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":{}}}
+        """))
+        XCTAssertEqual(updatedInput.invalidReason, "PreToolUse hook returned unsupported updatedInput")
+    }
+
+    func testPreToolUseOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"decision":"deny"}"#))
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"decision":"block","extra":1}"#))
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"hookSpecificOutput":{"permissionDecision":"deny"}}"#))
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"block"}}"#))
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":7}}"#))
+        XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
+    }
+
     func testPermissionRequestOutputParsesAllowAndDenyDecisionsLikeRust() throws {
         let allowed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
         {
