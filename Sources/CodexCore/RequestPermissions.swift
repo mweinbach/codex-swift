@@ -520,9 +520,7 @@ extension FileSystemSandboxPolicy: Codable {
         case let .restricted(entries, globScanMaxDepth):
             try container.encode(Kind.restricted, forKey: .kind)
             try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
-            if !entries.isEmpty {
-                try container.encode(entries, forKey: .entries)
-            }
+            try container.encode(entries, forKey: .entries)
         case .unrestricted:
             try container.encode(Kind.unrestricted, forKey: .kind)
         case .externalSandbox:

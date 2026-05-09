@@ -538,6 +538,8 @@ Source baseline inspected for this scaffold:
   - Tightened Swift `FileSystemPermissions` decoding to preserve Rust's denied unknown-field behavior for legacy/canonical shapes and nonzero `glob_scan_max_depth` constraint.
 - `codex-rs/protocol/src/protocol.rs` rollout turn context sidecars
   - Expanded Swift `TurnContextItem` rollout serialization with Rust's turn/trace IDs, current date/timezone, permission profile, network, runtime filesystem policy, personality, collaboration mode, realtime-active fields, and fallback permission-profile derivation.
+- `codex-rs/protocol/src/protocol.rs` session configured event permissions
+  - Updated Swift `SessionConfiguredEvent` to serialize Rust's current `thread_id`, `approvals_reviewer`, `permission_profile`, active-profile, network-proxy, and optional thread metadata fields while still decoding legacy persisted `sandbox_policy` session events.
 - `codex-rs/rollout/src/policy.rs` event persistence modes
   - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image/guardian-assessment/dynamic-tool events, and the stricter memories response-item persistence bucket.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
