@@ -133,10 +133,19 @@ enum AppServerAttestationRequestResult: Equatable, Sendable {
     case malformedResponse
 }
 
+enum AppServerExternalAuthRefreshRequestResult: Equatable, Sendable {
+    case success(AppServerProtocol.ChatGPTAuthTokensRefreshResponse)
+    case timeout
+    case requestFailed(code: Int64?, message: String?)
+    case requestCanceled
+    case malformedResponse
+}
+
 actor AppServerOutgoingRequestBroker {
     private let notificationSink: AppServerNotificationSink?
     private var nextRequestID: Int64 = 1
-    private var pendingRequests: [String: CheckedContinuation<AppServerAttestationRequestResult, Never>] = [:]
+    private var pendingAttestationRequests: [String: CheckedContinuation<AppServerAttestationRequestResult, Never>] = [:]
+    private var pendingExternalAuthRefreshRequests: [String: CheckedContinuation<AppServerExternalAuthRefreshRequestResult, Never>] = [:]
 
     init(notificationSink: AppServerNotificationSink?) {
         self.notificationSink = notificationSink
@@ -162,39 +171,105 @@ actor AppServerOutgoingRequestBroker {
 
         let key = AppServerRequestIDCodec.key(for: requestID)
         return await withCheckedContinuation { continuation in
-            pendingRequests[key] = continuation
+            pendingAttestationRequests[key] = continuation
             Task {
                 await notificationSink(data)
             }
             Task {
                 try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                self.resolveRequest(key: key, result: .timeout)
+                self.resolveAttestationRequest(key: key, result: .timeout)
+            }
+        }
+    }
+
+    func requestChatGPTAuthTokensRefresh(
+        previousAccountID: String?,
+        timeoutNanoseconds: UInt64
+    ) async -> AppServerExternalAuthRefreshRequestResult {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.chatGPTAuthTokensRefresh(
+            requestID: requestID,
+            params: AppServerProtocol.ChatGPTAuthTokensRefreshParams(
+                reason: .unauthorized,
+                previousAccountID: previousAccountID
+            )
+        )
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingExternalAuthRefreshRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self.resolveExternalAuthRefreshRequest(key: key, result: .timeout)
             }
         }
     }
 
     func receiveResponse(id: RequestID, resultData: Data) {
+        let key = AppServerRequestIDCodec.key(for: id)
+        if pendingExternalAuthRefreshRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(AppServerProtocol.ChatGPTAuthTokensRefreshResponse.self, from: resultData)
+            resolveExternalAuthRefreshRequest(
+                key: key,
+                result: decoded.map(AppServerExternalAuthRefreshRequestResult.success) ?? .malformedResponse
+            )
+            return
+        }
+
         let decoded = try? JSONDecoder().decode(Attestation.GenerateResponse.self, from: resultData)
-        resolveRequest(
-            key: AppServerRequestIDCodec.key(for: id),
+        resolveAttestationRequest(
+            key: key,
             result: decoded.map(AppServerAttestationRequestResult.success) ?? .malformedResponse
         )
     }
 
     func receiveMalformedResponse(id: RequestID) {
-        resolveRequest(key: AppServerRequestIDCodec.key(for: id), result: .malformedResponse)
+        let key = AppServerRequestIDCodec.key(for: id)
+        if pendingExternalAuthRefreshRequests[key] != nil {
+            resolveExternalAuthRefreshRequest(key: key, result: .malformedResponse)
+        } else {
+            resolveAttestationRequest(key: key, result: .malformedResponse)
+        }
     }
 
-    func receiveError(id: RequestID, code _: Int64?, message _: String?) {
-        resolveRequest(key: AppServerRequestIDCodec.key(for: id), result: .requestFailed)
+    func receiveError(id: RequestID, code: Int64?, message: String?) {
+        let key = AppServerRequestIDCodec.key(for: id)
+        if pendingExternalAuthRefreshRequests[key] != nil {
+            resolveExternalAuthRefreshRequest(key: key, result: .requestFailed(code: code, message: message))
+        } else {
+            resolveAttestationRequest(key: key, result: .requestFailed)
+        }
     }
 
     func cancelRequest(id: RequestID) {
-        resolveRequest(key: AppServerRequestIDCodec.key(for: id), result: .requestCanceled)
+        let key = AppServerRequestIDCodec.key(for: id)
+        if pendingExternalAuthRefreshRequests[key] != nil {
+            resolveExternalAuthRefreshRequest(key: key, result: .requestCanceled)
+        } else {
+            resolveAttestationRequest(key: key, result: .requestCanceled)
+        }
     }
 
-    private func resolveRequest(key: String, result: AppServerAttestationRequestResult) {
-        guard let continuation = pendingRequests.removeValue(forKey: key) else {
+    private func resolveAttestationRequest(key: String, result: AppServerAttestationRequestResult) {
+        guard let continuation = pendingAttestationRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolveExternalAuthRefreshRequest(key: String, result: AppServerExternalAuthRefreshRequestResult) {
+        guard let continuation = pendingExternalAuthRefreshRequests.removeValue(forKey: key) else {
             return
         }
         continuation.resume(returning: result)

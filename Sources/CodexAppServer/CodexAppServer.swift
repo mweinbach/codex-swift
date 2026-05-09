@@ -663,6 +663,16 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func isUnauthorizedBackendError(_ error: Error) -> Bool {
+        guard let fetchError = error as? AccountRateLimitsFetchError else {
+            return false
+        }
+        if case .httpStatus(401) = fetchError {
+            return true
+        }
+        return false
+    }
+
     public static func run(
         configuration: CodexAppServerConfiguration,
         stdin: FileHandle = .standardInput,
@@ -9207,14 +9217,20 @@ public enum CodexAppServer {
     }
 
     fileprivate static func accountRateLimitsResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
-        guard let auth = try currentAuth(configuration: configuration) else {
+        try accountRateLimitsResult(configuration: configuration, retryAfterUnauthorized: nil)
+    }
+
+    fileprivate static func accountRateLimitsResult(
+        configuration: CodexAppServerConfiguration,
+        retryAfterUnauthorized: ((AppServerAuth) throws -> AppServerAuth)?
+    ) throws -> [String: Any] {
+        guard let initialAuth = try currentAuth(configuration: configuration) else {
             throw AppServerError.invalidRequest("codex account authentication required to read rate limits")
         }
-        guard case .chatGPT = auth.kind else {
+        guard case .chatGPT = initialAuth.kind else {
             throw AppServerError.invalidRequest("chatgpt authentication required to read rate limits")
         }
-        guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !accountID.isEmpty
+        guard initialAuth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         else {
             throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
         }
@@ -9230,14 +9246,23 @@ public enum CodexAppServer {
             throw AppServerError.internalError("failed to construct backend client: \(error)")
         }
 
-        do {
-            let result = try runAsyncBlocking {
+        func fetch(using auth: AppServerAuth) throws -> AccountRateLimitsResult {
+            guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !accountID.isEmpty
+            else {
+                throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
+            }
+            return try runAsyncBlocking {
                 try await configuration.accountRateLimitsFetcher.fetchRateLimits(
                     baseURL: runtimeConfig.chatgptBaseURL,
                     accessToken: auth.token,
                     accountID: accountID
                 )
             }
+        }
+
+        do {
+            let result = try fetch(using: initialAuth)
             return [
                 "rateLimits": rateLimitSnapshotObject(result.rateLimits),
                 "rateLimitsByLimitId": result.rateLimitsByLimitID.mapValues(rateLimitSnapshotObject)
@@ -9245,6 +9270,20 @@ public enum CodexAppServer {
         } catch let error as AppServerError {
             throw error
         } catch {
+            if isUnauthorizedBackendError(error), let retryAfterUnauthorized {
+                let refreshedAuth = try retryAfterUnauthorized(initialAuth)
+                do {
+                    let result = try fetch(using: refreshedAuth)
+                    return [
+                        "rateLimits": rateLimitSnapshotObject(result.rateLimits),
+                        "rateLimitsByLimitId": result.rateLimitsByLimitID.mapValues(rateLimitSnapshotObject)
+                    ].nullStripped(keepNulls: true)
+                } catch let retryError as AppServerError {
+                    throw retryError
+                } catch {
+                    throw AppServerError.internalError("failed to fetch codex rate limits: \(error)")
+                }
+            }
             throw AppServerError.internalError("failed to fetch codex rate limits: \(error)")
         }
     }
@@ -9253,14 +9292,21 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let auth = try currentAuth(configuration: configuration) else {
+        try sendAddCreditsNudgeEmailResult(params: params, configuration: configuration, retryAfterUnauthorized: nil)
+    }
+
+    fileprivate static func sendAddCreditsNudgeEmailResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        retryAfterUnauthorized: ((AppServerAuth) throws -> AppServerAuth)?
+    ) throws -> [String: Any] {
+        guard let initialAuth = try currentAuth(configuration: configuration) else {
             throw AppServerError.invalidRequest("codex account authentication required to notify workspace owner")
         }
-        guard case .chatGPT = auth.kind else {
+        guard case .chatGPT = initialAuth.kind else {
             throw AppServerError.invalidRequest("chatgpt authentication required to notify workspace owner")
         }
-        guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !accountID.isEmpty
+        guard initialAuth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         else {
             throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
         }
@@ -9284,8 +9330,13 @@ public enum CodexAppServer {
             throw AppServerError.internalError("failed to construct backend client: \(error)")
         }
 
-        do {
-            let status = try runAsyncBlocking {
+        func send(using auth: AppServerAuth) throws -> AddCreditsNudgeEmailStatus {
+            guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !accountID.isEmpty
+            else {
+                throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
+            }
+            return try runAsyncBlocking {
                 try await configuration.addCreditsNudgeEmailSender.send(
                     baseURL: runtimeConfig.chatgptBaseURL,
                     accessToken: auth.token,
@@ -9293,8 +9344,25 @@ public enum CodexAppServer {
                     creditType: creditType
                 )
             }
+        }
+
+        do {
+            let status = try send(using: initialAuth)
             return ["status": status.rawValue]
+        } catch let error as AppServerError {
+            throw error
         } catch {
+            if isUnauthorizedBackendError(error), let retryAfterUnauthorized {
+                let refreshedAuth = try retryAfterUnauthorized(initialAuth)
+                do {
+                    let status = try send(using: refreshedAuth)
+                    return ["status": status.rawValue]
+                } catch let retryError as AppServerError {
+                    throw retryError
+                } catch {
+                    throw AppServerError.internalError("failed to notify workspace owner: \(error)")
+                }
+            }
             throw AppServerError.internalError("failed to notify workspace owner: \(error)")
         }
     }
@@ -12292,7 +12360,7 @@ public enum CodexAppServer {
         return value
     }
 
-    private static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
+    fileprivate static func currentAuth(configuration: CodexAppServerConfiguration) throws -> AppServerAuth? {
         if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(configuration.environment)
             ?? CodexAuthStorage.readOpenAIAPIKeyFromEnvironment(configuration.environment) {
             return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
@@ -13558,6 +13626,73 @@ final class CodexAppServerMessageProcessor {
         }) ?? []
     }
 
+    private func accountRateLimitsResult() throws -> [String: Any] {
+        try CodexAppServer.accountRateLimitsResult(
+            configuration: configuration,
+            retryAfterUnauthorized: refreshExternalAuthAfterUnauthorized
+        )
+    }
+
+    private func sendAddCreditsNudgeEmailResult(params: [String: Any]?) throws -> [String: Any] {
+        try CodexAppServer.sendAddCreditsNudgeEmailResult(
+            params: params,
+            configuration: configuration,
+            retryAfterUnauthorized: refreshExternalAuthAfterUnauthorized
+        )
+    }
+
+    private func refreshExternalAuthAfterUnauthorized(previousAuth: AppServerAuth) throws -> AppServerAuth {
+        guard previousAuth.method == "chatgptAuthTokens" else {
+            return previousAuth
+        }
+        let broker = outgoingRequestBroker
+        let result = try CodexAppServer.runAsyncBlocking {
+            await broker.requestChatGPTAuthTokensRefresh(
+                previousAccountID: previousAuth.accountID,
+                timeoutNanoseconds: 30_000_000_000
+            )
+        }
+
+        let response: AppServerProtocol.ChatGPTAuthTokensRefreshResponse
+        switch result {
+        case let .success(success):
+            response = success
+        case .timeout:
+            throw AppServerError.internalError("auth refresh request timed out after 30s")
+        case let .requestFailed(code, message):
+            throw AppServerError.internalError(
+                "auth refresh request failed: code=\(code.map(String.init) ?? "<missing>") message=\(message ?? "<missing>")"
+            )
+        case .requestCanceled:
+            throw AppServerError.internalError("auth refresh request canceled")
+        case .malformedResponse:
+            throw AppServerError.internalError("auth refresh request returned malformed response")
+        }
+
+        if let forcedWorkspace = try CodexAppServer.forcedChatGPTWorkspaceID(configuration: configuration),
+           response.chatGPTAccountID != forcedWorkspace {
+            throw AppServerError.invalidRequest(
+                "External auth must use workspace \(forcedWorkspace), but received \"\(response.chatGPTAccountID)\"."
+            )
+        }
+
+        do {
+            try CodexAuthStorage.saveChatGPTAuthTokens(
+                codexHome: configuration.codexHome,
+                accessToken: response.accessToken,
+                chatGPTAccountID: response.chatGPTAccountID,
+                chatGPTPlanType: response.chatGPTPlanType,
+                mode: .ephemeral
+            )
+        } catch {
+            throw AppServerError.internalError("failed to set external auth: \(error)")
+        }
+        guard let refreshed = try CodexAppServer.currentAuth(configuration: configuration) else {
+            throw AppServerError.internalError("failed to read refreshed external auth")
+        }
+        return refreshed
+    }
+
     private func receiveClientResponseIfPresent(_ object: [String: Any]) -> Bool {
         guard let rawID = object["id"],
               let requestID = AppServerRequestIDCodec.requestID(from: rawID)
@@ -14497,15 +14632,12 @@ final class CodexAppServerMessageProcessor {
                 case "account/rateLimits/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.accountRateLimitsResult(configuration: configuration)
+                        result: try accountRateLimitsResult()
                     )
                 case "account/sendAddCreditsNudgeEmail":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.sendAddCreditsNudgeEmailResult(
-                            params: params,
-                            configuration: configuration
-                        )
+                        result: try sendAddCreditsNudgeEmailResult(params: params)
                     )
                 case "userInfo":
                     response = CodexAppServer.responseObject(

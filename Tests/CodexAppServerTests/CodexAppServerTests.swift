@@ -6409,6 +6409,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(codexOtherPrimary["resetsAt"] as? Int, 1_735_693_200)
     }
 
+    func testAccountRateLimitsRefreshesExternalAuthOnUnauthorized() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let initialAccessToken = try fakeJWT(email: "initial@example.com", plan: "pro", accountID: "org-initial")
+        let refreshedAccessToken = try fakeJWT(email: "refreshed@example.com", plan: "pro", accountID: "org-refreshed")
+        let backend = AppServerSequentialAccountBackend(responses: [
+            AccountRateLimitsHTTPResponse(statusCode: 401, body: Data(#"{"error":{"message":"unauthorized"}}"#.utf8)),
+            AccountRateLimitsHTTPResponse(statusCode: 200, body: Data(Self.rateLimitsUsageJSON.utf8))
+        ])
+        let fetcher = URLSessionAccountRateLimitsFetcher { request in
+            await backend.respond(to: request)
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, accountRateLimitsFetcher: fetcher),
+            notificationSink: { data in await notificationCapture.append(data) },
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decodeMessages(processor.processLine(Data("""
+        {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(initialAccessToken)","chatgptAccountId":"org-initial","chatgptPlanType":"pro"}}
+        """.utf8)))
+
+        let processorBox = AppServerUncheckedSendableBox(processor)
+        let rateLimitsTask = Task {
+            processorBox.value.processLine(Data(#"{"id":2,"method":"account/rateLimits/read","params":{}}"#.utf8))
+        }
+
+        let refreshRequestData = try await nextNotificationPayload(notificationCapture)
+        let refreshRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: refreshRequestData) as? [String: Any])
+        XCTAssertEqual(refreshRequest["method"] as? String, "account/chatgptAuthTokens/refresh")
+        let refreshParams = try XCTUnwrap(refreshRequest["params"] as? [String: Any])
+        XCTAssertEqual(refreshParams["reason"] as? String, "unauthorized")
+        XCTAssertEqual(refreshParams["previousAccountId"] as? String, "org-initial")
+        let refreshRequestID = try XCTUnwrap(refreshRequest["id"])
+
+        let refreshResponse = try JSONSerialization.data(withJSONObject: [
+            "id": refreshRequestID,
+            "result": [
+                "accessToken": refreshedAccessToken,
+                "chatgptAccountId": "org-refreshed",
+                "chatgptPlanType": "pro"
+            ]
+        ])
+        XCTAssertNil(processor.processLine(refreshResponse))
+
+        let response = try decode(await rateLimitsTask.value)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let rateLimits = try XCTUnwrap(result["rateLimits"] as? [String: Any])
+        XCTAssertEqual(rateLimits["planType"] as? String, "pro")
+
+        let requests = await backend.requests
+        XCTAssertEqual(requests.map { $0.headers["Authorization"] }, [
+            "Bearer \(initialAccessToken)",
+            "Bearer \(refreshedAccessToken)"
+        ])
+        XCTAssertEqual(requests.map { $0.headers["chatgpt-account-id"] }, ["org-initial", "org-refreshed"])
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
+        XCTAssertEqual(stored.tokens?.accessToken, refreshedAccessToken)
+        XCTAssertEqual(stored.tokens?.accountID, "org-refreshed")
+    }
+
     func testURLSessionAccountRateLimitsFetcherUsesCodexAPIUsagePath() async throws {
         let capture = AppServerRequestCapture()
         let fetcher = URLSessionAccountRateLimitsFetcher { request in
@@ -10093,6 +10154,37 @@ private actor AppServerRequestCapture {
             headers: request.allHTTPHeaderFields ?? [:],
             body: request.httpBody.map { String(decoding: $0, as: UTF8.self) }
         ))
+    }
+}
+
+private actor AppServerSequentialAccountBackend {
+    private(set) var requests: [AppServerRequestCapture.Request] = []
+    private var responses: [AccountRateLimitsHTTPResponse]
+
+    init(responses: [AccountRateLimitsHTTPResponse]) {
+        self.responses = responses
+    }
+
+    func respond(to request: URLRequest) -> AccountRateLimitsHTTPResponse {
+        requests.append(AppServerRequestCapture.Request(
+            url: request.url,
+            method: request.httpMethod,
+            headers: request.allHTTPHeaderFields ?? [:],
+            body: request.httpBody.map { String(decoding: $0, as: UTF8.self) }
+        ))
+        guard !responses.isEmpty else {
+            return AccountRateLimitsHTTPResponse(statusCode: 500, body: Data())
+        }
+        return responses.removeFirst()
+    }
+}
+
+// Test-only box for running the synchronous processor on a task while the test answers its outgoing request.
+private final class AppServerUncheckedSendableBox<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
     }
 }
 
