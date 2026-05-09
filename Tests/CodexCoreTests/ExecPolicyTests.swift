@@ -2338,6 +2338,66 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkAugmentedOperatorAssignments() throws {
+        let policy = try parsePolicy("""
+        COUNT = 10
+        COUNT -= 3
+        COUNT *= 2
+        COUNT //= 4
+
+        REMAINDER = 17
+        REMAINDER %= 5
+
+        RATIO = 5
+        RATIO /= 2
+
+        JUSTIFICATION = "augmented %s"
+        JUSTIFICATION %= "operators"
+
+        SETTINGS = {"tool": "git", "decision": "prompt"}
+        SETTINGS |= {"decision": "allow", "command": "status"}
+
+        PATHS = ["/opt/git"]
+        PATHS *= 2
+
+        if COUNT == 3 and REMAINDER == 2 and RATIO == 2.5:
+            prefix_rule(
+                [SETTINGS["tool"], SETTINGS["command"], str(COUNT), str(REMAINDER)],
+                SETTINGS["decision"],
+                justification = JUSTIFICATION,
+            )
+            network_rule("aug-%d-%d.example.com" % (COUNT, REMAINDER), "https", "allow")
+            host_executable(SETTINGS["tool"], PATHS)
+            prefix_rule(["repeat"] + PATHS, "prompt")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status"), .single("3"), .single("2")]),
+                decision: .allow,
+                justification: "augmented operators"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "repeat"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "repeat", rest: [.single("/opt/git"), .single("/opt/git")]),
+                decision: .prompt
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "aug-3-2.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        MISSING += 1
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        VALUE = "git"
+        VALUE -= "it"
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkIndexedAssignments() throws {
         let policy = try parsePolicy("""
         SETTINGS = {}

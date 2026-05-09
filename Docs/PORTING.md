@@ -657,8 +657,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for assigning the return value of list `.pop([index])`, including mutation of the source list in top-level and helper-function scopes, default last-item removal, and Rust's rejection of explicit negative or out-of-range pop indexes.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list ordering methods
   - Added Swift execpolicy parser support for named list constant `.sort()` and `.reverse()` statements over supported comparable values before generated rules and host executable paths.
-- `codex-rs/execpolicy/src/parser.rs` Starlark augmented addition assignments
-  - Added Swift execpolicy parser support for identifier-target `+=` statements using the same supported Starlark addition semantics as expressions, covering incrementally extended list, tuple-backed list, and string constants used by rules, network hosts, and host executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark augmented assignments
+  - Added Swift execpolicy parser support for identifier-target `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, and `|=` statements using the same supported Starlark operator semantics as expressions, covering incrementally updated numbers, strings, lists, tuple-backed lists, and dictionaries used by rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark indexed assignments
   - Added Swift execpolicy parser support for assigning through top-level list and dictionary constants with supported `NAME[index] = value` and nested `NAME[key][key] = value` forms, including string-key table insert/replacement and positive or negative list-index replacement.
 - `codex-rs/execpolicy/src/parser.rs` Starlark delete statements

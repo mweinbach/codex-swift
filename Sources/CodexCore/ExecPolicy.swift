@@ -922,7 +922,7 @@ public final class PolicyParser {
             return
         }
 
-        if try Self.parseStarlarkAugmentedAdditionAssignment(
+        if try Self.parseStarlarkAugmentedAssignment(
             statement,
             constants: &constants,
             functions: functions
@@ -2036,32 +2036,63 @@ public final class PolicyParser {
         }
     }
 
-    private static func parseStarlarkAugmentedAdditionAssignment(
+    private static func parseStarlarkAugmentedAssignment(
         _ statement: String,
         constants: inout [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> Bool {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let operatorIndex = topLevelAugmentedAdditionAssignmentIndex(in: trimmed) else {
+        guard let assignmentOperator = topLevelAugmentedAssignmentOperator(in: trimmed) else {
             return false
         }
 
-        let target = String(trimmed[..<operatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = String(trimmed[..<assignmentOperator.range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard isStarlarkIdentifier(target),
               let existingValue = constants[target]
         else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
 
-        let valueStart = trimmed.index(operatorIndex, offsetBy: 2)
+        let valueStart = assignmentOperator.range.upperBound
         let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !valueText.isEmpty else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
 
         let rhs = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
-        constants[target] = try evaluateStarlarkAddition(existingValue, rhs, expression: trimmed)
+        constants[target] = try evaluateStarlarkAugmentedAssignment(
+            existingValue,
+            rhs,
+            operatorText: assignmentOperator.operatorText,
+            expression: trimmed
+        )
         return true
+    }
+
+    private static func evaluateStarlarkAugmentedAssignment(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        operatorText: String,
+        expression: String
+    ) throws -> ConfigValue {
+        switch operatorText {
+        case "+=":
+            return try evaluateStarlarkAddition(lhs, rhs, expression: expression)
+        case "-=":
+            return try evaluateStarlarkSubtraction(lhs, rhs, expression: expression)
+        case "*=":
+            return try evaluateStarlarkMultiplication(lhs, rhs, expression: expression)
+        case "/=":
+            return try evaluateStarlarkDivision(lhs, rhs, expression: expression)
+        case "//=":
+            return try evaluateStarlarkFloorDivision(lhs, rhs, expression: expression)
+        case "%=":
+            return try evaluateStarlarkModulo(lhs, rhs, expression: expression)
+        case "|=":
+            return try evaluateStarlarkDictionaryUnion(lhs, rhs, expression: expression)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func parseTopLevelLiteralAssignment(
@@ -2470,7 +2501,7 @@ public final class PolicyParser {
         return nil
     }
 
-    private static func topLevelAugmentedAdditionAssignmentIndex(in text: String) -> String.Index? {
+    private static func topLevelAugmentedAssignmentOperator(in text: String) -> (operatorText: String, range: Range<String.Index>)? {
         var squareDepth = 0
         var braceDepth = 0
         var parenDepth = 0
@@ -2507,10 +2538,21 @@ public final class PolicyParser {
                 parenDepth += 1
             case ")":
                 parenDepth -= 1
-            case "+" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+            case "+", "-", "*", "/", "%", "|":
+                guard squareDepth == 0 && braceDepth == 0 && parenDepth == 0 else {
+                    break
+                }
                 let nextIndex = text.index(after: index)
-                if nextIndex < text.endIndex, text[nextIndex] == "=" {
-                    return index
+                guard nextIndex < text.endIndex else {
+                    break
+                }
+                if character == "/", text[nextIndex] == "/" {
+                    let equalsIndex = text.index(after: nextIndex)
+                    if equalsIndex < text.endIndex, text[equalsIndex] == "=" {
+                        return ("//=", index..<text.index(after: equalsIndex))
+                    }
+                } else if text[nextIndex] == "=" {
+                    return ("\(character)=", index..<text.index(after: nextIndex))
                 }
             default:
                 break
@@ -4663,7 +4705,7 @@ public final class PolicyParser {
         if try parseStarlarkIndexedAssignment(statement, constants: &constants, functions: functions) {
             return true
         }
-        if try parseStarlarkAugmentedAdditionAssignment(statement, constants: &constants, functions: functions) {
+        if try parseStarlarkAugmentedAssignment(statement, constants: &constants, functions: functions) {
             return true
         }
         if let assignment = try parseTopLevelLiteralAssignment(
