@@ -266,7 +266,12 @@ public enum CodexConfigLayerLoader {
         }
 
         do {
-            requirementsToml.mergeUnsetFields(from: try ConfigRequirementsToml.parse(contents))
+            var parsed = try ConfigRequirementsToml.parse(contents)
+            if parsed.hooks != nil {
+                parsed.hooksSource = .system
+                parsed.hooksSourceDescription = url.standardizedFileURL.path
+            }
+            requirementsToml.mergeUnsetFields(from: parsed)
         } catch {
             throw ConfigLayerLoadError.parseFailed(path: url.path, message: String(describing: error))
         }

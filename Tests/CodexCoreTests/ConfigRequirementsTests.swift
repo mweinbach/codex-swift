@@ -63,6 +63,45 @@ final class ConfigRequirementsTests: XCTestCase {
         )
     }
 
+    func testDeserializeManagedHookRequirementsMatchesRustFlattenedShape() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [hooks]
+        managed_dir = "/enterprise/hooks"
+
+        [[hooks.PreToolUse]]
+        matcher = "^Bash$"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 /enterprise/hooks/pre.py"
+        timeout = 10
+        statusMessage = "checking"
+        """)
+
+        let hooks = try XCTUnwrap(config.hooks)
+        XCTAssertEqual(hooks.managedDir, "/enterprise/hooks")
+        XCTAssertEqual(hooks.windowsManagedDir, nil)
+        XCTAssertEqual(hooks.hookHandlerCount, 1)
+        let requirements = try config.requirements()
+        XCTAssertEqual(requirements.managedHooks?.value, hooks)
+        XCTAssertEqual(requirements.managedHooks?.source, .unknown)
+
+        let object = config.appServerRequirementsObject()
+        let hooksObject = try XCTUnwrap(object["hooks"] as? [String: Any])
+        XCTAssertEqual(hooksObject["managedDir"] as? String, "/enterprise/hooks")
+        XCTAssertTrue(hooksObject["windowsManagedDir"] is NSNull)
+        let preToolUse = try XCTUnwrap(hooksObject["PreToolUse"] as? [[String: Any]])
+        XCTAssertEqual(preToolUse.count, 1)
+        XCTAssertEqual(preToolUse[0]["matcher"] as? String, "^Bash$")
+        let handlers = try XCTUnwrap(preToolUse[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(handlers[0]["type"] as? String, "command")
+        XCTAssertEqual(handlers[0]["command"] as? String, "python3 /enterprise/hooks/pre.py")
+        XCTAssertEqual(handlers[0]["timeoutSec"] as? Int, 10)
+        XCTAssertEqual(handlers[0]["async"] as? Bool, false)
+        XCTAssertEqual(handlers[0]["statusMessage"] as? String, "checking")
+        XCTAssertEqual((hooksObject["PermissionRequest"] as? [[String: Any]])?.count, 0)
+    }
+
     func testEmptyAllowedApprovalPoliciesMatchesRustConstraintError() {
         let config = ConfigRequirementsToml(allowedApprovalPolicies: [])
         XCTAssertThrowsError(try config.requirements()) { error in

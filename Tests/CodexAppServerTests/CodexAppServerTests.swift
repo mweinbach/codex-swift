@@ -6983,6 +6983,130 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hooks[0]["trustStatus"] as? String, "modified")
     }
 
+    func testHooksListReturnsManagedRequirementHooks() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let managedDir = try TemporaryDirectory()
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [hooks]
+        managed_dir = "\(managedDir.url.path)"
+
+        [[hooks.PreToolUse]]
+        matcher = "^Bash$"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 \(managedDir.url.appendingPathComponent("pre.py").path)"
+        timeout = 10
+        statusMessage = "checking"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            configuration: testConfiguration(
+                codexHome: codexHome.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, "\(managedDir.url.standardizedFileURL.path):pre_tool_use:0:0")
+        XCTAssertEqual(hooks[0]["eventName"] as? String, "preToolUse")
+        XCTAssertEqual(hooks[0]["handlerType"] as? String, "command")
+        XCTAssertEqual(hooks[0]["matcher"] as? String, "^Bash$")
+        XCTAssertEqual(hooks[0]["command"] as? String, "python3 \(managedDir.url.appendingPathComponent("pre.py").path)")
+        XCTAssertEqual(hooks[0]["timeoutSec"] as? Int, 10)
+        XCTAssertEqual(hooks[0]["statusMessage"] as? String, "checking")
+        XCTAssertEqual(hooks[0]["sourcePath"] as? String, managedDir.url.standardizedFileURL.path)
+        XCTAssertEqual(hooks[0]["source"] as? String, "system")
+        XCTAssertTrue(hooks[0]["pluginId"] is NSNull)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(hooks[0]["isManaged"] as? Bool, true)
+        XCTAssertTrue((hooks[0]["currentHash"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "managed")
+        XCTAssertEqual(data[0]["warnings"] as? [String], [])
+    }
+
+    func testHooksListDoesNotDisableManagedRequirementHooksFromUserState() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let managedDir = try TemporaryDirectory()
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        let managedKey = "\(managedDir.url.standardizedFileURL.path):pre_tool_use:0:0"
+        try """
+        [hooks]
+        managed_dir = "\(managedDir.url.path)"
+
+        [[hooks.PreToolUse]]
+        matcher = "^Bash$"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 \(managedDir.url.appendingPathComponent("pre.py").path)"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        [hooks.state."\(managedKey)"]
+        enabled = false
+        trusted_hash = "sha256:user"
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            configuration: testConfiguration(
+                codexHome: codexHome.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, managedKey)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "managed")
+    }
+
+    func testHooksListWarnsWhenManagedRequirementDirectoryIsMissing() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let missingDir = codexHome.url.appendingPathComponent("missing-managed-hooks", isDirectory: true)
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [hooks]
+        managed_dir = "\(missingDir.path)"
+
+        [[hooks.PreToolUse]]
+        matcher = "^Bash$"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 \(missingDir.appendingPathComponent("pre.py").path)"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            configuration: testConfiguration(
+                codexHome: codexHome.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual((data[0]["hooks"] as? [[String: Any]])?.count, 0)
+        let warnings = try XCTUnwrap(data[0]["warnings"] as? [String])
+        XCTAssertEqual(warnings.count, 1)
+        XCTAssertTrue(warnings[0].contains("managed hook directory"))
+        XCTAssertTrue(warnings[0].contains("does not exist"))
+        XCTAssertTrue(warnings[0].contains(missingDir.path))
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """

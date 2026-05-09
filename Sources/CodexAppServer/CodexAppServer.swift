@@ -7655,6 +7655,7 @@ public enum CodexAppServer {
 
         return catalogHookProjection(
             effectiveConfig: stack.effectiveConfig(),
+            managedHooks: stack.requirements.managedHooks,
             hookLayers: hookLayers,
             codexHome: configuration.codexHome
         )
@@ -7662,6 +7663,7 @@ public enum CodexAppServer {
 
     private static func catalogHookProjection(
         effectiveConfig: ConfigValue,
+        managedHooks: ManagedHooksRequirement? = nil,
         hookLayers: [(config: ConfigValue, configFile: URL, source: String)],
         codexHome: URL
     ) -> CatalogHookProjection {
@@ -7670,6 +7672,13 @@ public enum CodexAppServer {
         }
         let hookStates = hookStateMap(from: effectiveConfig)
         var projection = CatalogHookProjection()
+        if let managedHooks {
+            appendManagedHookProjection(
+                managedHooks,
+                hookStates: hookStates,
+                projection: &projection
+            )
+        }
         for hookLayer in hookLayers {
             projection.hooks.append(contentsOf: configHookObjects(
                 config: hookLayer.config,
@@ -7699,6 +7708,41 @@ public enum CodexAppServer {
             ))
         }
         return projection
+    }
+
+    private static func appendManagedHookProjection(
+        _ managedHooks: ManagedHooksRequirement,
+        hookStates: [String: HookState],
+        projection: inout CatalogHookProjection
+    ) {
+        guard let managedDir = managedHooks.value.managedDirForCurrentPlatform else {
+            projection.warnings.append(
+                "skipping managed hooks from \(managedHooks.sourceDescription): no managed hook directory is configured for this platform"
+            )
+            return
+        }
+        let sourcePath = URL(fileURLWithPath: managedDir, isDirectory: true).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourcePath.path, isDirectory: &isDirectory) else {
+            projection.warnings.append(
+                "skipping managed hooks from \(managedHooks.sourceDescription): managed hook directory \(managedDir) does not exist"
+            )
+            return
+        }
+        guard isDirectory.boolValue else {
+            projection.warnings.append(
+                "skipping managed hooks from \(managedHooks.sourceDescription): managed hook directory \(managedDir) is not a directory"
+            )
+            return
+        }
+
+        projection.hooks.append(contentsOf: configHookObjects(
+            config: .table(["hooks": managedHooks.value.hooks]),
+            configFile: sourcePath,
+            source: managedHooks.source.rawValue,
+            hookStates: hookStates,
+            isManaged: true
+        ))
     }
 
     private static func enabledLocalPluginIDs(config: ConfigValue) -> [String] {
@@ -10266,7 +10310,8 @@ public enum CodexAppServer {
         config: ConfigValue,
         configFile: URL,
         source: String,
-        hookStates: [String: HookState]
+        hookStates: [String: HookState],
+        isManaged: Bool = false
     ) -> [[String: Any]] {
         guard let root = configTable(config),
               let hooks = root["hooks"].flatMap(configTable)
@@ -10325,10 +10370,10 @@ public enum CodexAppServer {
                         "source": source,
                         "pluginId": NSNull(),
                         "displayOrder": displayOrder,
-                        "enabled": hookStates[key]?.enabled ?? true,
-                        "isManaged": false,
+                        "enabled": isManaged ? true : hookStates[key]?.enabled ?? true,
+                        "isManaged": isManaged,
                         "currentHash": currentHash,
-                        "trustStatus": hookTrustStatus(currentHash: currentHash, state: hookStates[key])
+                        "trustStatus": isManaged ? "managed" : hookTrustStatus(currentHash: currentHash, state: hookStates[key])
                     ])
                     displayOrder += 1
                 }
