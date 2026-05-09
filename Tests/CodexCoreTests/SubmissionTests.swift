@@ -786,6 +786,92 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyResolveAccessWithCwdUsesMostSpecificEntryLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = temp.url
+        let docs = cwd.appendingPathComponent("docs", isDirectory: true)
+        let docsPrivate = docs.appendingPathComponent("private", isDirectory: true)
+        let docsPublic = docsPrivate.appendingPathComponent("public", isDirectory: true)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .read),
+            FileSystemSandboxEntry(path: .path(docsPrivate.path), access: .none),
+            FileSystemSandboxEntry(path: .path(docsPublic.path), access: .write)
+        ])
+
+        XCTAssertEqual(policy.resolveAccessWithCwd(path: cwd.path, cwd: cwd.path), .write)
+        XCTAssertEqual(policy.resolveAccessWithCwd(path: docs.path, cwd: cwd.path), .read)
+        XCTAssertEqual(policy.resolveAccessWithCwd(path: docsPrivate.path, cwd: cwd.path), .none)
+        XCTAssertEqual(policy.resolveAccessWithCwd(path: docsPublic.path, cwd: cwd.path), .write)
+    }
+
+    func testFileSystemSandboxPolicyAdditionalReadableRootsSkipExistingEffectiveAccessLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .read)
+        ])
+
+        XCTAssertEqual(
+            policy.withAdditionalReadableRoots([cwd], cwd: cwd.path),
+            policy
+        )
+    }
+
+    func testFileSystemSandboxPolicyAdditionalWritableRootsSkipExistingEffectiveAccessLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ])
+
+        XCTAssertEqual(
+            policy.withAdditionalWritableRoots([cwd], cwd: cwd.path),
+            policy
+        )
+    }
+
+    func testFileSystemSandboxPolicyAdditionalWritableRootsAddNewRootLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        let extra = try AbsolutePath(absolutePath: temp.url.appendingPathComponent("extra", isDirectory: true).path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ])
+
+        XCTAssertEqual(
+            policy.withAdditionalWritableRoots([extra], cwd: cwd.path),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                FileSystemSandboxEntry(path: .path(extra.path), access: .write)
+            ])
+        )
+    }
+
+    func testFileSystemSandboxPolicyBlocksProtectedMetadataWritesByDefaultLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(cwd.path), access: .write)
+        ])
+
+        XCTAssertFalse(policy.canWritePathWithCwd(cwd.path + "/.git/config", cwd: cwd.path))
+        XCTAssertFalse(policy.canWritePathWithCwd(cwd.path + "/.agents/config", cwd: cwd.path))
+        XCTAssertFalse(policy.canWritePathWithCwd(cwd.path + "/.codex/config.toml", cwd: cwd.path))
+    }
+
+    func testFileSystemSandboxPolicyAllowsExplicitMetadataWriteLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let dotCodex = try cwd.join(".codex")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(cwd.path), access: .write),
+            FileSystemSandboxEntry(path: .path(dotCodex.path), access: .write)
+        ])
+
+        XCTAssertTrue(policy.canWritePathWithCwd(dotCodex.path + "/config.toml", cwd: cwd.path))
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

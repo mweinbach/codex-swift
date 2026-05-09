@@ -25,6 +25,17 @@ public enum FileSystemAccessMode: String, Codable, Equatable, Sendable {
     public var canWrite: Bool {
         self == .write
     }
+
+    fileprivate var precedence: Int {
+        switch self {
+        case .none:
+            return 0
+        case .read:
+            return 1
+        case .write:
+            return 2
+        }
+    }
 }
 
 public enum FileSystemPath: Equatable, Codable, Sendable {
@@ -601,6 +612,96 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return .restricted(entries: preservedEntries, globScanMaxDepth: existingGlobScanMaxDepth)
     }
 
+    public var hasFullDiskReadAccess: Bool {
+        switch self {
+        case .unrestricted, .externalSandbox:
+            return true
+        case let .restricted(entries, _):
+            return entries.contains(where: { entry in
+                entry.access.canRead && entry.path.isRootSpecialPath
+            }) && !hasDeniedReadRestrictions
+        }
+    }
+
+    public var hasFullDiskWriteAccess: Bool {
+        switch self {
+        case .unrestricted, .externalSandbox:
+            return true
+        case let .restricted(entries, _):
+            return entries.contains(where: { entry in
+                entry.access.canWrite && entry.path.isRootSpecialPath
+            }) && !hasWriteNarrowingEntries(entries)
+        }
+    }
+
+    public func resolveAccessWithCwd(path: String, cwd: String) -> FileSystemAccessMode {
+        switch self {
+        case .unrestricted, .externalSandbox:
+            return .write
+        case let .restricted(entries, _):
+            guard let target = Self.resolveCandidatePath(path, cwd: cwd) else {
+                return .none
+            }
+
+            return resolvedEntriesWithCwd(entries, cwd: cwd)
+                .filter { target.isUnderOrEqual($0.path) }
+                .max { lhs, rhs in
+                    let lhsKey = (lhs.path.pathComponentCount, lhs.access.precedence)
+                    let rhsKey = (rhs.path.pathComponentCount, rhs.access.precedence)
+                    return lhsKey < rhsKey
+                }?
+                .access ?? .none
+        }
+    }
+
+    public func canReadPathWithCwd(_ path: String, cwd: String) -> Bool {
+        resolveAccessWithCwd(path: path, cwd: cwd).canRead
+    }
+
+    public func canWritePathWithCwd(_ path: String, cwd: String) -> Bool {
+        guard resolveAccessWithCwd(path: path, cwd: cwd).canWrite else {
+            return false
+        }
+        if hasFullDiskWriteAccess {
+            return true
+        }
+        return !isMetadataWriteDenied(path, cwd: cwd)
+    }
+
+    public func withAdditionalReadableRoots(
+        _ additionalReadableRoots: [AbsolutePath],
+        cwd: String
+    ) -> FileSystemSandboxPolicy {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self,
+              !hasFullDiskReadAccess
+        else {
+            return self
+        }
+
+        var entries = currentEntries
+        for path in additionalReadableRoots where !canReadPathWithCwd(path.path, cwd: cwd) {
+            entries.append(FileSystemSandboxEntry(path: .path(path.path), access: .read))
+        }
+
+        return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    public func withAdditionalWritableRoots(
+        _ additionalWritableRoots: [AbsolutePath],
+        cwd: String
+    ) -> FileSystemSandboxPolicy {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self else {
+            return self
+        }
+
+        var entries = currentEntries
+        for path in additionalWritableRoots where !canWritePathWithCwd(path.path, cwd: cwd) {
+            entries.append(FileSystemSandboxEntry(path: .path(path.path), access: .write))
+        }
+
+        return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
     public func withAdditionalLegacyWorkspaceWritableRoots(_ additionalWritableRoots: [AbsolutePath]) -> FileSystemSandboxPolicy {
         guard case let .restricted(currentEntries, globScanMaxDepth) = self else {
             return self
@@ -651,6 +752,48 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             return
         }
         entries.append(FileSystemSandboxEntry(path: path, access: .read))
+    }
+
+    private func isMetadataWriteDenied(_ path: String, cwd: String) -> Bool {
+        guard case let .restricted(entries, _) = self,
+              let target = Self.resolveCandidatePath(path, cwd: cwd)
+        else {
+            return false
+        }
+
+        let resolvedEntries = resolvedEntriesWithCwd(entries, cwd: cwd)
+        for writableRoot in resolvedEntries where writableRoot.access.canWrite {
+            for metadataName in Self.protectedMetadataPathNames {
+                guard let protectedPath = try? writableRoot.path.join(metadataName),
+                      target.isUnderOrEqual(protectedPath)
+                else {
+                    continue
+                }
+
+                if hasExplicitWriteEntryForMetadataPath(
+                    protectedPath,
+                    target: target,
+                    resolvedEntries: resolvedEntries
+                ) {
+                    return false
+                }
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func hasExplicitWriteEntryForMetadataPath(
+        _ protectedPath: AbsolutePath,
+        target: AbsolutePath,
+        resolvedEntries: [ResolvedFileSystemEntry]
+    ) -> Bool {
+        resolvedEntries.contains { entry in
+            entry.access.canWrite
+                && entry.path.isUnderOrEqual(protectedPath)
+                && target.isUnderOrEqual(entry.path)
+        }
     }
 
     private static func defaultReadOnlySubpathsForWritableRoot(
@@ -738,6 +881,99 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return try? AbsolutePath.resolve(cwd, against: FileManager.default.currentDirectoryPath)
     }
 
+    private static func resolveCandidatePath(_ path: String, cwd: String) -> AbsolutePath? {
+        try? AbsolutePath.resolve(path, against: cwd)
+    }
+
+    private func resolvedEntriesWithCwd(
+        _ entries: [FileSystemSandboxEntry],
+        cwd: String
+    ) -> [ResolvedFileSystemEntry] {
+        let cwdPath = Self.absolutePathForLegacyCwd(cwd)
+        return entries.compactMap { entry in
+            guard let resolvedPath = Self.resolveEntryPath(entry.path, cwd: cwdPath) else {
+                return nil
+            }
+            return ResolvedFileSystemEntry(path: resolvedPath, access: entry.access)
+        }
+    }
+
+    private static func resolveEntryPath(_ path: FileSystemPath, cwd: AbsolutePath?) -> AbsolutePath? {
+        if path.isRootSpecialPath {
+            return try? AbsolutePath(absolutePath: "/")
+        }
+        return resolveFileSystemPath(path, cwd: cwd)
+    }
+
+    private static func resolveFileSystemPath(_ path: FileSystemPath, cwd: AbsolutePath?) -> AbsolutePath? {
+        switch path {
+        case let .path(path):
+            return try? AbsolutePath(absolutePath: path)
+        case .globPattern:
+            return nil
+        case let .special(value):
+            switch FileSystemSpecialPath(jsonValue: value) {
+            case .root, .minimal, .unknown:
+                return nil
+            case let .projectRoots(subpath):
+                guard let cwd else {
+                    return nil
+                }
+                return subpath.flatMap { try? cwd.join($0) } ?? cwd
+            case .tmpdir:
+                guard let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"],
+                      !tmpdir.isEmpty
+                else {
+                    return nil
+                }
+                return try? AbsolutePath(absolutePath: tmpdir)
+            case .slashTmp:
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: "/tmp", isDirectory: &isDirectory),
+                      isDirectory.boolValue
+                else {
+                    return nil
+                }
+                return try? AbsolutePath(absolutePath: "/tmp")
+            }
+        }
+    }
+
+    private func hasWriteNarrowingEntries(_ entries: [FileSystemSandboxEntry]) -> Bool {
+        entries.contains { entry in
+            guard !entry.access.canWrite else {
+                return false
+            }
+
+            switch entry.path {
+            case .path:
+                return !hasSameTargetWriteOverride(for: entry, in: entries)
+            case .globPattern:
+                return true
+            case let .special(value):
+                switch FileSystemSpecialPath(jsonValue: value) {
+                case .root:
+                    return entry.access == .none
+                case .minimal, .unknown:
+                    return false
+                case .projectRoots, .tmpdir, .slashTmp:
+                    return !hasSameTargetWriteOverride(for: entry, in: entries)
+                }
+            }
+        }
+    }
+
+    private func hasSameTargetWriteOverride(
+        for entry: FileSystemSandboxEntry,
+        in entries: [FileSystemSandboxEntry]
+    ) -> Bool {
+        entries.contains { candidate in
+            candidate.access.canWrite
+                && candidate.access.precedence > entry.access.precedence
+                && candidate.path.sharesTarget(with: entry.path)
+        }
+    }
+
     private static func deduplicated(_ paths: [AbsolutePath]) -> [AbsolutePath] {
         var seen: Set<AbsolutePath> = []
         var result: [AbsolutePath] = []
@@ -745,6 +981,57 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             result.append(path)
         }
         return result
+    }
+
+    private static let protectedMetadataPathNames = [
+        protectedMetadataGitPathName,
+        protectedMetadataAgentsPathName,
+        protectedMetadataCodexPathName
+    ]
+}
+
+private struct ResolvedFileSystemEntry: Equatable {
+    let path: AbsolutePath
+    let access: FileSystemAccessMode
+}
+
+private extension FileSystemPath {
+    var isRootSpecialPath: Bool {
+        guard case let .special(value) = self,
+              case .root = FileSystemSpecialPath(jsonValue: value)
+        else {
+            return false
+        }
+        return true
+    }
+
+    func sharesTarget(with other: FileSystemPath) -> Bool {
+        switch (self, other) {
+        case let (.path(left), .path(right)):
+            return left == right
+        case let (.special(left), .special(right)):
+            return FileSystemSpecialPath(jsonValue: left) == FileSystemSpecialPath(jsonValue: right)
+        case let (.globPattern(left), .globPattern(right)):
+            return left == right
+        default:
+            return false
+        }
+    }
+}
+
+private extension AbsolutePath {
+    func isUnderOrEqual(_ root: AbsolutePath) -> Bool {
+        path == root.path || path.hasPrefix(root.path.withTrailingSlash)
+    }
+
+    var pathComponentCount: Int {
+        path.split(separator: "/", omittingEmptySubsequences: true).count
+    }
+}
+
+private extension String {
+    var withTrailingSlash: String {
+        hasSuffix("/") ? self : self + "/"
     }
 }
 
