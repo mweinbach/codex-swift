@@ -183,10 +183,14 @@ public final class RolloutRecorder {
                 continue
             }
 
-            if case let .sessionMeta(sessionMetaLine) = rolloutLine.item, conversationID == nil {
+            guard let item = sanitizedLoadedItem(rolloutLine.item) else {
+                continue
+            }
+
+            if case let .sessionMeta(sessionMetaLine) = item, conversationID == nil {
                 conversationID = sessionMetaLine.meta.id
             }
-            items.append(rolloutLine.item)
+            items.append(item)
         }
 
         guard let conversationID else {
@@ -277,6 +281,33 @@ public final class RolloutRecorder {
             return RolloutPolicy.shouldPersistResponseItem(responseItem)
         case let .eventMsg(event):
             return RolloutPolicy.shouldPersistEventMessage(event)
+        }
+    }
+
+    private static func sanitizedLoadedItem(_ item: RolloutRecordItem) -> RolloutRecordItem? {
+        switch item {
+        case .responseItem(.ghostSnapshot):
+            return nil
+
+        case let .compacted(compacted):
+            guard let replacementHistory = compacted.replacementHistory else {
+                return item
+            }
+            return .compacted(CompactedItem(
+                message: compacted.message,
+                replacementHistory: replacementHistory.filter { responseItem in
+                    if case .ghostSnapshot = responseItem {
+                        return false
+                    }
+                    return true
+                }
+            ))
+
+        case .sessionMeta,
+             .responseItem,
+             .turnContext,
+             .eventMsg:
+            return item
         }
     }
 

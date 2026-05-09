@@ -159,6 +159,78 @@ final class RolloutRecorderTests: XCTestCase {
         }
     }
 
+    func testGetRolloutHistorySkipsLegacyGhostSnapshotLines() throws {
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let path = temp.url.appendingPathComponent("legacy-ghost.jsonl")
+        let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let sessionMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: conversationID,
+            timestamp: "2026-05-08T00:00:00.000Z",
+            cwd: "/repo",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            source: .cli
+        )))
+        let ghost = RolloutRecordItem.responseItem(.ghostSnapshot(ghostCommit: GhostCommit(
+            id: "deadbeef",
+            preexistingUntrackedFiles: [],
+            preexistingUntrackedDirs: []
+        )))
+        let message = RolloutRecordItem.responseItem(.message(
+            role: "assistant",
+            content: [.outputText(text: "kept")]
+        ))
+        try writeLines([
+            RolloutLine(timestamp: "2026-05-08T00:00:00.000Z", item: sessionMeta),
+            RolloutLine(timestamp: "2026-05-08T00:00:01.000Z", item: ghost),
+            RolloutLine(timestamp: "2026-05-08T00:00:02.000Z", item: message)
+        ], to: path)
+
+        let history = try RolloutRecorder.getRolloutHistory(path: path)
+
+        guard case let .resumed(resumed) = history else {
+            return XCTFail("expected resumed history")
+        }
+        XCTAssertEqual(resumed.history, [sessionMeta, message])
+    }
+
+    func testGetRolloutHistoryFiltersLegacyGhostSnapshotsFromCompactionHistory() throws {
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let path = temp.url.appendingPathComponent("legacy-ghost-compaction.jsonl")
+        let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let sessionMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: conversationID,
+            timestamp: "2026-05-08T00:00:00.000Z",
+            cwd: "/repo",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            source: .cli
+        )))
+        let kept = ResponseItem.message(role: "assistant", content: [.outputText(text: "kept")])
+        let ghost = ResponseItem.ghostSnapshot(ghostCommit: GhostCommit(
+            id: "deadbeef",
+            preexistingUntrackedFiles: [],
+            preexistingUntrackedDirs: []
+        ))
+        let compacted = RolloutRecordItem.compacted(CompactedItem(
+            message: "summary",
+            replacementHistory: [kept, ghost]
+        ))
+        try writeLines([
+            RolloutLine(timestamp: "2026-05-08T00:00:00.000Z", item: sessionMeta),
+            RolloutLine(timestamp: "2026-05-08T00:00:01.000Z", item: compacted)
+        ], to: path)
+
+        let history = try RolloutRecorder.getRolloutHistory(path: path)
+
+        guard case let .resumed(resumed) = history,
+              case let .compacted(sanitized)? = resumed.history.dropFirst().first
+        else {
+            return XCTFail("expected sanitized compacted history")
+        }
+        XCTAssertEqual(sanitized.replacementHistory, [kept])
+    }
+
     func testReconstructResponseHistoryUsesResponseItemsAndNormalizesToolPairs() {
         let history = RolloutRecorder.reconstructResponseHistory(from: [
             .sessionMeta(SessionMetaLine(meta: SessionMeta(

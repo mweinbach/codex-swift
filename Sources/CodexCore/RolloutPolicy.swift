@@ -211,12 +211,12 @@ public enum RolloutPolicy {
              .toolSearchOutput,
              .webSearchCall,
              .imageGenerationCall,
-             .ghostSnapshot,
              .compaction,
              .contextCompaction,
              .knownPersisted:
             return true
-        case .other:
+        case .ghostSnapshot,
+             .other:
             return false
         }
     }

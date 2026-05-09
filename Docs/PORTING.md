@@ -548,6 +548,8 @@ Source baseline inspected for this scaffold:
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
+- `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
+  - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 
 ## Known Gaps
 
@@ -570,7 +572,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - config-layer file IO and full non-apply config loading
 - full apply-patch approval/diff event plumbing across shell-intercept and live-tool paths
 - Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior
-- full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
+- remaining `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
 - persistent SQLite-backed local agent graph store adapter

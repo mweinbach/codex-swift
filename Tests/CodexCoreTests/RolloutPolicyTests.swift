@@ -16,6 +16,11 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.imageGenerationCall(id: "ig-1", status: "completed", result: "Zm9v")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.contextCompaction(encryptedContent: "encrypted")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.ghostSnapshot(ghostCommit: GhostCommit(
+            id: "ghost-1",
+            preexistingUntrackedFiles: [],
+            preexistingUntrackedDirs: []
+        ))))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.other))
 
         for type in [
