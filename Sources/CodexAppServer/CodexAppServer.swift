@@ -7757,6 +7757,7 @@ public enum CodexAppServer {
             parsed.command,
             cwd: cwd,
             timeoutMilliseconds: parsed.timeoutMs,
+            outputBytesCap: parsed.outputBytesCap,
             environment: commandExecEnvironment(
                 base: configuration.environment,
                 overrides: parsed.environmentOverrides
@@ -7796,7 +7797,7 @@ public enum CodexAppServer {
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("command/exec size requires tty: true")
         }
-        if disableOutputCap && params?["outputBytesCap"] != nil {
+        if disableOutputCap && params?["outputBytesCap"] != nil && !(params?["outputBytesCap"] is NSNull) {
             throw AppServerError.invalidParams("command/exec cannot set both outputBytesCap and disableOutputCap")
         }
         if disableTimeout && params?["timeoutMs"] != nil {
@@ -7814,7 +7815,7 @@ public enum CodexAppServer {
             streamStdin: streamStdin,
             streamStdoutStderr: streamStdoutStderr,
             timeoutMs: disableTimeout ? nil : optionalIntParam(params?["timeoutMs"]),
-            outputBytesCap: disableOutputCap ? nil : processOutputBytesCap(params?["outputBytesCap"]),
+            outputBytesCap: disableOutputCap ? nil : commandExecOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
         )
@@ -8067,6 +8068,13 @@ public enum CodexAppServer {
         }
         if value is NSNull {
             return nil
+        }
+        return max(intParam(value, defaultValue: 1_048_576), 0)
+    }
+
+    private static func commandExecOutputBytesCap(_ value: Any?) -> Int {
+        guard let value, !(value is NSNull) else {
+            return 1_048_576
         }
         return max(intParam(value, defaultValue: 1_048_576), 0)
     }
@@ -10352,6 +10360,7 @@ public enum CodexAppServer {
         _ command: [String],
         cwd: URL?,
         timeoutMilliseconds: Int?,
+        outputBytesCap: Int?,
         environment: [String: String]
     ) throws -> [String: Any] {
         let process = Process()
@@ -10391,13 +10400,28 @@ public enum CodexAppServer {
         }
 
         process.waitUntilExit()
-        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stdoutData = cappedOutputData(
+            stdoutPipe.fileHandleForReading.readDataToEndOfFile(),
+            outputBytesCap: outputBytesCap
+        )
+        let stderrData = cappedOutputData(
+            stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+            outputBytesCap: outputBytesCap
+        )
+        let stdout = TextEncoding.bytesToStringSmart(stdoutData)
+        let stderr = TextEncoding.bytesToStringSmart(stderrData)
         return [
             "exitCode": timedOut ? 124 : Int(process.terminationStatus),
             "stdout": stdout,
             "stderr": stderr
         ]
+    }
+
+    private static func cappedOutputData(_ data: Data, outputBytesCap: Int?) -> Data {
+        guard let outputBytesCap else {
+            return data
+        }
+        return data.prefix(max(outputBytesCap, 0))
     }
 
     private static func loadSkills(cwd: URL, codexHome: URL) -> SkillLoadOutcome {

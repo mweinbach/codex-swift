@@ -7172,6 +7172,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecBufferedOutputBytesCapAppliesPerStream() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf stdout; printf stderr >&2"],"cwd":"\#(cwd.url.path)","outputBytesCap":3}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "std")
+        XCTAssertEqual(result["stderr"] as? String, "std")
+    }
+
     func testCommandExecBufferedTimeoutReportsRustExitCode() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7225,6 +7239,14 @@ final class CodexAppServerTests: XCTestCase {
             timeoutError["message"] as? String,
             "command/exec cannot set both timeoutMs and disableTimeout"
         )
+
+        let nullOutputCapWithDisable = try appServerResponse(
+            #"{"id":4,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":null,"disableOutputCap":true}}"#,
+            codexHome: codexHome.url
+        )
+        let nullOutputCapResult = try XCTUnwrap(nullOutputCapWithDisable["result"] as? [String: Any])
+        XCTAssertEqual(nullOutputCapResult["exitCode"] as? Int, 0)
+        XCTAssertEqual(nullOutputCapResult["stdout"] as? String, "hi\n")
 
         let sandboxAndProfile = try appServerResponse(
             #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{},"permissionProfile":"on-request"}}"#,
