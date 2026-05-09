@@ -6950,6 +6950,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(modifiedHooks[0]["trustStatus"] as? String, "modified")
     }
 
+    func testHooksListReadsDottedHookStateToml() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let configFile = codexHome.url.appendingPathComponent("config.toml", isDirectory: false)
+        let hookKey = "\(configFile.standardizedFileURL.path):pre_tool_use:0:0"
+        try """
+        [hooks.state."\(hookKey)"]
+        enabled = false
+        trusted_hash = "sha256:stale"
+
+        [hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 /tmp/listed-hook.py"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, hookKey)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, false)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "modified")
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """
