@@ -112,6 +112,79 @@ final class CompactTests: XCTestCase {
         ])
     }
 
+    func testInsertInitialContextBeforeLastRealUserKeepsSummaryLast() {
+        let summary = "\(Compact.summaryPrefix)\nsummary text"
+        let compactedHistory: [ResponseItem] = [
+            .message(role: "user", content: [.inputText(text: "older user")]),
+            .message(role: "user", content: [.inputText(text: "latest user")]),
+            .message(role: "user", content: [.inputText(text: summary)]),
+        ]
+        let initialContext: [ResponseItem] = [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")])
+        ]
+
+        let refreshed = Compact.insertInitialContextBeforeLastRealUserOrSummary(
+            compactedHistory: compactedHistory,
+            initialContext: initialContext
+        )
+
+        XCTAssertEqual(refreshed, [
+            .message(role: "user", content: [.inputText(text: "older user")]),
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")]),
+            .message(role: "user", content: [.inputText(text: "latest user")]),
+            .message(role: "user", content: [.inputText(text: summary)]),
+        ])
+    }
+
+    func testInsertInitialContextFallsBackToSummaryWhenNoRealUserRemains() {
+        let summary = "\(Compact.summaryPrefix)\nsummary text"
+        let initialContext: [ResponseItem] = [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")])
+        ]
+
+        let refreshed = Compact.insertInitialContextBeforeLastRealUserOrSummary(
+            compactedHistory: [.message(role: "user", content: [.inputText(text: summary)])],
+            initialContext: initialContext
+        )
+
+        XCTAssertEqual(refreshed, [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")]),
+            .message(role: "user", content: [.inputText(text: summary)]),
+        ])
+    }
+
+    func testInsertInitialContextFallsBackToCompactionItem() {
+        let initialContext: [ResponseItem] = [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")])
+        ]
+
+        let refreshed = Compact.insertInitialContextBeforeLastRealUserOrSummary(
+            compactedHistory: [.compaction(encryptedContent: "encrypted")],
+            initialContext: initialContext
+        )
+
+        XCTAssertEqual(refreshed, [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")]),
+            .compaction(encryptedContent: "encrypted"),
+        ])
+    }
+
+    func testInsertInitialContextAppendsWhenNoBoundaryExists() {
+        let initialContext: [ResponseItem] = [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")])
+        ]
+
+        let refreshed = Compact.insertInitialContextBeforeLastRealUserOrSummary(
+            compactedHistory: [.message(role: "assistant", content: [.outputText(text: "answer")])],
+            initialContext: initialContext
+        )
+
+        XCTAssertEqual(refreshed, [
+            .message(role: "assistant", content: [.outputText(text: "answer")]),
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")]),
+        ])
+    }
+
     private func messageText(_ item: ResponseItem) -> String {
         guard case let .message(_, role, content, _) = item, role == "user" else {
             XCTFail("expected user message, got \(item)")

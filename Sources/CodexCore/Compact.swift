@@ -89,6 +89,49 @@ public enum Compact {
         return history
     }
 
+    public static func insertInitialContextBeforeLastRealUserOrSummary(
+        compactedHistory: [ResponseItem],
+        initialContext: [ResponseItem]
+    ) -> [ResponseItem] {
+        var lastUserOrSummaryIndex: Int?
+        var lastRealUserIndex: Int?
+
+        for index in compactedHistory.indices.reversed() {
+            guard case let .message(_, role, content, _) = compactedHistory[index],
+                  role == "user"
+            else {
+                continue
+            }
+
+            lastUserOrSummaryIndex = lastUserOrSummaryIndex ?? index
+            let message = contentItemsToText(content) ?? ""
+            if !isSummaryMessage(message) {
+                lastRealUserIndex = index
+                break
+            }
+        }
+
+        let lastCompactionIndex = compactedHistory.indices.reversed().first { index in
+            if case .compaction = compactedHistory[index] {
+                return true
+            }
+            if case let .knownPersisted(type) = compactedHistory[index],
+               type == "context_compaction" {
+                return true
+            }
+            return false
+        }
+
+        let insertionIndex = lastRealUserIndex ?? lastUserOrSummaryIndex ?? lastCompactionIndex
+        var history = compactedHistory
+        if let insertionIndex {
+            history.insert(contentsOf: initialContext, at: insertionIndex)
+        } else {
+            history.append(contentsOf: initialContext)
+        }
+        return history
+    }
+
     private static func shouldKeepUserMessage(_ content: [ContentItem]) -> Bool {
         if UserInstructions.isUserInstructions(message: content)
             || SkillInstructions.isSkillInstructions(message: content)
