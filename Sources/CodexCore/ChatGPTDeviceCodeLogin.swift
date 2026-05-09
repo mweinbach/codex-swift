@@ -76,6 +76,20 @@ public enum ChatGPTDeviceCodeLoginError: Error, Equatable, CustomStringConvertib
     }
 }
 
+public struct ChatGPTDeviceCodeStart: Equatable, Sendable {
+    public let deviceAuthID: String
+    public let userCode: String
+    public let verificationURL: String
+    public let interval: UInt64
+
+    public init(deviceAuthID: String, userCode: String, verificationURL: String, interval: UInt64) {
+        self.deviceAuthID = deviceAuthID
+        self.userCode = userCode
+        self.verificationURL = verificationURL
+        self.interval = interval
+    }
+}
+
 public enum ChatGPTDeviceCodeLogin {
     public static let defaultIssuer = "https://auth.openai.com"
     public static let maxWaitSeconds: TimeInterval = 15 * 60
@@ -91,22 +105,61 @@ public enum ChatGPTDeviceCodeLogin {
         keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) async throws {
         let send = transport ?? urlSessionTransport
-        let issuer = options.issuer.trimmedTrailingSlashes()
-        let apiBaseURL = "\(issuer)/api/accounts"
 
-        let userCode = try await requestUserCode(
-            apiBaseURL: apiBaseURL,
-            clientID: options.clientID,
+        let deviceCode = try await requestDeviceCode(
+            options: options,
             transport: send
         )
 
-        await messageSink(.userCodePrompt(code: userCode.userCode, version: options.cliVersion))
+        await messageSink(.userCodePrompt(code: deviceCode.userCode, version: options.cliVersion))
 
-        let code = try await pollForAuthorizationCode(
-            apiBaseURL: apiBaseURL,
+        try await complete(
+            options: options,
+            deviceCode: deviceCode,
+            transport: send,
+            sleeper: sleeper,
+            now: now,
+            keyringStore: keyringStore
+        )
+    }
+
+    public static func requestDeviceCode(
+        options: ChatGPTDeviceCodeLoginOptions,
+        transport: ChatGPTDeviceCodeLoginTransport? = nil
+    ) async throws -> ChatGPTDeviceCodeStart {
+        let send = transport ?? urlSessionTransport
+        let issuer = options.issuer.trimmedTrailingSlashes()
+        let userCode = try await requestUserCode(
+            apiBaseURL: "\(issuer)/api/accounts",
+            clientID: options.clientID,
+            transport: send
+        )
+        return ChatGPTDeviceCodeStart(
             deviceAuthID: userCode.deviceAuthID,
             userCode: userCode.userCode,
-            interval: userCode.interval,
+            verificationURL: "\(issuer)/codex/device",
+            interval: userCode.interval
+        )
+    }
+
+    public static func complete(
+        options: ChatGPTDeviceCodeLoginOptions,
+        deviceCode: ChatGPTDeviceCodeStart,
+        transport: ChatGPTDeviceCodeLoginTransport? = nil,
+        sleeper: @escaping ChatGPTDeviceCodeLoginSleeper = { seconds in
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        },
+        now: @escaping @Sendable () -> Date = { Date() },
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) async throws {
+        let send = transport ?? urlSessionTransport
+        let issuer = options.issuer.trimmedTrailingSlashes()
+        let apiBaseURL = "\(issuer)/api/accounts"
+        let code = try await pollForAuthorizationCode(
+            apiBaseURL: apiBaseURL,
+            deviceAuthID: deviceCode.deviceAuthID,
+            userCode: deviceCode.userCode,
+            interval: deviceCode.interval,
             transport: send,
             sleeper: sleeper,
             now: now

@@ -5163,6 +5163,104 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(cancelAgainResult["status"] as? String, "notFound")
     }
 
+    func testAccountLoginChatGPTDeviceCodeSucceedsAndNotifies() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let idToken = try fakeJWT(email: "device@example.com", plan: "pro", accountID: "org-device")
+        let probe = AppServerDeviceCodeProbe(scenario: .success(idToken: idToken))
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authDeviceCodeTransport: { request in try await probe.handle(request) },
+                environment: ["CODEX_APP_SERVER_LOGIN_ISSUER": "https://issuer.example/"]
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        XCTAssertEqual(loginResult["type"] as? String, "chatgptDeviceCode")
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+        XCTAssertNotNil(UUID(uuidString: loginID))
+        XCTAssertEqual(loginResult["verificationUrl"] as? String, "https://issuer.example/codex/device")
+        XCTAssertEqual(loginResult["userCode"] as? String, "CODE-12345")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, true)
+        XCTAssertTrue(completedParams["error"] is NSNull)
+
+        let updated = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(updated.count, 1)
+        XCTAssertEqual(updated[0]["method"] as? String, "account/updated")
+        let updatedParams = try XCTUnwrap(updated[0]["params"] as? [String: Any])
+        XCTAssertEqual(updatedParams["authMode"] as? String, "chatgpt")
+        XCTAssertEqual(updatedParams["planType"] as? String, "pro")
+
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        XCTAssertEqual(stored.tokens?.accessToken, "access-token-123")
+        XCTAssertEqual(stored.tokens?.refreshToken, "refresh-token-123")
+        XCTAssertEqual(stored.tokens?.accountID, "org-device")
+    }
+
+    func testAccountLoginChatGPTDeviceCodeStartFailureDoesNotNotify() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let probe = AppServerDeviceCodeProbe(scenario: .userCodeFailure(statusCode: 404))
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authDeviceCodeTransport: { request in try await probe.handle(request) },
+                environment: ["CODEX_APP_SERVER_LOGIN_ISSUER": "https://issuer.example"]
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "device code login is not enabled for this Codex server. Use the browser login or verify the server URL."
+        )
+        let capturedPayloads = await notificationCapture.payloadsData()
+        XCTAssertTrue(capturedPayloads.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
+    func testAccountLoginChatGPTDeviceCodeCanBeCanceled() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let probe = AppServerDeviceCodeProbe(scenario: .pending)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authDeviceCodeTransport: { request in try await probe.handle(request) },
+                environment: ["CODEX_APP_SERVER_LOGIN_ISSUER": "https://issuer.example"]
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+
+        let cancel = try decode(processor.processLine(Data(#"{"id":2,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#.utf8)))
+        let cancelResult = try XCTUnwrap(cancel["result"] as? [String: Any])
+        XCTAssertEqual(cancelResult["status"] as? String, "canceled")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, false)
+        XCTAssertEqual(completedParams["error"] as? String, "Login was not completed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
     func testLegacyLoginChatGPTStartsServerWithForcedWorkspaceAndCanCancel() throws {
         let temp = try TemporaryDirectory()
         try #"forced_chatgpt_workspace_id = "ws-forced""#.write(
@@ -7556,23 +7654,28 @@ final class CodexAppServerTests: XCTestCase {
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
+        environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) -> CodexAppServerConfiguration {
-        CodexAppServerConfiguration(
+        var mergedEnvironment = [
+            CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
+                .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                .path
+        ]
+        mergedEnvironment.merge(environment) { _, new in new }
+        return CodexAppServerConfiguration(
             codexHome: codexHome,
             requiresOpenAIAuth: requiresOpenAIAuth,
-            environment: [
-                CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
-                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
-                    .path
-            ],
+            environment: mergedEnvironment,
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
             authRefreshTransport: authRefreshTransport,
+            authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             configLayerOverrides: configLayerOverrides
@@ -8029,6 +8132,61 @@ private actor AppServerMcpOAuthLoginCapture {
 }
 
 private struct AppServerTestTimeout: Error {}
+
+private actor AppServerDeviceCodeProbe {
+    enum Scenario {
+        case success(idToken: String)
+        case userCodeFailure(statusCode: Int)
+        case pending
+    }
+
+    private let scenario: Scenario
+
+    init(scenario: Scenario) {
+        self.scenario = scenario
+    }
+
+    func handle(_ request: URLRequest) throws -> AuthRefreshHTTPResponse {
+        let url = request.url?.absoluteString ?? ""
+        switch url {
+        case "https://issuer.example/api/accounts/deviceauth/usercode":
+            if case let .userCodeFailure(statusCode) = scenario {
+                return AuthRefreshHTTPResponse(statusCode: statusCode, body: Data())
+            }
+            return AuthRefreshHTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"device_auth_id":"device-auth-123","user_code":"CODE-12345","interval":"60"}"#.utf8)
+            )
+
+        case "https://issuer.example/api/accounts/deviceauth/token":
+            if case .pending = scenario {
+                return AuthRefreshHTTPResponse(statusCode: 404, body: Data())
+            }
+            return AuthRefreshHTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"authorization_code":"poll-code-321","code_challenge":"code-challenge-321","code_verifier":"code-verifier-321"}"#.utf8)
+            )
+
+        case "https://issuer.example/oauth/token":
+            guard case let .success(idToken) = scenario else {
+                return AuthRefreshHTTPResponse(statusCode: 500, body: Data())
+            }
+            return AuthRefreshHTTPResponse(
+                statusCode: 200,
+                body: Data("""
+                {
+                  "id_token": "\(idToken)",
+                  "access_token": "access-token-123",
+                  "refresh_token": "refresh-token-123"
+                }
+                """.utf8)
+            )
+
+        default:
+            return AuthRefreshHTTPResponse(statusCode: 404, body: Data())
+        }
+    }
+}
 
 private actor AppServerNotificationCapture {
     private var payloads: [Data] = []
