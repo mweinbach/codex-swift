@@ -198,6 +198,8 @@ Source baseline inspected for this scaffold:
   - configured handler run IDs, hook run labels, matcher pattern gating, ASCII exact matcher handling, invalid-regex fallback, canonical-plus-alias matcher inputs, one-selection-per-handler alias matching, declaration-order-preserving handler selection, event scope mapping, and running/completed summary metadata now match the Rust dispatcher. Command process execution remains pending.
 - Initial hook command runner behavior from `codex-rs/hooks/src/engine/command_runner.rs`
   - default shell command construction, custom shell argument appending, handler environment merging, hook stdin delivery, stdout/stderr capture, exit-code preservation, spawn-error result shape, timeout result shape, and `hook timed out after Ns` wording now match the Rust command runner. Integration with event-specific hook run paths remains pending.
+- Initial `PreToolUse` hook event runtime behavior from `codex-rs/hooks/src/events/pre_tool_use.rs`
+  - command stdin JSON preserves canonical `tool_name`, explicit null `transcript_path`, tool input, and `tool_use_id`; previews and completed events append the tool-use id to run ids; completed-result parsing preserves Rust's permission deny/block behavior, additional-context entries, fail-open invalid output handling, invalid JSON-like stdout error, exit-code-2 stderr block semantics, nonzero exit errors, missing-status errors, and aggregation of blocking/additional contexts across matching command hooks. Wiring this into the live session tool execution path remains pending.
 - Initial realtime conversation protocol models from `codex-rs/protocol/src/protocol.rs`
   - conversation start/audio/text/list-voices operation wire shapes, double-optional prompt encoding, websocket/WebRTC transport tags, stable builtin voice lists, realtime event external tags, and lifecycle/list-voices response payloads
 - Additional thread-control operations from `codex-rs/protocol/src/protocol.rs`
@@ -491,7 +493,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
 - persistent SQLite-backed local agent graph store adapter
-- live hook command integration of dispatcher/command-runner/output parsing/spilling into the runtime hook engine
+- live hook command integration of event runtimes into session/tool execution
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
 - accepted-line analytics uploader/app-server integration with live notification routing
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
