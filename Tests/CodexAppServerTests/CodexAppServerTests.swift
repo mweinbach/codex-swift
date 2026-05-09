@@ -1396,7 +1396,8 @@ final class CodexAppServerTests: XCTestCase {
         for (index, mode) in ["disabled", "enabled"].enumerated() {
             let response = try appServerResponse(
                 #"{"id":\#(index + 1),"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"\#(mode)"}}"#,
-                codexHome: temp.url
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
             )
             let result = try XCTUnwrap(response["result"] as? [String: Any])
             XCTAssertTrue(result.isEmpty)
@@ -1411,13 +1412,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(sessionMetaLines.last?.contains(#""memory_mode":"enabled""#) == true)
     }
 
+    func testThreadMemoryModeSetRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = UUID().uuidString.lowercased()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"disabled"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "thread/memoryMode/set requires experimentalApi capability")
+    }
+
     func testThreadMemoryModeSetRejectsInvalidModeAndMissingThread() throws {
         let temp = try TemporaryDirectory()
         let missingID = UUID().uuidString.lowercased()
 
         let invalidMode = try appServerResponse(
             #"{"id":1,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"paused"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let invalidModeError = try XCTUnwrap(invalidMode["error"] as? [String: Any])
         XCTAssertEqual(invalidModeError["code"] as? Int, -32600)
@@ -1425,7 +1441,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let missing = try appServerResponse(
             #"{"id":2,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"enabled"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
         XCTAssertEqual(missingError["code"] as? Int, -32600)
@@ -1527,7 +1544,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let response = try appServerResponse(
             #"{"id":1,"method":"memory/reset","params":{}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertTrue(result.isEmpty)
@@ -1537,11 +1555,25 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionsRoot.path), [])
     }
 
+    func testMemoryResetRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "memory/reset requires experimentalApi capability")
+    }
+
     func testMemoryResetCreatesMissingRootsAndRejectsSymlinkedRoot() throws {
         let temp = try TemporaryDirectory()
         let missingRoots = try appServerResponse(
             #"{"id":1,"method":"memory/reset","params":{}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         XCTAssertNotNil(missingRoots["result"] as? [String: Any])
         XCTAssertTrue(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("memories").path))
@@ -1561,7 +1593,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let rejected = try appServerResponse(
             #"{"id":2,"method":"memory/reset","params":{}}"#,
-            codexHome: symlink.deletingLastPathComponent()
+            codexHome: symlink.deletingLastPathComponent(),
+            experimentalAPIEnabled: true
         )
         let error = try XCTUnwrap(rejected["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32603)

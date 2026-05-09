@@ -1921,8 +1921,10 @@ public enum CodexAppServer {
 
     fileprivate static func threadMemoryModeSetResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
+        try requireExperimentalAPI(method: "thread/memoryMode/set", experimentalAPIEnabled: experimentalAPIEnabled)
         guard let rawThreadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -2013,7 +2015,11 @@ public enum CodexAppServer {
         return [:]
     }
 
-    fileprivate static func memoryResetResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+    fileprivate static func memoryResetResult(
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
+    ) throws -> [String: Any] {
+        try requireExperimentalAPI(method: "memory/reset", experimentalAPIEnabled: experimentalAPIEnabled)
         do {
             try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories", isDirectory: true))
             try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories_extensions", isDirectory: true))
@@ -13936,12 +13942,19 @@ final class CodexAppServerMessageProcessor {
                 case "thread/memoryMode/set":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadMemoryModeSetResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.threadMemoryModeSetResult(
+                            params: params,
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
+                        )
                     )
                 case "memory/reset":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.memoryResetResult(configuration: configuration)
+                        result: try CodexAppServer.memoryResetResult(
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
+                        )
                     )
                 case "thread/inject_items":
                     response = CodexAppServer.responseObject(
