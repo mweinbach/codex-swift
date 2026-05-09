@@ -971,6 +971,45 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(threadID)")
     }
 
+    func testThreadApproveGuardianDeniedActionValidatesEventAndThread() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-03-00",
+            timestamp: "2025-01-06T08:03:00Z",
+            preview: "guardian operation",
+            provider: "mock_provider"
+        )
+
+        let accepted = try appServerResponse(
+            """
+            {"id":1,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\(threadID)","event":{"id":"guardian-1","turn_id":"turn-1","started_at_ms":1234,"status":"denied","risk_level":"high","action":{"type":"command","source":"shell","command":"rm -rf build","cwd":"/repo"}}}}
+            """,
+            codexHome: temp.url
+        )
+        let acceptedResult = try XCTUnwrap(accepted["result"] as? [String: Any])
+        XCTAssertTrue(acceptedResult.isEmpty)
+
+        let invalidEvent = try appServerResponse(
+            #"{"id":2,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\#(threadID)","event":{"id":"guardian-2","action":{"type":"command","source":"shell","command":"pwd","cwd":"/repo"}}}}"#,
+            codexHome: temp.url
+        )
+        let invalidEventError = try XCTUnwrap(invalidEvent["error"] as? [String: Any])
+        XCTAssertEqual(invalidEventError["code"] as? Int, -32600)
+        XCTAssertTrue((invalidEventError["message"] as? String)?.hasPrefix("invalid Guardian denial event:") == true)
+
+        let missingThreadID = UUID().uuidString.lowercased()
+        let missingThread = try appServerResponse(
+            """
+            {"id":3,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\(missingThreadID)","event":{"id":"guardian-3","status":"denied","action":{"type":"command","source":"shell","command":"pwd","cwd":"/repo"}}}}
+            """,
+            codexHome: temp.url
+        )
+        let missingThreadError = try XCTUnwrap(missingThread["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(missingThreadID)")
+    }
+
     func testThreadBackgroundTerminalsCleanRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

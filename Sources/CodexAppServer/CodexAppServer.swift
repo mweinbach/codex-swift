@@ -1531,6 +1531,23 @@ public enum CodexAppServer {
         return [:]
     }
 
+    fileprivate static func threadApproveGuardianDeniedActionResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let event = params?["event"] else {
+            throw AppServerError.invalidRequest("missing event")
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: event)
+            _ = try JSONDecoder().decode(GuardianAssessmentEvent.self, from: data)
+        } catch {
+            throw AppServerError.invalidRequest("invalid Guardian denial event: \(error)")
+        }
+        _ = try materializedThreadID(params: params, configuration: configuration)
+        return [:]
+    }
+
     fileprivate static func threadBackgroundTerminalsCleanResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -12753,6 +12770,14 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadShellCommandResult(params: params, configuration: configuration)
+                    )
+                case "thread/approveGuardianDeniedAction":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadApproveGuardianDeniedActionResult(
+                            params: params,
+                            configuration: configuration
+                        )
                     )
                 case "thread/backgroundTerminals/clean":
                     response = CodexAppServer.responseObject(
