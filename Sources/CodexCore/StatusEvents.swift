@@ -1,8 +1,15 @@
 import Foundation
 
+public enum NonSteerableTurnKind: String, Codable, Equatable, Sendable {
+    case review
+    case compact
+}
+
 public enum CodexErrorInfo: Equatable, Codable, Sendable {
     case contextWindowExceeded
     case usageLimitExceeded
+    case serverOverloaded
+    case cyberPolicy
     case httpConnectionFailed(httpStatusCode: UInt16?)
     case responseStreamConnectionFailed(httpStatusCode: UInt16?)
     case internalServerError
@@ -11,15 +18,20 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
     case sandboxError
     case responseStreamDisconnected(httpStatusCode: UInt16?)
     case responseTooManyFailedAttempts(httpStatusCode: UInt16?)
+    case activeTurnNotSteerable(turnKind: NonSteerableTurnKind)
+    case threadRollbackFailed
     case other
 
     fileprivate enum UnitVariant: String, Codable {
         case contextWindowExceeded = "context_window_exceeded"
         case usageLimitExceeded = "usage_limit_exceeded"
+        case serverOverloaded = "server_overloaded"
+        case cyberPolicy = "cyber_policy"
         case internalServerError = "internal_server_error"
         case unauthorized
         case badRequest = "bad_request"
         case sandboxError = "sandbox_error"
+        case threadRollbackFailed = "thread_rollback_failed"
         case other
     }
 
@@ -28,6 +40,7 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
         case responseStreamConnectionFailed = "response_stream_connection_failed"
         case responseStreamDisconnected = "response_stream_disconnected"
         case responseTooManyFailedAttempts = "response_too_many_failed_attempts"
+        case activeTurnNotSteerable = "active_turn_not_steerable"
     }
 
     public init(from decoder: Decoder) throws {
@@ -53,16 +66,22 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
             )
         }
 
-        let payload = try container.decode(HTTPStatusPayload.self, forKey: key)
         switch key {
         case .httpConnectionFailed:
+            let payload = try container.decode(HTTPStatusPayload.self, forKey: key)
             self = .httpConnectionFailed(httpStatusCode: payload.httpStatusCode)
         case .responseStreamConnectionFailed:
+            let payload = try container.decode(HTTPStatusPayload.self, forKey: key)
             self = .responseStreamConnectionFailed(httpStatusCode: payload.httpStatusCode)
         case .responseStreamDisconnected:
+            let payload = try container.decode(HTTPStatusPayload.self, forKey: key)
             self = .responseStreamDisconnected(httpStatusCode: payload.httpStatusCode)
         case .responseTooManyFailedAttempts:
+            let payload = try container.decode(HTTPStatusPayload.self, forKey: key)
             self = .responseTooManyFailedAttempts(httpStatusCode: payload.httpStatusCode)
+        case .activeTurnNotSteerable:
+            let payload = try container.decode(ActiveTurnNotSteerablePayload.self, forKey: key)
+            self = .activeTurnNotSteerable(turnKind: payload.turnKind)
         }
     }
 
@@ -74,6 +93,12 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
         case .usageLimitExceeded:
             var container = encoder.singleValueContainer()
             try container.encode(UnitVariant.usageLimitExceeded.rawValue)
+        case .serverOverloaded:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitVariant.serverOverloaded.rawValue)
+        case .cyberPolicy:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitVariant.cyberPolicy.rawValue)
         case let .httpConnectionFailed(httpStatusCode):
             try encodeHTTPStatusPayload(httpStatusCode, forKey: .httpConnectionFailed, to: encoder)
         case let .responseStreamConnectionFailed(httpStatusCode):
@@ -94,6 +119,11 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
             try encodeHTTPStatusPayload(httpStatusCode, forKey: .responseStreamDisconnected, to: encoder)
         case let .responseTooManyFailedAttempts(httpStatusCode):
             try encodeHTTPStatusPayload(httpStatusCode, forKey: .responseTooManyFailedAttempts, to: encoder)
+        case let .activeTurnNotSteerable(turnKind):
+            try encodeActiveTurnNotSteerablePayload(turnKind, to: encoder)
+        case .threadRollbackFailed:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitVariant.threadRollbackFailed.rawValue)
         case .other:
             var container = encoder.singleValueContainer()
             try container.encode(UnitVariant.other.rawValue)
@@ -108,6 +138,17 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
         var container = encoder.container(keyedBy: ObjectVariant.self)
         try container.encode(HTTPStatusPayload(httpStatusCode: httpStatusCode), forKey: key)
     }
+
+    private func encodeActiveTurnNotSteerablePayload(
+        _ turnKind: NonSteerableTurnKind,
+        to encoder: Encoder
+    ) throws {
+        var container = encoder.container(keyedBy: ObjectVariant.self)
+        try container.encode(
+            ActiveTurnNotSteerablePayload(turnKind: turnKind),
+            forKey: .activeTurnNotSteerable
+        )
+    }
 }
 
 private extension CodexErrorInfo.UnitVariant {
@@ -117,6 +158,10 @@ private extension CodexErrorInfo.UnitVariant {
             return .contextWindowExceeded
         case .usageLimitExceeded:
             return .usageLimitExceeded
+        case .serverOverloaded:
+            return .serverOverloaded
+        case .cyberPolicy:
+            return .cyberPolicy
         case .internalServerError:
             return .internalServerError
         case .unauthorized:
@@ -125,6 +170,8 @@ private extension CodexErrorInfo.UnitVariant {
             return .badRequest
         case .sandboxError:
             return .sandboxError
+        case .threadRollbackFailed:
+            return .threadRollbackFailed
         case .other:
             return .other
         }
@@ -150,6 +197,14 @@ private struct HTTPStatusPayload: Equatable, Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresentOrNull(httpStatusCode, forKey: .httpStatusCode)
+    }
+}
+
+private struct ActiveTurnNotSteerablePayload: Equatable, Codable {
+    let turnKind: NonSteerableTurnKind
+
+    private enum CodingKeys: String, CodingKey {
+        case turnKind = "turn_kind"
     }
 }
 
@@ -392,6 +447,7 @@ public enum TurnAbortReason: String, Codable, Equatable, Sendable {
     case interrupted
     case replaced
     case reviewEnded = "review_ended"
+    case budgetLimited = "budget_limited"
 }
 
 private extension KeyedEncodingContainer {

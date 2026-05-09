@@ -5,10 +5,13 @@ final class StatusEventsTests: XCTestCase {
     func testCodexErrorInfoUsesRustStringVariants() throws {
         XCTAssertEqual(try encode(CodexErrorInfo.contextWindowExceeded), #""context_window_exceeded""#)
         XCTAssertEqual(try encode(CodexErrorInfo.usageLimitExceeded), #""usage_limit_exceeded""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.serverOverloaded), #""server_overloaded""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.cyberPolicy), #""cyber_policy""#)
         XCTAssertEqual(try encode(CodexErrorInfo.internalServerError), #""internal_server_error""#)
         XCTAssertEqual(try encode(CodexErrorInfo.unauthorized), #""unauthorized""#)
         XCTAssertEqual(try encode(CodexErrorInfo.badRequest), #""bad_request""#)
         XCTAssertEqual(try encode(CodexErrorInfo.sandboxError), #""sandbox_error""#)
+        XCTAssertEqual(try encode(CodexErrorInfo.threadRollbackFailed), #""thread_rollback_failed""#)
         XCTAssertEqual(try encode(CodexErrorInfo.other), #""other""#)
 
         XCTAssertEqual(
@@ -38,11 +41,22 @@ final class StatusEventsTests: XCTestCase {
                 "http_status_code": NSNull()
             ]
         ])
+        try XCTAssertJSONObjectEqual(CodexErrorInfo.activeTurnNotSteerable(turnKind: .review), [
+            "active_turn_not_steerable": [
+                "turn_kind": "review"
+            ]
+        ])
 
         let json = #"{"http_connection_failed":{"http_status_code":503}}"#
         XCTAssertEqual(
             try JSONDecoder().decode(CodexErrorInfo.self, from: Data(json.utf8)),
             .httpConnectionFailed(httpStatusCode: 503)
+        )
+
+        let nonSteerableJSON = #"{"active_turn_not_steerable":{"turn_kind":"compact"}}"#
+        XCTAssertEqual(
+            try JSONDecoder().decode(CodexErrorInfo.self, from: Data(nonSteerableJSON.utf8)),
+            .activeTurnNotSteerable(turnKind: .compact)
         )
     }
 
@@ -128,9 +142,10 @@ final class StatusEventsTests: XCTestCase {
         XCTAssertEqual(try encode(TurnAbortReason.interrupted), #""interrupted""#)
         XCTAssertEqual(try encode(TurnAbortReason.replaced), #""replaced""#)
         XCTAssertEqual(try encode(TurnAbortReason.reviewEnded), #""review_ended""#)
+        XCTAssertEqual(try encode(TurnAbortReason.budgetLimited), #""budget_limited""#)
 
-        try XCTAssertJSONObjectEqual(TurnAbortedEvent(reason: .reviewEnded), [
-            "reason": "review_ended"
+        try XCTAssertJSONObjectEqual(TurnAbortedEvent(reason: .budgetLimited), [
+            "reason": "budget_limited"
         ])
     }
 
