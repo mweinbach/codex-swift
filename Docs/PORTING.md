@@ -630,6 +630,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.
 - `codex-rs/app-server-protocol` thread-start response reviewer
   - added Rust's required `approvalsReviewer` field to the `thread/start` response with the default `user` reviewer.
+- `codex-rs/app-server-protocol` thread-start response shape
+  - added Rust's required `thread/start` response fields for service tier, instruction sources, permission profile, and active permission profile.
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
 - `codex-rs/app-server` thread-start override compatibility
