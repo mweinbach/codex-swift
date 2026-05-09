@@ -136,6 +136,7 @@ final class CodexAppServerTests: XCTestCase {
             (#"{"approvalPolicy":{"type":"granular","sandboxApproval":true}}"#, "askForApproval.granular"),
             (#"{"environments":[]}"#, "thread/start.environments"),
             (#"{"dynamicTools":[]}"#, "thread/start.dynamicTools"),
+            (#"{"permissions":{"profile":"readOnly"}}"#, "thread/start.permissions"),
             (#"{"mockExperimentalField":"mock"}"#, "thread/start.mockExperimentalField"),
             (#"{"experimentalRawEvents":true}"#, "thread/start.experimentalRawEvents"),
             (#"{"persistFullHistory":true}"#, "thread/start.persistFullHistory")
@@ -160,6 +161,20 @@ final class CodexAppServerTests: XCTestCase {
 
         XCTAssertNotNil(messages[0]["result"] as? [String: Any])
         XCTAssertNil(messages[0]["error"])
+    }
+
+    func testThreadStartRejectsPermissionsWithSandbox() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"sandbox":"read-only","permissions":{"profile":"readOnly"}}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
     }
 
     func testAppServerAttestationProviderRequestsCapableSubscribedClient() async throws {

@@ -1277,6 +1277,9 @@ public enum CodexAppServer {
         if let dynamicTools = params?["dynamicTools"], !(dynamicTools is NSNull) {
             throw AppServerError.invalidRequest("thread/start.dynamicTools requires experimentalApi capability")
         }
+        if let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("thread/start.permissions requires experimentalApi capability")
+        }
         if let mockExperimentalField = params?["mockExperimentalField"], !(mockExperimentalField is NSNull) {
             throw AppServerError.invalidRequest("thread/start.mockExperimentalField requires experimentalApi capability")
         }
@@ -1285,6 +1288,13 @@ public enum CodexAppServer {
         }
         if boolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
+        }
+    }
+
+    fileprivate static func requireThreadStartContextOverrideCompatibility(params: [String: Any]?) throws {
+        if let sandbox = params?["sandbox"], !(sandbox is NSNull),
+           let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("`permissions` cannot be combined with `sandbox`")
         }
     }
 
@@ -13942,6 +13952,7 @@ final class CodexAppServerMessageProcessor {
                         params: params,
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
+                    try CodexAppServer.requireThreadStartContextOverrideCompatibility(params: params)
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {

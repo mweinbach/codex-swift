@@ -625,13 +625,15 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server` turn steer route
   - added v2 `turn/steer` with active-turn id validation, no-active/mismatched/empty-input errors, rollout persistence for steer input, Rust's `turnId` response shape, and the experimental API guard for `responsesapiClientMetadata`.
 - `codex-rs/app-server-protocol` thread-start experimental field gating
-  - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
+  - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.permissions`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
 - `codex-rs/app-server-protocol` turn-start experimental field gating
   - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.
 - `codex-rs/app-server-protocol` thread-start response reviewer
   - added Rust's required `approvalsReviewer` field to the `thread/start` response with the default `user` reviewer.
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
+- `codex-rs/app-server` thread-start override compatibility
+  - matched Rust's `thread/start` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 
 ## Known Gaps
 
