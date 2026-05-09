@@ -206,6 +206,49 @@ public enum NonInteractiveExec {
         return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
     }
 
+    public static func runUserPromptSubmitHooks(
+        handlers: [ConfiguredHookHandler],
+        prompt: inout Prompt,
+        userPrompt: String,
+        conversationID: ConversationId,
+        turnID: String,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval
+    ) async -> HookUserPromptSubmitOutcome {
+        let request: HookUserPromptSubmitRequest
+        do {
+            request = try HookUserPromptSubmitRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                turnID: turnID,
+                cwd: AbsolutePath(absolutePath: cwd.standardizedFileURL.path),
+                model: model,
+                permissionMode: hookPermissionMode(approvalPolicy),
+                prompt: userPrompt
+            )
+        } catch {
+            return HookUserPromptSubmitOutcome(
+                hookEvents: [],
+                shouldStop: false,
+                stopReason: nil,
+                additionalContexts: []
+            )
+        }
+
+        let outcome = await HookUserPromptSubmit.run(
+            handlers: handlers,
+            shell: HookCommandShell(),
+            request: request
+        )
+        guard !outcome.shouldStop else {
+            return outcome
+        }
+        prompt.input.append(contentsOf: outcome.additionalContexts.map { context in
+            ResponseInputItem(userInputs: [.text(context)]).responseItem()
+        })
+        return outcome
+    }
+
     public static func executeFunctionCall(
         _ item: ResponseItem,
         cwd: URL,
@@ -686,6 +729,10 @@ public enum NonInteractiveExec {
             }
             return false
         }
+    }
+
+    private static func hookPermissionMode(_ approvalPolicy: AskForApproval) -> String {
+        approvalPolicy == .never ? "bypassPermissions" : "default"
     }
 
     private static func functionOutput(callID: String, content: String, success: Bool) -> ResponseItem {

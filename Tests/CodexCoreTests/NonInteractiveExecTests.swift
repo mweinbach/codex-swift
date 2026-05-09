@@ -115,6 +115,50 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(options.serviceTier, "flex")
     }
 
+    func testUserPromptSubmitHooksAppendAdditionalContextToPrompt() async throws {
+        let cwd = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-hook-context-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cwd) }
+
+        var prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: cwd,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
+        )
+        let outcome = await NonInteractiveExec.runUserPromptSubmitHooks(
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .userPromptSubmit,
+                    matcher: nil,
+                    command: "printf '%s' 'remember hook context'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            prompt: &prompt,
+            userPrompt: "ship it",
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: cwd,
+            model: "gpt-test",
+            approvalPolicy: .never
+        )
+
+        XCTAssertEqual(outcome.additionalContexts, ["remember hook context"])
+        XCTAssertEqual(prompt.input.count, 3)
+        guard case let .message(_, role, content, _) = prompt.input[2] else {
+            return XCTFail("expected hook context message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertEqual(content, [.inputText(text: "remember hook context")])
+    }
+
     func testResponsesLoopExecutesFunctionCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])

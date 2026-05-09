@@ -673,8 +673,15 @@ private func runNonInteractiveExec(
         skipGitRepoCheck: options.skipGitRepoCheck
     )
 
-    let (codexHome, settings) = try resolvedAuthSettings(overrides: configOverrides)
     let environment = ProcessInfo.processInfo.environment
+    let (codexHome, settings) = try resolvedAuthSettings(overrides: configOverrides)
+    let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
+        codexHome: codexHome,
+        cwd: cwd,
+        cliOverrides: configOverrides,
+        environment: environment
+    )
+    let hookHandlers = HookConfig.configuredHandlers(from: configStack, environment: environment)
     try await CodexAuthStorage.enforceLoginRestrictions(
         codexHome: codexHome,
         config: settings,
@@ -748,6 +755,19 @@ private func runNonInteractiveExec(
             cwd: cwd
         )
     }
+    let userPromptItem = prompt.input.last
+    let hookInputCount = prompt.input.count
+    let userPromptSubmitOutcome = await NonInteractiveExec.runUserPromptSubmitHooks(
+        handlers: hookHandlers,
+        prompt: &prompt,
+        userPrompt: promptResolution.prompt,
+        conversationID: conversationID,
+        turnID: "turn-1",
+        cwd: cwd,
+        model: resolvedModel,
+        approvalPolicy: approvalPolicy
+    )
+    let hookAdditionalItems = Array(prompt.input.dropFirst(hookInputCount))
 
     let recorder = try createExecRolloutRecorder(
         codexHome: codexHome,
@@ -770,8 +790,18 @@ private func runNonInteractiveExec(
             truncationPolicy: modelFamily.truncationPolicy
         ))
     ])
-    if let newUserItem = prompt.input.last {
+    if let newUserItem = userPromptItem {
         try recorder.recordItems([.responseItem(newUserItem)])
+    }
+    if !hookAdditionalItems.isEmpty {
+        try recorder.recordItems(hookAdditionalItems.map(RolloutRecordItem.responseItem))
+    }
+    if userPromptSubmitOutcome.shouldStop {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: userPromptSubmitOutcome.stopReason,
+            stderrMessage: nil
+        )
     }
 
     let client = ResponsesClient(
