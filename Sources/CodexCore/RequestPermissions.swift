@@ -284,12 +284,27 @@ public enum NetworkSandboxPolicy: String, Codable, Equatable, Sendable {
     public var isEnabled: Bool {
         self == .enabled
     }
+
+    public static func fromLegacySandboxPolicy(_ sandboxPolicy: SandboxPolicy) -> NetworkSandboxPolicy {
+        sandboxPolicy.hasFullNetworkAccess ? .enabled : .restricted
+    }
 }
 
 public enum SandboxEnforcement: String, Codable, Equatable, Sendable {
     case managed
     case disabled
     case external
+
+    public static func fromLegacySandboxPolicy(_ sandboxPolicy: SandboxPolicy) -> SandboxEnforcement {
+        switch sandboxPolicy {
+        case .dangerFullAccess:
+            return .disabled
+        case .externalSandbox:
+            return .external
+        case .readOnly, .workspaceWrite:
+            return .managed
+        }
+    }
 }
 
 public enum ManagedFileSystemPermissions: Equatable, Codable, Sendable {
@@ -493,6 +508,24 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
             ),
             network: network
         )
+    }
+
+    public static func fromLegacySandboxPolicy(_ sandboxPolicy: SandboxPolicy) -> PermissionProfile {
+        switch sandboxPolicy {
+        case .dangerFullAccess:
+            return .disabled
+        case let .externalSandbox(networkAccess):
+            return .external(network: networkAccess.isEnabled ? .enabled : .restricted)
+        case .readOnly:
+            return .readOnly()
+        case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):
+            return .workspaceWriteWith(
+                writableRoots: writableRoots,
+                network: networkAccess ? .enabled : .restricted,
+                excludeTmpdirEnvVar: excludeTmpdirEnvVar,
+                excludeSlashTmp: excludeSlashTmp
+            )
+        }
     }
 }
 

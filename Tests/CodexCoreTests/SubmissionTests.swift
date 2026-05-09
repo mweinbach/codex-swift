@@ -375,6 +375,43 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testPermissionProfileFromLegacySandboxPolicyMatchesRust() throws {
+        XCTAssertEqual(SandboxEnforcement.fromLegacySandboxPolicy(.dangerFullAccess), .disabled)
+        XCTAssertEqual(SandboxEnforcement.fromLegacySandboxPolicy(.externalSandbox(networkAccess: .restricted)), .external)
+        XCTAssertEqual(SandboxEnforcement.fromLegacySandboxPolicy(.readOnly), .managed)
+
+        XCTAssertEqual(NetworkSandboxPolicy.fromLegacySandboxPolicy(.dangerFullAccess), .enabled)
+        XCTAssertEqual(NetworkSandboxPolicy.fromLegacySandboxPolicy(.readOnly), .restricted)
+        XCTAssertEqual(
+            NetworkSandboxPolicy.fromLegacySandboxPolicy(.externalSandbox(networkAccess: .enabled)),
+            .enabled
+        )
+
+        let writableRoot = try AbsolutePath(absolutePath: "/repo/out")
+        let workspacePolicy = SandboxPolicy.workspaceWrite(
+            writableRoots: [writableRoot],
+            networkAccess: true,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true
+        )
+
+        XCTAssertEqual(PermissionProfile.fromLegacySandboxPolicy(.dangerFullAccess), .disabled)
+        XCTAssertEqual(
+            PermissionProfile.fromLegacySandboxPolicy(.externalSandbox(networkAccess: .restricted)),
+            .external(network: .restricted)
+        )
+        XCTAssertEqual(PermissionProfile.fromLegacySandboxPolicy(.readOnly), .readOnly())
+        XCTAssertEqual(
+            PermissionProfile.fromLegacySandboxPolicy(workspacePolicy),
+            .workspaceWriteWith(
+                writableRoots: [writableRoot],
+                network: .enabled,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            )
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
