@@ -678,7 +678,11 @@ public final class PolicyParser {
     }
 
     private func addPrefixRule(from body: String, constants: [String: ConfigValue]) throws {
-        let arguments = try Self.parseArguments(body, constants: constants)
+        let arguments = try Self.parseArguments(
+            body,
+            constants: constants,
+            positionalNames: ["pattern", "decision", "match", "not_match", "justification"]
+        )
         guard let patternValue = arguments["pattern"] else {
             throw ExecPolicyError.invalidPattern("missing pattern")
         }
@@ -720,7 +724,11 @@ public final class PolicyParser {
     }
 
     private func addNetworkRule(from body: String, constants: [String: ConfigValue]) throws {
-        let arguments = try Self.parseArguments(body, constants: constants)
+        let arguments = try Self.parseArguments(
+            body,
+            constants: constants,
+            positionalNames: ["host", "protocol", "decision", "justification"]
+        )
         let host = try Self.requireStringArgument(arguments, key: "host", function: "network_rule")
         let rawProtocol = try Self.requireStringArgument(arguments, key: "protocol", function: "network_rule")
         let rawDecision = try Self.requireStringArgument(arguments, key: "decision", function: "network_rule")
@@ -733,7 +741,11 @@ public final class PolicyParser {
     }
 
     private func addHostExecutable(from body: String, constants: [String: ConfigValue]) throws {
-        let arguments = try Self.parseArguments(body, constants: constants)
+        let arguments = try Self.parseArguments(
+            body,
+            constants: constants,
+            positionalNames: ["name", "paths"]
+        )
         let name = try Self.requireStringArgument(arguments, key: "name", function: "host_executable")
         guard let pathsValue = arguments["paths"] else {
             throw ExecPolicyError.invalidRule("host_executable missing paths")
@@ -1014,20 +1026,92 @@ public final class PolicyParser {
         return value.dropFirst().allSatisfy(isStarlarkIdentifierCharacter)
     }
 
-    private static func parseArguments(_ body: String, constants: [String: ConfigValue]) throws -> [String: ConfigValue] {
+    private static func parseArguments(
+        _ body: String,
+        constants: [String: ConfigValue],
+        positionalNames: [String]
+    ) throws -> [String: ConfigValue] {
         var arguments: [String: ConfigValue] = [:]
+        var positionalIndex = 0
+        var sawNamedArgument = false
         for piece in splitTopLevel(body, separator: ",") {
             let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            guard let equalsIndex = trimmed.firstIndex(of: "=") else {
-                throw ExecPolicyError.invalidSyntax("expected key=value argument: \(trimmed)")
+
+            let key: String
+            let valueText: String
+            if let equalsIndex = topLevelEqualsIndex(in: trimmed) {
+                sawNamedArgument = true
+                key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = trimmed.index(after: equalsIndex)
+                valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                guard !sawNamedArgument else {
+                    throw ExecPolicyError.invalidSyntax("positional argument follows keyword argument: \(trimmed)")
+                }
+                guard positionalIndex < positionalNames.count else {
+                    throw ExecPolicyError.invalidSyntax("too many positional arguments")
+                }
+                key = positionalNames[positionalIndex]
+                valueText = trimmed
+                positionalIndex += 1
             }
-            let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let valueStart = trimmed.index(after: equalsIndex)
-            let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard arguments[key] == nil else {
+                throw ExecPolicyError.invalidSyntax("duplicate argument: \(key)")
+            }
             arguments[key] = try parsePolicyLiteral(valueText, constants: constants)
         }
         return arguments
+    }
+
+    private static func topLevelEqualsIndex(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            case "=" where squareDepth == 0 && parenDepth == 0:
+                let previous = index > text.startIndex ? text[text.index(before: index)] : nil
+                let nextIndex = text.index(after: index)
+                let next = nextIndex < text.endIndex ? text[nextIndex] : nil
+                guard previous != "=", next != "=" else {
+                    return nil
+                }
+                return index
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        return nil
     }
 
     private static func requireStringArgument(

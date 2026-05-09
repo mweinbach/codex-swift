@@ -546,6 +546,79 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testParserAcceptsRustStarlarkBuiltinPositionalArguments() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(["git", "status"], "prompt", [["git", "status"]], ["git commit"], "inspect git state")
+        network_rule("api.github.com", "https", "allow", "allow API access")
+        host_executable("git", ["/usr/bin/git", "/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt,
+                    justification: "inspect git state"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(
+                host: "api.github.com",
+                protocol: .https,
+                decision: .allow,
+                justification: "allow API access"
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
+    func testParserAcceptsRustStarlarkMixedPositionalAndNamedArguments() throws {
+        let policy = try parsePolicy("""
+        PREFIX = ["npm", "publish"]
+        DECISION = "prompt"
+
+        prefix_rule(PREFIX, decision = DECISION, justification = "review publish")
+        network_rule("registry.npmjs.org", protocol = "https", decision = "deny")
+        host_executable("npm", paths = ["/usr/bin/npm"])
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "npm"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "npm", rest: [.single("publish")]),
+                    decision: .prompt,
+                    justification: "review publish"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "registry.npmjs.org", protocol: .https, decision: .forbidden)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["npm": ["/usr/bin/npm"]])
+    }
+
+    func testParserRejectsRustStarlarkArgumentOrderingAndDuplicates() {
+        XCTAssertThrowsError(try parsePolicy(#"prefix_rule(decision = "prompt", ["git"])"#)) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyError,
+                .invalidSyntax(#"positional argument follows keyword argument: ["git"]"#)
+            )
+        }
+
+        XCTAssertThrowsError(try parsePolicy(#"prefix_rule(["git"], pattern = ["git", "status"])"#)) { error in
+            XCTAssertEqual(error as? ExecPolicyError, .invalidSyntax("duplicate argument: pattern"))
+        }
+
+        XCTAssertThrowsError(
+            try parsePolicy(#"host_executable("git", ["/usr/bin/git"], "extra")"#)
+        ) { error in
+            XCTAssertEqual(error as? ExecPolicyError, .invalidSyntax("too many positional arguments"))
+        }
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
