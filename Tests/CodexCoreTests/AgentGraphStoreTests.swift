@@ -119,6 +119,53 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(closedSecondParentChildren, [childThreadID])
     }
 
+    func testInMemoryStoreInsertsThreadSpawnEdgeFromSourceOnlyWhenAbsent() async throws {
+        let store = InMemoryAgentGraphStore()
+        let firstParentThreadID = try threadID(16)
+        let secondParentThreadID = try threadID(17)
+        let childThreadID = try threadID(18)
+        let source = try persistedSource(
+            .subagent(.threadSpawn(parentThreadID: firstParentThreadID, depth: 2))
+        )
+
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: childThreadID,
+            source: source
+        )
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: try threadID(19),
+            source: "cli"
+        )
+
+        let inferredChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: firstParentThreadID,
+            statusFilter: .open
+        )
+        XCTAssertEqual(inferredChildren, [childThreadID])
+
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: secondParentThreadID,
+            childThreadID: childThreadID,
+            status: .closed
+        )
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: childThreadID,
+            source: source
+        )
+
+        let firstParentChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: firstParentThreadID,
+            statusFilter: nil
+        )
+        XCTAssertEqual(firstParentChildren, [])
+
+        let secondParentClosedChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: secondParentThreadID,
+            statusFilter: .closed
+        )
+        XCTAssertEqual(secondParentClosedChildren, [childThreadID])
+    }
+
     func testInMemoryStoreListsDescendantsBreadthFirstWithStatusFilters() async throws {
         let store = InMemoryAgentGraphStore()
         let rootThreadID = try threadID(20)
@@ -260,6 +307,54 @@ final class AgentGraphStoreTests: XCTestCase {
             statusFilter: .closed
         )
         XCTAssertEqual(closedSecondParentChildren, [childThreadID])
+    }
+
+    func testSQLiteStoreInsertsThreadSpawnEdgeFromSourceOnlyWhenAbsent() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let firstParentThreadID = try threadID(44)
+        let secondParentThreadID = try threadID(45)
+        let childThreadID = try threadID(46)
+        let source = try persistedSource(
+            .subagent(.threadSpawn(parentThreadID: firstParentThreadID, depth: 1))
+        )
+
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: childThreadID,
+            source: source
+        )
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: try threadID(47),
+            source: "exec"
+        )
+
+        let inferredChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: firstParentThreadID,
+            statusFilter: .open
+        )
+        XCTAssertEqual(inferredChildren, [childThreadID])
+
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: secondParentThreadID,
+            childThreadID: childThreadID,
+            status: .closed
+        )
+        try await store.insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: childThreadID,
+            source: source
+        )
+
+        let firstParentChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: firstParentThreadID,
+            statusFilter: nil
+        )
+        XCTAssertEqual(firstParentChildren, [])
+
+        let secondParentClosedChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: secondParentThreadID,
+            statusFilter: .closed
+        )
+        XCTAssertEqual(secondParentClosedChildren, [childThreadID])
     }
 
     func testSQLiteStoreListsDescendantsBreadthFirstWithStatusFilters() async throws {
@@ -418,6 +513,10 @@ final class AgentGraphStoreTests: XCTestCase {
     private func jsonString<T: Encodable>(_ value: T) throws -> String {
         let data = try JSONEncoder().encode(value)
         return try XCTUnwrap(String(data: data, encoding: .utf8))
+    }
+
+    private func persistedSource(_ source: SessionSource) throws -> String {
+        try jsonString(source)
     }
 
     private func insertRawSQLiteThreadSpawnEdge(

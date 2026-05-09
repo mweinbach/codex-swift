@@ -42,6 +42,24 @@ public protocol AgentGraphStore: Sendable {
         status: ThreadSpawnEdgeStatus
     ) async throws
 
+    /// Insert an open directional parent/child edge only when the child has no existing edge.
+    ///
+    /// This preserves Rust's metadata-ingest bootstrap behavior: a discovered thread-spawn source
+    /// should materialize the graph edge, but must not overwrite a live edge that was already
+    /// recorded with an explicit parent or lifecycle status.
+    func insertThreadSpawnEdgeIfAbsent(
+        parentThreadID: ThreadId,
+        childThreadID: ThreadId
+    ) async throws
+
+    /// Decode a persisted session-source string and insert the implied open thread-spawn edge.
+    ///
+    /// Non-thread-spawn sources are accepted as successful no-ops.
+    func insertThreadSpawnEdgeFromSourceIfAbsent(
+        childThreadID: ThreadId,
+        source: String
+    ) async throws
+
     /// Update the persisted lifecycle status of a spawned thread's incoming edge.
     ///
     /// Implementations treat missing children as a successful no-op.
@@ -92,6 +110,33 @@ public actor InMemoryAgentGraphStore: AgentGraphStore {
             parentThreadID: parentThreadID,
             childThreadID: childThreadID,
             status: status
+        )
+    }
+
+    public func insertThreadSpawnEdgeIfAbsent(
+        parentThreadID: ThreadId,
+        childThreadID: ThreadId
+    ) async throws {
+        guard edgesByChild[childThreadID] == nil else {
+            return
+        }
+        edgesByChild[childThreadID] = Edge(
+            parentThreadID: parentThreadID,
+            childThreadID: childThreadID,
+            status: .open
+        )
+    }
+
+    public func insertThreadSpawnEdgeFromSourceIfAbsent(
+        childThreadID: ThreadId,
+        source: String
+    ) async throws {
+        guard let parentThreadID = SessionSource.threadSpawnParentThreadID(fromPersistedSource: source) else {
+            return
+        }
+        try await insertThreadSpawnEdgeIfAbsent(
+            parentThreadID: parentThreadID,
+            childThreadID: childThreadID
         )
     }
 

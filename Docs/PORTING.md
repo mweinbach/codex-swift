@@ -196,6 +196,8 @@ Source baseline inspected for this scaffold:
   - PowerShell/Cmd/browser ShellExecute-style URL launch danger detection, including `Start-Process`, `Invoke-Item`, Shell.Application COM calls, `rundll32 url.dll,FileProtocolHandler`, `cmd /c start`, and direct browser/explorer/mshta URL launches
 - Initial `codex-rs/agent-graph-store`
   - thread-spawn edge status wire values, shared graph-store error display strings, storage-neutral graph-store protocol, and in-memory direct-child/descendant listing semantics with stable thread-id ordering, reparenting on child upsert, missing-child status no-op, and breadth-first traversal with status-filter pruning
+- `codex-rs/state/src/runtime/threads.rs` thread-spawn source bootstrap
+  - added insert-if-absent thread-spawn edge materialization for persisted `SessionSource::SubAgent(ThreadSpawn...)` metadata strings, including Rust's JSON-first/plain-string fallback parsing, open-edge default, non-thread-spawn no-op, and no-overwrite behavior for existing child edges.
 - Initial hook protocol models from `codex-rs/protocol/src/protocol.rs` and `codex-rs/hooks/src/lib.rs`
   - hook event/type/mode/scope/source/trust/run-status/output-entry wire values, run-summary started/completed event shapes with explicit null optionals, hook config-label constants, matcher-capable event list, and persisted hook key formatting
 - Initial hook command-output parsing and output spilling from `codex-rs/hooks/src/engine/output_parser.rs` and `codex-rs/hooks/src/output_spill.rs`

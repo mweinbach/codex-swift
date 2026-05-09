@@ -68,6 +68,19 @@ final class SessionSourceTests: XCTestCase {
         XCTAssertNil(decoded.agentPath)
     }
 
+    func testPersistedSourceThreadSpawnParentExtractionMatchesRustFallbackOrder() throws {
+        let parent = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let source = SessionSource.subagent(.threadSpawn(parentThreadID: parent, depth: 3))
+        let encodedSource = try encode(source)
+
+        XCTAssertEqual(
+            SessionSource.threadSpawnParentThreadID(fromPersistedSource: encodedSource),
+            parent
+        )
+        XCTAssertNil(SessionSource.threadSpawnParentThreadID(fromPersistedSource: "cli"))
+        XCTAssertNil(SessionSource.threadSpawnParentThreadID(fromPersistedSource: "subagent_thread_spawn_\(parent)_d3"))
+    }
+
     func testSubAgentSourceDisplayMatchesRust() {
         let parent = ThreadId(uuid: UUID(uuidString: "018f7a2d-4c5b-7abc-8def-0123456789ab")!)
         XCTAssertEqual(SubAgentSource.review.description, "review")

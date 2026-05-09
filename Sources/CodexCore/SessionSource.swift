@@ -93,6 +93,28 @@ public enum SessionSource: Equatable, Sendable {
         }
     }
 
+    /// Decode a persisted Rust session-source string and return its thread-spawn parent, if any.
+    ///
+    /// Rust first tries to parse the stored source as full JSON, then falls back to treating it as
+    /// a plain session-source string. Matching that order keeps state backfills and imported
+    /// rollout metadata from inventing graph edges for non-thread-spawn sources.
+    public static func threadSpawnParentThreadID(fromPersistedSource source: String) -> ThreadId? {
+        if let data = source.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(SessionSource.self, from: data),
+           case let .subagent(.threadSpawn(parentThreadID, _, _, _, _)) = parsed {
+            return parentThreadID
+        }
+
+        let quoted = try? JSONEncoder().encode(source)
+        if let quoted,
+           let parsed = try? JSONDecoder().decode(SessionSource.self, from: quoted),
+           case let .subagent(.threadSpawn(parentThreadID, _, _, _, _)) = parsed {
+            return parentThreadID
+        }
+
+        return nil
+    }
+
     public func restrictionProduct() -> Product? {
         switch self {
         case .custom(let source):

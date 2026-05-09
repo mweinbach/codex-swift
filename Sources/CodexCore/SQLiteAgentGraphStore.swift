@@ -68,6 +68,38 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
+    public func insertThreadSpawnEdgeIfAbsent(
+        parentThreadID: ThreadId,
+        childThreadID: ThreadId
+    ) async throws {
+        try execute(
+            """
+            INSERT INTO thread_spawn_edges (
+                parent_thread_id,
+                child_thread_id,
+                status
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(child_thread_id) DO NOTHING
+            """,
+            parentThreadID.description,
+            childThreadID.description,
+            ThreadSpawnEdgeStatus.open.rawValue
+        )
+    }
+
+    public func insertThreadSpawnEdgeFromSourceIfAbsent(
+        childThreadID: ThreadId,
+        source: String
+    ) async throws {
+        guard let parentThreadID = SessionSource.threadSpawnParentThreadID(fromPersistedSource: source) else {
+            return
+        }
+        try await insertThreadSpawnEdgeIfAbsent(
+            parentThreadID: parentThreadID,
+            childThreadID: childThreadID
+        )
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
