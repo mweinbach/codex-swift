@@ -840,7 +840,9 @@ final class ExecPolicyTests: XCTestCase {
         TOOL = "git"
         COMMANDS = ["status", "diff", "log", "show"]
         SELECTED = [COMMANDS[index] for index in range(len(COMMANDS)) if index != 1]
-        REVERSED = [COMMANDS[index] for index in range(3, 0, -2)]
+        LAST_INDEX = len(COMMANDS) - 1
+        STEP = 1 + 1
+        REVERSED = [COMMANDS[index] for index in range(LAST_INDEX, 0, -STEP)]
 
         for index in range(0, len(SELECTED), 2):
             prefix_rule(
@@ -850,7 +852,7 @@ final class ExecPolicyTests: XCTestCase {
                 justification = "range index " + SELECTED[index],
             )
 
-        if COMMANDS[3] == "show":
+        if COMMANDS[len(COMMANDS) - 1] == "show":
             network_rule("api.github.com", "https", "allow")
 
         if REVERSED[0] == "show" and REVERSED[1] == "diff":

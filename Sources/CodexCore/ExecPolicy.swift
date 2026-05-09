@@ -1567,10 +1567,11 @@ public final class PolicyParser {
         ) {
             return boolean
         }
-        let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        if additivePieces.count > 1 {
-            return try evaluateStarlarkAddition(additivePieces, constants: constants, functions: functions)
+        if let unary = try parseStarlarkUnaryNumericExpression(trimmed, constants: constants, functions: functions) {
+            return unary
+        }
+        if let additive = try parseStarlarkAdditiveExpression(trimmed, constants: constants, functions: functions) {
+            return additive
         }
         if let constant = constants[trimmed] {
             return constant
@@ -2769,32 +2770,108 @@ public final class PolicyParser {
         return try parsePolicyLiteral(selected, constants: constants, functions: functions)
     }
 
-    private static func evaluateStarlarkAddition(
-        _ pieces: [String],
+    private static func parseStarlarkAdditiveExpression(
+        _ text: String,
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
-    ) throws -> ConfigValue {
-        guard let first = pieces.first, !first.isEmpty else {
-            throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelAdditiveExpression(text)
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
         }
 
-        var result = try parsePolicyLiteral(first, constants: constants, functions: functions)
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
         for piece in pieces.dropFirst() {
-            guard !piece.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+            guard let operatorText = piece.operator,
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
             }
-            let next = try parsePolicyLiteral(piece, constants: constants, functions: functions)
-            switch (result, next) {
-            case let (.string(lhs), .string(rhs)):
-                result = .string(lhs + rhs)
-            case let (.array(lhs), .array(rhs)):
-                result = .array(lhs + rhs)
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            switch operatorText {
+            case "+":
+                result = try evaluateStarlarkAddition(result, next, expression: text)
+            case "-":
+                result = try evaluateStarlarkSubtraction(result, next, expression: text)
             default:
-                throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+                throw ConfigOverrideError.invalidLiteral(text)
             }
         }
 
         return result
+    }
+
+    private static func parseStarlarkUnaryNumericExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasPrefix("-"),
+              text.dropFirst().first?.isWhitespace != true
+        else {
+            return nil
+        }
+        let operandText = String(text.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !operandText.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+        let operand = try parsePolicyLiteral(operandText, constants: constants, functions: functions)
+        switch operand {
+        case let .integer(value):
+            return .integer(-value)
+        case let .double(value):
+            return .double(-value)
+        default:
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+    }
+
+    private static func evaluateStarlarkAddition(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        switch (lhs, rhs) {
+        case let (.string(lhs), .string(rhs)):
+            return .string(lhs + rhs)
+        case let (.array(lhs), .array(rhs)):
+            return .array(lhs + rhs)
+        case let (.integer(lhs), .integer(rhs)):
+            return .integer(lhs + rhs)
+        case let (.double(lhs), .double(rhs)):
+            return .double(lhs + rhs)
+        case let (.integer(lhs), .double(rhs)):
+            return .double(Double(lhs) + rhs)
+        case let (.double(lhs), .integer(rhs)):
+            return .double(lhs + Double(rhs))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func evaluateStarlarkSubtraction(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        switch (lhs, rhs) {
+        case let (.integer(lhs), .integer(rhs)):
+            return .integer(lhs - rhs)
+        case let (.double(lhs), .double(rhs)):
+            return .double(lhs - rhs)
+        case let (.integer(lhs), .double(rhs)):
+            return .double(Double(lhs) - rhs)
+        case let (.double(lhs), .integer(rhs)):
+            return .double(lhs - Double(rhs))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func removingTrailingArrayCommas(from text: String) -> String {
@@ -2962,6 +3039,90 @@ public final class PolicyParser {
 
     private static func splitTopLevel(_ text: String, separator: Character) -> [String] {
         splitTopLevelExpression(text, separator: separator)
+    }
+
+    private static func splitTopLevelAdditiveExpression(_ text: String) -> [(operator: Character?, text: String)] {
+        var pieces: [(operator: Character?, text: String)] = []
+        var current = ""
+        var currentOperator: Character?
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var previousSignificant: Character?
+
+        for character in text {
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+                previousSignificant = character
+            case "[":
+                squareDepth += 1
+                current.append(character)
+                previousSignificant = character
+            case "]":
+                squareDepth -= 1
+                current.append(character)
+                previousSignificant = character
+            case "{":
+                braceDepth += 1
+                current.append(character)
+                previousSignificant = character
+            case "}":
+                braceDepth -= 1
+                current.append(character)
+                previousSignificant = character
+            case "(":
+                parenDepth += 1
+                current.append(character)
+                previousSignificant = character
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+                previousSignificant = character
+            case "+" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0 && isBinaryStarlarkAdditiveOperator(character, after: previousSignificant):
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = character
+                previousSignificant = character
+            case "-" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0 && isBinaryStarlarkAdditiveOperator(character, after: previousSignificant):
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = character
+                previousSignificant = character
+            default:
+                current.append(character)
+                if !character.isWhitespace {
+                    previousSignificant = character
+                }
+            }
+        }
+
+        pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+        return pieces
+    }
+
+    private static func isBinaryStarlarkAdditiveOperator(_ operatorText: Character, after previous: Character?) -> Bool {
+        guard operatorText == "+" || operatorText == "-",
+              let previous
+        else {
+            return false
+        }
+        return !["+", "-", "*", "/", "%", "(", "[", "{", ",", ":", "<", ">", "=", "!"].contains(previous)
     }
 
     private static func splitTopLevelExpression(_ text: String, separator: Character) -> [String] {
