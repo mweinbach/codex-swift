@@ -15,6 +15,7 @@ Source baseline inspected for this scaffold:
 - `CodexCore`: pure core/protocol utilities that can be tested without network, terminal, or model runtime.
 - `CodexCLI`: top-level command metadata and CLI surface.
 - `codex`: executable target.
+- `AGENTS.md` and `Docs/SwiftPort/`: Swift-rewritten agent guidance and upstream Codex docs for the porting workspace, translated from Rust/Cargo conventions into SwiftPM, Swift API, `Codable`, protocol, and concurrency conventions.
 
 ## Ported In This Initial Slice
 
