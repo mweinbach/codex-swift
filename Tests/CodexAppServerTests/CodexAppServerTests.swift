@@ -7893,6 +7893,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecPermissionProfileRequiresExperimentalAPI() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"disabled"}}}"#,
+            codexHome: codexHome.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "command/exec.permissionProfile requires experimentalApi capability")
+
+        let nullPermissionProfile = try appServerResponse(
+            #"{"id":2,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":null}}"#,
+            codexHome: codexHome.url
+        )
+        let nullPermissionProfileResult = try XCTUnwrap(nullPermissionProfile["result"] as? [String: Any])
+        XCTAssertEqual(nullPermissionProfileResult["exitCode"] as? Int, 0)
+        XCTAssertEqual(nullPermissionProfileResult["stdout"] as? String, "hi\n")
+    }
+
     func testCommandExecValidatesRustOptionConflicts() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7935,10 +7956,13 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullOutputCapResult["exitCode"] as? Int, 0)
         XCTAssertEqual(nullOutputCapResult["stdout"] as? String, "hi\n")
 
-        let sandboxAndProfile = try appServerResponse(
-            #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{},"permissionProfile":"on-request"}}"#,
-            codexHome: codexHome.url
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
         )
+        let sandboxAndProfile = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{},"permissionProfile":"on-request"}}"#.utf8
+        )))
         let sandboxAndProfileError = try XCTUnwrap(sandboxAndProfile["error"] as? [String: Any])
         XCTAssertEqual(sandboxAndProfileError["code"] as? Int, -32600)
         XCTAssertEqual(
@@ -8850,10 +8874,12 @@ final class CodexAppServerTests: XCTestCase {
 
     private func initializedProcessor(
         configuration: CodexAppServerConfiguration,
-        notificationSink: AppServerNotificationSink? = nil
+        notificationSink: AppServerNotificationSink? = nil,
+        experimentalAPIEnabled: Bool = false
     ) throws -> CodexAppServerMessageProcessor {
         let processor = CodexAppServerMessageProcessor(configuration: configuration, notificationSink: notificationSink)
-        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+        let capabilities = experimentalAPIEnabled ? #","capabilities":{"experimentalApi":true}"# : ""
+        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}\#(capabilities)}}"#.utf8)))
         return processor
     }
 

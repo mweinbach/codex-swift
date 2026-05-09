@@ -8228,6 +8228,19 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func requireCommandExecPermissionProfileExperimentalAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled,
+              let permissionProfile = params?["permissionProfile"],
+              !(permissionProfile is NSNull)
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("command/exec.permissionProfile requires experimentalApi capability")
+    }
+
     fileprivate static func commandExecEnvironment(
         base: [String: String],
         overrides: [String: String?]
@@ -13520,6 +13533,10 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func commandExecResult(id: Any, params: [String: Any]?) throws -> [String: Any]? {
+        try CodexAppServer.requireCommandExecPermissionProfileExperimentalAPI(
+            params: params,
+            experimentalAPIEnabled: experimentalAPIEnabled
+        )
         let parsed = try CodexAppServer.commandExecParams(params: params)
         guard let processID = parsed.processID else {
             return CodexAppServer.responseObject(

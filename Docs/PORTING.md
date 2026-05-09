@@ -602,6 +602,8 @@ Source baseline inspected for this scaffold:
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
+- `codex-rs/app-server-protocol` experimental `command/exec.permissionProfile` gating
+  - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled.
 
 ## Known Gaps
 
