@@ -31,6 +31,30 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(output[1]["image_url"] as? String, "data:image/png;base64,BASE64")
     }
 
+    func testFunctionCallOutputTextContentMatchesRustFallback() {
+        XCTAssertEqual(FunctionCallOutputPayload(content: "ok").textContent, "ok")
+
+        let payload = FunctionCallOutputPayload(
+            content: "ignored when content items exist",
+            contentItems: [
+                .inputText(text: "line 1"),
+                .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail),
+                .inputText(text: "   "),
+                .inputText(text: "line 2")
+            ]
+        )
+        XCTAssertEqual(payload.textContent, "line 1\nline 2")
+
+        let imagesOnly = FunctionCallOutputPayload(
+            content: "ignored when content items exist",
+            contentItems: [
+                .inputText(text: "\n\t "),
+                .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail)
+            ]
+        )
+        XCTAssertNil(imagesOnly.textContent)
+    }
+
     func testFunctionCallOutputContentItemSupportsImageDetailLikeCodeMode() throws {
         XCTAssertEqual(defaultImageDetail, .high)
         let json = #"{"type":"input_image","image_url":"data:image/png;base64,abc","detail":"original"}"#

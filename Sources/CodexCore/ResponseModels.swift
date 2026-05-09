@@ -202,6 +202,13 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         return content
     }
 
+    public var textContent: String? {
+        guard let contentItems else {
+            return content
+        }
+        return Self.textContent(from: contentItems)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let text = try? container.decode(String.self) {
@@ -257,6 +264,18 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         }
 
         return sawImage ? items : nil
+    }
+
+    private static func textContent(from items: [FunctionCallOutputContentItem]) -> String? {
+        let segments = items.compactMap { item -> String? in
+            guard case let .inputText(text) = item,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                return nil
+            }
+            return text
+        }
+        return segments.isEmpty ? nil : segments.joined(separator: "\n")
     }
 
     private static func imageDetail(from meta: JSONValue?) -> ImageDetail? {
