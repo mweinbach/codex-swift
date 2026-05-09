@@ -134,6 +134,7 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "(ls)"]))
         XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls || (pwd && echo hi)"]))
         XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls > out.txt"]))
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "echo hi # comment"]))
     }
 
     func testDangerousCommandsMatchRustShellCommandHeuristics() {

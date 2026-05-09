@@ -94,6 +94,16 @@ final class BashPlainCommandParserTests: XCTestCase {
         XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "hi $USER""#))
     }
 
+    func testRejectsBashCommentsLikeRustTreeSitterParser() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("# comment"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("echo hi # comment"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls && # comment\npwd"))
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("echo foo#bar \\#literal"),
+            [["echo", "foo#bar", "\\#literal"]]
+        )
+    }
+
     func testRejectsVariableAssignmentPrefix() {
         XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("FOO=bar ls"))
     }

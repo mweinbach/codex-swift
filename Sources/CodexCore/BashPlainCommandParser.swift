@@ -170,6 +170,15 @@ public enum BashPlainCommandParser {
             case "(", ")", "{", "}", "<", ">", "`", "$":
                 return nil
 
+            case "#":
+                if currentWord.isEmpty {
+                    return nil
+                }
+                currentWord.append(character)
+                justClosedQuote = false
+                expectingCommand = false
+                endedWithOperator = false
+
             default:
                 currentWord.append(character)
                 justClosedQuote = false
