@@ -394,13 +394,35 @@ public enum CloudTaskCommandFormatter {
     }
 
     public static func listJSON(tasks: [CloudTaskSummary], cursor: String?, baseURL: String) throws -> String {
-        let payload = CloudTaskListJSONPayload(
-            tasks: tasks.map { CloudTaskListJSONTask(task: $0, url: taskURL(baseURL: baseURL, taskID: $0.id.rawValue)) },
-            cursor: cursor
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return String(decoding: try encoder.encode(payload), as: UTF8.self)
+        var lines: [String] = []
+        lines.append("{")
+        lines.append("  \"cursor\": \(try jsonOptionalString(cursor)),")
+        if tasks.isEmpty {
+            lines.append("  \"tasks\": []")
+        } else {
+            lines.append("  \"tasks\": [")
+            for (index, task) in tasks.enumerated() {
+                lines.append("    {")
+                lines.append("      \"attempt_total\": \(jsonOptionalInt(task.attemptTotal)),")
+                lines.append("      \"environment_id\": \(try jsonOptionalString(task.environmentID)),")
+                lines.append("      \"environment_label\": \(try jsonOptionalString(task.environmentLabel)),")
+                lines.append("      \"id\": \(try jsonString(task.id.rawValue)),")
+                lines.append("      \"is_review\": \(task.isReview),")
+                lines.append("      \"status\": \(try jsonString(task.status.rawValue)),")
+                lines.append("      \"summary\": {")
+                lines.append("        \"files_changed\": \(task.summary.filesChanged),")
+                lines.append("        \"lines_added\": \(task.summary.linesAdded),")
+                lines.append("        \"lines_removed\": \(task.summary.linesRemoved)")
+                lines.append("      },")
+                lines.append("      \"title\": \(try jsonString(task.title)),")
+                lines.append("      \"updated_at\": \(try jsonString(CloudDateCoding.encodeString(task.updatedAt))),")
+                lines.append("      \"url\": \(try jsonString(taskURL(baseURL: baseURL, taskID: task.id.rawValue)))")
+                lines.append(index + 1 == tasks.count ? "    }" : "    },")
+            }
+            lines.append("  ]")
+        }
+        lines.append("}")
+        return lines.joined(separator: "\n")
     }
 
     public static func summaryLine(_ summary: CloudDiffSummary) -> String {
@@ -459,90 +481,22 @@ public enum CloudTaskCommandFormatter {
         }
         return "\(normalized)/codex/tasks/\(taskID)"
     }
-}
 
-private struct CloudTaskListJSONPayload: Encodable {
-    let tasks: [CloudTaskListJSONTask]
-    let cursor: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case tasks
-        case cursor
+    private static func jsonOptionalInt(_ value: Int?) -> String {
+        value.map(String.init) ?? "null"
     }
 
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(tasks, forKey: .tasks)
-        if let cursor {
-            try container.encode(cursor, forKey: .cursor)
-        } else {
-            try container.encodeNil(forKey: .cursor)
+    private static func jsonOptionalString(_ value: String?) throws -> String {
+        guard let value else {
+            return "null"
         }
-    }
-}
-
-private struct CloudTaskListJSONTask: Encodable {
-    let id: String
-    let url: String
-    let title: String
-    let status: CloudTaskStatus
-    let updatedAt: String
-    let environmentID: String?
-    let environmentLabel: String?
-    let summary: CloudDiffSummary
-    let isReview: Bool
-    let attemptTotal: Int?
-
-    init(task: CloudTaskSummary, url: String) {
-        self.id = task.id.rawValue
-        self.url = url
-        self.title = task.title
-        self.status = task.status
-        self.updatedAt = CloudDateCoding.encodeString(task.updatedAt)
-        self.environmentID = task.environmentID
-        self.environmentLabel = task.environmentLabel
-        self.summary = task.summary
-        self.isReview = task.isReview
-        self.attemptTotal = task.attemptTotal
+        return try jsonString(value)
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case url
-        case title
-        case status
-        case updatedAt = "updated_at"
-        case environmentID = "environment_id"
-        case environmentLabel = "environment_label"
-        case summary
-        case isReview = "is_review"
-        case attemptTotal = "attempt_total"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(url, forKey: .url)
-        try container.encode(title, forKey: .title)
-        try container.encode(status, forKey: .status)
-        try container.encode(updatedAt, forKey: .updatedAt)
-        if let environmentID {
-            try container.encode(environmentID, forKey: .environmentID)
-        } else {
-            try container.encodeNil(forKey: .environmentID)
-        }
-        if let environmentLabel {
-            try container.encode(environmentLabel, forKey: .environmentLabel)
-        } else {
-            try container.encodeNil(forKey: .environmentLabel)
-        }
-        try container.encode(summary, forKey: .summary)
-        try container.encode(isReview, forKey: .isReview)
-        if let attemptTotal {
-            try container.encode(attemptTotal, forKey: .attemptTotal)
-        } else {
-            try container.encodeNil(forKey: .attemptTotal)
-        }
+    private static func jsonString(_ value: String) throws -> String {
+        let encoded = try JSONEncoder().encode(value)
+        return String(decoding: encoded, as: UTF8.self)
+            .replacingOccurrences(of: "\\/", with: "/")
     }
 }
 

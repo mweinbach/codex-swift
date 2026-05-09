@@ -271,6 +271,29 @@ final class CloudTaskClientTests: XCTestCase {
             cursor: "next",
             baseURL: "https://chatgpt.com/backend-api"
         )
+        XCTAssertEqual(json, """
+        {
+          "cursor": "next",
+          "tasks": [
+            {
+              "attempt_total": null,
+              "environment_id": null,
+              "environment_label": "Env A",
+              "id": "task_123",
+              "is_review": false,
+              "status": "ready",
+              "summary": {
+                "files_changed": 2,
+                "lines_added": 7,
+                "lines_removed": 3
+              },
+              "title": "Fix the thing",
+              "updated_at": "2023-11-14T22:11:15Z",
+              "url": "https://chatgpt.com/codex/tasks/task_123"
+            }
+          ]
+        }
+        """)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         XCTAssertEqual(object["cursor"] as? String, "next")
         let tasks = try XCTUnwrap(object["tasks"] as? [[String: Any]])
@@ -279,6 +302,18 @@ final class CloudTaskClientTests: XCTestCase {
         XCTAssertEqual(tasks[0]["updated_at"] as? String, "2023-11-14T22:11:15Z")
         XCTAssertTrue(tasks[0]["environment_id"] is NSNull)
         XCTAssertTrue(tasks[0]["attempt_total"] is NSNull)
+
+        let emptyJSON = try CloudTaskCommandFormatter.listJSON(
+            tasks: [],
+            cursor: nil,
+            baseURL: "https://chatgpt.com/backend-api"
+        )
+        XCTAssertEqual(emptyJSON, """
+        {
+          "cursor": null,
+          "tasks": []
+        }
+        """)
     }
 
     func testStatusFormatterUsesRustLocalDateShapeForOlderTasks() throws {
