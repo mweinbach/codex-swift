@@ -2490,6 +2490,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
     }
 
+    func testMarketplaceAddClonesGitSourceAndRecordsDuplicate() throws {
+        let temp = try TemporaryDirectory()
+        let remote = try makeGitMarketplaceRemote(named: "debug", marker: "git ref", in: temp.url)
+        let gitConfig = temp.url.appendingPathComponent("gitconfig", isDirectory: false)
+        try """
+        [url "\(URL(fileURLWithPath: remote.path).absoluteString)"]
+            insteadOf = https://github.com/openai/debug-marketplace.git
+        """.write(to: gitConfig, atomically: true, encoding: .utf8)
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "GIT_CONFIG_GLOBAL": gitConfig.path,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":"openai/debug-marketplace"}}"#,
+            configuration: configuration
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        let installedRoot = temp.url
+            .appendingPathComponent(".tmp/marketplaces/debug", isDirectory: true)
+            .path
+        XCTAssertEqual(firstResult["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(firstResult["installedRoot"] as? String, installedRoot)
+        XCTAssertEqual(firstResult["alreadyAdded"] as? Bool, false)
+        XCTAssertEqual(
+            try String(contentsOf: URL(fileURLWithPath: installedRoot).appendingPathComponent("plugins/sample/marker.txt"), encoding: .utf8),
+            "git ref"
+        )
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains("[marketplaces.debug]"))
+        XCTAssertTrue(config.contains(#"source_type = "git""#))
+        XCTAssertTrue(config.contains(#"source = "https://github.com/openai/debug-marketplace.git""#))
+
+        let duplicate = try appServerResponse(
+            #"{"id":2,"method":"marketplace/add","params":{"source":"openai/debug-marketplace"}}"#,
+            configuration: configuration
+        )
+        let duplicateResult = try XCTUnwrap(duplicate["result"] as? [String: Any])
+        XCTAssertEqual(duplicateResult["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(duplicateResult["installedRoot"] as? String, installedRoot)
+        XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
+    }
+
     func testMarketplaceAddRejectsConflictingLocalSourceForExistingName() throws {
         let temp = try TemporaryDirectory()
         let firstRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url, suffix: "one")
@@ -6884,6 +6935,32 @@ final class CodexAppServerTests: XCTestCase {
             encoding: .utf8
         )
         return root
+    }
+
+    private func makeGitMarketplaceRemote(
+        named name: String,
+        marker: String,
+        in parent: URL
+    ) throws -> URL {
+        let source = try makeLocalMarketplaceRootWithPlugin(named: name, pluginName: "sample", in: parent)
+        try marker.write(
+            to: source.appendingPathComponent("plugins/sample/marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["init"], cwd: source)
+        try runGit(["config", "user.name", "Test User"], cwd: source)
+        try runGit(["config", "user.email", "test@example.com"], cwd: source)
+        try runGit(["add", "."], cwd: source)
+        try runGit(["commit", "-m", "Initial marketplace"], cwd: source)
+        let remote = parent.appendingPathComponent("marketplace-remote.git", isDirectory: true)
+        try runGit(["init", "--bare", remote.path], cwd: parent)
+        try runGit(["remote", "add", "origin", remote.path], cwd: source)
+        let branch = try runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd: source)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try runGit(["push", "-u", "origin", branch], cwd: source)
+        return remote
     }
 
     private func makeLocalMarketplaceRootWithPlugin(

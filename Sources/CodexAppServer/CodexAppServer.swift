@@ -2897,8 +2897,24 @@ public enum CodexAppServer {
         if !sparsePaths.isEmpty && parsed.kind != .git {
             throw AppServerError.invalidRequest("--sparse is only supported for git marketplace sources")
         }
-        guard parsed.kind == .local, let sourcePath = parsed.localPath else {
-            throw AppServerError.invalidRequest("git marketplace add is not implemented")
+        if parsed.kind == .git {
+            guard let gitURL = parsed.gitURL else {
+                throw AppServerError.invalidRequest(
+                    "invalid marketplace source format; expected owner/repo, a git URL, or a local marketplace path"
+                )
+            }
+            return try marketplaceAddGitResult(
+                source: gitURL,
+                refName: parsed.refName,
+                sparsePaths: sparsePaths,
+                configuration: configuration
+            )
+        }
+
+        guard let sourcePath = parsed.localPath else {
+            throw AppServerError.invalidRequest(
+                "invalid marketplace source format; expected owner/repo, a git URL, or a local marketplace path"
+            )
         }
 
         let marketplaceName = try validateLocalMarketplaceSourceRoot(sourcePath)
@@ -2947,6 +2963,105 @@ public enum CodexAppServer {
         return [
             "marketplaceName": marketplaceName,
             "installedRoot": sourcePath.path,
+            "alreadyAdded": false
+        ]
+    }
+
+    private static func marketplaceAddGitResult(
+        source: String,
+        refName: String?,
+        sparsePaths: [String],
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let installRoot = configuration.codexHome
+            .appendingPathComponent(".tmp", isDirectory: true)
+            .appendingPathComponent("marketplaces", isDirectory: true)
+        if let existingRoot = configuredMarketplaceRootForGitSource(
+            source: source,
+            refName: refName,
+            sparsePaths: sparsePaths,
+            codexHome: configuration.codexHome,
+            in: config
+        ),
+           (try? validateLocalMarketplaceSourceRoot(URL(fileURLWithPath: existingRoot, isDirectory: true))) != nil {
+            let marketplaceName = try validateLocalMarketplaceSourceRoot(URL(fileURLWithPath: existingRoot, isDirectory: true))
+            try recordMarketplaceConfig(
+                name: marketplaceName,
+                sourceType: "git",
+                source: source,
+                refName: refName,
+                sparsePaths: sparsePaths,
+                in: &config
+            )
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+            return [
+                "marketplaceName": marketplaceName,
+                "installedRoot": existingRoot,
+                "alreadyAdded": true
+            ]
+        }
+
+        let stagingParent = installRoot.appendingPathComponent(".staging", isDirectory: true)
+        let stagingRoot = stagingParent.appendingPathComponent("marketplace-add-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: stagingParent, withIntermediateDirectories: true)
+            try cloneGitMarketplace(
+                source: source,
+                refName: refName,
+                sparsePaths: sparsePaths,
+                destination: stagingRoot,
+                environment: configuration.environment
+            )
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("failed to stage marketplace source: \(error)")
+        }
+        defer {
+            if FileManager.default.fileExists(atPath: stagingRoot.path) {
+                try? FileManager.default.removeItem(at: stagingRoot)
+            }
+        }
+
+        let marketplaceName = try validateLocalMarketplaceSourceRoot(stagingRoot)
+        if marketplaceName == "openai-curated" {
+            throw AppServerError.invalidRequest(
+                "marketplace 'openai-curated' is reserved and cannot be added from this source"
+            )
+        }
+        try validatePluginSegment(marketplaceName, kind: "marketplace name")
+        let destination = try installRoot.appendingPathComponent(safeMarketplaceDirectoryName(marketplaceName), isDirectory: true)
+        if FileManager.default.fileExists(atPath: destination.path)
+            || configuredMarketplaceRootIsValid(named: marketplaceName, codexHome: configuration.codexHome, in: config) {
+            throw AppServerError.invalidRequest(
+                "marketplace '\(marketplaceName)' is already added from a different source; remove it before adding this source"
+            )
+        }
+        do {
+            try FileManager.default.createDirectory(at: installRoot, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: stagingRoot, to: destination)
+            try recordMarketplaceConfig(
+                name: marketplaceName,
+                sourceType: "git",
+                source: source,
+                refName: refName,
+                sparsePaths: sparsePaths,
+                in: &config
+            )
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        } catch {
+            if FileManager.default.fileExists(atPath: destination.path),
+               !FileManager.default.fileExists(atPath: stagingRoot.path) {
+                try? FileManager.default.moveItem(at: destination, to: stagingRoot)
+            }
+            throw AppServerError.internalError("failed to install marketplace at \(destination.path): \(error)")
+        }
+
+        return [
+            "marketplaceName": marketplaceName,
+            "installedRoot": destination.path,
             "alreadyAdded": false
         ]
     }
@@ -7893,6 +8008,8 @@ public enum CodexAppServer {
     private struct ParsedMarketplaceSource {
         let kind: MarketplaceSourceKind
         let localPath: URL?
+        let gitURL: String?
+        let refName: String?
     }
 
     private static func configuredGitMarketplaceNames(in stack: ConfigLayerStack) -> [String] {
@@ -7983,11 +8100,25 @@ public enum CodexAppServer {
             guard isDirectory.boolValue else {
                 throw AppServerError.invalidRequest("local marketplace source must be a directory, not a file")
             }
-            return ParsedMarketplaceSource(kind: .local, localPath: path)
+            return ParsedMarketplaceSource(kind: .local, localPath: path, gitURL: nil, refName: nil)
         }
 
-        if isGitMarketplaceSource(baseSource) || looksLikeGitHubMarketplaceShorthand(baseSource) {
-            return ParsedMarketplaceSource(kind: .git, localPath: nil)
+        if isGitMarketplaceSource(baseSource) {
+            return ParsedMarketplaceSource(
+                kind: .git,
+                localPath: nil,
+                gitURL: normalizeGitMarketplaceURL(baseSource),
+                refName: refName
+            )
+        }
+
+        if looksLikeGitHubMarketplaceShorthand(baseSource) {
+            return ParsedMarketplaceSource(
+                kind: .git,
+                localPath: nil,
+                gitURL: "https://github.com/\(baseSource).git",
+                refName: refName
+            )
         }
 
         throw AppServerError.invalidRequest(
@@ -8038,6 +8169,17 @@ public enum CodexAppServer {
 
     private static func isGitMarketplaceSource(_ source: String) -> Bool {
         source.hasPrefix("http://") || source.hasPrefix("https://") || isSSHGitMarketplaceSource(source)
+    }
+
+    private static func normalizeGitMarketplaceURL(_ source: String) -> String {
+        var trimmed = source
+        while trimmed.hasSuffix("/") {
+            trimmed.removeLast()
+        }
+        if trimmed.hasPrefix("https://github.com/") && !trimmed.hasSuffix(".git") {
+            return trimmed + ".git"
+        }
+        return trimmed
     }
 
     private static func isSSHGitMarketplaceSource(_ source: String) -> Bool {
@@ -8115,6 +8257,30 @@ public enum CodexAppServer {
         return nil
     }
 
+    private static func configuredMarketplaceRootForGitSource(
+        source: String,
+        refName: String?,
+        sparsePaths: [String],
+        codexHome: URL,
+        in config: ConfigValue
+    ) -> String? {
+        guard let marketplaces = marketplaceConfigTable(in: config) else {
+            return nil
+        }
+        for (name, value) in marketplaces {
+            guard let entry = configTable(value),
+                  stringConfig(entry, "source_type") == "git",
+                  stringConfig(entry, "source") == source,
+                  stringConfig(entry, "ref") == refName,
+                  stringArrayConfig(entry, "sparse_paths") == sparsePaths
+            else {
+                continue
+            }
+            return configuredMarketplaceRoot(name: name, entry: entry, codexHome: codexHome)
+        }
+        return nil
+    }
+
     private static func configuredMarketplaceRoot(named marketplaceName: String, in config: ConfigValue) -> String? {
         guard let marketplaces = marketplaceConfigTable(in: config),
               let value = marketplaces[marketplaceName],
@@ -8123,6 +8289,31 @@ public enum CodexAppServer {
             return nil
         }
         return configuredMarketplaceRoot(name: marketplaceName, entry: entry)
+    }
+
+    private static func configuredMarketplaceRoot(
+        named marketplaceName: String,
+        codexHome: URL,
+        in config: ConfigValue
+    ) -> String? {
+        guard let marketplaces = marketplaceConfigTable(in: config),
+              let value = marketplaces[marketplaceName],
+              let entry = configTable(value)
+        else {
+            return nil
+        }
+        return configuredMarketplaceRoot(name: marketplaceName, entry: entry, codexHome: codexHome)
+    }
+
+    private static func configuredMarketplaceRootIsValid(
+        named marketplaceName: String,
+        codexHome: URL,
+        in config: ConfigValue
+    ) -> Bool {
+        guard let root = configuredMarketplaceRoot(named: marketplaceName, codexHome: codexHome, in: config) else {
+            return false
+        }
+        return (try? validateLocalMarketplaceSourceRoot(URL(fileURLWithPath: root, isDirectory: true))) != nil
     }
 
     private static func marketplaceConfigTable(in config: ConfigValue) -> [String: ConfigValue]? {
@@ -8142,6 +8333,26 @@ public enum CodexAppServer {
         case "git":
             return stringConfig(entry, "installed_root")
                 ?? FileManager.default.currentDirectoryPath + "/.tmp/marketplaces/" + name
+        default:
+            return nil
+        }
+    }
+
+    private static func configuredMarketplaceRoot(
+        name: String,
+        entry: [String: ConfigValue],
+        codexHome: URL
+    ) -> String? {
+        switch stringConfig(entry, "source_type") {
+        case "local":
+            return stringConfig(entry, "source")
+        case "git":
+            return stringConfig(entry, "installed_root")
+                ?? codexHome
+                    .appendingPathComponent(".tmp", isDirectory: true)
+                    .appendingPathComponent("marketplaces", isDirectory: true)
+                    .appendingPathComponent(name, isDirectory: true)
+                    .path
         default:
             return nil
         }
@@ -8171,6 +8382,88 @@ public enum CodexAppServer {
         marketplaces[name] = .table(entry)
         root["marketplaces"] = .table(marketplaces)
         config = .table(root)
+    }
+
+    private static func cloneGitMarketplace(
+        source: String,
+        refName: String?,
+        sparsePaths: [String],
+        destination: URL,
+        environment: [String: String]
+    ) throws {
+        if sparsePaths.isEmpty {
+            try runMarketplaceGit(
+                ["clone", source, destination.path],
+                cwd: nil,
+                environment: environment
+            )
+            if let refName {
+                try runMarketplaceGit(["checkout", refName], cwd: destination, environment: environment)
+            }
+            return
+        }
+
+        try runMarketplaceGit(
+            ["clone", "--filter=blob:none", "--no-checkout", source, destination.path],
+            cwd: nil,
+            environment: environment
+        )
+        try runMarketplaceGit(
+            ["sparse-checkout", "set"] + sparsePaths,
+            cwd: destination,
+            environment: environment
+        )
+        try runMarketplaceGit(["checkout", refName ?? "HEAD"], cwd: destination, environment: environment)
+    }
+
+    private static func runMarketplaceGit(
+        _ args: [String],
+        cwd: URL?,
+        environment: [String: String]
+    ) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        if let cwd {
+            process.currentDirectoryURL = cwd
+        }
+        var processEnvironment = environment
+        processEnvironment["GIT_TERMINAL_PROMPT"] = "0"
+        process.environment = processEnvironment
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to run git \(args.joined(separator: " ")): \(error)")
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let stdout = String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderr = String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw AppServerError.internalError(
+                "git \(args.joined(separator: " ")) failed with status \(process.terminationStatus)\nstdout:\n\(stdout)\nstderr:\n\(stderr)"
+            )
+        }
+    }
+
+    private static func safeMarketplaceDirectoryName(_ marketplaceName: String) throws -> String {
+        let safe = String(marketplaceName.map { character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_" || character == ".")
+                ? character
+                : "-"
+        }).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !safe.isEmpty, safe != ".." else {
+            throw AppServerError.invalidRequest(
+                "marketplace name '\(marketplaceName)' cannot be used as an install directory"
+            )
+        }
+        return safe
     }
 
     private static func marketplaceTimestamp() -> String {
