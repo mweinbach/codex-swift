@@ -499,6 +499,45 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["codex-swift: unsupported option for command 'cloud status': --attempt"])
     }
 
+    func testRunAsyncCloudListParsesRustFlags() async {
+        var stdout: [String] = []
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "list", "--env=Env A", "--limit", "7", "--cursor=next-page", "--json"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: #"{"tasks":[]}"#)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, [#"{"tasks":[]}"#])
+        XCTAssertEqual(
+            receivedRequest?.action,
+            .list(environment: "Env A", limit: 7, cursor: "next-page", json: true)
+        )
+    }
+
+    func testRunAsyncCloudListRejectsInvalidLimitBeforeRunner() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "list", "--limit", "0"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            cloudRunner: { _ in
+                XCTFail("runner should not be called with invalid limit")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["limit must be between 1 and 20"])
+    }
+
     func testRunAsyncCloudDiffParsesAttemptFlag() async {
         var stdout: [String] = []
         var receivedRequest: CodexCLI.CloudCommandRequest?

@@ -370,6 +370,7 @@ public struct CodexCLI: Sendable {
 
     public enum CloudCommandAction: Equatable, Sendable {
         case status(taskID: String)
+        case list(environment: String?, limit: Int, cursor: String?, json: Bool)
         case diff(taskID: String, attempt: Int?)
         case apply(taskID: String, attempt: Int?)
         case exec(query: String?, environment: String, branch: String?, attempts: Int)
@@ -2174,6 +2175,8 @@ public struct CodexCLI: Sendable {
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
+        case "list":
+            return parseCloudList(Array(arguments.dropFirst()))
         case "diff", "apply":
             switch parseCloudTaskAndAttempt(Array(arguments.dropFirst()), command: subcommand) {
             case let .success(parsed):
@@ -2189,6 +2192,71 @@ public struct CodexCLI: Sendable {
         default:
             return .failure("codex-swift: unsupported cloud subcommand: \(subcommand)", 64)
         }
+    }
+
+    private func parseCloudList(_ arguments: [String]) -> ParseResult<CloudCommandAction> {
+        var environment: String?
+        var limit = 20
+        var cursor: String?
+        var json = false
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--env" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --env", 64)
+                }
+                environment = value
+                continue
+            }
+            if argument.hasPrefix("--env=") {
+                environment = String(argument.dropFirst("--env=".count))
+                continue
+            }
+            if argument == "--limit" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --limit", 64)
+                }
+                switch parseCloudListLimit(value) {
+                case let .success(parsed):
+                    limit = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument.hasPrefix("--limit=") {
+                let value = String(argument.dropFirst("--limit=".count))
+                switch parseCloudListLimit(value) {
+                case let .success(parsed):
+                    limit = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                continue
+            }
+            if argument == "--cursor" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --cursor", 64)
+                }
+                cursor = value
+                continue
+            }
+            if argument.hasPrefix("--cursor=") {
+                cursor = String(argument.dropFirst("--cursor=".count))
+                continue
+            }
+            if argument == "--json" {
+                json = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'cloud list': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'cloud list': \(argument)", 64)
+        }
+
+        return .success(.list(environment: environment, limit: limit, cursor: cursor, json: json))
     }
 
     private func parseCloudRequiredTaskID(_ arguments: [String], command: String) -> ParseResult<String> {
@@ -2328,6 +2396,16 @@ public struct CodexCLI: Sendable {
             return .failure("attempts must be between 1 and 4", 64)
         }
         return .success(attempt)
+    }
+
+    private func parseCloudListLimit(_ value: String) -> ParseResult<Int> {
+        guard let limit = Int(value) else {
+            return .failure("limit must be an integer between 1 and 20", 64)
+        }
+        guard (1...20).contains(limit) else {
+            return .failure("limit must be between 1 and 20", 64)
+        }
+        return .success(limit)
     }
 
     private func parseResponsesAPIProxyCommand(_ arguments: [String]) -> ParseResult<ResponsesAPIProxyCommandRequest> {

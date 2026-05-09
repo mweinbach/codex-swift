@@ -242,6 +242,44 @@ final class CloudTaskClientTests: XCTestCase {
         ])
     }
 
+    func testListFormatterMatchesCloudTasksCLIShapeAndJSON() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let task = CloudTaskSummary(
+            id: CloudTaskID("task_123"),
+            title: "Fix the thing",
+            status: .ready,
+            updatedAt: now.addingTimeInterval(-125),
+            environmentID: nil,
+            environmentLabel: "Env A",
+            summary: CloudDiffSummary(filesChanged: 2, linesAdded: 7, linesRemoved: 3),
+            attemptTotal: nil
+        )
+
+        XCTAssertEqual(CloudTaskCommandFormatter.listLines(
+            tasks: [task],
+            baseURL: "https://chatgpt.com/backend-api",
+            now: now
+        ), [
+            "https://chatgpt.com/codex/tasks/task_123",
+            "  [READY] Fix the thing",
+            "  Env A  •  2m ago",
+            "  +7/-3 • 2 files"
+        ])
+
+        let json = try CloudTaskCommandFormatter.listJSON(
+            tasks: [task],
+            cursor: "next",
+            baseURL: "https://chatgpt.com/backend-api"
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        XCTAssertEqual(object["cursor"] as? String, "next")
+        let tasks = try XCTUnwrap(object["tasks"] as? [[String: Any]])
+        XCTAssertEqual(tasks[0]["id"] as? String, "task_123")
+        XCTAssertEqual(tasks[0]["url"] as? String, "https://chatgpt.com/codex/tasks/task_123")
+        XCTAssertTrue(tasks[0]["environment_id"] is NSNull)
+        XCTAssertTrue(tasks[0]["attempt_total"] is NSNull)
+    }
+
     func testStatusFormatterUsesRustLocalDateShapeForOlderTasks() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current

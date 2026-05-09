@@ -276,8 +276,18 @@ public struct CloudTaskText: Equatable, Sendable {
     }
 }
 
+public struct CloudTaskPage: Equatable, Sendable {
+    public let tasks: [CloudTaskSummary]
+    public let cursor: String?
+
+    public init(tasks: [CloudTaskSummary], cursor: String? = nil) {
+        self.tasks = tasks
+        self.cursor = cursor
+    }
+}
+
 public protocol CloudBackend: Sendable {
-    func listTasks(environment: String?) async -> CloudTaskResult<[CloudTaskSummary]>
+    func listTasks(environment: String?, limit: Int?, cursor: String?) async -> CloudTaskResult<CloudTaskPage>
     func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]>
     func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary>
     func getTaskDiff(id: CloudTaskID) async -> CloudTaskResult<String?>
@@ -295,6 +305,17 @@ public protocol CloudBackend: Sendable {
     ) async -> CloudTaskResult<CloudCreatedTask>
 }
 
+public extension CloudBackend {
+    func listTasks(environment: String?) async -> CloudTaskResult<[CloudTaskSummary]> {
+        switch await listTasks(environment: environment, limit: 20, cursor: nil) {
+        case let .success(page):
+            return .success(page.tasks)
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+}
+
 public struct CloudMockClient: CloudBackend {
     private let now: @Sendable () -> Date
 
@@ -302,7 +323,8 @@ public struct CloudMockClient: CloudBackend {
         self.now = now
     }
 
-    public func listTasks(environment: String?) async -> CloudTaskResult<[CloudTaskSummary]> {
+    public func listTasks(environment: String?, limit: Int?, cursor: String?) async -> CloudTaskResult<CloudTaskPage> {
+        _ = cursor
         let rows: [(String, String, CloudTaskStatus)]
         switch environment {
         case "env-A":
@@ -332,7 +354,8 @@ public struct CloudMockClient: CloudBackend {
             environmentLabel = "Global"
         }
 
-        return .success(rows.map { id, title, status in
+        let limitedRows = rows.prefix(limit ?? rows.count)
+        return .success(CloudTaskPage(tasks: limitedRows.map { id, title, status in
             let taskID = CloudTaskID(id)
             let diffCounts = Self.countFromUnified(Self.mockDiff(for: taskID))
             return CloudTaskSummary(
@@ -350,7 +373,7 @@ public struct CloudMockClient: CloudBackend {
                 isReview: false,
                 attemptTotal: id == "T-1000" ? 2 : 1
             )
-        })
+        }))
     }
 
     public func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]> {

@@ -1453,6 +1453,27 @@ private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async thro
             exitCode: summary.status == .ready ? 0 : 1,
             stdoutMessage: CloudTaskCommandFormatter.statusLines(task: summary).joined(separator: "\n")
         )
+    case let .list(environment, limit, cursor, json):
+        let page = try await client.listTasks(environment: environment, limit: limit, cursor: cursor)
+        if json {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 0,
+                stdoutMessage: try CloudTaskCommandFormatter.listJSON(
+                    tasks: page.tasks,
+                    cursor: page.cursor,
+                    baseURL: settings.chatgptBaseURL
+                )
+            )
+        }
+        guard !page.tasks.isEmpty else {
+            return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "No tasks found.")
+        }
+        var lines = CloudTaskCommandFormatter.listLines(tasks: page.tasks, baseURL: settings.chatgptBaseURL)
+        if let cursor = page.cursor {
+            lines.append("")
+            lines.append("To fetch the next page, run codex cloud list --cursor='\(cursor)'")
+        }
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
     case let .diff(taskID, attempt):
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,

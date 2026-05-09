@@ -381,7 +381,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/main.rs` apply dispatch through cloud task HTTP client
   - executable `codex apply <task_id>` now loads ChatGPT auth, calls the cloud task HTTP client, applies via the Swift `CodexGit` bridge, and exits nonzero for missing auth/account IDs or non-success apply outcomes
 - `codex-rs/cloud-tasks/src/cli.rs` and non-TUI command dispatch from `codex-rs/cloud-tasks/src/lib.rs`
-  - `codex cloud status`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt` validation, status/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection, and cloud-task status/diff summary formatting
+  - `codex cloud status`, `codex cloud list`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt`/`--limit` validation, status/list/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection, and cloud-task status/list/diff summary formatting
 - `codex-rs/cloud-tasks/src/exec_command.rs` task creation path
   - `codex cloud exec` prompt/stdin loading, `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path

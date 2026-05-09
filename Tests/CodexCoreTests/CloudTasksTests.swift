@@ -202,6 +202,7 @@ final class CloudTasksTests: XCTestCase {
         let transport = CloudCapturingTransport(executeResults: [
             .success(cloudResponse("""
             {
+              "cursor": "next-page",
               "items": [
                 {
                   "id": "T-9000",
@@ -258,6 +259,23 @@ final class CloudTasksTests: XCTestCase {
                 attemptTotal: 2
             )
         ])
+
+        let pagedTransport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse(#"{"items":[],"cursor":"after"}"#))
+        ])
+        let pagedClient = CloudHTTPClient(
+            baseURL: "https://chatgpt.com/",
+            transport: pagedTransport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+        let page = try await pagedClient.listTasks(environment: "env-B", limit: 7, cursor: "before").get()
+        XCTAssertEqual(page.cursor, "after")
+        XCTAssertEqual(page.tasks, [])
+        XCTAssertEqual(
+            pagedTransport.executeRequests.first?.url,
+            "https://chatgpt.com/backend-api/wham/tasks/list?limit=7&task_filter=current&cursor=before&environment_id=env-B"
+        )
     }
 
     func testHTTPClientListEnvironmentsMergesRepoAndGlobalRows() async throws {

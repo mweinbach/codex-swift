@@ -123,6 +123,22 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
         }
     }
 
+    public func listTasks(environment: String?, limit: Int = 20, cursor: String? = nil) async throws -> CloudTaskPage {
+        let backend = try await makeBackend()
+        let environmentID: String?
+        if let environment {
+            environmentID = try await resolveEnvironmentID(environment, backend: backend)
+        } else {
+            environmentID = nil
+        }
+        switch await backend.listTasks(environment: environmentID, limit: limit, cursor: cursor) {
+        case let .success(page):
+            return page
+        case let .failure(error):
+            throw CloudTaskClientError.cloudTaskFailed(error)
+        }
+    }
+
     public func taskDiff(taskID: String, attempt: Int? = nil) async throws -> String {
         let id = try Self.parseTaskID(taskID)
         let attempts = try await collectAttemptDiffs(id: id)
@@ -365,6 +381,29 @@ public enum CloudTaskCommandFormatter {
         return lines
     }
 
+    public static func listLines(tasks: [CloudTaskSummary], baseURL: String, now: Date = Date()) -> [String] {
+        var lines: [String] = []
+        for (index, task) in tasks.enumerated() {
+            lines.append(taskURL(baseURL: baseURL, taskID: task.id.rawValue))
+            lines.append(contentsOf: statusLines(task: task, now: now).map { "  \($0)" })
+            if index + 1 < tasks.count {
+                lines.append("")
+            }
+        }
+        return lines
+    }
+
+    public static func listJSON(tasks: [CloudTaskSummary], cursor: String?, baseURL: String) throws -> String {
+        let payload = CloudTaskListJSONPayload(
+            tasks: tasks.map { CloudTaskListJSONTask(task: $0, url: taskURL(baseURL: baseURL, taskID: $0.id.rawValue)) },
+            cursor: cursor
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return String(decoding: try encoder.encode(payload), as: UTF8.self)
+    }
+
     public static func summaryLine(_ summary: CloudDiffSummary) -> String {
         if summary.filesChanged == 0, summary.linesAdded == 0, summary.linesRemoved == 0 {
             return "no diff"
@@ -420,6 +459,91 @@ public enum CloudTaskCommandFormatter {
             return "\(normalized)/tasks/\(taskID)"
         }
         return "\(normalized)/codex/tasks/\(taskID)"
+    }
+}
+
+private struct CloudTaskListJSONPayload: Encodable {
+    let tasks: [CloudTaskListJSONTask]
+    let cursor: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case tasks
+        case cursor
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tasks, forKey: .tasks)
+        if let cursor {
+            try container.encode(cursor, forKey: .cursor)
+        } else {
+            try container.encodeNil(forKey: .cursor)
+        }
+    }
+}
+
+private struct CloudTaskListJSONTask: Encodable {
+    let id: String
+    let url: String
+    let title: String
+    let status: CloudTaskStatus
+    let updatedAt: Date
+    let environmentID: String?
+    let environmentLabel: String?
+    let summary: CloudDiffSummary
+    let isReview: Bool
+    let attemptTotal: Int?
+
+    init(task: CloudTaskSummary, url: String) {
+        self.id = task.id.rawValue
+        self.url = url
+        self.title = task.title
+        self.status = task.status
+        self.updatedAt = task.updatedAt
+        self.environmentID = task.environmentID
+        self.environmentLabel = task.environmentLabel
+        self.summary = task.summary
+        self.isReview = task.isReview
+        self.attemptTotal = task.attemptTotal
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case url
+        case title
+        case status
+        case updatedAt = "updated_at"
+        case environmentID = "environment_id"
+        case environmentLabel = "environment_label"
+        case summary
+        case isReview = "is_review"
+        case attemptTotal = "attempt_total"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(url, forKey: .url)
+        try container.encode(title, forKey: .title)
+        try container.encode(status, forKey: .status)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        if let environmentID {
+            try container.encode(environmentID, forKey: .environmentID)
+        } else {
+            try container.encodeNil(forKey: .environmentID)
+        }
+        if let environmentLabel {
+            try container.encode(environmentLabel, forKey: .environmentLabel)
+        } else {
+            try container.encodeNil(forKey: .environmentLabel)
+        }
+        try container.encode(summary, forKey: .summary)
+        try container.encode(isReview, forKey: .isReview)
+        if let attemptTotal {
+            try container.encode(attemptTotal, forKey: .attemptTotal)
+        } else {
+            try container.encodeNil(forKey: .attemptTotal)
+        }
     }
 }
 

@@ -119,11 +119,15 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         return baseURL
     }
 
-    public func listTasks(environment env: String?) async -> CloudTaskResult<[CloudTaskSummary]> {
-        var query = [
-            ("limit", "20"),
-            ("task_filter", "current")
-        ]
+    public func listTasks(environment env: String?, limit: Int?, cursor: String?) async -> CloudTaskResult<CloudTaskPage> {
+        var query: [(String, String)] = []
+        if let limit {
+            query.append(("limit", "\(limit)"))
+        }
+        query.append(("task_filter", "current"))
+        if let cursor {
+            query.append(("cursor", cursor))
+        }
         if let env {
             query.append(("environment_id", env))
         }
@@ -133,8 +137,10 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
             do {
                 let list = try decode(CloudTaskListResponse.self, from: response)
                 let tasks = list.items.map { Self.mapTaskListItemToSummary($0, now: now) }
-                errorLog("http.list_tasks: env=\(env ?? "<all>") items=\(tasks.count)")
-                return .success(tasks)
+                errorLog(
+                    "http.list_tasks: env=\(env ?? "<all>") limit=\(limit.map(String.init) ?? "<default>") cursor_in=\(cursor ?? "<none>") cursor_out=\(list.cursor ?? "<none>") items=\(tasks.count)"
+                )
+                return .success(CloudTaskPage(tasks: tasks, cursor: list.cursor))
             } catch {
                 return .failure(.http("list_tasks failed: \(decodeDescription(error, response: response))"))
             }
@@ -574,6 +580,7 @@ private struct CloudTaskDetailsPayload: Equatable, Sendable {
 
 private struct CloudTaskListResponse: Decodable, Equatable, Sendable {
     let items: [CloudTaskListItem]
+    let cursor: String?
 }
 
 private struct CloudTaskListItem: Decodable, Equatable, Sendable {
