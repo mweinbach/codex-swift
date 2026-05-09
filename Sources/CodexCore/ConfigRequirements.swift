@@ -133,6 +133,43 @@ public struct ManagedHooksRequirementsToml: Equatable, Sendable {
     }
 }
 
+public struct AppRequirementToml: Equatable, Sendable {
+    public var enabled: Bool?
+
+    public init(enabled: Bool? = nil) {
+        self.enabled = enabled
+    }
+
+    public var isEmpty: Bool {
+        enabled == nil
+    }
+}
+
+public struct AppsRequirementsToml: Equatable, Sendable {
+    public var apps: [String: AppRequirementToml]
+
+    public init(apps: [String: AppRequirementToml] = [:]) {
+        self.apps = apps
+    }
+
+    public var isEmpty: Bool {
+        apps.values.allSatisfy(\.isEmpty)
+    }
+
+    public mutating func mergeEnablementSettingsDescending(from lowerPrecedence: AppsRequirementsToml) {
+        for (appID, incomingRequirement) in lowerPrecedence.apps {
+            let higherRequirement = apps[appID, default: AppRequirementToml()]
+            let mergedEnabled: Bool?
+            if higherRequirement.enabled == false || incomingRequirement.enabled == false {
+                mergedEnabled = false
+            } else {
+                mergedEnabled = higherRequirement.enabled ?? incomingRequirement.enabled
+            }
+            apps[appID] = AppRequirementToml(enabled: mergedEnabled)
+        }
+    }
+}
+
 public enum WebSearchModeRequirement: String, Equatable, Sendable, CaseIterable {
     case disabled
     case cached
@@ -284,6 +321,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var hooks: ManagedHooksRequirementsToml?
     public var hooksSource: HookSource
     public var hooksSourceDescription: String
+    public var apps: AppsRequirementsToml?
     public var enforceResidency: ResidencyRequirement?
     public var network: NetworkRequirementsToml?
     public var permissions: PermissionsRequirementsToml?
@@ -298,6 +336,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements",
+        apps: AppsRequirementsToml? = nil,
         enforceResidency: ResidencyRequirement? = nil,
         network: NetworkRequirementsToml? = nil,
         permissions: PermissionsRequirementsToml? = nil
@@ -311,6 +350,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.hooks = hooks
         self.hooksSource = hooksSource
         self.hooksSourceDescription = hooksSourceDescription
+        self.apps = apps
         self.enforceResidency = enforceResidency
         self.network = network
         self.permissions = permissions
@@ -324,6 +364,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             allowedWebSearchModes == nil &&
             featureRequirements == nil &&
             hooks == nil &&
+            (apps?.isEmpty ?? true) &&
             enforceResidency == nil &&
             network == nil &&
             (permissions?.isEmpty ?? true)
@@ -352,6 +393,18 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             hooks = value
             hooksSource = other.hooksSource
             hooksSourceDescription = other.hooksSourceDescription
+        }
+        if var mergedApps = apps {
+            if let lowerPrecedenceApps = other.apps {
+                if mergedApps.isEmpty {
+                    apps = lowerPrecedenceApps.isEmpty ? nil : lowerPrecedenceApps
+                } else {
+                    mergedApps.mergeEnablementSettingsDescending(from: lowerPrecedenceApps)
+                    apps = mergedApps.isEmpty ? nil : mergedApps
+                }
+            }
+        } else if let lowerPrecedenceApps = other.apps {
+            apps = lowerPrecedenceApps.isEmpty ? nil : lowerPrecedenceApps
         }
         if enforceResidency == nil, let value = other.enforceResidency {
             enforceResidency = value
@@ -448,6 +501,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let hooksValue = table["hooks"] {
             result.hooks = try parseManagedHooks(hooksValue)
+        }
+        if let appsValue = table["apps"] {
+            result.apps = try parseAppsRequirements(appsValue)
         }
         if let residencyValue = table["enforce_residency"] {
             result.enforceResidency = try parseResidencyRequirement(residencyValue)
@@ -615,6 +671,22 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         let filesystem = try table["filesystem"].map(parseFilesystemRequirements)
         return PermissionsRequirementsToml(filesystem: filesystem)
+    }
+
+    private static func parseAppsRequirements(_ value: ConfigValue) throws -> AppsRequirementsToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine("apps")
+        }
+        var apps: [String: AppRequirementToml] = [:]
+        for appID in table.keys.sorted() {
+            guard case let .table(appTable) = table[appID] else {
+                throw ConfigRequirementsParseError.invalidLine("apps.\(appID)")
+            }
+            apps[appID] = AppRequirementToml(
+                enabled: try optionalBool(appTable["enabled"], key: "apps.\(appID).enabled")
+            )
+        }
+        return AppsRequirementsToml(apps: apps)
     }
 
     private static func parseFilesystemRequirements(_ value: ConfigValue) throws -> FilesystemRequirementsToml {

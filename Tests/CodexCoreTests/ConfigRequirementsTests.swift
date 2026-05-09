@@ -447,6 +447,82 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(SandboxModeRequirement(sandboxPolicy: .externalSandbox(networkAccess: .enabled)), .externalSandbox)
     }
 
+    func testDeserializeAppsRequirements() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [apps.connector_123123]
+        enabled = false
+
+        [apps.connector_unset]
+        """)
+
+        XCTAssertEqual(config.apps, AppsRequirementsToml(apps: [
+            "connector_123123": AppRequirementToml(enabled: false),
+            "connector_unset": AppRequirementToml()
+        ]))
+        XCTAssertFalse(config.isEmpty)
+        XCTAssertTrue(ConfigRequirementsToml(apps: AppsRequirementsToml()).isEmpty)
+        XCTAssertTrue(ConfigRequirementsToml(apps: AppsRequirementsToml(apps: [
+            "connector_unset": AppRequirementToml()
+        ])).isEmpty)
+    }
+
+    func testAppsRequirementsMergeEnablementSettingsLikeRust() {
+        var merged = AppsRequirementsToml(apps: [
+            "connector_high": AppRequirementToml(enabled: true),
+            "connector_shared": AppRequirementToml(enabled: true),
+            "connector_disabled": AppRequirementToml(enabled: false)
+        ])
+
+        merged.mergeEnablementSettingsDescending(from: AppsRequirementsToml(apps: [
+            "connector_low": AppRequirementToml(enabled: true),
+            "connector_shared": AppRequirementToml(enabled: false),
+            "connector_disabled": AppRequirementToml(),
+            "connector_unset": AppRequirementToml()
+        ]))
+
+        XCTAssertEqual(merged, AppsRequirementsToml(apps: [
+            "connector_high": AppRequirementToml(enabled: true),
+            "connector_low": AppRequirementToml(enabled: true),
+            "connector_shared": AppRequirementToml(enabled: false),
+            "connector_disabled": AppRequirementToml(enabled: false),
+            "connector_unset": AppRequirementToml()
+        ]))
+    }
+
+    func testMergeUnsetFieldsMergesAppsAcrossSourcesWithDescendingDisableWinsSemantics() throws {
+        var merged = try ConfigRequirementsToml.parse("""
+        [apps.connector_high]
+        enabled = true
+
+        [apps.connector_shared]
+        enabled = true
+        """)
+
+        let lower = try ConfigRequirementsToml.parse("""
+        [apps.connector_low]
+        enabled = false
+
+        [apps.connector_shared]
+        enabled = false
+        """)
+
+        merged.mergeUnsetFields(from: lower)
+        XCTAssertEqual(merged.apps, AppsRequirementsToml(apps: [
+            "connector_high": AppRequirementToml(enabled: true),
+            "connector_low": AppRequirementToml(enabled: false),
+            "connector_shared": AppRequirementToml(enabled: false)
+        ]))
+
+        var emptyHigher = try ConfigRequirementsToml.parse("""
+        [apps.connector_empty]
+        """)
+        emptyHigher.mergeUnsetFields(from: lower)
+        XCTAssertEqual(emptyHigher.apps, AppsRequirementsToml(apps: [
+            "connector_low": AppRequirementToml(enabled: false),
+            "connector_shared": AppRequirementToml(enabled: false)
+        ]))
+    }
+
     func testAppServerRequirementsObjectMatchesPortedRustFields() throws {
         let config = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
