@@ -118,7 +118,7 @@ public enum ShellResolver {
         #else
         let userDefaultShell = userShellPath
             .flatMap(detectShellType(_:))
-            .flatMap { getShell($0) }
+            .flatMap { getShell($0, defaultShellPath: userShellPath) }
 
         #if os(macOS)
         let shellWithFallback = userDefaultShell
@@ -141,29 +141,65 @@ public enum ShellResolver {
     }
 
     public static func getShell(_ shellType: ShellType, path: String? = nil) -> Shell? {
+        getShell(shellType, path: path, defaultShellPath: currentUserShellPath())
+    }
+
+    static func getShell(_ shellType: ShellType, path: String? = nil, defaultShellPath: String?) -> Shell? {
         switch shellType {
         case .zsh:
-            return getShell(shellType, providedPath: path, binaryName: "zsh", fallbackPaths: ["/bin/zsh"])
+            return getShell(
+                shellType,
+                providedPath: path,
+                defaultShellPath: defaultShellPath,
+                binaryName: "zsh",
+                fallbackPaths: ["/bin/zsh"]
+            )
         case .bash:
-            return getShell(shellType, providedPath: path, binaryName: "bash", fallbackPaths: ["/bin/bash"])
+            return getShell(
+                shellType,
+                providedPath: path,
+                defaultShellPath: defaultShellPath,
+                binaryName: "bash",
+                fallbackPaths: ["/bin/bash"]
+            )
         case .sh:
-            return getShell(shellType, providedPath: path, binaryName: "sh", fallbackPaths: ["/bin/sh"])
+            return getShell(
+                shellType,
+                providedPath: path,
+                defaultShellPath: defaultShellPath,
+                binaryName: "sh",
+                fallbackPaths: ["/bin/sh"]
+            )
         case .powerShell:
             return getShell(
                 shellType,
                 providedPath: path,
+                defaultShellPath: defaultShellPath,
                 binaryName: "pwsh",
                 fallbackPaths: ["/usr/local/bin/pwsh"]
             )
-            ?? getShell(shellType, providedPath: path, binaryName: "powershell", fallbackPaths: [])
+            ?? getShell(
+                shellType,
+                providedPath: path,
+                defaultShellPath: defaultShellPath,
+                binaryName: "powershell",
+                fallbackPaths: []
+            )
         case .cmd:
-            return getShell(shellType, providedPath: path, binaryName: "cmd", fallbackPaths: [])
+            return getShell(
+                shellType,
+                providedPath: path,
+                defaultShellPath: defaultShellPath,
+                binaryName: "cmd",
+                fallbackPaths: []
+            )
         }
     }
 
     private static func getShell(
         _ shellType: ShellType,
         providedPath: String?,
+        defaultShellPath: String?,
         binaryName: String,
         fallbackPaths: [String]
     ) -> Shell? {
@@ -171,8 +207,9 @@ public enum ShellResolver {
             return Shell(shellType: shellType, shellPath: providedPath)
         }
 
-        if let defaultShellPath = currentUserShellPath(),
-           detectShellType(defaultShellPath) == shellType
+        if let defaultShellPath,
+           detectShellType(defaultShellPath) == shellType,
+           isFile(defaultShellPath)
         {
             return Shell(shellType: shellType, shellPath: defaultShellPath)
         }

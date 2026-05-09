@@ -235,7 +235,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
-  - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, and default shell fallback ordering
+  - shell type detection, shell name mapping, exec argument derivation, model-provided shell fallback, default shell fallback ordering, and Rust-matching real-file checks before accepting a detected user default shell path
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`

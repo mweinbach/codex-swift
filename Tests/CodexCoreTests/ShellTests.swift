@@ -104,9 +104,23 @@ final class ShellTests: XCTestCase {
         )
     }
 
+    func testGetShellIgnoresMissingDefaultShellPath() {
+        let shell = ShellResolver.getShell(.bash, defaultShellPath: "/definitely/not/bash")
+
+        XCTAssertEqual(shell?.shellType, .bash)
+        XCTAssertNotEqual(shell?.shellPath, "/definitely/not/bash")
+        XCTAssertEqual((shell?.shellPath as NSString?)?.lastPathComponent, "bash")
+    }
+
     #if os(macOS)
     func testMacOSFishFallbackPrefersZsh() {
         let shell = ShellResolver.defaultUserShell(userShellPath: "/bin/fish")
+
+        XCTAssertEqual(shell, Shell(shellType: .zsh, shellPath: "/bin/zsh"))
+    }
+
+    func testMacOSMissingDefaultShellFallsBackToZsh() {
+        let shell = ShellResolver.defaultUserShell(userShellPath: "/definitely/not/zsh")
 
         XCTAssertEqual(shell, Shell(shellType: .zsh, shellPath: "/bin/zsh"))
     }
