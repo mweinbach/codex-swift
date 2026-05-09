@@ -822,6 +822,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkIndexedAssignment(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if try Self.parseStarlarkAugmentedAdditionAssignment(
             statement,
             constants: &constants,
@@ -1230,6 +1238,203 @@ public final class PolicyParser {
         }
         constants[receiverText] = .array(items)
         return true
+    }
+
+    private static func parseStarlarkIndexedAssignment(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let equalsIndex = topLevelEqualsIndex(in: trimmed) else {
+            return false
+        }
+
+        let targetText = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let target = try parseStarlarkIndexedAssignmentTarget(targetText, expression: trimmed) else {
+            return false
+        }
+
+        guard var existingValue = constants[target.root]
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let valueStart = trimmed.index(after: equalsIndex)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !valueText.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        let assignedValue = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+
+        try assignStarlarkIndexedValue(
+            &existingValue,
+            indexes: target.indexes,
+            assignedValue: assignedValue,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        )
+        constants[target.root] = existingValue
+        return true
+    }
+
+    private static func parseStarlarkIndexedAssignmentTarget(
+        _ text: String,
+        expression: String
+    ) throws -> (root: String, indexes: [String])? {
+        guard let firstOpenIndex = text.firstIndex(of: "[") else {
+            return nil
+        }
+        let root = String(text[..<firstOpenIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(root) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        var indexes: [String] = []
+        var cursor = firstOpenIndex
+        while cursor < text.endIndex {
+            while cursor < text.endIndex, text[cursor].isWhitespace {
+                cursor = text.index(after: cursor)
+            }
+            guard cursor < text.endIndex else {
+                break
+            }
+            guard text[cursor] == "[",
+                  let closeIndex = matchingIndexClose(from: cursor, in: text)
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            let indexStart = text.index(after: cursor)
+            let indexText = String(text[indexStart..<closeIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !indexText.isEmpty,
+                  !indexText.contains(":")
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            indexes.append(indexText)
+            cursor = text.index(after: closeIndex)
+        }
+
+        guard !indexes.isEmpty else {
+            return nil
+        }
+        return (root, indexes)
+    }
+
+    private static func matchingIndexClose(from openIndex: String.Index, in text: String) -> String.Index? {
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = openIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+                if squareDepth == 0 && braceDepth == 0 && parenDepth == 0 {
+                    return index
+                }
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+        return nil
+    }
+
+    private static func assignStarlarkIndexedValue(
+        _ value: inout ConfigValue,
+        indexes: [String],
+        assignedValue: ConfigValue,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
+        guard let indexText = indexes.first else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let remainingIndexes = Array(indexes.dropFirst())
+
+        switch value {
+        case var .array(items):
+            let itemIndex = try parseStarlarkInteger(
+                indexText,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
+            guard items.indices.contains(resolvedIndex) else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if remainingIndexes.isEmpty {
+                items[resolvedIndex] = assignedValue
+            } else {
+                var nested = items[resolvedIndex]
+                try assignStarlarkIndexedValue(
+                    &nested,
+                    indexes: remainingIndexes,
+                    assignedValue: assignedValue,
+                    constants: constants,
+                    functions: functions,
+                    expression: expression
+                )
+                items[resolvedIndex] = nested
+            }
+            value = .array(items)
+        case var .table(items):
+            let key = try parsePolicyLiteral(indexText, constants: constants, functions: functions)
+            guard case let .string(key) = key else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if remainingIndexes.isEmpty {
+                items[key] = assignedValue
+            } else {
+                guard var nested = items[key] else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                try assignStarlarkIndexedValue(
+                    &nested,
+                    indexes: remainingIndexes,
+                    assignedValue: assignedValue,
+                    constants: constants,
+                    functions: functions,
+                    expression: expression
+                )
+                items[key] = nested
+            }
+            value = .table(items)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func parseStarlarkAugmentedAdditionAssignment(

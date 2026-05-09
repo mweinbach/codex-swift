@@ -1458,6 +1458,41 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkIndexedAssignments() throws {
+        let policy = try parsePolicy("""
+        SETTINGS = {}
+        SETTINGS["git"] = {"command": "status", "decision": "prompt", "path": "/bin/git"}
+        TOOL = "jj"
+        SETTINGS[TOOL] = {"command": "log", "decision": "allow"}
+        SETTINGS["git"]["path"] = "/usr/bin/git"
+
+        COMMANDS = [("git", "status", "forbidden"), ("jj", "log", "prompt")]
+        COMMANDS[0] = ("git", SETTINGS["git"]["command"], SETTINGS["git"]["decision"])
+        COMMANDS[-1] = ("jj", SETTINGS["jj"]["command"], SETTINGS["jj"]["decision"])
+
+        for tool, subcommand, decision in COMMANDS:
+            prefix_rule([tool, subcommand], decision, justification = "indexed " + tool)
+
+        host_executable("git", [SETTINGS["git"]["path"]])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "indexed git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "indexed jj"
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkLengthComparisonsAndMembership() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
