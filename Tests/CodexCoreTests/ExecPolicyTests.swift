@@ -2391,6 +2391,54 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkStringFormatMethod() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "{tool}-{cmd}".format(tool = TOOL, cmd = "status")
+        JUSTIFICATION = "({1!r}, {0!s})".format("zero", "one")
+        EXPLICIT = "({1}, {0})".format("zero", "one")
+        MIXED = "a{x}b{y}c{}".format(1, x = 2, y = "three")
+        ESCAPED = "{{{tool}}}".format(tool = TOOL)
+        REPR = "Is {0!r} {0!s}?".format("heterological")
+
+        if MIXED == "a2bthreec1" and ESCAPED == "{git}":
+            prefix_rule([TOOL, COMMAND], "allow", justification = JUSTIFICATION)
+
+        if EXPLICIT == "(one, zero)" and REPR == "Is \\"heterological\\" heterological?":
+            network_rule("api.{name}.com".format(name = "github"), "https", "allow")
+            host_executable(TOOL, ["/opt/" + "{}".format(TOOL)])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("git-status")]),
+                decision: .allow,
+                justification: "(\"one\", zero)"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "{} {0}".format("git") == "git git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "{missing}".format("git") == "git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "{!q}".format("git") == "git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "{tool.name}".format(tool = "git") == "git":
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "

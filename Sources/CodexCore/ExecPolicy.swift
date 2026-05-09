@@ -640,6 +640,16 @@ public final class PolicyParser {
         let body: [String]
     }
 
+    private struct StarlarkFormatArguments {
+        let positional: [ConfigValue]
+        let named: [String: ConfigValue]
+    }
+
+    private enum StarlarkFormatConversion {
+        case string
+        case representation
+    }
+
     private enum StarlarkStatementFlow: Equatable {
         case none
         case continueLoop
@@ -2703,7 +2713,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "elems", "codepoints", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "elems", "codepoints", "format", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2743,6 +2753,14 @@ public final class PolicyParser {
         case "codepoints":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .array(receiver.unicodeScalars.map { .integer(Int64($0.value)) })
+        case "format":
+            let arguments = try parseStringFormatMethodArguments(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+            return .string(try formattingStarlarkString(receiver, arguments: arguments, expression: text))
         case "startswith":
             let prefixes = try parseStringOrTupleMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .bool(prefixes.contains { receiver.hasPrefix($0) })
@@ -3015,6 +3033,37 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func parseStringFormatMethodArguments(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> StarlarkFormatArguments {
+        var positional: [ConfigValue] = []
+        var named: [String: ConfigValue] = [:]
+        var sawNamedArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawNamedArgument = true
+                let key = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard isStarlarkIdentifier(key), named[key] == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let valueText = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                named[key] = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+            } else {
+                guard !sawNamedArgument else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                positional.append(try parsePolicyLiteral(rawArgument, constants: constants, functions: functions))
+            }
+        }
+
+        return StarlarkFormatArguments(positional: positional, named: named)
     }
 
     private static func parseStringSearchMethodArguments(
@@ -3577,6 +3626,150 @@ public final class PolicyParser {
             lines.append(String(string[stringLineStart..<string.endIndex]))
         }
         return lines
+    }
+
+    private static func formattingStarlarkString(
+        _ format: String,
+        arguments: StarlarkFormatArguments,
+        expression: String
+    ) throws -> String {
+        var result = ""
+        var nextOrderedArgumentIndex = 0
+        var usedOrderedFields = false
+        var usedIndexedFields = false
+        var index = format.startIndex
+
+        while index < format.endIndex {
+            let character = format[index]
+            switch character {
+            case "{":
+                let nextIndex = format.index(after: index)
+                if nextIndex < format.endIndex, format[nextIndex] == "{" {
+                    result.append("{")
+                    index = format.index(after: nextIndex)
+                    continue
+                }
+
+                let capture = try parseStarlarkFormatCapture(
+                    in: format,
+                    startingAt: nextIndex,
+                    expression: expression
+                )
+                let value = try resolveStarlarkFormatCapture(
+                    capture.field,
+                    conversion: capture.conversion,
+                    arguments: arguments,
+                    nextOrderedArgumentIndex: &nextOrderedArgumentIndex,
+                    usedOrderedFields: &usedOrderedFields,
+                    usedIndexedFields: &usedIndexedFields,
+                    expression: expression
+                )
+                result.append(value)
+                index = format.index(after: capture.closeIndex)
+            case "}":
+                let nextIndex = format.index(after: index)
+                guard nextIndex < format.endIndex, format[nextIndex] == "}" else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                result.append("}")
+                index = format.index(after: nextIndex)
+            default:
+                result.append(character)
+                index = format.index(after: index)
+            }
+        }
+
+        return result
+    }
+
+    private static func parseStarlarkFormatCapture(
+        in format: String,
+        startingAt start: String.Index,
+        expression: String
+    ) throws -> (field: String, conversion: StarlarkFormatConversion, closeIndex: String.Index) {
+        var index = start
+        while index < format.endIndex {
+            switch format[index] {
+            case "}":
+                return (String(format[start..<index]), .string, index)
+            case "!":
+                let field = String(format[start..<index])
+                let conversionIndex = format.index(after: index)
+                guard conversionIndex < format.endIndex else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let conversion: StarlarkFormatConversion
+                switch format[conversionIndex] {
+                case "r":
+                    conversion = .representation
+                case "s":
+                    conversion = .string
+                default:
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let closeIndex = format.index(after: conversionIndex)
+                guard closeIndex < format.endIndex, format[closeIndex] == "}" else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                return (field, conversion, closeIndex)
+            case "{":
+                throw ConfigOverrideError.invalidLiteral(expression)
+            default:
+                index = format.index(after: index)
+            }
+        }
+
+        throw ConfigOverrideError.invalidLiteral(expression)
+    }
+
+    private static func resolveStarlarkFormatCapture(
+        _ field: String,
+        conversion: StarlarkFormatConversion,
+        arguments: StarlarkFormatArguments,
+        nextOrderedArgumentIndex: inout Int,
+        usedOrderedFields: inout Bool,
+        usedIndexedFields: inout Bool,
+        expression: String
+    ) throws -> String {
+        let value: ConfigValue
+        if field.isEmpty {
+            guard !usedIndexedFields else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            usedOrderedFields = true
+            guard nextOrderedArgumentIndex < arguments.positional.count else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            value = arguments.positional[nextOrderedArgumentIndex]
+            nextOrderedArgumentIndex += 1
+        } else if field.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) {
+            guard !usedOrderedFields,
+                  let index = Int(field),
+                  index >= 0,
+                  index < arguments.positional.count
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            usedIndexedFields = true
+            value = arguments.positional[index]
+        } else {
+            guard !field.contains("."),
+                  !field.contains(","),
+                  !field.contains("["),
+                  !field.contains("]"),
+                  let namedValue = arguments.named[field]
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            value = namedValue
+        }
+
+        switch conversion {
+        case .string:
+            return starlarkString(value)
+        case .representation:
+            return starlarkRepresentation(value)
+        }
     }
 
     private static func replacingEmptyStarlarkString(_ string: String, newValue: String, count: Int) -> String {

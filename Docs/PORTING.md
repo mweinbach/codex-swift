@@ -673,6 +673,8 @@ Source baseline inspected for this scaffold:
   - Extended Swift execpolicy parser support for `.split(...)` with `None`, `maxsplit`, negative and zero `maxsplit`, explicit separators that preserve empty fields, and added `.rsplit(...)` reverse splitting with matching whitespace and separator behavior.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string iterable and line methods
   - Added Swift execpolicy parser support for string `.elems()`, `.codepoints()`, and `.splitlines([keepends])`, including Rust's double-quoted `\r` escape handling, CRLF handling, trailing-line omission, keepends behavior, and tuple/list prefix or suffix alternatives for `.startswith(...)` and `.endswith(...)`.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string format method
+  - Added Swift execpolicy parser support for `.format(...)` with automatic positional fields, manual numeric indexes, keyword fields, escaped braces, `!s`/`!r` conversions, missing-argument rejection, mixed automatic/manual field rejection, invalid conversion rejection, and Rust's invalid field-character rejection for dotted/indexed captures.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string normalization methods
   - Added Swift execpolicy parser support for string `.lower()`, `.upper()`, `.strip(...)`, `.lstrip(...)`, `.rstrip(...)`, and separator-based `.split(...)` method calls across supported policy literals, helper returns, list/loop bodies, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string replacement method
