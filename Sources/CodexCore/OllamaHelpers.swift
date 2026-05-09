@@ -83,6 +83,9 @@ public struct OllamaHTTPResponse: Equatable, Sendable {
 public enum OllamaClientError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
     case connectionUnavailable
     case missingBaseURL
+    case pullStartFailed(statusCode: Int)
+    case pullFailed(String)
+    case pullStreamEndedUnexpectedly
     case unsupportedResponsesVersion(OllamaVersion)
 
     public var description: String {
@@ -91,6 +94,12 @@ public enum OllamaClientError: Error, Equatable, CustomStringConvertible, Locali
             return OllamaHelpers.connectionErrorMessage
         case .missingBaseURL:
             return "Ollama provider must have a base_url"
+        case let .pullStartFailed(statusCode):
+            return "failed to start pull: HTTP \(statusCode)"
+        case let .pullFailed(message):
+            return "Pull failed: \(message)"
+        case .pullStreamEndedUnexpectedly:
+            return "Pull stream ended unexpectedly without success."
         case let .unsupportedResponsesVersion(version):
             return OllamaHelpers.unsupportedResponsesVersionMessage(for: version)
         }
@@ -167,6 +176,51 @@ public struct OllamaClient {
             return nil
         }
         return OllamaHelpers.parseVersion(version)
+    }
+
+    public func pullModel(
+        _ model: String,
+        onEvent: (OllamaPullEvent) throws -> Void
+    ) async throws {
+        try onEvent(.status("Pulling model \(model)..."))
+        var request = URLRequest(url: try endpointURL("/api/pull"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": model,
+            "stream": true
+        ])
+
+        let response = try await send(request)
+        guard response.isSuccess else {
+            throw OllamaClientError.pullStartFailed(statusCode: response.statusCode)
+        }
+
+        let streamText = String(decoding: response.data, as: UTF8.self)
+        let frames = streamText.split(separator: "\n", omittingEmptySubsequences: false)
+        let completeFrameCount = streamText.hasSuffix("\n") ? frames.count : max(frames.count - 1, 0)
+        for line in frames.prefix(completeFrameCount) {
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty,
+                  let data = text.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
+            }
+
+            for event in OllamaHelpers.pullEvents(fromJSONObject: value) {
+                try onEvent(event)
+                if event == .success {
+                    return
+                }
+            }
+            if let errorMessage = value["error"] as? String {
+                try onEvent(.error(errorMessage))
+                throw OllamaClientError.pullFailed(errorMessage)
+            }
+        }
+
+        throw OllamaClientError.pullStreamEndedUnexpectedly
     }
 
     public static func ensureResponsesSupported(
@@ -392,4 +446,44 @@ public enum OllamaPullEvent: Equatable, Sendable {
     case chunkProgress(digest: String, total: UInt64?, completed: UInt64?)
     case success
     case error(String)
+}
+
+extension OllamaHelpers {
+    public static func pullEvents(fromJSONObject value: [String: Any]) -> [OllamaPullEvent] {
+        var events: [OllamaPullEvent] = []
+        if let status = value["status"] as? String {
+            events.append(.status(status))
+            if status == "success" {
+                events.append(.success)
+            }
+        }
+
+        let total = integerValue(value["total"])
+        let completed = integerValue(value["completed"])
+        if total != nil || completed != nil {
+            events.append(.chunkProgress(
+                digest: value["digest"] as? String ?? "",
+                total: total,
+                completed: completed
+            ))
+        }
+        return events
+    }
+
+    private static func integerValue(_ value: Any?) -> UInt64? {
+        switch value {
+        case is Bool:
+            return nil
+        case let number as UInt64:
+            return number
+        case let number as UInt:
+            return UInt64(number)
+        case let number as Int where number >= 0:
+            return UInt64(number)
+        case let number as NSNumber where number.uint64Value <= UInt64(Int64.max):
+            return number.uint64Value
+        default:
+            return nil
+        }
+    }
 }

@@ -71,6 +71,21 @@ final class OllamaHelpersTests: XCTestCase {
         )
     }
 
+    func testPullEventsFromJSONObjectMatchesRustParser() {
+        XCTAssertEqual(
+            OllamaHelpers.pullEvents(fromJSONObject: [
+                "status": "downloading",
+                "digest": "sha256:abc",
+                "total": NSNumber(value: 100),
+                "completed": NSNumber(value: 25)
+            ]),
+            [
+                .status("downloading"),
+                .chunkProgress(digest: "sha256:abc", total: 100, completed: 25)
+            ]
+        )
+    }
+
     func testVersionParserTrimsPrefixAndBuildMetadataLikeRustSemver() {
         XCTAssertEqual(OllamaHelpers.parseVersion("0.13.4"), OllamaVersion(major: 0, minor: 13, patch: 4))
         XCTAssertEqual(
@@ -217,6 +232,88 @@ final class OllamaHelpersTests: XCTestCase {
                 return OllamaHTTPResponse(statusCode: 200)
             }
             return OllamaHTTPResponse(statusCode: 200, data: Data(#"{}"#.utf8))
+        }
+    }
+
+    func testPullModelPostsStreamRequestAndStopsAtSuccessLikeRustReporterPath() async throws {
+        var capturedRequest: URLRequest?
+        let client = OllamaClient(hostRoot: "http://ollama.example", usesOpenAICompatibleAPI: false) { request in
+            capturedRequest = request
+            return OllamaHTTPResponse(
+                statusCode: 200,
+                data: Data("""
+                {"status":"pulling manifest"}
+                {"digest":"sha256:abc","total":100,"completed":50}
+                {"status":"success"}
+                {"status":"ignored after success"}
+                """.utf8)
+            )
+        }
+
+        var events: [OllamaPullEvent] = []
+        try await client.pullModel("gpt-oss:20b") { event in
+            events.append(event)
+        }
+
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.url?.path, "/api/pull")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, "gpt-oss:20b")
+        XCTAssertEqual(json["stream"] as? Bool, true)
+        XCTAssertEqual(events, [
+            .status("Pulling model gpt-oss:20b..."),
+            .status("pulling manifest"),
+            .chunkProgress(digest: "sha256:abc", total: 100, completed: 50),
+            .status("success"),
+            .success
+        ])
+    }
+
+    func testPullModelReportsStreamErrorAndUnexpectedEOFLikeRustReporterPath() async throws {
+        let errorClient = OllamaClient(hostRoot: "http://ollama.example", usesOpenAICompatibleAPI: false) { _ in
+            OllamaHTTPResponse(statusCode: 200, data: Data((#"{"error":"model not found"}"# + "\n").utf8))
+        }
+        var errorEvents: [OllamaPullEvent] = []
+        do {
+            try await errorClient.pullModel("missing") { event in
+                errorEvents.append(event)
+            }
+            XCTFail("expected pull stream error")
+        } catch let error as OllamaClientError {
+            XCTAssertEqual(error, .pullFailed("model not found"))
+            XCTAssertEqual(String(describing: error), "Pull failed: model not found")
+        }
+        XCTAssertEqual(errorEvents, [
+            .status("Pulling model missing..."),
+            .error("model not found")
+        ])
+
+        let eofClient = OllamaClient(hostRoot: "http://ollama.example", usesOpenAICompatibleAPI: false) { _ in
+            OllamaHTTPResponse(statusCode: 200, data: Data(#"{"status":"pulling"}"#.utf8))
+        }
+        do {
+            try await eofClient.pullModel("gpt-oss:20b") { _ in }
+            XCTFail("expected unexpected EOF")
+        } catch let error as OllamaClientError {
+            XCTAssertEqual(error, .pullStreamEndedUnexpectedly)
+            XCTAssertEqual(String(describing: error), "Pull stream ended unexpectedly without success.")
+        }
+    }
+
+    func testPullModelStartFailureMatchesRustHTTPError() async throws {
+        let client = OllamaClient(hostRoot: "http://ollama.example", usesOpenAICompatibleAPI: false) { _ in
+            OllamaHTTPResponse(statusCode: 404)
+        }
+
+        do {
+            try await client.pullModel("gpt-oss:20b") { _ in }
+            XCTFail("expected pull start failure")
+        } catch let error as OllamaClientError {
+            XCTAssertEqual(error, .pullStartFailed(statusCode: 404))
+            XCTAssertEqual(String(describing: error), "failed to start pull: HTTP 404")
         }
     }
 }
