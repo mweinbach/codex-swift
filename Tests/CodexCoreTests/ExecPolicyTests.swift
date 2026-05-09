@@ -835,6 +835,55 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkEnumerateAndZip() throws {
+        let policy = try parsePolicy("""
+        TOOLS = ["git", "jj", "npm"]
+        COMMANDS = ["status", "log"]
+        DECISIONS = ["prompt", "allow"]
+        HOSTS = ["api.github.com", "registry.npmjs.org", "ignored.example.com"]
+        PATHS = ["/usr/bin/git", "/usr/bin/jj"]
+
+        for index, pair in enumerate(zip(TOOLS, COMMANDS, DECISIONS), 1):
+            tool, command, decision = pair
+            prefix_rule(
+                [tool, command],
+                decision,
+                match = [f"{tool} {command}"],
+                justification = f"pair {index}",
+            )
+
+        for tool, path in zip(TOOLS, PATHS):
+            host_executable(tool, [path])
+
+        for host, char in zip(HOSTS, "ab"):
+            if char == "a":
+                network_rule(host, "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "pair 1"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "pair 2"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "npm"), [])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "jj": ["/usr/bin/jj"]
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkRangeAndComputedIndexes() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

@@ -806,6 +806,14 @@ public final class PolicyParser {
         constants: inout [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws {
+        if try Self.parseTopLevelDestructuringAssignment(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if let assignment = try Self.parseTopLevelLiteralAssignment(
             statement,
             constants: constants,
@@ -1118,6 +1126,38 @@ public final class PolicyParser {
 
     private static func isStarlarkIdentifierCharacter(_ character: Character) -> Bool {
         character == "_" || character.isLetter || character.isNumber
+    }
+
+    private static func parseTopLevelDestructuringAssignment(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let equalsIndex = topLevelEqualsIndex(in: trimmed)
+        else {
+            return false
+        }
+
+        let targetText = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard targetText.contains(",") ||
+            (targetText.hasPrefix("[") && targetText.hasSuffix("]")) ||
+            (targetText.hasPrefix("(") && targetText.hasSuffix(")"))
+        else {
+            return false
+        }
+
+        let valueStart = trimmed.index(after: equalsIndex)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !valueText.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let targets = try parseStarlarkLoopTargets(targetText, expression: trimmed)
+        let value = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+        try bindStarlarkLoopTargets(targets, to: value, constants: &constants, expression: trimmed)
+        return true
     }
 
     private static func parseTopLevelLiteralAssignment(
@@ -1588,6 +1628,9 @@ public final class PolicyParser {
         if let methodCall = try parseStarlarkStringMethodCall(trimmed, constants: constants, functions: functions) {
             return methodCall
         }
+        if let builtinCall = try parseStarlarkBuiltinFunctionCall(trimmed, constants: constants, functions: functions) {
+            return builtinCall
+        }
         if let functionCall = try parseStarlarkFunctionCall(trimmed, constants: constants, functions: functions) {
             return functionCall
         }
@@ -1739,10 +1782,7 @@ public final class PolicyParser {
                     throw ConfigOverrideError.invalidLiteral(text)
                 }
                 let value = try parsePolicyLiteral(expression, constants: constants, functions: functions)
-                guard case let .string(interpolated) = value else {
-                    throw ConfigOverrideError.invalidLiteral(text)
-                }
-                result.append(interpolated)
+                result.append(try starlarkInterpolatedString(value, expression: text))
                 index = text.index(after: closeIndex)
                 continue
             }
@@ -1760,6 +1800,21 @@ public final class PolicyParser {
         }
 
         return result
+    }
+
+    private static func starlarkInterpolatedString(_ value: ConfigValue, expression: String) throws -> String {
+        switch value {
+        case let .string(value):
+            return value
+        case let .integer(value):
+            return String(value)
+        case let .double(value):
+            return String(value)
+        case let .bool(value):
+            return value ? "True" : "False"
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func matchingFStringExpressionClose(
@@ -2165,6 +2220,110 @@ public final class PolicyParser {
             )
         }
         return try parsePolicyLiteral(function.returnExpression, constants: scopedConstants, functions: functions)
+    }
+
+    private static func parseStarlarkBuiltinFunctionCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name == "enumerate" || name == "zip" else {
+            return nil
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        switch name {
+        case "enumerate":
+            return try parseStarlarkEnumerateCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "zip":
+            return try parseStarlarkZipCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func parseStarlarkEnumerateCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1 || rawArguments.count == 2,
+              let iterableArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let start: Int64
+        if rawArguments.count == 2 {
+            start = Int64(try parseStarlarkInteger(
+                rawArguments[1],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            ))
+        } else {
+            start = 0
+        }
+        let iterable = try parsePolicyLiteral(iterableArgument, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: expression)
+        return .array(items.enumerated().map { offset, item in
+            .array([.integer(start + Int64(offset)), item])
+        })
+    }
+
+    private static func parseStarlarkZipCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard !rawArguments.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let iterables = try rawArguments.map { rawArgument in
+            try starlarkIterableItems(
+                parsePolicyLiteral(rawArgument, constants: constants, functions: functions),
+                expression: expression
+            )
+        }
+        let count = iterables.map(\.count).min() ?? 0
+        return .array((0..<count).map { index in
+            .array(iterables.map { $0[index] })
+        })
+    }
+
+    private static func starlarkIterableItems(_ value: ConfigValue, expression: String) throws -> [ConfigValue] {
+        switch value {
+        case let .array(items):
+            return items
+        case let .string(value):
+            return value.map { .string(String($0)) }
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func matchingTopLevelCallOpen(in text: String) -> String.Index? {

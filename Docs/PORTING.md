@@ -614,7 +614,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark addition expressions
   - Added Swift execpolicy parser support for Starlark string and list `+` expressions in supported policy literals, including constants, builtin arguments, nested patterns, host paths, and examples. Full Starlark evaluation remains a known gap.
 - `codex-rs/execpolicy/src/parser.rs` Starlark f-strings and grouping
-  - Added Swift execpolicy parser support for simple Starlark f-string interpolation of supported string expressions plus parenthesized literal expressions in constants and builtin arguments.
+  - Added Swift execpolicy parser support for simple Starlark f-string interpolation of supported string, integer, floating-point, and boolean expressions plus parenthesized literal expressions in constants and builtin arguments.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list comprehensions and indexing
   - Added Swift execpolicy parser support for simple list comprehensions over supported literal arrays and integer indexing of generated arrays, covering constants and builtin arguments for rules, examples, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark top-level loops
@@ -649,6 +649,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for numeric `*`, `/`, `//`, and `%` expressions, including Starlark-style floor division/modulo for integers and computed range, index, and condition expressions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence repetition
   - Added Swift execpolicy parser support for Starlark string and list repetition with `*`, including left- and right-hand integer counts, empty results for non-positive counts, and use in generated prefix rules, examples, network hosts, and executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark sequence builtins and assignment destructuring
+  - Added Swift execpolicy parser support for `enumerate(...)` and `zip(...)` over supported list/string iterables, including shortest-input zip behavior, enumerate start offsets, loop-target destructuring over generated pairs, and simple destructuring assignments inside supported policy blocks.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
