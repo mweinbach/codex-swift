@@ -8331,6 +8331,13 @@ public enum CodexAppServer {
             return
         }
         do {
+            if try externalChatGPTAuthActive(configuration: configuration) {
+                return
+            }
+        } catch {
+            return
+        }
+        do {
             _ = try runAsyncBlocking {
                 try await CodexAuthStorage.loadFreshTokenData(
                     codexHome: configuration.codexHome,

@@ -5131,6 +5131,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(stored.openAIAPIKey)
     }
 
+    func testAccountReadSkipsRefreshWhenExternalAuthActive() async throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+        let staleDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: accessToken,
+            chatGPTAccountID: "org-embedded",
+            chatGPTPlanType: "pro",
+            now: staleDate
+        )
+        let capture = AppServerRefreshCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            authRefreshTransport: { request in
+                await capture.append(request)
+                return AuthRefreshHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"access_token":"unexpected-access-token","refresh_token":"unexpected-refresh-token"}"#.utf8)
+                )
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/read","params":{"refreshToken":true}}"#,
+            configuration: configuration
+        )
+
+        let accountResult = try XCTUnwrap(response["result"] as? [String: Any])
+        let account = try XCTUnwrap(accountResult["account"] as? [String: Any])
+        XCTAssertEqual(account["type"] as? String, "chatgpt")
+        XCTAssertEqual(account["email"] as? String, "embedded@example.com")
+        XCTAssertEqual(account["planType"] as? String, "pro")
+        let refreshRequests = await capture.requests
+        XCTAssertEqual(refreshRequests.count, 0)
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
+        XCTAssertEqual(stored.tokens?.accessToken, accessToken)
+    }
+
     func testAccountLoginChatGPTAuthTokensHonorsForcedWorkspaceAndForcedAPI() throws {
         let temp = try TemporaryDirectory()
         try """
