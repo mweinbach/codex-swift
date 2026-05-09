@@ -659,25 +659,14 @@ public final class PolicyParser {
 
             if let forLoop = try Self.parseTopLevelForHeader(statement) {
                 let headerIndent = Self.indentationCount(statement)
-                var body: [String] = []
-                var bodyIndex = index + 1
-                while bodyIndex < statements.count {
-                    let candidate = statements[bodyIndex]
-                    if candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        body.append(candidate)
-                        bodyIndex += 1
-                        continue
-                    }
-                    guard Self.indentationCount(candidate) > headerIndent else {
-                        break
-                    }
-                    body.append(candidate)
-                    bodyIndex += 1
-                }
-
-                guard body.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
-                    throw ExecPolicyError.invalidSyntax("\(identifier): for loop body cannot be empty")
-                }
+                let collected = try Self.collectIndentedBlock(
+                    after: index,
+                    in: statements,
+                    parentIndent: headerIndent,
+                    identifier: identifier,
+                    blockName: "for loop"
+                )
+                let body = collected.body
 
                 let iterable = try Self.parsePolicyLiteral(forLoop.iterableText, constants: constants)
                 guard case let .array(items) = iterable else {
@@ -690,7 +679,41 @@ public final class PolicyParser {
                     try parseStatements(body, identifier: identifier, constants: &loopConstants)
                 }
                 constants = loopConstants
-                index = bodyIndex
+                index = collected.nextIndex
+                continue
+            }
+
+            if let condition = try Self.parseTopLevelIfHeader(statement) {
+                let headerIndent = Self.indentationCount(statement)
+                let thenBlock = try Self.collectIndentedBlock(
+                    after: index,
+                    in: statements,
+                    parentIndent: headerIndent,
+                    identifier: identifier,
+                    blockName: "if block"
+                )
+                var nextIndex = thenBlock.nextIndex
+                var elseBody: [String] = []
+                if nextIndex < statements.count,
+                   Self.indentationCount(statements[nextIndex]) == headerIndent,
+                   Self.isTopLevelElseHeader(statements[nextIndex]) {
+                    let elseBlock = try Self.collectIndentedBlock(
+                        after: nextIndex,
+                        in: statements,
+                        parentIndent: headerIndent,
+                        identifier: identifier,
+                        blockName: "else block"
+                    )
+                    elseBody = elseBlock.body
+                    nextIndex = elseBlock.nextIndex
+                }
+
+                if try Self.evaluateStarlarkCondition(condition, constants: constants) {
+                    try parseStatements(thenBlock.body, identifier: identifier, constants: &constants)
+                } else if !elseBody.isEmpty {
+                    try parseStatements(elseBody, identifier: identifier, constants: &constants)
+                }
+                index = nextIndex
                 continue
             }
 
@@ -1053,6 +1076,56 @@ public final class PolicyParser {
         return (variable, iterableText)
     }
 
+    private static func parseTopLevelIfHeader(_ statement: String) throws -> String? {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(":"),
+              let ifRange = topLevelKeywordRange("if", in: trimmed),
+              ifRange.lowerBound == trimmed.startIndex
+        else {
+            return nil
+        }
+        let conditionEnd = trimmed.index(before: trimmed.endIndex)
+        let condition = String(trimmed[ifRange.upperBound..<conditionEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !condition.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        return condition
+    }
+
+    private static func isTopLevelElseHeader(_ statement: String) -> Bool {
+        statement.trimmingCharacters(in: .whitespacesAndNewlines) == "else:"
+    }
+
+    private static func collectIndentedBlock(
+        after headerIndex: Int,
+        in statements: [String],
+        parentIndent: Int,
+        identifier: String,
+        blockName: String
+    ) throws -> (body: [String], nextIndex: Int) {
+        var body: [String] = []
+        var index = headerIndex + 1
+        while index < statements.count {
+            let candidate = statements[index]
+            if candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                body.append(candidate)
+                index += 1
+                continue
+            }
+            guard indentationCount(candidate) > parentIndent else {
+                break
+            }
+            body.append(candidate)
+            index += 1
+        }
+
+        guard body.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw ExecPolicyError.invalidSyntax("\(identifier): \(blockName) body cannot be empty")
+        }
+        return (body, index)
+    }
+
     private static func indentationCount(_ statement: String) -> Int {
         var count = 0
         for character in statement {
@@ -1249,6 +1322,12 @@ public final class PolicyParser {
         constants: [String: ConfigValue] = [:]
     ) throws -> ConfigValue {
         let trimmed = strippingEnclosingParentheses(from: valueText.trimmingCharacters(in: .whitespacesAndNewlines))
+        if trimmed == "True" {
+            return .bool(true)
+        }
+        if trimmed == "False" {
+            return .bool(false)
+        }
         let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         if additivePieces.count > 1 {
@@ -1580,6 +1659,23 @@ public final class PolicyParser {
         in text: String,
         startingAt start: String.Index? = nil
     ) -> Range<String.Index>? {
+        topLevelTokenRange(keyword, in: text, startingAt: start, requiresIdentifierBoundaries: true)
+    }
+
+    private static func topLevelOperatorRange(
+        _ operatorText: String,
+        in text: String,
+        startingAt start: String.Index? = nil
+    ) -> Range<String.Index>? {
+        topLevelTokenRange(operatorText, in: text, startingAt: start, requiresIdentifierBoundaries: false)
+    }
+
+    private static func topLevelTokenRange(
+        _ token: String,
+        in text: String,
+        startingAt start: String.Index? = nil,
+        requiresIdentifierBoundaries: Bool
+    ) -> Range<String.Index>? {
         var squareDepth = 0
         var parenDepth = 0
         var quote: Character?
@@ -1617,10 +1713,10 @@ public final class PolicyParser {
 
             if squareDepth == 0,
                parenDepth == 0,
-               text[index...].hasPrefix(keyword) {
-                let end = text.index(index, offsetBy: keyword.count)
-                if isIdentifierBoundaryBefore(index, in: text),
-                   isIdentifierBoundaryAfter(end, in: text) {
+               text[index...].hasPrefix(token) {
+                let end = text.index(index, offsetBy: token.count)
+                if !requiresIdentifierBoundaries ||
+                    (isIdentifierBoundaryBefore(index, in: text) && isIdentifierBoundaryAfter(end, in: text)) {
                     return index..<end
                 }
             }
@@ -1629,6 +1725,59 @@ public final class PolicyParser {
         }
 
         return nil
+    }
+
+    private static func evaluateStarlarkCondition(
+        _ condition: String,
+        constants: [String: ConfigValue]
+    ) throws -> Bool {
+        let trimmed = strippingEnclosingParentheses(from: condition.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let notRange = topLevelKeywordRange("not", in: trimmed),
+           notRange.lowerBound == trimmed.startIndex {
+            let operand = String(trimmed[notRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !operand.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(condition)
+            }
+            return try !evaluateStarlarkCondition(operand, constants: constants)
+        }
+
+        if let range = topLevelOperatorRange("==", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            return lhs == rhs
+        }
+        if let range = topLevelOperatorRange("!=", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            return lhs != rhs
+        }
+        if let range = topLevelKeywordRange("in", in: trimmed) {
+            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
+            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            guard case let .array(items) = haystack else {
+                throw ConfigOverrideError.invalidLiteral(condition)
+            }
+            return items.contains(needle)
+        }
+
+        return try truthy(parsePolicyLiteral(trimmed, constants: constants))
+    }
+
+    private static func truthy(_ value: ConfigValue) -> Bool {
+        switch value {
+        case let .bool(value):
+            return value
+        case let .string(value):
+            return !value.isEmpty
+        case let .array(items):
+            return !items.isEmpty
+        case let .table(items):
+            return !items.isEmpty
+        case let .integer(value):
+            return value != 0
+        case let .double(value):
+            return value != 0
+        }
     }
 
     private static func evaluateStarlarkAddition(

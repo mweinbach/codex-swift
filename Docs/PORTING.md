@@ -619,6 +619,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for simple list comprehensions over supported literal arrays and integer indexing of generated arrays, covering constants and builtin arguments for rules, examples, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark top-level loops
   - Added Swift execpolicy parser support for simple top-level `for name in values:` blocks over supported literal arrays, including generated prefix/network/host-executable rules, loop-scoped assignments, and last-loop-value visibility that matches Starlark module execution for subsequent supported policy statements.
+- `codex-rs/execpolicy/src/parser.rs` Starlark top-level conditionals
+  - Added Swift execpolicy parser support for simple top-level `if`/`else` blocks with Starlark `True`/`False`, truthiness, `not`, equality/inequality, and membership conditions over supported policy literals.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
