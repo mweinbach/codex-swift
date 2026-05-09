@@ -4539,6 +4539,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.map(turnUserText), ["second", "first"])
     }
 
+    func testThreadRollbackRejectsNonU32NumTurnsLikeRustParams() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+
+        let zero = try appServerResponse(
+            #"{"id":1,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":0}}"#,
+            codexHome: temp.url
+        )
+        let zeroError = try XCTUnwrap(zero["error"] as? [String: Any])
+        XCTAssertEqual(zeroError["code"] as? Int, -32600)
+        XCTAssertEqual(zeroError["message"] as? String, "numTurns must be >= 1")
+
+        for (id, value) in [(2, "true"), (3, "1.5")] {
+            let response = try appServerResponse(
+                #"{"id":\#(id),"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":\#(value)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "numTurns must be an integer")
+        }
+    }
+
     func testThreadTurnsListSupportsItemsViewAndUnsupportedItemsHydration() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

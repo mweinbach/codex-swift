@@ -417,7 +417,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread metadata updates
   - `thread/metadata/update` now patches persisted rollout `gitInfo` with Rust double-option semantics: omitted fields are preserved, explicit `null` clears fields, replacement strings are trimmed and cannot be empty, all-empty patches are rejected, and updated thread/read responses project the new Git metadata.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread rollback markers
-  - `thread/rollback` now validates rollout-backed thread ids and positive `numTurns`, persists Rust-shaped `thread_rolled_back` event markers, returns the pruned thread, and applies persisted rollback markers while rebuilding thread turns.
+  - `thread/rollback` now validates rollout-backed thread ids and Rust-style positive integer `numTurns`, persists Rust-shaped `thread_rolled_back` event markers, returns the pruned thread, and applies persisted rollback markers while rebuilding thread turns.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` manual compaction, shell command, and Guardian approval routes
   - `thread/compact/start`, `thread/shellCommand`, and `thread/approveGuardianDeniedAction` now validate materialized thread ids, preserve the shell-command empty-string rejection, decode Guardian denial events before thread lookup, and return Rust's empty response object for accepted rollout-backed threads. Live core-op submission and progress notifications remain pending with the broader running-thread runtime.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` background terminal cleanup

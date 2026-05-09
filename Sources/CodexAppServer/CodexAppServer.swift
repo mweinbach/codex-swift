@@ -1051,9 +1051,16 @@ public enum CodexAppServer {
         guard let numTurnsNumber = params?["numTurns"] as? NSNumber else {
             throw AppServerError.invalidRequest("missing numTurns")
         }
+        guard CFGetTypeID(numTurnsNumber) != CFBooleanGetTypeID() else {
+            throw AppServerError.invalidRequest("numTurns must be an integer")
+        }
+        let numberType = String(cString: numTurnsNumber.objCType)
+        guard ["c", "i", "s", "l", "q", "C", "I", "S", "L", "Q"].contains(numberType) else {
+            throw AppServerError.invalidRequest("numTurns must be an integer")
+        }
         let rawNumTurns = numTurnsNumber.int64Value
         guard rawNumTurns > 0 && rawNumTurns <= Int64(UInt32.max) else {
-            throw AppServerError.invalidRequest("numTurns must be at least 1")
+            throw AppServerError.invalidRequest("numTurns must be >= 1")
         }
         let numTurns = UInt32(rawNumTurns)
 
