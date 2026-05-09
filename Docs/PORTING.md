@@ -473,6 +473,8 @@ Source baseline inspected for this scaffold:
   - Requirements TOML now parses top-level `[mcp_servers.<name>.identity]` command/url identities plus `[plugins."<plugin_id>".mcp_servers.<name>.identity]` command/url identities, carries them through `ConfigRequirements`, and preserves Rust's first-source-wins merge behavior.
 - `codex-rs/config/src/config_requirements.rs` approvals reviewer and Guardian policy requirements
   - `allowed_approvals_reviewers` now constrains Swift `ConfigRequirements.approvalsReviewer` with Rust's initial-value, empty-list, alias, and debug-string behavior; `guardian_policy_config` now parses, treats whitespace-only values as empty, and does not block lower-precedence nonblank managed requirements during merge.
+- `codex-rs/config/src/requirements_exec_policy.rs` managed exec-policy requirements
+  - Requirements TOML now parses `[rules] prefix_rules = [...]`, converts TOML-friendly `token` / `any_of` pattern entries into Swift `ExecPolicy` prefix rules, rejects empty/malformed patterns, empty justifications, missing decisions, and disallowed `allow` decisions with Rust-shaped messages, and preserves first-source-wins merge behavior.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements network field
   - `configRequirements/read` now parses `experimental_network`, including canonical `domains`/`unix_sockets`, legacy `allowed_domains`/`denied_domains`/`allow_unix_sockets`, Rust's legacy/canonical conflict checks, and the camelCase API object with legacy compatibility views.
 - `codex-rs/config/src/config_requirements.rs` filesystem permissions requirements

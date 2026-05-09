@@ -496,6 +496,104 @@ final class ConfigRequirementsTests: XCTestCase {
         ])
     }
 
+    func testDeserializeRequirementsExecPolicyRules() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "rm" }], decision = "forbidden" }, { pattern = [{ any_of = ["npm", "pnpm"] }, { token = "publish" }], decision = "prompt", justification = "publishing packages" }]
+        """)
+
+        XCTAssertEqual(config.rules, RequirementsExecPolicyToml(prefixRules: [
+            RequirementsExecPolicyPrefixRuleToml(
+                pattern: [RequirementsExecPolicyPatternTokenToml(token: "rm")],
+                decision: .forbidden
+            ),
+            RequirementsExecPolicyPrefixRuleToml(
+                pattern: [
+                    RequirementsExecPolicyPatternTokenToml(anyOf: ["npm", "pnpm"]),
+                    RequirementsExecPolicyPatternTokenToml(token: "publish")
+                ],
+                decision: .prompt,
+                justification: "publishing packages"
+            )
+        ]))
+        XCTAssertFalse(config.isEmpty)
+
+        let policy = try XCTUnwrap(try config.requirements().execPolicy)
+        XCTAssertEqual(
+            policy.check(["rm", "-rf"], heuristicsFallback: { _ in .allow }),
+            PolicyEvaluation(
+                decision: .forbidden,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: ["rm"], decision: .forbidden)]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(["pnpm", "publish", "--dry-run"], heuristicsFallback: { _ in .allow }),
+            PolicyEvaluation(
+                decision: .prompt,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: ["pnpm", "publish"],
+                    decision: .prompt,
+                    justification: "publishing packages"
+                )]
+            )
+        )
+    }
+
+    func testRequirementsExecPolicyRejectsRustInvalidShapes() throws {
+        let missingDecision = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "rm" }] }]
+        """)
+        XCTAssertThrowsError(try missingDecision.requirements()) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidRequirementsExecPolicy(reason: "rules prefix_rule at index 0 is missing a decision")
+            )
+        }
+
+        let allowDecision = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "ls" }], decision = "allow" }]
+        """)
+        XCTAssertThrowsError(try allowDecision.requirements()) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidRequirementsExecPolicy(reason: "rules prefix_rule at index 0 has decision 'allow', which is not permitted in requirements.toml: Codex merges these rules with other config and uses the most restrictive result (use 'prompt' or 'forbidden')")
+            )
+        }
+
+        let bothTokenForms = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "npm", any_of = ["pnpm"] }], decision = "prompt" }]
+        """)
+        XCTAssertThrowsError(try bothTokenForms.requirements()) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index 0 has an invalid pattern token at index 0: set either token or any_of, not both"
+                )
+            )
+        }
+    }
+
+    func testMergeUnsetFieldsPreservesHigherPrecedenceRequirementsExecPolicy() throws {
+        var merged = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "rm" }], decision = "forbidden" }]
+        """)
+        let lower = try ConfigRequirementsToml.parse("""
+        [rules]
+        prefix_rules = [{ pattern = [{ token = "git" }, { token = "push" }], decision = "prompt" }]
+        """)
+
+        merged.mergeUnsetFields(from: lower)
+        XCTAssertEqual(merged.rules?.prefixRules.first?.pattern.first?.token, "rm")
+
+        var empty = ConfigRequirementsToml()
+        empty.mergeUnsetFields(from: lower)
+        XCTAssertEqual(empty.rules, lower.rules)
+    }
+
     func testDeserializeFilesystemDenyReadRequirements() throws {
         let config = try ConfigRequirementsToml.parse("""
         [permissions.filesystem]

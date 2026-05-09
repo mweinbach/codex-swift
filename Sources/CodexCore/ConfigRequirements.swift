@@ -54,6 +54,7 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var managedHooks: ManagedHooksRequirement?
     public var mcpServers: [String: McpServerRequirement]?
     public var plugins: [String: PluginRequirementsToml]?
+    public var execPolicy: ExecPolicy?
     public var filesystem: FilesystemConstraints?
 
     public init(
@@ -63,6 +64,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         managedHooks: ManagedHooksRequirement? = nil,
         mcpServers: [String: McpServerRequirement]? = nil,
         plugins: [String: PluginRequirementsToml]? = nil,
+        execPolicy: ExecPolicy? = nil,
         filesystem: FilesystemConstraints? = nil
     ) {
         self.approvalPolicy = approvalPolicy
@@ -71,6 +73,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         self.managedHooks = managedHooks
         self.mcpServers = mcpServers
         self.plugins = plugins
+        self.execPolicy = execPolicy
         self.filesystem = filesystem
     }
 
@@ -164,6 +167,128 @@ public struct PluginRequirementsToml: Equatable, Sendable {
 
     public var isEmpty: Bool {
         mcpServers?.isEmpty ?? true
+    }
+}
+
+public struct RequirementsExecPolicyToml: Equatable, Sendable {
+    public var prefixRules: [RequirementsExecPolicyPrefixRuleToml]
+
+    public init(prefixRules: [RequirementsExecPolicyPrefixRuleToml] = []) {
+        self.prefixRules = prefixRules
+    }
+
+    public func toPolicy() throws -> ExecPolicy {
+        guard !prefixRules.isEmpty else {
+            throw ConstraintError.invalidRequirementsExecPolicy(reason: "rules prefix_rules cannot be empty")
+        }
+
+        var rulesByProgram: [String: [PrefixRule]] = [:]
+        for (ruleIndex, rule) in prefixRules.enumerated() {
+            if let justification = rule.justification,
+               justification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                throw ConstraintError.invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index \(ruleIndex) has an empty justification"
+                )
+            }
+            guard !rule.pattern.isEmpty else {
+                throw ConstraintError.invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index \(ruleIndex) has an empty pattern"
+                )
+            }
+
+            let patternTokens = try rule.pattern.enumerated().map { tokenIndex, token in
+                try token.patternToken(ruleIndex: ruleIndex, tokenIndex: tokenIndex)
+            }
+            let decision: ExecPolicyDecision
+            switch rule.decision {
+            case .some(.allow):
+                throw ConstraintError.invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index \(ruleIndex) has decision 'allow', which is not permitted in requirements.toml: Codex merges these rules with other config and uses the most restrictive result (use 'prompt' or 'forbidden')"
+                )
+            case .some(.prompt):
+                decision = .prompt
+            case .some(.forbidden):
+                decision = .forbidden
+            case .none:
+                throw ConstraintError.invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index \(ruleIndex) is missing a decision"
+                )
+            }
+
+            guard let firstToken = patternTokens.first else {
+                throw ConstraintError.invalidRequirementsExecPolicy(
+                    reason: "rules prefix_rule at index \(ruleIndex) has an empty pattern"
+                )
+            }
+            let rest = Array(patternTokens.dropFirst())
+            for head in firstToken.alternatives {
+                rulesByProgram[head, default: []].append(PrefixRule(
+                    pattern: PrefixPattern(first: head, rest: rest),
+                    decision: decision,
+                    justification: rule.justification
+                ))
+            }
+        }
+        return ExecPolicy(rulesByProgram: rulesByProgram)
+    }
+}
+
+public struct RequirementsExecPolicyPrefixRuleToml: Equatable, Sendable {
+    public var pattern: [RequirementsExecPolicyPatternTokenToml]
+    public var decision: ExecPolicyDecision?
+    public var justification: String?
+
+    public init(
+        pattern: [RequirementsExecPolicyPatternTokenToml] = [],
+        decision: ExecPolicyDecision? = nil,
+        justification: String? = nil
+    ) {
+        self.pattern = pattern
+        self.decision = decision
+        self.justification = justification
+    }
+}
+
+public struct RequirementsExecPolicyPatternTokenToml: Equatable, Sendable {
+    public var token: String?
+    public var anyOf: [String]?
+
+    public init(token: String? = nil, anyOf: [String]? = nil) {
+        self.token = token
+        self.anyOf = anyOf
+    }
+
+    fileprivate func patternToken(ruleIndex: Int, tokenIndex: Int) throws -> PatternToken {
+        switch (token, anyOf) {
+        case let (single?, nil):
+            guard !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw invalidPatternToken(ruleIndex: ruleIndex, tokenIndex: tokenIndex, reason: "token cannot be empty")
+            }
+            return .single(single)
+        case let (nil, alternatives?):
+            guard !alternatives.isEmpty else {
+                throw invalidPatternToken(ruleIndex: ruleIndex, tokenIndex: tokenIndex, reason: "any_of cannot be empty")
+            }
+            guard !alternatives.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+                throw invalidPatternToken(
+                    ruleIndex: ruleIndex,
+                    tokenIndex: tokenIndex,
+                    reason: "any_of cannot include empty tokens"
+                )
+            }
+            return .alts(alternatives)
+        case (.some, .some):
+            throw invalidPatternToken(ruleIndex: ruleIndex, tokenIndex: tokenIndex, reason: "set either token or any_of, not both")
+        case (nil, nil):
+            throw invalidPatternToken(ruleIndex: ruleIndex, tokenIndex: tokenIndex, reason: "set either token or any_of")
+        }
+    }
+
+    private func invalidPatternToken(ruleIndex: Int, tokenIndex: Int, reason: String) -> ConstraintError {
+        .invalidRequirementsExecPolicy(
+            reason: "rules prefix_rule at index \(ruleIndex) has an invalid pattern token at index \(tokenIndex): \(reason)"
+        )
     }
 }
 
@@ -358,6 +483,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var mcpServers: [String: McpServerRequirement]?
     public var plugins: [String: PluginRequirementsToml]?
     public var apps: AppsRequirementsToml?
+    public var rules: RequirementsExecPolicyToml?
     public var enforceResidency: ResidencyRequirement?
     public var network: NetworkRequirementsToml?
     public var permissions: PermissionsRequirementsToml?
@@ -376,6 +502,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         mcpServers: [String: McpServerRequirement]? = nil,
         plugins: [String: PluginRequirementsToml]? = nil,
         apps: AppsRequirementsToml? = nil,
+        rules: RequirementsExecPolicyToml? = nil,
         enforceResidency: ResidencyRequirement? = nil,
         network: NetworkRequirementsToml? = nil,
         permissions: PermissionsRequirementsToml? = nil,
@@ -393,6 +520,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.mcpServers = mcpServers
         self.plugins = plugins
         self.apps = apps
+        self.rules = rules
         self.enforceResidency = enforceResidency
         self.network = network
         self.permissions = permissions
@@ -410,6 +538,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             mcpServers == nil &&
             (plugins?.values.allSatisfy(\.isEmpty) ?? true) &&
             (apps?.isEmpty ?? true) &&
+            rules == nil &&
             enforceResidency == nil &&
             network == nil &&
             (permissions?.isEmpty ?? true) &&
@@ -457,6 +586,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             }
         } else if let lowerPrecedenceApps = other.apps {
             apps = lowerPrecedenceApps.isEmpty ? nil : lowerPrecedenceApps
+        }
+        if rules == nil, let value = other.rules {
+            rules = value
         }
         if enforceResidency == nil, let value = other.enforceResidency {
             enforceResidency = value
@@ -528,6 +660,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             sandboxPolicy = .allowAny(defaultSandboxPolicy)
         }
 
+        let execPolicy = try rules?.toPolicy()
         let managedHooks = hooks.flatMap { hooks -> ManagedHooksRequirement? in
             guard hooks.hookHandlerCount > 0 else {
                 return nil
@@ -546,6 +679,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             managedHooks: managedHooks,
             mcpServers: mcpServers,
             plugins: plugins,
+            execPolicy: execPolicy,
             filesystem: permissions?.filesystem.map { FilesystemConstraints(denyRead: $0.denyRead ?? []) }
         )
     }
@@ -585,6 +719,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let appsValue = table["apps"] {
             result.apps = try parseAppsRequirements(appsValue)
+        }
+        if let rulesValue = table["rules"] {
+            result.rules = try parseRequirementsExecPolicy(rulesValue)
         }
         if let residencyValue = table["enforce_residency"] {
             result.enforceResidency = try parseResidencyRequirement(residencyValue)
@@ -791,6 +928,83 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             plugins[pluginID] = PluginRequirementsToml(mcpServers: mcpServers)
         }
         return plugins
+    }
+
+    private static func parseRequirementsExecPolicy(_ value: ConfigValue) throws -> RequirementsExecPolicyToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine("rules")
+        }
+        guard let prefixRulesValue = table["prefix_rules"] else {
+            return RequirementsExecPolicyToml()
+        }
+        guard case let .array(ruleValues) = prefixRulesValue else {
+            throw ConfigRequirementsParseError.invalidLine("rules.prefix_rules")
+        }
+        let prefixRules = try ruleValues.enumerated().map { ruleIndex, ruleValue in
+            try parseRequirementsPrefixRule(ruleValue, ruleIndex: ruleIndex)
+        }
+        return RequirementsExecPolicyToml(prefixRules: prefixRules)
+    }
+
+    private static func parseRequirementsPrefixRule(
+        _ value: ConfigValue,
+        ruleIndex: Int
+    ) throws -> RequirementsExecPolicyPrefixRuleToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine("rules.prefix_rules[\(ruleIndex)]")
+        }
+        let pattern = try table["pattern"].map { value in
+            try parseRequirementsPattern(value, ruleIndex: ruleIndex)
+        } ?? []
+        let decision = try table["decision"].map(parseRequirementsDecision)
+        let justification = try table["justification"].map {
+            try stringValue($0, key: "rules.prefix_rules[\(ruleIndex)].justification")
+        }
+        return RequirementsExecPolicyPrefixRuleToml(
+            pattern: pattern,
+            decision: decision,
+            justification: justification
+        )
+    }
+
+    private static func parseRequirementsPattern(
+        _ value: ConfigValue,
+        ruleIndex: Int
+    ) throws -> [RequirementsExecPolicyPatternTokenToml] {
+        guard case let .array(tokenValues) = value else {
+            throw ConfigRequirementsParseError.invalidLine("rules.prefix_rules[\(ruleIndex)].pattern")
+        }
+        return try tokenValues.enumerated().map { tokenIndex, tokenValue in
+            try parseRequirementsPatternToken(tokenValue, ruleIndex: ruleIndex, tokenIndex: tokenIndex)
+        }
+    }
+
+    private static func parseRequirementsPatternToken(
+        _ value: ConfigValue,
+        ruleIndex: Int,
+        tokenIndex: Int
+    ) throws -> RequirementsExecPolicyPatternTokenToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine(
+                "rules.prefix_rules[\(ruleIndex)].pattern[\(tokenIndex)]"
+            )
+        }
+        let token = try table["token"].map {
+            try stringValue($0, key: "rules.prefix_rules[\(ruleIndex)].pattern[\(tokenIndex)].token")
+        }
+        let anyOf = try table["any_of"].map {
+            try stringArray($0, key: "rules.prefix_rules[\(ruleIndex)].pattern[\(tokenIndex)].any_of")
+        }
+        return RequirementsExecPolicyPatternTokenToml(token: token, anyOf: anyOf)
+    }
+
+    private static func parseRequirementsDecision(_ value: ConfigValue) throws -> ExecPolicyDecision {
+        guard case let .string(rawValue) = value,
+              let decision = ExecPolicyDecision(rawValue: rawValue)
+        else {
+            throw ConfigRequirementsParseError.invalidLine("rules.prefix_rules.decision")
+        }
+        return decision
     }
 
     private static func parseMcpServerRequirements(

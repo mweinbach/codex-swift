@@ -3,6 +3,7 @@ import Foundation
 public enum ConstraintError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidValue(candidate: String, allowed: String)
     case emptyField(fieldName: String)
+    case invalidRequirementsExecPolicy(reason: String)
 
     public static func invalidValue(_ candidate: some StringProtocol, _ allowed: some StringProtocol) -> ConstraintError {
         .invalidValue(candidate: String(candidate), allowed: String(allowed))
@@ -18,6 +19,8 @@ public enum ConstraintError: Error, Equatable, CustomStringConvertible, Sendable
             return "value `\(candidate)` is not in the allowed set \(allowed)"
         case let .emptyField(fieldName):
             return "field `\(fieldName)` cannot be empty"
+        case let .invalidRequirementsExecPolicy(reason):
+            return "invalid rules in requirements: \(reason)"
         }
     }
 }
