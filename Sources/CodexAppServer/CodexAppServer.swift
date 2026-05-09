@@ -2035,6 +2035,16 @@ public enum CodexAppServer {
         let source = summary["source"] as? [String: Any]
         let sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
         let manifest = sourcePath.map(localPluginManifest(root:)) ?? (interface: NSNull(), keywords: [], description: nil)
+        let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config) } ?? []
+        let hooks = sourcePath.map {
+            localPluginHooks(
+                root: $0,
+                pluginID: "\(pluginName)@\(marketplaceName)",
+                enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: false)
+            )
+        } ?? []
+        let apps = sourcePath.map(localPluginApps(root:)) ?? []
+        let mcpServers = sourcePath.map(localPluginMcpServerNames(root:)) ?? []
 
         return [
             "plugin": [
@@ -2042,10 +2052,10 @@ public enum CodexAppServer {
                 "marketplacePath": marketplacePath,
                 "summary": summary,
                 "description": manifest.description ?? NSNull(),
-                "skills": [],
-                "hooks": [],
-                "apps": [],
-                "mcpServers": []
+                "skills": skills,
+                "hooks": hooks,
+                "apps": apps,
+                "mcpServers": mcpServers
             ].nullStripped(keepNulls: true)
         ]
     }
@@ -2094,6 +2104,116 @@ public enum CodexAppServer {
             keywords,
             object["description"] as? String
         )
+    }
+
+    private static func localPluginSkills(root: URL, pluginName: String, config: ConfigValue) -> [[String: Any]] {
+        let skillsRoot = root.appendingPathComponent("skills", isDirectory: true)
+        var outcome = SkillLoadOutcome()
+        discoverSkills(root: skillsRoot, scope: .user, outcome: &outcome)
+        let rules = skillConfigRules(from: config)
+        return outcome.skills.sorted {
+            if $0.name != $1.name {
+                return $0.name < $1.name
+            }
+            return $0.path < $1.path
+        }.map { skill in
+            [
+                "name": "\(pluginName):\(skill.name)",
+                "description": skill.description,
+                "shortDescription": nullable(skill.shortDescription),
+                "interface": NSNull(),
+                "path": skill.path,
+                "enabled": isSkillEnabled(skill, rules: rules)
+            ].nullStripped(keepNulls: true)
+        }
+    }
+
+    private static func localPluginHooks(root: URL, pluginID: String, enabled: Bool) -> [[String: Any]] {
+        guard enabled else {
+            return []
+        }
+        let hooksPath = root.appendingPathComponent("hooks/hooks.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: hooksPath),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hooks = object["hooks"] as? [String: Any]
+        else {
+            return []
+        }
+        var summaries: [[String: Any]] = []
+        for (eventKey, value) in hooks {
+            guard let eventName = localPluginHookEventName(eventKey),
+                  let groups = value as? [[String: Any]]
+            else {
+                continue
+            }
+            for (groupIndex, group) in groups.enumerated() {
+                let handlers = group["hooks"] as? [[String: Any]] ?? []
+                for handlerIndex in handlers.indices {
+                    summaries.append([
+                        "key": "\(pluginID):hooks/hooks.json:\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
+                        "eventName": appServerHookEventName(eventName)
+                    ])
+                }
+            }
+        }
+        summaries.sort {
+            ($0["key"] as? String ?? "") < ($1["key"] as? String ?? "")
+        }
+        return summaries
+    }
+
+    private static func localPluginHookEventName(_ raw: String) -> HookEventName? {
+        if let eventName = hookEventName(configLabel: raw) {
+            return eventName
+        }
+        return HookEventName.allCases.first { $0.rawValue == raw }
+    }
+
+    private static func localPluginApps(root: URL) -> [[String: Any]] {
+        let appPath = root.appendingPathComponent(".app.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: appPath),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let apps = object["apps"] as? [String: Any]
+        else {
+            return []
+        }
+        return apps.values.compactMap { value -> [String: Any]? in
+            guard let app = value as? [String: Any],
+                  let id = app["id"] as? String,
+                  !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                return nil
+            }
+            return [
+                "id": id,
+                "name": app["name"] as? String ?? id,
+                "description": nullable(app["description"] as? String),
+                "installUrl": nullable(app["installUrl"] as? String ?? app["installURL"] as? String),
+                "needsAuth": false
+            ].nullStripped(keepNulls: true)
+        }.sorted {
+            ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+        }
+    }
+
+    private static func localPluginMcpServerNames(root: URL) -> [String] {
+        let mcpPath = root.appendingPathComponent(".mcp.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: mcpPath),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let servers = object["mcpServers"] as? [String: Any]
+        else {
+            return []
+        }
+        return Array(Set(servers.keys)).sorted()
+    }
+
+    private static func configFeatureEnabled(_ key: String, in config: ConfigValue, defaultValue: Bool) -> Bool {
+        guard let root = configTable(config),
+              let features = root["features"].flatMap(configTable)
+        else {
+            return defaultValue
+        }
+        return boolConfig(features, key) ?? defaultValue
     }
 
     private static func marketplaceInterfaceObject(_ value: Any?) -> Any {

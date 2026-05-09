@@ -1827,6 +1827,9 @@ final class CodexAppServerTests: XCTestCase {
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
         let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
         try """
+        [features]
+        plugin_hooks = true
+
         [plugins."weather@debug"]
         enabled = true
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
@@ -1840,10 +1843,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(plugin["marketplaceName"] as? String, "debug")
         XCTAssertEqual(plugin["marketplacePath"] as? String, marketplacePath)
         XCTAssertEqual(plugin["description"] as? String, "Reads local weather")
-        XCTAssertEqual((plugin["skills"] as? [Any])?.count, 0)
-        XCTAssertEqual((plugin["hooks"] as? [Any])?.count, 0)
-        XCTAssertEqual((plugin["apps"] as? [Any])?.count, 0)
-        XCTAssertEqual((plugin["mcpServers"] as? [Any])?.count, 0)
+
+        let skills = try XCTUnwrap(plugin["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.count, 1)
+        XCTAssertEqual(skills[0]["name"] as? String, "weather:forecast")
+        XCTAssertEqual(skills[0]["description"] as? String, "forecast local weather")
+        XCTAssertEqual(skills[0]["enabled"] as? Bool, true)
+        XCTAssertTrue(skills[0]["interface"] is NSNull)
+        XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/skills/forecast/SKILL.md") == true)
+
+        let hooks = try XCTUnwrap(plugin["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, "weather@debug:hooks/hooks.json:session_start:0:0")
+        XCTAssertEqual(hooks[0]["eventName"] as? String, "sessionStart")
+
+        let apps = try XCTUnwrap(plugin["apps"] as? [[String: Any]])
+        XCTAssertEqual(apps.count, 1)
+        XCTAssertEqual(apps[0]["id"] as? String, "connector_weather")
+        XCTAssertEqual(apps[0]["name"] as? String, "Weather")
+        XCTAssertEqual(apps[0]["needsAuth"] as? Bool, false)
+
+        XCTAssertEqual(plugin["mcpServers"] as? [String], ["weather"])
 
         let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
         XCTAssertEqual(summary["id"] as? String, "weather@debug")
@@ -5065,6 +5085,68 @@ final class CodexAppServerTests: XCTestCase {
         }
         """.write(
             to: pluginManifestDirectory.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let pluginRoot = root.appendingPathComponent("plugins/\(pluginName)", isDirectory: true)
+        let skillDirectory = pluginRoot.appendingPathComponent("skills/forecast", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        try """
+        ---
+        name: forecast
+        description: forecast local weather
+        ---
+        """.write(
+            to: skillDirectory.appendingPathComponent("SKILL.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "apps": {
+            "weather": {
+              "id": "connector_weather",
+              "name": "Weather"
+            }
+          }
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".app.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "mcpServers": {
+            "weather": {
+              "command": "weather-mcp"
+            }
+          }
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".mcp.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let hookDirectory = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hookDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "hooks": {
+            "SessionStart": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "echo startup"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(
+            to: hookDirectory.appendingPathComponent("hooks.json", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )
