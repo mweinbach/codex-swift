@@ -754,6 +754,21 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testBlockingAppendAllowPrefixRuleDedupesExistingRuleLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let policyPath = ExecPolicyManager.defaultPolicyPath(codexHome: tempDir.url)
+        let prefix = tokens("python3")
+
+        try ExecPolicyManager.blockingAppendAllowPrefixRule(policyPath: policyPath, prefix: prefix)
+        try ExecPolicyManager.blockingAppendAllowPrefixRule(policyPath: policyPath, prefix: prefix)
+
+        let contents = try String(contentsOf: policyPath, encoding: .utf8)
+        XCTAssertEqual(
+            contents,
+            #"prefix_rule(pattern=["python3"], decision="allow")"# + "\n"
+        )
+    }
+
     func testAppendExecPolicyAmendmentRejectsEmptyPrefix() throws {
         let tempDir = try CoreTemporaryDirectory()
         XCTAssertThrowsError(try ExecPolicyManager().appendAmendmentAndUpdate(

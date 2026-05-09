@@ -594,7 +594,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/rollout/src/policy.rs` event persistence modes
   - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image/guardian-assessment/dynamic-tool events, and the stricter memories response-item persistence bucket.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
-  - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
+  - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, compiled allow/deny domain lists, and Rust's idempotent prefix-rule amendment file append behavior.
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules
   - Added Swift execpolicy host-executable parsing, validation, deduplication, last-definition-wins behavior, deferred example validation with host executable resolution, and optional absolute-path command matching that records `resolvedProgram`.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
