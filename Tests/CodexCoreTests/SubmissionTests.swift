@@ -562,6 +562,91 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyAddsLegacyWritableRootsWithProtectedMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        let gitDir = root.appendingPathComponent(".git", isDirectory: true)
+        let agentsDir = root.appendingPathComponent(".agents", isDirectory: true)
+        let codexDir = root.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+
+        let rootPath = try AbsolutePath(absolutePath: root.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ])
+
+        XCTAssertEqual(
+            policy.withAdditionalLegacyWorkspaceWritableRoots([rootPath]),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                FileSystemSandboxEntry(path: .path(rootPath.path), access: .write),
+                FileSystemSandboxEntry(path: .path(gitDir.path), access: .read),
+                FileSystemSandboxEntry(path: .path(agentsDir.path), access: .read),
+                FileSystemSandboxEntry(path: .path(codexDir.path), access: .read)
+            ])
+        )
+    }
+
+    func testFileSystemSandboxPolicyLegacyWritableRootKeepsExistingExactWriteAndReadRulesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        let gitDir = root.appendingPathComponent(".git", isDirectory: true)
+        try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+        let rootPath = try AbsolutePath(absolutePath: root.path)
+
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(rootPath.path), access: .write),
+            FileSystemSandboxEntry(path: .path(gitDir.path), access: .none)
+        ], globScanMaxDepth: 3)
+
+        XCTAssertEqual(
+            policy.withAdditionalLegacyWorkspaceWritableRoots([rootPath, rootPath]),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .path(rootPath.path), access: .write),
+                FileSystemSandboxEntry(path: .path(gitDir.path), access: .none)
+            ], globScanMaxDepth: 3)
+        )
+    }
+
+    func testFileSystemSandboxPolicyLegacyWritableRootTracksGitPointerLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = temp.url.appendingPathComponent("worktree", isDirectory: true)
+        let gitDir = temp.url.appendingPathComponent("actual-git-dir", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+        let dotGit = root.appendingPathComponent(".git")
+        try "gitdir: ../actual-git-dir\n".write(to: dotGit, atomically: true, encoding: .utf8)
+        let rootPath = try AbsolutePath(absolutePath: root.path)
+
+        let policy = FileSystemSandboxPolicy.restricted(entries: [])
+
+        XCTAssertEqual(
+            policy.withAdditionalLegacyWorkspaceWritableRoots([rootPath]),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .path(rootPath.path), access: .write),
+                FileSystemSandboxEntry(path: .path(gitDir.path), access: .read),
+                FileSystemSandboxEntry(path: .path(dotGit.path), access: .read)
+            ])
+        )
+    }
+
+    func testFileSystemSandboxPolicyLegacyWritableRootLeavesNonRestrictedPoliciesUnchangedLikeRust() throws {
+        let root = try AbsolutePath(absolutePath: "/repo/generated")
+
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.unrestricted.withAdditionalLegacyWorkspaceWritableRoots([root]),
+            .unrestricted
+        )
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.externalSandbox.withAdditionalLegacyWorkspaceWritableRoots([root]),
+            .externalSandbox
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
@@ -771,5 +856,18 @@ final class SubmissionTests: XCTestCase {
     func testListSkillsDefaultsDecodeLikeSerdeDefaults() throws {
         let decoded = try JSONDecoder().decode(Op.self, from: Data(#"{"type":"list_skills"}"#.utf8))
         XCTAssertEqual(decoded, .listSkills(cwds: [], forceReload: false))
+    }
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

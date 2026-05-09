@@ -485,6 +485,10 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
     case unrestricted
     case externalSandbox
 
+    private static let protectedMetadataGitPathName = ".git"
+    private static let protectedMetadataAgentsPathName = ".agents"
+    private static let protectedMetadataCodexPathName = ".codex"
+
     public var hasDeniedReadRestrictions: Bool {
         guard case let .restricted(entries, _) = self else {
             return false
@@ -515,6 +519,113 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             entries.append(entry)
         }
         self = .restricted(entries: entries, globScanMaxDepth: effectiveGlobScanMaxDepth)
+    }
+
+    public func withAdditionalLegacyWorkspaceWritableRoots(_ additionalWritableRoots: [AbsolutePath]) -> FileSystemSandboxPolicy {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self else {
+            return self
+        }
+
+        var entries = currentEntries
+        for path in additionalWritableRoots {
+            let rootEntry = FileSystemSandboxEntry(path: .path(path.path), access: .write)
+            if !entries.contains(where: { $0.access.canWrite && $0.path == rootEntry.path }) {
+                entries.append(rootEntry)
+            }
+
+            for protectedPath in Self.defaultReadOnlySubpathsForWritableRoot(path, protectMissingDotCodex: false) {
+                Self.appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+            }
+        }
+
+        return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    private static func defaultReadOnlySubpathsForWritableRoot(
+        _ writableRoot: AbsolutePath,
+        protectMissingDotCodex: Bool
+    ) -> [AbsolutePath] {
+        var subpaths: [AbsolutePath] = []
+
+        if let topLevelGit = try? writableRoot.join(protectedMetadataGitPathName),
+           fileExists(atPath: topLevelGit.path) {
+            if isFile(atPath: topLevelGit.path),
+               let gitDir = resolveGitDirFromFile(topLevelGit) {
+                subpaths.append(gitDir)
+            }
+            subpaths.append(topLevelGit)
+        }
+
+        if let topLevelAgents = try? writableRoot.join(protectedMetadataAgentsPathName),
+           isDirectory(atPath: topLevelAgents.path) {
+            subpaths.append(topLevelAgents)
+        }
+
+        if let topLevelCodex = try? writableRoot.join(protectedMetadataCodexPathName),
+           protectMissingDotCodex || isDirectory(atPath: topLevelCodex.path) {
+            subpaths.append(topLevelCodex)
+        }
+
+        return deduplicated(subpaths)
+    }
+
+    private static func appendDefaultReadOnlyPathIfNoExplicitRule(
+        _ path: AbsolutePath,
+        to entries: inout [FileSystemSandboxEntry]
+    ) {
+        let fileSystemPath = FileSystemPath.path(path.path)
+        guard !entries.contains(where: { $0.path == fileSystemPath }) else {
+            return
+        }
+        entries.append(FileSystemSandboxEntry(path: fileSystemPath, access: .read))
+    }
+
+    private static func fileExists(atPath path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path)
+    }
+
+    private static func isFile(atPath path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    private static func isDirectory(atPath path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private static func resolveGitDirFromFile(_ dotGit: AbsolutePath) -> AbsolutePath? {
+        guard let contents = try? String(contentsOfFile: dotGit.path, encoding: .utf8) else {
+            return nil
+        }
+
+        let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              parts[0].trimmingCharacters(in: .whitespaces) == "gitdir"
+        else {
+            return nil
+        }
+
+        let rawGitDir = parts[1].trimmingCharacters(in: .whitespaces)
+        guard !rawGitDir.isEmpty,
+              let base = dotGit.parent,
+              let gitDir = try? AbsolutePath.resolve(rawGitDir, against: base.path),
+              fileExists(atPath: gitDir.path)
+        else {
+            return nil
+        }
+
+        return gitDir
+    }
+
+    private static func deduplicated(_ paths: [AbsolutePath]) -> [AbsolutePath] {
+        var seen: Set<AbsolutePath> = []
+        var result: [AbsolutePath] = []
+        for path in paths where seen.insert(path).inserted {
+            result.append(path)
+        }
+        return result
     }
 }
 

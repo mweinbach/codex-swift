@@ -540,6 +540,8 @@ Source baseline inspected for this scaffold:
   - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 - `codex-rs/protocol/src/permissions.rs` filesystem deny-read preservation
   - Added Swift runtime filesystem policy helpers that preserve configured read-deny entries and glob scan depth when replacing allow-side permissions, including Rust's unrestricted-to-root-write fallback for enforceable deny rules.
+- `codex-rs/protocol/src/permissions.rs` legacy workspace writable roots
+  - Added Swift runtime policy widening for legacy workspace-write additional roots, preserving Rust's exact-root duplicate rules and existing `.git` file/directory, gitdir pointer, `.agents`, and `.codex` read-only metadata protections.
 - `codex-rs/protocol/src/permissions.rs` special filesystem path parsing
   - Added Swift parsing for Rust special filesystem path tokens, including the legacy `current_working_directory` alias for project roots and forward-compatible unknown-token preservation.
 - `codex-rs/protocol/src/models.rs` runtime permission profile construction
