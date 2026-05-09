@@ -101,7 +101,7 @@ public enum BashPlainCommandParser {
                     quote = nil
                     justClosedQuote = true
                 } else {
-                    if activeQuote == "\"", character == "$" || character == "`" {
+                    if activeQuote == "\"", !previousWasBackslash, character == "$" || character == "`" {
                         return nil
                     }
                     currentWord.append(character)

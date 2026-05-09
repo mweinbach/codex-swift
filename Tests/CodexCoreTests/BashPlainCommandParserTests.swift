@@ -34,6 +34,13 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
     }
 
+    func testAcceptsEscapedSpecialsInDoubleQuotedStringsLikeRust() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "\$HOME" "\`literal\`""#),
+            [["echo", #"\$HOME"#, #"\`literal\`"#]]
+        )
+    }
+
     func testAcceptsNumbersAsWords() {
         XCTAssertEqual(
             BashPlainCommandParser.parseWordOnlyCommandsSequence("echo 123 456"),
