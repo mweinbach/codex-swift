@@ -756,6 +756,36 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyMaterializesProjectRootsWithCwdLikeRust() throws {
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".codex").jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none)
+        ], globScanMaxDepth: 5)
+
+        XCTAssertEqual(
+            policy.materializeProjectRootsWithCwd("/repo/workspace"),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .path("/repo/workspace"), access: .write),
+                FileSystemSandboxEntry(path: .path("/repo/workspace/.codex"), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none)
+            ], globScanMaxDepth: 5)
+        )
+    }
+
+    func testFileSystemSandboxPolicyMaterializeProjectRootsLeavesNonRestrictedPoliciesUnchangedLikeRust() {
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.unrestricted.materializeProjectRootsWithCwd("/repo"),
+            .unrestricted
+        )
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.externalSandbox.materializeProjectRootsWithCwd("/repo"),
+            .externalSandbox
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

@@ -621,6 +621,27 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
     }
 
+    public func materializeProjectRootsWithCwd(_ cwd: String) -> FileSystemSandboxPolicy {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self,
+              let cwdPath = Self.absolutePathForLegacyCwd(cwd)
+        else {
+            return self
+        }
+
+        let entries = currentEntries.map { entry in
+            guard case let .special(value) = entry.path,
+                  case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value)
+            else {
+                return entry
+            }
+
+            let resolvedPath = subpath.flatMap { try? cwdPath.join($0) } ?? cwdPath
+            return FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
+        }
+
+        return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
     private static func appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(
         _ subpath: String,
         to entries: inout [FileSystemSandboxEntry]
