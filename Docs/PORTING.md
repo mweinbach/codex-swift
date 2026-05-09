@@ -281,7 +281,7 @@ Source baseline inspected for this scaffold:
 - Initial `codex-rs/ollama/src/client.rs` provider probing
   - Ollama clients now derive the native host root from OpenAI-compatible `/v1` provider URLs, probe `/v1/models` or `/api/tags` according to the provider URL shape, parse `/api/tags` model names, parse optional `/api/version` semver responses, treat unavailable or unparsable versions as allowed, reject too-old Responses API versions with Rust's error text, POST `/api/pull` with Rust's stream request body, project newline-delimited pull status/progress/error/success events, and preserve Rust's pull-start, stream-error, and unexpected-EOF error text. Wiring these helpers into OSS runtime startup remains pending.
 - Initial `codex-rs/lmstudio/src/client.rs` provider probing
-  - LM Studio clients now probe `/models`, preserve Rust's missing-base-url and connection/server error text, parse `/models` response `data[].id` model IDs, surface missing-data and failed-fetch errors with Rust strings, and POST the minimal `/responses` model-load request with `input: ""` and `max_output_tokens: 1`. `lms get --yes` download execution and runtime startup wiring remain pending.
+  - LM Studio clients now probe `/models`, preserve Rust's missing-base-url and connection/server error text, parse `/models` response `data[].id` model IDs, surface missing-data and failed-fetch errors with Rust strings, POST the minimal `/responses` model-load request with `input: ""` and `max_output_tokens: 1`, discover the `lms` CLI via PATH or `$HOME/.lmstudio/bin/lms`, and construct the Rust-matching `lms get --yes {model}` download command and failure strings. CLI subprocess execution and runtime startup wiring remain pending.
 - `codex-rs/feedback/src/lib.rs`
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
 - `codex-rs/hooks/src/legacy_notify.rs`
@@ -469,7 +469,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - full interactive resume continuation after rollout target resolution
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
 - model-provider parity beyond the initial Responses/OpenAI provider/auth path
-- LM Studio CLI download execution and local-provider runtime wiring
+- LM Studio CLI subprocess download execution and local-provider runtime wiring
 - runtime Responses API tool orchestration
 - Linux Landlock/Windows debug sandbox helper execution and Rust-complete config-layer fidelity for sandbox runtime setup
 - tool handler registry dispatch and dynamic MCP tool conversion

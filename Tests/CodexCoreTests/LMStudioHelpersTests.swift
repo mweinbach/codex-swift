@@ -122,6 +122,74 @@ final class LMStudioHelpersTests: XCTestCase {
             XCTAssertEqual(String(describing: error), "Failed to load model: 503")
         }
     }
+
+    func testFindLMSReturnsLiteralCommandWhenPathContainsExecutableLikeRust() throws {
+        let lms = try LMStudioClient.findLMS(
+            pathEnvironment: "/usr/local/bin:/opt/lmstudio/bin",
+            homeDirectory: "/test/home",
+            fileExists: { $0 == "/opt/lmstudio/bin/lms" }
+        )
+
+        XCTAssertEqual(lms, "lms")
+    }
+
+    func testFindLMSFallsBackToHomeLMStudioBinLikeRust() throws {
+        let expected = LMStudioClient.fallbackLMSPath(homeDirectory: "/test/home")
+
+        let lms = try LMStudioClient.findLMS(
+            pathEnvironment: "/usr/local/bin",
+            homeDirectory: "/test/home",
+            fileExists: { $0 == expected }
+        )
+
+        XCTAssertEqual(lms, expected)
+        #if !os(Windows)
+        XCTAssertEqual(expected, "/test/home/.lmstudio/bin/lms")
+        #endif
+    }
+
+    func testFindLMSErrorMatchesRustMessage() throws {
+        do {
+            _ = try LMStudioClient.findLMS(
+                pathEnvironment: "/usr/local/bin",
+                homeDirectory: "/test/home",
+                fileExists: { _ in false }
+            )
+            XCTFail("expected missing lms error")
+        } catch let error as LMStudioClientError {
+            XCTAssertEqual(error, .lmsNotFound)
+            XCTAssertEqual(
+                String(describing: error),
+                "LM Studio not found. Please install LM Studio from https://lmstudio.ai/"
+            )
+        }
+    }
+
+    func testDownloadCommandUsesRustArguments() {
+        let command = LMStudioClient.downloadCommand(for: "openai/gpt-oss-20b", lmsExecutable: "lms")
+
+        XCTAssertEqual(command.executable, "lms")
+        XCTAssertEqual(command.arguments, ["get", "--yes", "openai/gpt-oss-20b"])
+        XCTAssertEqual(command.displayCommand, "lms get --yes openai/gpt-oss-20b")
+    }
+
+    func testDownloadErrorMessagesMatchRust() {
+        XCTAssertEqual(
+            String(describing: LMStudioClientError.downloadExecutionFailed(
+                command: "lms get --yes openai/gpt-oss-20b",
+                underlying: "boom"
+            )),
+            "Failed to execute 'lms get --yes openai/gpt-oss-20b': boom"
+        )
+        XCTAssertEqual(
+            String(describing: LMStudioClientError.downloadFailed(exitCode: 7)),
+            "Model download failed with exit code: 7"
+        )
+        XCTAssertEqual(
+            String(describing: LMStudioClientError.downloadFailed(exitCode: nil)),
+            "Model download failed with exit code: -1"
+        )
+    }
 }
 
 private struct BoomError: Error, CustomStringConvertible {

@@ -18,6 +18,7 @@ public enum LMStudioClientError: Error, Equatable, CustomStringConvertible, Loca
     public static let connectionErrorMessage = "LM Studio is not responding. Install from https://lmstudio.ai/download and run 'lms server start'."
 
     case connectionUnavailable
+    case lmsNotFound
     case missingBaseURL
     case serverReturnedError(statusCode: Int)
     case requestFailed(String)
@@ -25,11 +26,15 @@ public enum LMStudioClientError: Error, Equatable, CustomStringConvertible, Loca
     case missingDataArray
     case fetchModelsFailed(statusCode: Int)
     case loadModelFailed(statusCode: Int)
+    case downloadExecutionFailed(command: String, underlying: String)
+    case downloadFailed(exitCode: Int32?)
 
     public var description: String {
         switch self {
         case .connectionUnavailable:
             return Self.connectionErrorMessage
+        case .lmsNotFound:
+            return "LM Studio not found. Please install LM Studio from https://lmstudio.ai/"
         case .missingBaseURL:
             return "oss provider must have a base_url"
         case let .serverReturnedError(statusCode):
@@ -44,11 +49,29 @@ public enum LMStudioClientError: Error, Equatable, CustomStringConvertible, Loca
             return "Failed to fetch models: \(statusCode)"
         case let .loadModelFailed(statusCode):
             return "Failed to load model: \(statusCode)"
+        case let .downloadExecutionFailed(command, underlying):
+            return "Failed to execute '\(command)': \(underlying)"
+        case let .downloadFailed(exitCode):
+            return "Model download failed with exit code: \(exitCode ?? -1)"
         }
     }
 
     public var errorDescription: String? {
         description
+    }
+}
+
+public struct LMStudioDownloadCommand: Equatable, Sendable {
+    public let executable: String
+    public let arguments: [String]
+
+    public init(executable: String, arguments: [String]) {
+        self.executable = executable
+        self.arguments = arguments
+    }
+
+    public var displayCommand: String {
+        ([executable] + arguments).joined(separator: " ")
     }
 }
 
@@ -152,6 +175,73 @@ public struct LMStudioClient {
             result.removeLast()
         }
         return result
+    }
+
+    public static func findLMS(
+        pathEnvironment: String? = ProcessInfo.processInfo.environment["PATH"],
+        homeDirectory: String? = Self.defaultHomeDirectory(),
+        fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)
+    ) throws -> String {
+        if let pathEnvironment, pathContainsLMS(pathEnvironment, fileExists: fileExists) {
+            return "lms"
+        }
+
+        if let homeDirectory {
+            let fallback = fallbackLMSPath(homeDirectory: homeDirectory)
+            if fileExists(fallback) {
+                return fallback
+            }
+        }
+
+        throw LMStudioClientError.lmsNotFound
+    }
+
+    public static func fallbackLMSPath(homeDirectory: String) -> String {
+        #if os(Windows)
+        return homeDirectory + "\\.lmstudio\\bin\\lms.exe"
+        #else
+        return homeDirectory + "/.lmstudio/bin/lms"
+        #endif
+    }
+
+    public static func downloadCommand(for model: String, lmsExecutable: String) -> LMStudioDownloadCommand {
+        LMStudioDownloadCommand(executable: lmsExecutable, arguments: ["get", "--yes", model])
+    }
+
+    private static func pathContainsLMS(
+        _ pathEnvironment: String,
+        fileExists: (String) -> Bool
+    ) -> Bool {
+        for directory in pathEnvironment.split(separator: pathListSeparator, omittingEmptySubsequences: true) {
+            if fileExists(String(directory) + pathSeparator + "lms") {
+                return true
+            }
+        }
+        return false
+    }
+
+    public static func defaultHomeDirectory() -> String? {
+        #if os(Windows)
+        return ProcessInfo.processInfo.environment["USERPROFILE"]
+        #else
+        return ProcessInfo.processInfo.environment["HOME"]
+        #endif
+    }
+
+    private static var pathListSeparator: Character {
+        #if os(Windows)
+        return ";"
+        #else
+        return ":"
+        #endif
+    }
+
+    private static var pathSeparator: String {
+        #if os(Windows)
+        return "\\"
+        #else
+        return "/"
+        #endif
     }
 
     public static func urlSessionSend(_ request: URLRequest) async throws -> LMStudioHTTPResponse {
