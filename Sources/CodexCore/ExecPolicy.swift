@@ -822,6 +822,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkAugmentedAdditionAssignment(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if let assignment = try Self.parseTopLevelLiteralAssignment(
             statement,
             constants: constants,
@@ -1224,6 +1232,34 @@ public final class PolicyParser {
         return true
     }
 
+    private static func parseStarlarkAugmentedAdditionAssignment(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let operatorIndex = topLevelAugmentedAdditionAssignmentIndex(in: trimmed) else {
+            return false
+        }
+
+        let target = String(trimmed[..<operatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(target),
+              let existingValue = constants[target]
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let valueStart = trimmed.index(operatorIndex, offsetBy: 2)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !valueText.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let rhs = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+        constants[target] = try evaluateStarlarkAddition(existingValue, rhs, expression: trimmed)
+        return true
+    }
+
     private static func parseTopLevelLiteralAssignment(
         _ statement: String,
         constants: [String: ConfigValue],
@@ -1609,6 +1645,57 @@ public final class PolicyParser {
                     return nil
                 }
                 return index
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        return nil
+    }
+
+    private static func topLevelAugmentedAdditionAssignmentIndex(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            case "+" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                let nextIndex = text.index(after: index)
+                if nextIndex < text.endIndex, text[nextIndex] == "=" {
+                    return index
+                }
             default:
                 break
             }

@@ -1411,6 +1411,53 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = [("git", "status")]
+        COMMANDS += [("jj", "log")]
+
+        GIT_PATTERN = ["git"]
+        GIT_PATTERN += ["status"]
+
+        HOST = "api."
+        HOST += "github.com"
+
+        GIT_PATHS = ["/usr/bin/git"]
+        GIT_PATHS += ("/opt/homebrew/bin/git",)
+
+        for tool, subcommand in COMMANDS:
+            prefix_rule([tool, subcommand], "prompt", justification = "augmented " + tool)
+
+        prefix_rule(GIT_PATTERN + ["--short"], "allow", justification = "augmented git short")
+        network_rule(HOST, "https", "allow")
+        host_executable("git", GIT_PATHS)
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "augmented git"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status"), .single("--short")]),
+                decision: .allow,
+                justification: "augmented git short"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .prompt,
+                justification: "augmented jj"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkLengthComparisonsAndMembership() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
