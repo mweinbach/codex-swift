@@ -4934,6 +4934,125 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "command must not be empty")
     }
 
+    func testCommandExecProcessIDSessionAcceptsStdinAndSendsDeferredResponse() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let started = processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/cat"],"processId":"cmd-stdin","cwd":"\#(cwd.url.path)","streamStdin":true}}"#.utf8
+        ))
+        XCTAssertNil(started)
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/write","params":{"processId":"cmd-stdin","deltaBase64":"aGVsbG8=","closeStdin":true}}"#.utf8
+        )))
+        XCTAssertEqual((write["result"] as? [String: Any])?.isEmpty, true)
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        XCTAssertEqual(response["id"] as? Int, 1)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "hello")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
+    func testCommandExecProcessIDSessionStreamsOutputAndDefersBufferedResponse() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let started = processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf streamed"],"processId":"cmd-stream","cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#.utf8
+        ))
+        XCTAssertNil(started)
+
+        let firstData = try await nextNotificationPayload(notificationCapture)
+        let secondData = try await nextNotificationPayload(notificationCapture)
+        let messages = try decodeMessages(firstData) + decodeMessages(secondData)
+        let output = try XCTUnwrap(messages.first { $0["method"] as? String == "command/exec/outputDelta" })
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processId"] as? String, "cmd-stream")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "streamed"
+        )
+
+        let response = try XCTUnwrap(messages.first { $0["id"] as? Int == 1 })
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
+    func testCommandExecRejectsDuplicateProcessIDAndTerminateStopsActiveSession() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        let duplicate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        let duplicateError = try XCTUnwrap(duplicate["error"] as? [String: Any])
+        XCTAssertEqual(duplicateError["code"] as? Int, -32600)
+        XCTAssertEqual(duplicateError["message"] as? String, #"duplicate active command/exec process id: "cmd-kill""#)
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"command/exec/terminate","params":{"processId":"cmd-kill"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        XCTAssertEqual(response["id"] as? Int, 1)
+    }
+
+    func testCommandExecProcessIDSessionTimeoutReportsRustExitCode() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
+        )))
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        XCTAssertEqual(response["id"] as? Int, 1)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 124)
+    }
+
     func testCommandExecFollowUpsReportNoActiveProcess() throws {
         let temp = try TemporaryDirectory()
 

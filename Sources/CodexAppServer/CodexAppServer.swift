@@ -185,6 +185,24 @@ private struct AppServerProcessWriteStdinParams {
     let closeStdin: Bool
 }
 
+private struct AppServerCommandExecParams {
+    let command: [String]
+    let processID: String?
+    let cwd: String?
+    let tty: Bool
+    let streamStdin: Bool
+    let streamStdoutStderr: Bool
+    let timeoutMs: Int?
+    let outputBytesCap: Int?
+    let environmentOverrides: [String: String?]
+}
+
+private struct AppServerCommandExecWriteParams {
+    let processID: String
+    let delta: Data
+    let closeStdin: Bool
+}
+
 public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
     public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
 
@@ -3522,33 +3540,107 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let parsed = try commandExecParams(params: params)
+        guard parsed.processID == nil,
+              !parsed.tty,
+              !parsed.streamStdin,
+              !parsed.streamStdoutStderr
+        else {
+            throw AppServerError.invalidRequest("live command/exec session is not implemented")
+        }
+        let cwd = parsed.cwd.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        return try runOneOffCommand(
+            parsed.command,
+            cwd: cwd,
+            timeoutMilliseconds: parsed.timeoutMs,
+            environment: commandExecEnvironment(
+                base: configuration.environment,
+                overrides: parsed.environmentOverrides
+            )
+        )
+    }
+
+    fileprivate static func commandExecParams(params: [String: Any]?) throws -> AppServerCommandExecParams {
         guard let command = stringArrayParam(params?["command"]) else {
             throw AppServerError.invalidRequest("missing command")
         }
         guard !command.isEmpty else {
             throw AppServerError.invalidRequest("command must not be empty")
         }
-
-        let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let timeout = intParam(params?["timeoutMs"] ?? params?["timeout_ms"], defaultValue: 0)
-        return try runOneOffCommand(
-            command,
-            cwd: cwd,
-            timeoutMilliseconds: timeout > 0 ? timeout : nil,
-            environment: configuration.environment
+        let processID = stringParam(params?["processId"])
+        let tty = boolParam(params?["tty"], defaultValue: false)
+        let streamStdin = boolParam(params?["streamStdin"], defaultValue: false)
+        let streamStdoutStderr = boolParam(params?["streamStdoutStderr"], defaultValue: false)
+        if processID == nil && (tty || streamStdin || streamStdoutStderr) {
+            throw AppServerError.invalidRequest("command/exec tty or streaming requires a client-supplied processId")
+        }
+        if params?["size"] != nil && !tty {
+            throw AppServerError.invalidParams("command/exec size requires tty: true")
+        }
+        if let size = params?["size"] as? [String: Any] {
+            try validateCommandExecSize(size)
+        }
+        if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
+            throw AppServerError.invalidParams("command/exec timeoutMs must be non-negative, got \(timeoutMs)")
+        }
+        return AppServerCommandExecParams(
+            command: command,
+            processID: processID,
+            cwd: stringParam(params?["cwd"]),
+            tty: tty,
+            streamStdin: streamStdin,
+            streamStdoutStderr: streamStdoutStderr,
+            timeoutMs: optionalIntParam(params?["timeoutMs"] ?? params?["timeout_ms"]),
+            outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
+            environmentOverrides: processEnvironmentOverrides(params?["env"])
         )
     }
 
-    fileprivate static func commandExecWriteResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func commandExecEnvironment(
+        base: [String: String],
+        overrides: [String: String?]
+    ) -> [String: String] {
+        var environment = base
+        for (key, value) in overrides {
+            if let value {
+                environment[key] = value
+            } else {
+                environment.removeValue(forKey: key)
+            }
+        }
+        return environment
+    }
+
+    fileprivate static func commandExecWriteParams(params: [String: Any]?) throws -> AppServerCommandExecWriteParams {
         let processID = try commandExecProcessID(params: params)
         let deltaBase64 = stringParam(params?["deltaBase64"])
         let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("command/exec/write requires deltaBase64 or closeStdin")
         }
-        if let deltaBase64, Data(base64Encoded: deltaBase64) == nil {
-            throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        let delta: Data
+        if let deltaBase64 {
+            guard let decoded = Data(base64Encoded: deltaBase64) else {
+                throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+            }
+            delta = decoded
+        } else {
+            delta = Data()
         }
+        return AppServerCommandExecWriteParams(
+            processID: processID,
+            delta: delta,
+            closeStdin: closeStdin
+        )
+    }
+
+    fileprivate static func commandExecWriteResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try commandExecWriteParams(params: params)
+        throw AppServerError.invalidRequest("no active command/exec for process id \"\(parsed.processID)\"")
+    }
+
+    fileprivate static func commandExecNoActiveTerminateResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try commandExecProcessID(params: params)
         throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
     }
 
@@ -3571,7 +3663,18 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
     }
 
-    private static func commandExecProcessID(params: [String: Any]?) throws -> String {
+    private static func validateCommandExecSize(_ size: [String: Any]) throws {
+        guard let rows = size["rows"] as? Int,
+              let cols = size["cols"] as? Int
+        else {
+            throw AppServerError.invalidParams("command/exec/resize requires size rows and cols")
+        }
+        guard rows > 0, cols > 0 else {
+            throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
+        }
+    }
+
+    fileprivate static func commandExecProcessID(params: [String: Any]?) throws -> String {
         guard let processID = stringParam(params?["processId"]), !processID.isEmpty else {
             throw AppServerError.invalidRequest("missing processId")
         }
@@ -6902,6 +7005,227 @@ private struct AppServerProcessOutputCapture {
     let capReached: Bool
 }
 
+private final class AppServerCommandExecProcess: @unchecked Sendable {
+    private let params: AppServerCommandExecParams
+    private let requestID: Any
+    private let notificationSink: AppServerNotificationSink?
+    private let onExit: @Sendable (String) -> Void
+    private let lock = NSLock()
+    private let process = Process()
+    private var stdinPipe: Pipe?
+    private var stdinClosed = false
+    private var terminated = false
+    private var timedOut = false
+
+    init(
+        params: AppServerCommandExecParams,
+        requestID: Any,
+        environment: [String: String],
+        notificationSink: AppServerNotificationSink?,
+        onExit: @escaping @Sendable (String) -> Void
+    ) {
+        self.params = params
+        self.requestID = requestID
+        self.notificationSink = notificationSink
+        self.onExit = onExit
+        if params.command[0].contains("/") {
+            process.executableURL = URL(fileURLWithPath: params.command[0])
+            process.arguments = Array(params.command.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = params.command
+        }
+        if let cwd = params.cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        process.environment = CodexAppServer.commandExecEnvironment(
+            base: environment,
+            overrides: params.environmentOverrides
+        )
+    }
+
+    deinit {
+        terminate()
+    }
+
+    func start() throws {
+        let stdout = Pipe()
+        let stderr = Pipe()
+        if params.streamStdin || params.tty {
+            let stdin = Pipe()
+            stdinPipe = stdin
+            process.standardInput = stdin
+        }
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        Task.detached { [weak self] in
+            await self?.finish(stdout: stdout, stderr: stderr)
+        }
+    }
+
+    func writeStdin(delta: Data, closeStdin: Bool) throws {
+        let stdin = try lock.withLock {
+            guard let stdinPipe else {
+                throw AppServerError.invalidRequest("stdin streaming is not enabled for this command/exec")
+            }
+            guard !stdinClosed else {
+                throw AppServerError.invalidRequest("stdin is already closed")
+            }
+            return stdinPipe
+        }
+        if !delta.isEmpty {
+            do {
+                try stdin.fileHandleForWriting.write(contentsOf: delta)
+            } catch {
+                throw AppServerError.invalidRequest("stdin is already closed")
+            }
+        }
+        if closeStdin {
+            lock.withLock {
+                stdinClosed = true
+            }
+            do {
+                try stdin.fileHandleForWriting.close()
+            } catch {
+                stdin.fileHandleForWriting.closeFile()
+            }
+        }
+    }
+
+    func terminate() {
+        let shouldTerminate = lock.withLock {
+            guard !terminated else {
+                return false
+            }
+            terminated = true
+            stdinClosed = true
+            return process.isRunning
+        }
+        try? stdinPipe?.fileHandleForWriting.close()
+        if shouldTerminate {
+            process.terminate()
+        }
+    }
+
+    private func finish(stdout: Pipe, stderr: Pipe) async {
+        if let timeoutMs = params.timeoutMs {
+            let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
+            while process.isRunning && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            if process.isRunning {
+                lock.withLock {
+                    timedOut = true
+                }
+                terminate()
+            }
+        }
+        process.waitUntilExit()
+        let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        if params.streamStdoutStderr {
+            await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
+            await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
+        }
+        await sendResponse(stdout: stdoutCapture, stderr: stderrCapture)
+        if let processID = params.processID {
+            onExit(processID)
+        }
+    }
+
+    private func sendOutputDelta(stream: String, data: Data, capReached: Bool) async {
+        guard let processID = params.processID,
+              (!data.isEmpty || capReached)
+        else {
+            return
+        }
+        await sendEnvelope([
+            "method": "command/exec/outputDelta",
+            "params": [
+                "processId": processID,
+                "stream": stream,
+                "deltaBase64": data.base64EncodedString(),
+                "capReached": capReached
+            ]
+        ])
+    }
+
+    private func sendResponse(stdout: AppServerProcessOutputCapture, stderr: AppServerProcessOutputCapture) async {
+        await sendEnvelope(CodexAppServer.responseObject(
+            id: requestID,
+            result: [
+                "exitCode": lock.withLock { timedOut } ? 124 : Int(process.terminationStatus),
+                "stdout": params.streamStdoutStderr ? "" : stdout.text,
+                "stderr": params.streamStdoutStderr ? "" : stderr.text
+            ]
+        ))
+    }
+
+    private func sendEnvelope(_ envelope: [String: Any]) async {
+        guard let notificationSink,
+              let data = CodexAppServer.encodeMessages([envelope])
+        else {
+            return
+        }
+        await notificationSink(data)
+    }
+
+    private static func capture(_ data: Data, cap: Int?) -> AppServerProcessOutputCapture {
+        let capReached: Bool
+        let capped: Data
+        if let cap, data.count > cap {
+            capped = data.prefix(cap)
+            capReached = true
+        } else {
+            capped = data
+            capReached = false
+        }
+        return AppServerProcessOutputCapture(
+            text: TextEncoding.bytesToStringSmart(capped),
+            capReached: capReached
+        )
+    }
+}
+
+private final class AppServerCommandExecRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var activeProcesses: [String: AppServerCommandExecProcess] = [:]
+
+    func contains(_ processID: String) -> Bool {
+        lock.withLock { activeProcesses[processID] != nil }
+    }
+
+    func insert(_ process: AppServerCommandExecProcess, processID: String) {
+        lock.withLock {
+            activeProcesses[processID] = process
+        }
+    }
+
+    func get(_ processID: String) -> AppServerCommandExecProcess? {
+        lock.withLock {
+            activeProcesses[processID]
+        }
+    }
+
+    func remove(_ processID: String) -> AppServerCommandExecProcess? {
+        lock.withLock {
+            activeProcesses.removeValue(forKey: processID)
+        }
+    }
+
+    func terminateAll() {
+        let processes = lock.withLock {
+            let processes = Array(activeProcesses.values)
+            activeProcesses.removeAll()
+            return processes
+        }
+        for process in processes {
+            process.terminate()
+        }
+    }
+}
+
 private final class AppServerSpawnedProcess: @unchecked Sendable {
     private let params: AppServerProcessSpawnParams
     private let notificationSink: AppServerNotificationSink?
@@ -7135,6 +7459,7 @@ final class CodexAppServerMessageProcessor {
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
+    private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
 
     init(
@@ -7157,6 +7482,7 @@ final class CodexAppServerMessageProcessor {
         for watch in fsWatches.values {
             watch.cancel()
         }
+        activeCommandExecs.terminateAll()
         activeProcesses.terminateAll()
     }
 
@@ -7367,6 +7693,55 @@ final class CodexAppServerMessageProcessor {
         return [:]
     }
 
+    private func commandExecResult(id: Any, params: [String: Any]?) throws -> [String: Any]? {
+        let parsed = try CodexAppServer.commandExecParams(params: params)
+        guard let processID = parsed.processID else {
+            return CodexAppServer.responseObject(
+                id: id,
+                result: try CodexAppServer.commandExecResult(params: params, configuration: configuration)
+            )
+        }
+        if activeCommandExecs.contains(processID) {
+            throw AppServerError.invalidRequest("duplicate active command/exec process id: \"\(processID)\"")
+        }
+        let registry = activeCommandExecs
+        let session = AppServerCommandExecProcess(
+            params: parsed,
+            requestID: id,
+            environment: configuration.environment,
+            notificationSink: notificationSink,
+            onExit: { processID in
+                _ = registry.remove(processID)
+            }
+        )
+        activeCommandExecs.insert(session, processID: processID)
+        do {
+            try session.start()
+        } catch {
+            _ = activeCommandExecs.remove(processID)
+            throw AppServerError.internalError("failed to spawn command: \(error)")
+        }
+        return nil
+    }
+
+    private func commandExecWriteResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try CodexAppServer.commandExecWriteParams(params: params)
+        guard let session = activeCommandExecs.get(parsed.processID) else {
+            throw AppServerError.invalidRequest("no active command/exec for process id \"\(parsed.processID)\"")
+        }
+        try session.writeStdin(delta: parsed.delta, closeStdin: parsed.closeStdin)
+        return [:]
+    }
+
+    private func commandExecTerminateResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try CodexAppServer.commandExecProcessID(params: params)
+        guard let session = activeCommandExecs.remove(processID) else {
+            throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+        }
+        session.terminate()
+        return [:]
+    }
+
     private func processSpawnResult(params: [String: Any]?) throws -> [String: Any] {
         let parsed = try CodexAppServer.processSpawnParams(params: params)
         if activeProcesses.contains(parsed.processHandle) {
@@ -7423,7 +7798,7 @@ final class CodexAppServerMessageProcessor {
         }
 
         let params = object["params"] as? [String: Any]
-        var response: [String: Any]
+        var response: [String: Any]?
         var notifications: [[String: Any]] = []
         if method == "initialize" {
             if initialized {
@@ -7968,17 +8343,21 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.fuzzyFileSearchResult(params: params)
                     )
                 case "command/exec", "execOneOffCommand":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.commandExecResult(
-                            params: params,
-                            configuration: configuration
+                    if method == "command/exec" {
+                        response = try commandExecResult(id: id, params: params)
+                    } else {
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: try CodexAppServer.commandExecResult(
+                                params: params,
+                                configuration: configuration
+                            )
                         )
-                    )
+                    }
                 case "command/exec/write":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.commandExecWriteResult(params: params)
+                        result: try commandExecWriteResult(params: params)
                     )
                 case "command/exec/resize":
                     response = CodexAppServer.responseObject(
@@ -7988,7 +8367,7 @@ final class CodexAppServerMessageProcessor {
                 case "command/exec/terminate":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.commandExecTerminateResult(params: params)
+                        result: try commandExecTerminateResult(params: params)
                     )
                 case "process/spawn":
                     response = CodexAppServer.responseObject(
@@ -8090,7 +8469,8 @@ final class CodexAppServerMessageProcessor {
                 response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
             }
         }
-        return CodexAppServer.encodeMessages([response] + notifications)
+        let envelopes = (response.map { [$0] } ?? []) + notifications
+        return CodexAppServer.encodeMessages(envelopes)
     }
 }
 
