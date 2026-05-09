@@ -1625,6 +1625,9 @@ public final class PolicyParser {
         if let length = try parseStarlarkLenCall(trimmed, constants: constants, functions: functions) {
             return length
         }
+        if let dictMethodCall = try parseStarlarkDictMethodCall(trimmed, constants: constants, functions: functions) {
+            return dictMethodCall
+        }
         if let methodCall = try parseStarlarkStringMethodCall(trimmed, constants: constants, functions: functions) {
             return methodCall
         }
@@ -2049,6 +2052,74 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             return .array(receiver.components(separatedBy: separator).map(ConfigValue.string))
+        default:
+            return nil
+        }
+    }
+
+    private static func parseStarlarkDictMethodCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let callee = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return nil
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !receiverText.isEmpty,
+              ["get", "keys", "values", "items"].contains(methodName)
+        else {
+            return nil
+        }
+
+        let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
+        guard case let .table(items) = receiver else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        switch methodName {
+        case "get":
+            guard rawArguments.count == 1 || rawArguments.count == 2,
+                  let rawKey = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
+            guard case let .string(key) = key else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            if let value = items[key] {
+                return value
+            }
+            if rawArguments.count == 2 {
+                return try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+            }
+            throw ConfigOverrideError.invalidLiteral(text)
+        case "keys":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .array(items.keys.map(ConfigValue.string))
+        case "values":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .array(Array(items.values))
+        case "items":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .array(items.map { key, value in .array([.string(key), value]) })
         default:
             return nil
         }
