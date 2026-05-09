@@ -503,6 +503,8 @@ Source baseline inspected for this scaffold:
   - `ResponseInputItem(userInputs:)` now wraps remote image inputs with Rust's `<image>` markers, emits numbered local-image labels, shares the remote/local image counter, and uses Rust's unsupported-image placeholder wording.
 - `codex-rs/protocol/src/models.rs` filesystem permission overlays
   - Added typed `FileSystemPermissions`, `FileSystemSandboxEntry`, `FileSystemPath`, and `FileSystemAccessMode` models for request/additional permissions, including Rust's legacy `read`/`write` roots and canonical `entries` plus `glob_scan_max_depth` wire shapes.
+- `codex-rs/protocol/src/models.rs` active permission profile sidecar
+  - Added typed `ActivePermissionProfile` and `ActivePermissionProfileModification` models and wired `UserInputWithTurnContextParams.active_permission_profile` through them, preserving Rust's default empty `modifications` and tagged `additional_writable_root` wire shape.
 
 ## Known Gaps
 

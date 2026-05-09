@@ -184,9 +184,10 @@ final class SubmissionTests: XCTestCase {
             permissionProfile: .object([
                 "type": .string("managed")
             ]),
-            activePermissionProfile: .object([
-                "id": .string(":workspace")
-            ]),
+            activePermissionProfile: ActivePermissionProfile(
+                id: ":workspace",
+                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+            ),
             windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
             effort: .null,
@@ -226,7 +227,13 @@ final class SubmissionTests: XCTestCase {
                 "type": "managed"
             ],
             "active_permission_profile": [
-                "id": ":workspace"
+                "id": ":workspace",
+                "modifications": [
+                    [
+                        "type": "additional_writable_root",
+                        "path": "/repo/tmp"
+                    ]
+                ]
             ],
             "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",
@@ -239,6 +246,17 @@ final class SubmissionTests: XCTestCase {
 
         let data = try JSONEncoder().encode(op)
         XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
+    }
+
+    func testActivePermissionProfileDefaultsMatchRustSerde() throws {
+        let json = #"{"id":":workspace"}"#
+        let profile = try JSONDecoder().decode(ActivePermissionProfile.self, from: Data(json.utf8))
+
+        XCTAssertEqual(profile, ActivePermissionProfile(id: ":workspace"))
+        XCTAssertTrue(profile.modifications.isEmpty)
+        try XCTAssertJSONObjectEqual(profile, [
+            "id": ":workspace"
+        ])
     }
 
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {

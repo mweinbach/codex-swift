@@ -165,6 +165,77 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
     }
 }
 
+public enum ActivePermissionProfileModification: Equatable, Codable, Sendable {
+    case additionalWritableRoot(path: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case path
+    }
+
+    private enum ModificationType: String, Codable {
+        case additionalWritableRoot = "additional_writable_root"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(ModificationType.self, forKey: .type) {
+        case .additionalWritableRoot:
+            self = .additionalWritableRoot(path: try container.decode(String.self, forKey: .path))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .additionalWritableRoot(path):
+            try container.encode(ModificationType.additionalWritableRoot, forKey: .type)
+            try container.encode(path, forKey: .path)
+        }
+    }
+}
+
+public struct ActivePermissionProfile: Codable, Equatable, Sendable {
+    public let id: String
+    public let extends: String?
+    public let modifications: [ActivePermissionProfileModification]
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case extends
+        case modifications
+    }
+
+    public init(
+        id: String,
+        extends: String? = nil,
+        modifications: [ActivePermissionProfileModification] = []
+    ) {
+        self.id = id
+        self.extends = extends
+        self.modifications = modifications
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        extends = try container.decodeIfPresent(String.self, forKey: .extends)
+        modifications = try container.decodeIfPresent(
+            [ActivePermissionProfileModification].self,
+            forKey: .modifications
+        ) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(extends, forKey: .extends)
+        if !modifications.isEmpty {
+            try container.encode(modifications, forKey: .modifications)
+        }
+    }
+}
+
 public struct RequestPermissionProfile: Codable, Equatable, Sendable {
     public let network: RequestPermissionNetworkPermissions?
     public let fileSystem: FileSystemPermissions?

@@ -10,7 +10,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
     public let approvalsReviewer: JSONValue?
     public let sandboxPolicy: SandboxPolicy?
     public let permissionProfile: JSONValue?
-    public let activePermissionProfile: JSONValue?
+    public let activePermissionProfile: ActivePermissionProfile?
     public let windowsSandboxLevel: JSONValue?
     public let model: String?
     public let effort: JSONValue?
@@ -49,7 +49,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy? = nil,
         permissionProfile: JSONValue? = nil,
-        activePermissionProfile: JSONValue? = nil,
+        activePermissionProfile: ActivePermissionProfile? = nil,
         windowsSandboxLevel: JSONValue? = nil,
         model: String? = nil,
         effort: JSONValue? = nil,
@@ -91,7 +91,10 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         approvalsReviewer = try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer)
         sandboxPolicy = try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy)
         permissionProfile = try Self.decodeNullableJSON(from: container, forKey: .permissionProfile)
-        activePermissionProfile = try Self.decodeNullableJSON(from: container, forKey: .activePermissionProfile)
+        activePermissionProfile = try container.decodeIfPresent(
+            ActivePermissionProfile.self,
+            forKey: .activePermissionProfile
+        )
         windowsSandboxLevel = try Self.decodeNullableJSON(from: container, forKey: .windowsSandboxLevel)
         model = try container.decodeIfPresent(String.self, forKey: .model)
         effort = try Self.decodeNullableJSON(from: container, forKey: .effort)
@@ -112,7 +115,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try container.encodeIfPresent(sandboxPolicy, forKey: .sandboxPolicy)
         try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
-        try Self.encodeNullableJSON(activePermissionProfile, into: &container, forKey: .activePermissionProfile)
+        try container.encodeIfPresent(activePermissionProfile, forKey: .activePermissionProfile)
         try Self.encodeNullableJSON(windowsSandboxLevel, into: &container, forKey: .windowsSandboxLevel)
         try container.encodeIfPresent(model, forKey: .model)
         try Self.encodeNullableJSON(effort, into: &container, forKey: .effort)
