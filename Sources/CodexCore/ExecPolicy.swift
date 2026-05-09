@@ -1575,6 +1575,9 @@ public final class PolicyParser {
         if let constant = constants[trimmed] {
             return constant
         }
+        if let range = try parseStarlarkRangeCall(trimmed, constants: constants, functions: functions) {
+            return range
+        }
         if let length = try parseStarlarkLenCall(trimmed, constants: constants, functions: functions) {
             return length
         }
@@ -1837,6 +1840,73 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
+    }
+
+    private static func parseStarlarkRangeCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name == "range" else {
+            return nil
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard (1...3).contains(rawArguments.count) else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let integers = try rawArguments.map { rawArgument in
+            try parseStarlarkInteger(rawArgument, constants: constants, functions: functions, expression: text)
+        }
+        let start: Int
+        let end: Int
+        let step: Int
+        switch integers.count {
+        case 1:
+            start = 0
+            end = integers[0]
+            step = 1
+        case 2:
+            start = integers[0]
+            end = integers[1]
+            step = 1
+        case 3:
+            start = integers[0]
+            end = integers[1]
+            step = integers[2]
+        default:
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+        guard step != 0 else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var values: [ConfigValue] = []
+        var current = start
+        if step > 0 {
+            while current < end {
+                values.append(.integer(Int64(current)))
+                current += step
+            }
+        } else {
+            while current > end {
+                values.append(.integer(Int64(current)))
+                current += step
+            }
+        }
+        return .array(values)
     }
 
     private static func parseStarlarkStringMethodCall(
@@ -2172,9 +2242,12 @@ public final class PolicyParser {
         let base = try parsePolicyLiteral(baseText, constants: constants, functions: functions)
         switch base {
         case let .array(items):
-            guard let itemIndex = Int(indexText) else {
-                throw ConfigOverrideError.invalidLiteral(text)
-            }
+            let itemIndex = try parseStarlarkInteger(
+                indexText,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
             let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
             guard items.indices.contains(resolvedIndex) else {
                 throw ConfigOverrideError.invalidLiteral(text)
@@ -2191,6 +2264,21 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
+    }
+
+    private static func parseStarlarkInteger(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> Int {
+        let value = try parsePolicyLiteral(text, constants: constants, functions: functions)
+        guard case let .integer(raw) = value,
+              let integer = Int(exactly: raw)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return integer
     }
 
     private static func matchingTopLevelIndexOpen(in text: String) -> String.Index? {

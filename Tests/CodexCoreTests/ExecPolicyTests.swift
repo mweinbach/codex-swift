@@ -835,6 +835,46 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkRangeAndComputedIndexes() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log", "show"]
+        SELECTED = [COMMANDS[index] for index in range(len(COMMANDS)) if index != 1]
+        REVERSED = [COMMANDS[index] for index in range(3, 0, -2)]
+
+        for index in range(0, len(SELECTED), 2):
+            prefix_rule(
+                [TOOL, SELECTED[index]],
+                "prompt",
+                match = [f"{TOOL} {SELECTED[index]}"],
+                justification = "range index " + SELECTED[index],
+            )
+
+        if COMMANDS[3] == "show":
+            network_rule("api.github.com", "https", "allow")
+
+        if REVERSED[0] == "show" and REVERSED[1] == "diff":
+            host_executable(TOOL, ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "range index status"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .prompt,
+                justification: "range index show"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkTopLevelForLoops() throws {
         let policy = try parsePolicy("""
         TOOLS = ["git", "jj"]

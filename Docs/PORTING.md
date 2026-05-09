@@ -641,6 +641,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for explicit boolean/comparison expressions assigned to constants and passed through supported function or builtin arguments, covering `and`, `or`, prefix `not`, ordered/equality comparisons, and membership operators.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
+- `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes
+  - Added Swift execpolicy parser support for `range(stop)`, `range(start, stop)`, and `range(start, stop, step)` over integer expressions, plus array indexing by integer constants or loop variables, covering range-driven loops and list comprehensions.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
