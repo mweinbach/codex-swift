@@ -1004,8 +1004,10 @@ public enum CodexAppServer {
 
     fileprivate static func threadTurnsListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
+        try requireExperimentalAPI(method: "thread/turns/list", experimentalAPIEnabled: experimentalAPIEnabled)
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -13763,9 +13765,17 @@ final class CodexAppServerMessageProcessor {
                 case "thread/turns/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadTurnsListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.threadTurnsListResult(
+                            params: params,
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
+                        )
                     )
                 case "thread/turns/items/list":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "thread/turns/items/list",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.errorObject(
                         id: id,
                         code: -32601,

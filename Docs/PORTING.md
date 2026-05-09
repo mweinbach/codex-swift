@@ -608,6 +608,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled.
 - `codex-rs/app-server-protocol` experimental `thread/goal/*` gating
   - matched Rust's method-level experimental API guard for `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear`, including preserving the goals-feature-disabled error after clients opt into `experimentalApi`.
+- `codex-rs/app-server-protocol` experimental `thread/turns/*` gating
+  - matched Rust's method-level experimental API guard for `thread/turns/list` and `thread/turns/items/list`, while preserving the unsupported-items-list response once clients opt into `experimentalApi`.
 
 ## Known Gaps
 

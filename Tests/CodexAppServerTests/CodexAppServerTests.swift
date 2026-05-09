@@ -4467,7 +4467,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let firstPage = try appServerResponse(
             #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":2}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let firstResult = try XCTUnwrap(firstPage["result"] as? [String: Any])
         let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
@@ -4480,7 +4481,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let secondPage = try appServerResponse(
             #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":\#(jsonString(nextCursor)),"limit":10}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let secondResult = try XCTUnwrap(secondPage["result"] as? [String: Any])
         let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
@@ -4492,11 +4494,40 @@ final class CodexAppServerTests: XCTestCase {
         ])
         let newerPage = try appServerResponse(
             #"{"id":3,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":\#(jsonString(backwardsCursor)),"sortDirection":"asc","limit":10}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let newerResult = try XCTUnwrap(newerPage["result"] as? [String: Any])
         let newerData = try XCTUnwrap(newerResult["data"] as? [[String: Any]])
         XCTAssertEqual(newerData.map(turnUserText), ["third", "fourth"])
+    }
+
+    func testThreadTurnsRoutesRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-10-00",
+            timestamp: "2025-01-05T12:10:00Z",
+            preview: "turns gate",
+            provider: "mock_provider"
+        )
+        let cases = [
+            (
+                "thread/turns/list",
+                #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)"}}"#
+            ),
+            (
+                "thread/turns/items/list",
+                #"{"id":2,"method":"thread/turns/items/list","params":{"threadId":"\#(threadID)","turnId":"turn-1"}}"#
+            )
+        ]
+
+        for (method, request) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(method) requires experimentalApi capability")
+        }
     }
 
     func testThreadRollbackPersistsMarkerAndReturnsPrunedThread() throws {
@@ -4563,7 +4594,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let response = try appServerResponse(
             #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":10}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
@@ -4619,7 +4651,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let full = try appServerResponse(
             #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"full"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let fullTurn = try XCTUnwrap(((full["result"] as? [String: Any])?["data"] as? [[String: Any]])?.first)
         XCTAssertEqual(fullTurn["itemsView"] as? String, "full")
@@ -4627,7 +4660,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let notLoaded = try appServerResponse(
             #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"notLoaded"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let notLoadedTurn = try XCTUnwrap(((notLoaded["result"] as? [String: Any])?["data"] as? [[String: Any]])?.first)
         XCTAssertEqual(notLoadedTurn["itemsView"] as? String, "notLoaded")
@@ -4635,7 +4669,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let unsupported = try appServerResponse(
             #"{"id":3,"method":"thread/turns/items/list","params":{"threadId":"\#(threadID)","turnId":"turn-1"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let error = try XCTUnwrap(unsupported["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32601)
@@ -4654,7 +4689,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let badItemsView = try appServerResponse(
             #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"compact"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let badItemsViewError = try XCTUnwrap(badItemsView["error"] as? [String: Any])
         XCTAssertEqual(badItemsViewError["code"] as? Int, -32600)
@@ -4665,7 +4701,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let badSortDirection = try appServerResponse(
             #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","sortDirection":"sideways"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let badSortDirectionError = try XCTUnwrap(badSortDirection["error"] as? [String: Any])
         XCTAssertEqual(badSortDirectionError["code"] as? Int, -32600)
