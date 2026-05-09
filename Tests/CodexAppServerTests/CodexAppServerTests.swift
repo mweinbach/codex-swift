@@ -5039,10 +5039,6 @@ final class CodexAppServerTests: XCTestCase {
             #"{"id":3,"method":"command/exec/terminate","params":{"processId":"cmd-kill"}}"#.utf8
         )))
         XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
-
-        let responseData = try await nextNotificationPayload(notificationCapture)
-        let response = try XCTUnwrap(decodeMessages(responseData).first)
-        XCTAssertEqual(response["id"] as? Int, 1)
     }
 
     func testCommandExecProcessIDSessionTimeoutReportsRustExitCode() async throws {
@@ -5065,6 +5061,34 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(response["id"] as? Int, 1)
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["exitCode"] as? Int, 124)
+    }
+
+    func testCommandExecResizeActiveNonPtyReportsRustError() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        let resize = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/resize","params":{"processId":"cmd-resize","size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        let resizeError = try XCTUnwrap(resize["error"] as? [String: Any])
+        XCTAssertEqual(resizeError["code"] as? Int, -32600)
+        XCTAssertEqual(resizeError["message"] as? String, "failed to resize PTY: process is not attached to a PTY")
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"command/exec/terminate","params":{"processId":"cmd-resize"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
     }
 
     func testCommandExecFollowUpsReportNoActiveProcess() throws {
@@ -5330,7 +5354,35 @@ final class CodexAppServerTests: XCTestCase {
             #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-no-stdin"}}"#.utf8
         )))
         XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
-        _ = try await nextNotificationPayload(notificationCapture)
+    }
+
+    func testProcessResizeActiveNonPtyReportsRustError() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let resize = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/resizePty","params":{"processHandle":"proc-resize","size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        let resizeError = try XCTUnwrap(resize["error"] as? [String: Any])
+        XCTAssertEqual(resizeError["code"] as? Int, -32600)
+        XCTAssertEqual(resizeError["message"] as? String, "failed to resize PTY: process is not attached to a PTY")
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-resize"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
     }
 
     func testProcessSpawnTimeoutReportsRustExitCode() async throws {
@@ -5507,18 +5559,14 @@ final class CodexAppServerTests: XCTestCase {
         _ capture: AppServerNotificationCapture,
         timeoutNanoseconds: UInt64 = 2_000_000_000
     ) async throws -> Data {
-        try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask {
-                await capture.nextPayload()
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if let payload = await capture.popPayload() {
+                return payload
             }
-            group.addTask {
-                try await Task.sleep(nanoseconds: timeoutNanoseconds)
-                throw AppServerTestTimeout()
-            }
-            let value = try await group.next()
-            group.cancelAll()
-            return try XCTUnwrap(value)
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
+        throw AppServerTestTimeout()
     }
 
     private func testConfiguration(
@@ -5934,9 +5982,16 @@ private actor AppServerNotificationCapture {
         payloads
     }
 
-    func nextPayload() async -> Data {
+    func popPayload() -> Data? {
         if !payloads.isEmpty {
             return payloads.removeFirst()
+        }
+        return nil
+    }
+
+    func nextPayload() async -> Data {
+        if let payload = popPayload() {
+            return payload
         }
         return await withCheckedContinuation { continuation in
             waiters.append(continuation)

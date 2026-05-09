@@ -3651,6 +3651,11 @@ public enum CodexAppServer {
 
     fileprivate static func commandExecResizeResult(params: [String: Any]?) throws -> [String: Any] {
         let processID = try commandExecProcessID(params: params)
+        try validateCommandExecResizeParams(params: params)
+        throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+    }
+
+    fileprivate static func validateCommandExecResizeParams(params: [String: Any]?) throws {
         guard let size = params?["size"] as? [String: Any],
               let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
@@ -3660,7 +3665,6 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
         }
-        throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
     }
 
     private static func validateCommandExecSize(_ size: [String: Any]) throws {
@@ -3753,6 +3757,11 @@ public enum CodexAppServer {
 
     fileprivate static func processResizePtyResult(params: [String: Any]?) throws -> [String: Any] {
         let processHandle = try processHandle(params: params)
+        try validateProcessResizePtyParams(params: params)
+        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+    }
+
+    fileprivate static func validateProcessResizePtyParams(params: [String: Any]?) throws {
         guard let size = params?["size"] as? [String: Any],
               let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
@@ -3762,7 +3771,6 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
         }
-        throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
     }
 
     private static func validateProcessSize(_ size: [String: Any]) throws {
@@ -7090,6 +7098,10 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         }
     }
 
+    func resizePty() throws {
+        throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
+    }
+
     func terminate() {
         let shouldTerminate = lock.withLock {
             guard !terminated else {
@@ -7309,6 +7321,10 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
                 stdin.fileHandleForWriting.closeFile()
             }
         }
+    }
+
+    func resizePty() throws {
+        throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
     }
 
     func terminate() {
@@ -7739,6 +7755,16 @@ final class CodexAppServerMessageProcessor {
         return [:]
     }
 
+    private func commandExecResizeResult(params: [String: Any]?) throws -> [String: Any] {
+        let processID = try CodexAppServer.commandExecProcessID(params: params)
+        try CodexAppServer.validateCommandExecResizeParams(params: params)
+        guard let session = activeCommandExecs.get(processID) else {
+            throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
+        }
+        try session.resizePty()
+        return [:]
+    }
+
     private func processSpawnResult(params: [String: Any]?) throws -> [String: Any] {
         let parsed = try CodexAppServer.processSpawnParams(params: params)
         if activeProcesses.contains(parsed.processHandle) {
@@ -7769,6 +7795,16 @@ final class CodexAppServerMessageProcessor {
             throw AppServerError.invalidRequest("no active process for process handle \"\(parsed.processHandle)\"")
         }
         try session.writeStdin(delta: parsed.delta, closeStdin: parsed.closeStdin)
+        return [:]
+    }
+
+    private func processResizePtyResult(params: [String: Any]?) throws -> [String: Any] {
+        let processHandle = try CodexAppServer.processHandle(params: params)
+        try CodexAppServer.validateProcessResizePtyParams(params: params)
+        guard let session = activeProcesses.get(processHandle) else {
+            throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+        }
+        try session.resizePty()
         return [:]
     }
 
@@ -8359,7 +8395,7 @@ final class CodexAppServerMessageProcessor {
                 case "command/exec/resize":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.commandExecResizeResult(params: params)
+                        result: try commandExecResizeResult(params: params)
                     )
                 case "command/exec/terminate":
                     response = CodexAppServer.responseObject(
@@ -8379,7 +8415,7 @@ final class CodexAppServerMessageProcessor {
                 case "process/resizePty":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.processResizePtyResult(params: params)
+                        result: try processResizePtyResult(params: params)
                     )
                 case "process/kill":
                     response = CodexAppServer.responseObject(
