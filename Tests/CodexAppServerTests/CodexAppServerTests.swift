@@ -861,6 +861,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let cases: [(String, String)] = [
             (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""history":[]"#, "thread/resume.history"),
+            (#""path":"/tmp/rollout.jsonl""#, "thread/resume.path"),
             (#""permissions":{"profile":"readOnly"}"#, "thread/resume.permissions"),
             (#""excludeTurns":true"#, "thread/resume.excludeTurns"),
             (#""persistFullHistory":true"#, "thread/resume.persistFullHistory")

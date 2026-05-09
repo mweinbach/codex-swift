@@ -1315,6 +1315,12 @@ public enum CodexAppServer {
             return
         }
         try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
+        if let history = params?["history"], !(history is NSNull) {
+            throw AppServerError.invalidRequest("thread/resume.history requires experimentalApi capability")
+        }
+        if let path = params?["path"], !(path is NSNull) {
+            throw AppServerError.invalidRequest("thread/resume.path requires experimentalApi capability")
+        }
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/resume.permissions requires experimentalApi capability")
         }
