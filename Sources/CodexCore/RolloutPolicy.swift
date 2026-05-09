@@ -3,6 +3,9 @@ import Foundation
 public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, Sendable {
     case error
     case warning
+    case guardianWarning = "guardian_warning"
+    case modelReroute = "model_reroute"
+    case modelVerification = "model_verification"
     case contextCompacted = "context_compacted"
     case taskStarted = "task_started"
     case taskComplete = "task_complete"
@@ -80,6 +83,12 @@ public enum RolloutPolicy {
             return .error
         case .warning:
             return .warning
+        case .guardianWarning:
+            return .guardianWarning
+        case .modelReroute:
+            return .modelReroute
+        case .modelVerification:
+            return .modelVerification
         case .contextCompacted:
             return .contextCompacted
         case .taskStarted:
@@ -303,6 +312,9 @@ public enum RolloutPolicy {
              .viewImageToolCall:
             return .extended
         case .warning,
+             .guardianWarning,
+             .modelReroute,
+             .modelVerification,
              .agentMessageDelta,
              .agentReasoningDelta,
              .agentReasoningRawContentDelta,

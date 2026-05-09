@@ -29,6 +29,9 @@ public struct ThreadRolledBackEvent: Equatable, Codable, Sendable {
 public enum EventMessage: Equatable, Codable, Sendable {
     case error(ErrorEvent)
     case warning(WarningEvent)
+    case guardianWarning(WarningEvent)
+    case modelReroute(ModelRerouteEvent)
+    case modelVerification(ModelVerificationEvent)
     case contextCompacted(ContextCompactedEvent)
     case taskStarted(TaskStartedEvent)
     case taskComplete(TaskCompleteEvent)
@@ -92,6 +95,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
     private enum EventType: String, Codable {
         case error
         case warning
+        case guardianWarning = "guardian_warning"
+        case modelReroute = "model_reroute"
+        case modelVerification = "model_verification"
         case contextCompacted = "context_compacted"
         case taskStarted = "task_started"
         case taskComplete = "task_complete"
@@ -180,6 +186,12 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .error(try ErrorEvent(from: decoder))
         case .warning:
             self = .warning(try WarningEvent(from: decoder))
+        case .guardianWarning:
+            self = .guardianWarning(try WarningEvent(from: decoder))
+        case .modelReroute:
+            self = .modelReroute(try ModelRerouteEvent(from: decoder))
+        case .modelVerification:
+            self = .modelVerification(try ModelVerificationEvent(from: decoder))
         case .contextCompacted:
             self = .contextCompacted(try ContextCompactedEvent(from: decoder))
         case .taskStarted:
@@ -301,6 +313,15 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .warning(event):
             try container.encode(EventType.warning, forKey: .type)
+            try event.encode(to: encoder)
+        case let .guardianWarning(event):
+            try container.encode(EventType.guardianWarning, forKey: .type)
+            try event.encode(to: encoder)
+        case let .modelReroute(event):
+            try container.encode(EventType.modelReroute, forKey: .type)
+            try event.encode(to: encoder)
+        case let .modelVerification(event):
+            try container.encode(EventType.modelVerification, forKey: .type)
             try event.encode(to: encoder)
         case let .contextCompacted(event):
             try container.encode(EventType.contextCompacted, forKey: .type)

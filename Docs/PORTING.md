@@ -330,11 +330,11 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` MCP list-tools response plus `codex-rs/mcp-types/src/lib.rs`
   - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, camelCase MCP field names, fully qualified MCP tool naming, duplicate qualified-tool skipping, SHA-1 suffix truncation for OpenAI's 64-character tool-name limit, and per-server MCP tool allow/deny filtering
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
-  - Codex error-info wire variants, task start/complete events, warning/error/stream-error payloads, deprecation and undo notices, stream info, and turn-abort reason values
+  - Codex error-info wire variants, task start/complete events, warning/Guardian-warning/error/stream-error payloads, model reroute/verification events, deprecation and undo notices, stream info, and turn-abort reason values
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
   - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content-delta payloads, and legacy-event projection helpers
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
-  - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants, including guardian assessments, turn lifecycle v2 aliases, and turn timing fields.
+  - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants, including Guardian warnings/assessments, model reroute/verification events, turn lifecycle v2 aliases, and turn timing fields.
 - `codex-rs/protocol/src/protocol.rs` submission queue model
   - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user input with bundled turn-context overrides, user turns, turn-context overrides, approvals with turn ids, elicitation resolution metadata, typed Guardian-denied retry approval, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/approvals.rs` Guardian assessment models

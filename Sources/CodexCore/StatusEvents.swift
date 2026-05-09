@@ -188,6 +188,40 @@ public struct WarningEvent: Equatable, Codable, Sendable {
     }
 }
 
+public enum ModelRerouteReason: String, Codable, Equatable, Sendable {
+    case highRiskCyberActivity = "high_risk_cyber_activity"
+}
+
+public struct ModelRerouteEvent: Equatable, Codable, Sendable {
+    public let fromModel: String
+    public let toModel: String
+    public let reason: ModelRerouteReason
+
+    private enum CodingKeys: String, CodingKey {
+        case fromModel = "from_model"
+        case toModel = "to_model"
+        case reason
+    }
+
+    public init(fromModel: String, toModel: String, reason: ModelRerouteReason) {
+        self.fromModel = fromModel
+        self.toModel = toModel
+        self.reason = reason
+    }
+}
+
+public enum ModelVerification: String, Codable, Equatable, Sendable {
+    case trustedAccessForCyber = "trusted_access_for_cyber"
+}
+
+public struct ModelVerificationEvent: Equatable, Codable, Sendable {
+    public let verifications: [ModelVerification]
+
+    public init(verifications: [ModelVerification]) {
+        self.verifications = verifications
+    }
+}
+
 public struct TaskCompleteEvent: Equatable, Codable, Sendable {
     public let turnID: String?
     public let lastAgentMessage: String?

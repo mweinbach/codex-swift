@@ -138,6 +138,24 @@ final class RolloutPolicyTests: XCTestCase {
 
     func testEventMessageKindMappingFeedsPersistencePolicy() {
         XCTAssertEqual(RolloutPolicy.eventKind(for: .warning(WarningEvent(message: "heads up"))), .warning)
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .guardianWarning(WarningEvent(message: "careful"))),
+            .guardianWarning
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .modelReroute(ModelRerouteEvent(
+                fromModel: "gpt-5.4",
+                toModel: "gpt-5.4-cyber",
+                reason: .highRiskCyberActivity
+            ))),
+            .modelReroute
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .modelVerification(ModelVerificationEvent(
+                verifications: [.trustedAccessForCyber]
+            ))),
+            .modelVerification
+        )
         XCTAssertEqual(RolloutPolicy.eventKind(for: .userMessage(UserMessageEvent(message: "hello"))), .userMessage)
         XCTAssertEqual(
             RolloutPolicy.eventKind(for: .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))),
@@ -152,6 +170,15 @@ final class RolloutPolicyTests: XCTestCase {
             .imageGenerationEnd
         )
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.guardianWarning(WarningEvent(message: "careful"))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.modelReroute(ModelRerouteEvent(
+            fromModel: "gpt-5.4",
+            toModel: "gpt-5.4-cyber",
+            reason: .highRiskCyberActivity
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.modelVerification(ModelVerificationEvent(
+            verifications: [.trustedAccessForCyber]
+        ))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.threadRolledBack(ThreadRolledBackEvent(numTurns: 1))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))

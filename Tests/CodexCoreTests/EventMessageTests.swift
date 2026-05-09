@@ -86,6 +86,40 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), msg)
     }
 
+    func testEventMessageCoversGuardianWarningAndModelRoutingLikeRust() throws {
+        let warning = EventMessage.guardianWarning(WarningEvent(message: "approval needed"))
+        try XCTAssertJSONObjectEqual(warning, [
+            "type": "guardian_warning",
+            "message": "approval needed"
+        ])
+
+        let reroute = EventMessage.modelReroute(ModelRerouteEvent(
+            fromModel: "gpt-5.4",
+            toModel: "gpt-5.4-cyber",
+            reason: .highRiskCyberActivity
+        ))
+        try XCTAssertJSONObjectEqual(reroute, [
+            "type": "model_reroute",
+            "from_model": "gpt-5.4",
+            "to_model": "gpt-5.4-cyber",
+            "reason": "high_risk_cyber_activity"
+        ])
+
+        let verification = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "model_verification",
+          "verifications": ["trusted_access_for_cyber"]
+        }
+        """.utf8))
+
+        XCTAssertEqual(verification, .modelVerification(ModelVerificationEvent(
+            verifications: [.trustedAccessForCyber]
+        )))
+
+        let data = try JSONEncoder().encode(reroute)
+        XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), reroute)
+    }
+
     func testUnitEventMessagesUseTypeOnlyRustShape() throws {
         try XCTAssertJSONObjectEqual(EventMessage.contextCompacted(ContextCompactedEvent()), [
             "type": "context_compacted"
