@@ -2133,6 +2133,38 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        RAW_COMMANDS = "status   diff\\nlog"
+        COMMANDS = RAW_COMMANDS.split()
+        INDEX = +0
+        OFFSET = +(1)
+        DECISIONS = ["allow", "prompt", "forbidden"]
+
+        prefix_rule([TOOL, COMMANDS[INDEX]], DECISIONS[+0], justification = "default split")
+        prefix_rule([TOOL, COMMANDS[OFFSET]], DECISIONS[+1])
+        network_rule("api.github.com", "https", DECISIONS[+0])
+        host_executable(TOOL, ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "default split"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .prompt
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

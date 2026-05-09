@@ -2735,6 +2735,9 @@ public final class PolicyParser {
             let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .string(trimmingStarlarkString(receiver, characters: characters, edges: .trailing))
         case "split":
+            if rawArguments.isEmpty {
+                return .array(starlarkWhitespaceSplit(receiver).map(ConfigValue.string))
+            }
             let separator = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             guard !separator.isEmpty else {
                 throw ConfigOverrideError.invalidLiteral(text)
@@ -2954,6 +2957,10 @@ public final class PolicyParser {
         }
         result += string[cursor..<string.endIndex]
         return result
+    }
+
+    private static func starlarkWhitespaceSplit(_ string: String) -> [String] {
+        string.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).map(String.init)
     }
 
     private static func replacingEmptyStarlarkString(_ string: String, newValue: String, count: Int) -> String {
@@ -4145,7 +4152,8 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue? {
-        guard text.hasPrefix("-"),
+        guard let sign = text.first,
+              sign == "-" || sign == "+",
               text.dropFirst().first?.isWhitespace != true
         else {
             return nil
@@ -4157,9 +4165,9 @@ public final class PolicyParser {
         let operand = try parsePolicyLiteral(operandText, constants: constants, functions: functions)
         switch operand {
         case let .integer(value):
-            return .integer(-value)
+            return .integer(sign == "-" ? -value : value)
         case let .double(value):
-            return .double(-value)
+            return .double(sign == "-" ? -value : value)
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
