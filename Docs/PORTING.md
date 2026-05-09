@@ -334,7 +334,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
   - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content-delta payloads, and legacy-event projection helpers
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model
-  - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants
+  - Rust-compatible `Event { id, msg }` shape and `type`-tagged dispatch for currently ported event payload variants, including guardian assessments.
 - `codex-rs/protocol/src/protocol.rs` submission queue model
   - `Submission { id, op, trace }` and Rust `Op` tagged variants for user input, user input with bundled turn-context overrides, user turns, turn-context overrides, approvals with turn ids, elicitation resolution metadata, typed Guardian-denied retry approval, history/custom-prompt/skill/model list requests, compact/undo/review/shutdown, and user shell commands
 - `codex-rs/protocol/src/approvals.rs` Guardian assessment models
@@ -535,7 +535,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` rollout turn context sidecars
   - Expanded Swift `TurnContextItem` rollout serialization with Rust's turn/trace IDs, current date/timezone, permission profile, network, runtime filesystem policy, personality, collaboration mode, realtime-active fields, and fallback permission-profile derivation.
 - `codex-rs/rollout/src/policy.rs` event persistence modes
-  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image events, and the stricter memories response-item persistence bucket.
+  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image/guardian-assessment events, and the stricter memories response-item persistence bucket.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
   - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules

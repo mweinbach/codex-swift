@@ -40,6 +40,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case patchApplyBegin = "patch_apply_begin"
     case patchApplyEnd = "patch_apply_end"
     case turnDiff = "turn_diff"
+    case guardianAssessment = "guardian_assessment"
     case getHistoryEntryResponse = "get_history_entry_response"
     case mcpListToolsResponse = "mcp_list_tools_response"
     case listCustomPromptsResponse = "list_custom_prompts_response"
@@ -155,6 +156,8 @@ public enum RolloutPolicy {
             return .patchApplyEnd
         case .turnDiff:
             return .turnDiff
+        case .guardianAssessment:
+            return .guardianAssessment
         case .getHistoryEntryResponse:
             return .getHistoryEntryResponse
         case .listSkillsResponse:
@@ -293,6 +296,7 @@ public enum RolloutPolicy {
              .imageGenerationEnd:
             return .limited
         case .error,
+             .guardianAssessment,
              .execCommandEnd,
              .viewImageToolCall:
             return .extended

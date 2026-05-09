@@ -108,6 +108,7 @@ final class RolloutPolicyTests: XCTestCase {
         ]
         let extendedOnly: Set<RolloutEventMessageKind> = [
             .error,
+            .guardianAssessment,
             .execCommandEnd,
             .viewImageToolCall
         ]
@@ -157,6 +158,16 @@ final class RolloutPolicyTests: XCTestCase {
             status: "completed",
             result: "base64-png"
         ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.guardianAssessment(GuardianAssessmentEvent(
+            id: "guardian-1",
+            status: .inProgress,
+            action: .command(source: .unifiedExec, command: "git status", cwd: "/repo")
+        ))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.guardianAssessment(GuardianAssessmentEvent(
+            id: "guardian-1",
+            status: .inProgress,
+            action: .command(source: .unifiedExec, command: "git status", cwd: "/repo")
+        )), mode: .extended))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.error(ErrorEvent(message: "boom"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.error(ErrorEvent(message: "boom")), mode: .extended))
     }

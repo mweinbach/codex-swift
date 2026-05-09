@@ -67,6 +67,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case patchApplyBegin(PatchApplyBeginEvent)
     case patchApplyEnd(PatchApplyEndEvent)
     case turnDiff(TurnDiffEvent)
+    case guardianAssessment(GuardianAssessmentEvent)
     case getHistoryEntryResponse(GetHistoryEntryResponseEvent)
     case listSkillsResponse(ListSkillsResponseEvent)
     case listCustomPromptsResponse(ListCustomPromptsResponseEvent)
@@ -129,6 +130,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case patchApplyBegin = "patch_apply_begin"
         case patchApplyEnd = "patch_apply_end"
         case turnDiff = "turn_diff"
+        case guardianAssessment = "guardian_assessment"
         case getHistoryEntryResponse = "get_history_entry_response"
         case listSkillsResponse = "list_skills_response"
         case listCustomPromptsResponse = "list_custom_prompts_response"
@@ -230,6 +232,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .patchApplyEnd(try PatchApplyEndEvent(from: decoder))
         case .turnDiff:
             self = .turnDiff(try TurnDiffEvent(from: decoder))
+        case .guardianAssessment:
+            self = .guardianAssessment(try GuardianAssessmentEvent(from: decoder))
         case .getHistoryEntryResponse:
             self = .getHistoryEntryResponse(try GetHistoryEntryResponseEvent(from: decoder))
         case .listSkillsResponse:
@@ -387,6 +391,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .turnDiff(event):
             try container.encode(EventType.turnDiff, forKey: .type)
+            try event.encode(to: encoder)
+        case let .guardianAssessment(event):
+            try container.encode(EventType.guardianAssessment, forKey: .type)
             try event.encode(to: encoder)
         case let .getHistoryEntryResponse(event):
             try container.encode(EventType.getHistoryEntryResponse, forKey: .type)

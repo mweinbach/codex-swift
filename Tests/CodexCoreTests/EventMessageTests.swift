@@ -210,6 +210,36 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(review, .enteredReviewMode(ReviewRequest(target: .uncommittedChanges)))
     }
 
+    func testEventMessageCarriesGuardianAssessmentLikeRust() throws {
+        let assessment = GuardianAssessmentEvent(
+            id: "guardian-1",
+            targetItemID: "item-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 123,
+            status: .inProgress,
+            action: .command(source: .unifiedExec, command: "git status", cwd: "/repo")
+        )
+        let message = EventMessage.guardianAssessment(assessment)
+
+        try XCTAssertJSONObjectEqual(message, [
+            "type": "guardian_assessment",
+            "id": "guardian-1",
+            "target_item_id": "item-1",
+            "turn_id": "turn-1",
+            "started_at_ms": 123,
+            "status": "in_progress",
+            "action": [
+                "type": "command",
+                "source": "unified_exec",
+                "command": "git status",
+                "cwd": "/repo"
+            ]
+        ])
+
+        let data = try JSONEncoder().encode(message)
+        XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), message)
+    }
+
     func testUnsupportedEventMessageVariantThrows() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             EventMessage.self,
