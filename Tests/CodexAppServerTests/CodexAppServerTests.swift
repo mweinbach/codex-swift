@@ -6595,6 +6595,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "collaborationMode/list requires experimentalApi capability")
     }
 
+    func testMockExperimentalMethodRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mock/experimentalMethod","params":{"value":"hello"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "mock/experimentalMethod requires experimentalApi capability")
+    }
+
+    func testMockExperimentalMethodEchoesValue() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mock/experimentalMethod","params":{"value":"hello"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["echoed"] as? String, "hello")
+
+        let nullResponse = try appServerResponse(
+            #"{"id":2,"method":"mock/experimentalMethod","params":{}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let nullResult = try XCTUnwrap(nullResponse["result"] as? [String: Any])
+        XCTAssertTrue(nullResult["echoed"] is NSNull)
+    }
+
     func testRealtimeRoutesRequireExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 

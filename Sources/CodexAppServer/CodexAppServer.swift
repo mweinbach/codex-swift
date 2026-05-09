@@ -8019,6 +8019,12 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func mockExperimentalMethodResult(params: [String: Any]?) -> [String: Any] {
+        [
+            "echoed": stringParam(params?["value"]) as Any? ?? NSNull()
+        ]
+    }
+
     fileprivate static func configReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -14346,6 +14352,15 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     throw AppServerError.methodNotFound("\(method) is not supported yet")
+                case "mock/experimentalMethod":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "mock/experimentalMethod",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.mockExperimentalMethodResult(params: params)
+                    )
                 case "config/read":
                     response = CodexAppServer.responseObject(
                         id: id,
