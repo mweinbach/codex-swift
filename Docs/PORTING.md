@@ -462,6 +462,8 @@ Source baseline inspected for this scaffold:
   - `experimentalFeature/enablement/set` now accepts the Rust allowlisted feature keys, rejects unsupported and legacy alias keys with Rust-shaped invalid-request messages, stores a connection-local runtime overlay, and reflects it through `experimentalFeature/list` and `config/read` without overriding feature values already present in config.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config read cwd scoping
   - `config/read` now honors the optional absolute `cwd` param when loading config layers, matching Rust's project-layer-aware effective config, origins, and included layer list.
+- `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements reviewer constraints
+  - `configRequirements/read` now parses `allowed_approvals_reviewers` and returns Rust's camelCase `allowedApprovalsReviewers` values, including the `auto_review` input alias normalized to `guardian_subagent`.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` model-provider capabilities
   - `modelProvider/capabilities/read` now reloads the active config and returns Rust-shaped provider capability booleans, including the Amazon Bedrock built-in provider's disabled namespace-tools, image-generation, and web-search capabilities.
 - `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox readiness

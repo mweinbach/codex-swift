@@ -7923,6 +7923,7 @@ final class CodexAppServerTests: XCTestCase {
         let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
         try """
         allowed_approval_policies = ["untrusted", "on-request"]
+        allowed_approvals_reviewers = ["user", "guardian_subagent"]
         allowed_sandbox_modes = ["read-only", "workspace-write", "external-sandbox"]
         """.write(to: requirementsPath, atomically: true, encoding: .utf8)
 
@@ -7937,7 +7938,7 @@ final class CodexAppServerTests: XCTestCase {
         let requirements = try XCTUnwrap(result["requirements"] as? [String: Any])
         XCTAssertEqual(requirements["allowedApprovalPolicies"] as? [String], ["untrusted", "on-request"])
         XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only", "workspace-write"])
-        XCTAssertTrue(requirements["allowedApprovalsReviewers"] is NSNull)
+        XCTAssertEqual(requirements["allowedApprovalsReviewers"] as? [String], ["user", "guardian_subagent"])
         XCTAssertTrue(requirements["allowedWebSearchModes"] is NSNull)
         XCTAssertTrue(requirements["featureRequirements"] is NSNull)
         XCTAssertTrue(requirements["hooks"] is NSNull)

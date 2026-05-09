@@ -150,6 +150,15 @@ extension AskForApproval: Codable {
 public enum ApprovalsReviewer: Equatable, Sendable {
     case user
     case autoReview
+
+    public var appServerRawValue: String {
+        switch self {
+        case .user:
+            "user"
+        case .autoReview:
+            "guardian_subagent"
+        }
+    }
 }
 
 extension ApprovalsReviewer: Codable {

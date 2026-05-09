@@ -3,6 +3,7 @@ import Foundation
 public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidLine(String)
     case invalidApprovalPolicy(String)
+    case invalidApprovalsReviewer(String)
     case invalidSandboxMode(String)
     case invalidArray(String)
 
@@ -12,6 +13,8 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
             return "Invalid requirements line: \(line)"
         case let .invalidApprovalPolicy(value):
             return "Invalid approval policy requirement: \(value)"
+        case let .invalidApprovalsReviewer(value):
+            return "Invalid approvals reviewer requirement: \(value)"
         case let .invalidSandboxMode(value):
             return "Invalid sandbox mode requirement: \(value)"
         case let .invalidArray(key):
@@ -105,6 +108,7 @@ public struct ManagedHooksRequirementsToml: Equatable, Sendable {
 
 public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedApprovalPolicies: [AskForApproval]?
+    public var allowedApprovalsReviewers: [ApprovalsReviewer]?
     public var allowedSandboxModes: [SandboxModeRequirement]?
     public var hooks: ManagedHooksRequirementsToml?
     public var hooksSource: HookSource
@@ -112,12 +116,14 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
 
     public init(
         allowedApprovalPolicies: [AskForApproval]? = nil,
+        allowedApprovalsReviewers: [ApprovalsReviewer]? = nil,
         allowedSandboxModes: [SandboxModeRequirement]? = nil,
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements"
     ) {
         self.allowedApprovalPolicies = allowedApprovalPolicies
+        self.allowedApprovalsReviewers = allowedApprovalsReviewers
         self.allowedSandboxModes = allowedSandboxModes
         self.hooks = hooks
         self.hooksSource = hooksSource
@@ -126,6 +132,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
 
     public var isEmpty: Bool {
         allowedApprovalPolicies == nil &&
+            allowedApprovalsReviewers == nil &&
             allowedSandboxModes == nil &&
             hooks == nil
     }
@@ -133,6 +140,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
         if allowedApprovalPolicies == nil, let value = other.allowedApprovalPolicies {
             allowedApprovalPolicies = value
+        }
+        if allowedApprovalsReviewers == nil, let value = other.allowedApprovalsReviewers {
+            allowedApprovalsReviewers = value
         }
         if allowedSandboxModes == nil, let value = other.allowedSandboxModes {
             allowedSandboxModes = value
@@ -210,6 +220,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if let approvalValue = table["allowed_approval_policies"] {
             result.allowedApprovalPolicies = try parseApprovalPolicies(approvalValue)
         }
+        if let reviewerValue = table["allowed_approvals_reviewers"] {
+            result.allowedApprovalsReviewers = try parseApprovalsReviewers(reviewerValue)
+        }
         if let sandboxValue = table["allowed_sandbox_modes"] {
             result.allowedSandboxModes = try parseSandboxModes(sandboxValue)
         }
@@ -226,6 +239,19 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
                 throw ConfigRequirementsParseError.invalidApprovalPolicy(value)
             }
             return policy
+        }
+    }
+
+    private static func parseApprovalsReviewers(_ value: ConfigValue) throws -> [ApprovalsReviewer] {
+        try stringArray(value, key: "allowed_approvals_reviewers").map { value in
+            switch value {
+            case "user":
+                return .user
+            case "guardian_subagent", "auto_review":
+                return .autoReview
+            default:
+                throw ConfigRequirementsParseError.invalidApprovalsReviewer(value)
+            }
         }
     }
 
@@ -279,7 +305,9 @@ extension ConfigRequirementsToml {
     public func appServerRequirementsObject() -> [String: Any] {
         [
             "allowedApprovalPolicies": allowedApprovalPolicies.map { $0.map(\.rawValue) } as Any? ?? NSNull(),
-            "allowedApprovalsReviewers": NSNull(),
+            "allowedApprovalsReviewers": allowedApprovalsReviewers.map {
+                $0.map(\.appServerRawValue)
+            } as Any? ?? NSNull(),
             "allowedSandboxModes": allowedSandboxModes.map { modes in
                 modes.compactMap(\.appServerSandboxModeValue)
             } as Any? ?? NSNull(),

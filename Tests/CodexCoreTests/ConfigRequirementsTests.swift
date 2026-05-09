@@ -5,6 +5,7 @@ final class ConfigRequirementsTests: XCTestCase {
     func testMergeUnsetFieldsOnlyFillsMissingValues() throws {
         let source = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["on-request"]
+        allowed_approvals_reviewers = ["guardian_subagent"]
         """)
 
         var emptyTarget = try ConfigRequirementsToml.parse("""
@@ -12,12 +13,14 @@ final class ConfigRequirementsTests: XCTestCase {
         """)
         emptyTarget.mergeUnsetFields(from: source)
         XCTAssertEqual(emptyTarget.allowedApprovalPolicies, [.onRequest])
+        XCTAssertEqual(emptyTarget.allowedApprovalsReviewers, [.autoReview])
 
         var populatedTarget = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
         """)
         populatedTarget.mergeUnsetFields(from: source)
         XCTAssertEqual(populatedTarget.allowedApprovalPolicies, [.never])
+        XCTAssertEqual(populatedTarget.allowedApprovalsReviewers, [.autoReview])
     }
 
     func testDeserializeAllowedApprovalPolicies() throws {
@@ -38,6 +41,14 @@ final class ConfigRequirementsTests: XCTestCase {
             .invalidValue(candidate: "Never", allowed: "[UnlessTrusted, OnRequest]")
         )
         XCTAssertNoThrow(try requirements.sandboxPolicy.canSet(.readOnly).get())
+    }
+
+    func testDeserializeAllowedApprovalsReviewers() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        allowed_approvals_reviewers = ["user", "auto_review", "guardian_subagent"]
+        """)
+
+        XCTAssertEqual(config.allowedApprovalsReviewers, [.user, .autoReview, .autoReview])
     }
 
     func testDeserializeAllowedSandboxModes() throws {
@@ -132,6 +143,7 @@ final class ConfigRequirementsTests: XCTestCase {
     func testAppServerRequirementsObjectMatchesPortedRustFields() throws {
         let config = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
+        allowed_approvals_reviewers = ["user", "guardian_subagent"]
         allowed_sandbox_modes = ["read-only", "danger-full-access", "external-sandbox"]
         """)
 
@@ -139,7 +151,7 @@ final class ConfigRequirementsTests: XCTestCase {
         let object = config.appServerRequirementsObject()
         XCTAssertEqual(object["allowedApprovalPolicies"] as? [String], ["never"])
         XCTAssertEqual(object["allowedSandboxModes"] as? [String], ["read-only", "danger-full-access"])
-        XCTAssertTrue(object["allowedApprovalsReviewers"] is NSNull)
+        XCTAssertEqual(object["allowedApprovalsReviewers"] as? [String], ["user", "guardian_subagent"])
         XCTAssertTrue(ConfigRequirementsToml().isEmpty)
     }
 }
