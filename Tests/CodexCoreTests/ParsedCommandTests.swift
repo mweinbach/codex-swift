@@ -194,6 +194,21 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["/bin/bash", "-lc", "sed -n '1,10p' Cargo.toml"]), [
             .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "bat --theme TwoDark README.md"]), [
+            .read(cmd: "bat --theme TwoDark README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "batcat README.md"]), [
+            .read(cmd: "batcat README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "less -p TODO README.md"]), [
+            .read(cmd: "less -p TODO README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "more README.md"]), [
+            .read(cmd: "more README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", "bat README.md CHANGELOG.md"]), [
+            .unknown(cmd: "bat README.md CHANGELOG.md")
+        ])
     }
 
     func testSearchVariants() {

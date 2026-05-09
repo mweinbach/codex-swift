@@ -117,7 +117,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
-  - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, relative-`cd` context including rebased read/search/list paths, `rg`, `grep`, `ls`, `cat`, `head`, `tail`, `nl`, and `sed -n`
+  - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, relative-`cd` context including rebased read/search/list paths, `rg`, `grep`, `ls`, `cat`, `bat`/`batcat`, `less`, `more`, `head`, `tail`, `nl`, and `sed -n`
 - `codex-rs/common/src/fuzzy_match.rs`
   - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 - `codex-rs/apply-patch`

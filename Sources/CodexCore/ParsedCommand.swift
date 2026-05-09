@@ -290,6 +290,50 @@ private func summarizeMainTokens(_ mainCommand: [String]) -> ParsedCommand {
         }
         return .unknown(cmd: commandString(for: mainCommand))
 
+    case "bat", "batcat":
+        if let path = singleNonFlagOperand(
+            tail,
+            flagsWithValues: [
+                "--theme",
+                "--language",
+                "--style",
+                "--terminal-width",
+                "--tabs",
+                "--line-range",
+                "--map-syntax",
+            ]
+        ) {
+            return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
+    case "less":
+        if let path = singleNonFlagOperand(
+            tail,
+            flagsWithValues: [
+                "-p",
+                "-P",
+                "-x",
+                "-y",
+                "-z",
+                "-j",
+                "--pattern",
+                "--prompt",
+                "--tabs",
+                "--shift",
+                "--jump-target",
+            ]
+        ) {
+            return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
+    case "more":
+        if let path = singleNonFlagOperand(tail, flagsWithValues: []) {
+            return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
     case "head":
         if let path = fileOperandForHead(tail) {
             return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
@@ -459,6 +503,14 @@ private func skipFlagValues(_ args: [String], flagsWithValues: Set<String>) -> [
     }
 
     return output
+}
+
+private func singleNonFlagOperand(_ args: [String], flagsWithValues: Set<String>) -> String? {
+    let operands = skipFlagValues(args, flagsWithValues: flagsWithValues).filter { !$0.hasPrefix("-") }
+    guard operands.count == 1 else {
+        return nil
+    }
+    return operands[0]
 }
 
 private func isPathish(_ value: String) -> Bool {
