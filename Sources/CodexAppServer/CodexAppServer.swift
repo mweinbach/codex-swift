@@ -5,6 +5,7 @@ import Foundation
 
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
 public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
+public typealias AppServerMcpHTTPTransport = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
 public typealias AppServerMcpOAuthLoginCompletion = @Sendable (_ success: Bool, _ error: String?) async -> Void
 public typealias AppServerMcpOAuthLoginStarter = @Sendable (
     AppServerMcpOAuthLoginStartRequest,
@@ -105,6 +106,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let feedbackUploadTransport: any FeedbackUploadTransport
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let authRefreshTransport: AppServerAuthRefreshTransport?
+    public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
     public let configLayerOverrides: ConfigLayerLoaderOverrides
 
@@ -121,6 +123,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) {
@@ -136,6 +139,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.feedbackUploadTransport = feedbackUploadTransport
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.authRefreshTransport = authRefreshTransport
+        self.mcpHTTPTransport = mcpHTTPTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
         self.configLayerOverrides = configLayerOverrides
     }
@@ -201,6 +205,10 @@ private struct AppServerCommandExecWriteParams {
     let processID: String
     let delta: Data
     let closeStdin: Bool
+}
+
+private struct AppServerJSONObject: @unchecked Sendable {
+    let object: [String: Any]
 }
 
 public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
@@ -387,6 +395,25 @@ public enum CodexAppServer {
             }
         }
         return AppServerMcpOAuthLoginStarted(authorizationURL: try await capture.wait())
+    }
+
+    public static func defaultMcpHTTPTransport(_ request: URLRequest) async throws -> URLSessionTransportResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AppServerError.internalError("MCP server returned a non-HTTP response")
+        }
+        return URLSessionTransportResponse(
+            statusCode: httpResponse.statusCode,
+            headers: Dictionary(
+                uniqueKeysWithValues: httpResponse.allHeaderFields.compactMap { key, value in
+                    guard let name = key as? String else {
+                        return nil
+                    }
+                    return (name, String(describing: value))
+                }
+            ),
+            body: data
+        )
     }
 
     public static func run(
@@ -5714,7 +5741,209 @@ public enum CodexAppServer {
         guard let uri = stringParam(params?["uri"]), !uri.isEmpty else {
             throw AppServerError.invalidRequest("missing uri")
         }
-        throw AppServerError.internalError("MCP resource read is not implemented for server \(server)")
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to load MCP server config: \(error)")
+        }
+        guard let serverConfig = runtimeConfig.mcpServers[server] else {
+            throw AppServerError.internalError("No MCP server named '\(server)' found.")
+        }
+        guard serverConfig.enabled else {
+            throw AppServerError.internalError("MCP server '\(server)' is disabled.")
+        }
+        switch serverConfig.transport {
+        case .stdio:
+            throw AppServerError.internalError("MCP resource read is not implemented for stdio server \(server)")
+        case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
+            return try runAsyncBlocking {
+                try await mcpStreamableHTTPResourceReadResult(
+                    server: server,
+                    url: url,
+                    uri: uri,
+                    bearerTokenEnvVar: bearerTokenEnvVar,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    configuration: configuration
+                )
+            }.object
+        }
+    }
+
+    fileprivate static func mcpStreamableHTTPResourceReadResult(
+        server: String,
+        url: String,
+        uri: String,
+        bearerTokenEnvVar: String?,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        configuration: CodexAppServerConfiguration
+    ) async throws -> AppServerJSONObject {
+        let initializeResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: mcpHTTPHeaders(
+                bearerTokenEnvVar: bearerTokenEnvVar,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: configuration.environment
+            ),
+            sessionID: nil,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": [
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": [:],
+                    "clientInfo": [
+                        "name": "codex-swift",
+                        "version": configuration.version
+                    ]
+                ]
+            ],
+            transport: configuration.mcpHTTPTransport,
+            server: server
+        )
+        let sessionID = mcpSessionID(from: initializeResponse.headers)
+        let resourceResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: mcpHTTPHeaders(
+                bearerTokenEnvVar: bearerTokenEnvVar,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: configuration.environment
+            ),
+            sessionID: sessionID,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": [
+                    "uri": uri
+                ]
+            ],
+            transport: configuration.mcpHTTPTransport,
+            server: server
+        )
+        guard let result = resourceResponse.object["result"] as? [String: Any] else {
+            if let error = resourceResponse.object["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw AppServerError.internalError(message)
+            }
+            throw AppServerError.internalError("MCP server \(server) returned a response without result")
+        }
+        guard result["contents"] is [Any] else {
+            throw AppServerError.internalError("MCP server \(server) returned a resource read result without contents")
+        }
+        return AppServerJSONObject(object: result)
+    }
+
+    fileprivate static func mcpStreamableHTTPRequest(
+        url: String,
+        headers: [String: String],
+        sessionID: String?,
+        body: [String: Any],
+        transport: AppServerMcpHTTPTransport,
+        server: String
+    ) async throws -> (object: [String: Any], headers: [String: String]) {
+        guard let endpoint = URL(string: url) else {
+            throw AppServerError.internalError("invalid MCP server URL for \(server): \(url)")
+        }
+        guard JSONSerialization.isValidJSONObject(body) else {
+            throw AppServerError.internalError("invalid MCP request body for \(server)")
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let sessionID {
+            request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+        }
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let response = try await transport(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw AppServerError.internalError("MCP server \(server) returned HTTP \(response.statusCode)")
+        }
+        return (try mcpJSONObject(from: response.body, server: server), response.headers)
+    }
+
+    fileprivate static func mcpSessionID(from headers: [String: String]) -> String? {
+        for (name, value) in headers where name.caseInsensitiveCompare("mcp-session-id") == .orderedSame {
+            return value
+        }
+        return nil
+    }
+
+    fileprivate static func mcpHTTPHeaders(
+        bearerTokenEnvVar: String?,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        environment: [String: String]
+    ) -> [String: String] {
+        var headers: [String: String] = [:]
+        for (name, value) in httpHeaders ?? [:] where isValidHTTPHeaderName(name) && isValidHTTPHeaderValue(value) {
+            headers[name] = value
+        }
+        for (name, envVar) in envHttpHeaders ?? [:] {
+            guard let value = environment[envVar], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+            guard isValidHTTPHeaderName(name), isValidHTTPHeaderValue(value) else {
+                continue
+            }
+            headers[name] = value
+        }
+        if let bearerTokenEnvVar,
+           let bearerToken = environment[bearerTokenEnvVar],
+           !bearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            headers["Authorization"] = "Bearer \(bearerToken)"
+        }
+        return headers
+    }
+
+    fileprivate static func isValidHTTPHeaderName(_ name: String) -> Bool {
+        !name.isEmpty && name.utf8.allSatisfy { byte in
+            byte > 32 && byte < 127 && byte != 58
+        }
+    }
+
+    fileprivate static func isValidHTTPHeaderValue(_ value: String) -> Bool {
+        value.utf8.allSatisfy { byte in
+            byte == 9 || (byte >= 32 && byte != 127)
+        }
+    }
+
+    fileprivate static func mcpJSONObject(from data: Data, server: String) throws -> [String: Any] {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return object
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        for event in text.components(separatedBy: "\n\n") {
+            let dataLines = event
+                .split(separator: "\n")
+                .compactMap { line -> String? in
+                    guard line.hasPrefix("data:") else {
+                        return nil
+                    }
+                    return String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                }
+            guard !dataLines.isEmpty else {
+                continue
+            }
+            let payload = dataLines.joined(separator: "\n")
+            if let object = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] {
+                return object
+            }
+        }
+        throw AppServerError.internalError("MCP server \(server) returned invalid JSON")
     }
 
     fileprivate static func mcpServerToolCallResult(

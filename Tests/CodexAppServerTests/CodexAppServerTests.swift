@@ -3524,6 +3524,81 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(toolMissingThreadError["message"] as? String, "thread not found: \(threadID)")
     }
 
+    func testMcpResourceReadWithoutThreadCallsConfiguredStreamableHTTPServer() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        url = "https://mcp.example.test/mcp"
+        bearer_token_env_var = "MCP_TOKEN"
+
+        [mcp_servers.docs.http_headers]
+        XStatic = "static-value"
+
+        [mcp_servers.docs.env_http_headers]
+        XEnv = "MCP_ENV"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "MCP_TOKEN": "token-value",
+                "MCP_ENV": "env-value",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "session-123"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "resources/read":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"contents":[{"uri":"test://codex/resource","mimeType":"text/markdown","text":"Resource body from the MCP server."},{"uri":"test://codex/resource.bin","mimeType":"application/octet-stream","blob":"YmluYXJ5LXJlc291cmNl"}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/resource/read","params":{"server":"docs","uri":"test://codex/resource"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let contents = try XCTUnwrap(result["contents"] as? [[String: Any]])
+        XCTAssertEqual(contents.count, 2)
+        XCTAssertEqual(contents[0]["uri"] as? String, "test://codex/resource")
+        XCTAssertEqual(contents[0]["mimeType"] as? String, "text/markdown")
+        XCTAssertEqual(contents[0]["text"] as? String, "Resource body from the MCP server.")
+        XCTAssertEqual(contents[1]["uri"] as? String, "test://codex/resource.bin")
+        XCTAssertEqual(contents[1]["blob"] as? String, "YmluYXJ5LXJlc291cmNl")
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].url?.absoluteString, "https://mcp.example.test/mcp")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Authorization"), "Bearer token-value")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "XStatic"), "static-value")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "XEnv"), "env-value")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Mcp-Session-Id"), "session-123")
+        let readBody = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[1].httpBody)) as? [String: Any])
+        XCTAssertEqual(readBody["method"] as? String, "resources/read")
+        XCTAssertEqual((readBody["params"] as? [String: Any])?["uri"] as? String, "test://codex/resource")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -6393,6 +6468,7 @@ final class CodexAppServerTests: XCTestCase {
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
     ) -> CodexAppServerConfiguration {
@@ -6408,6 +6484,7 @@ final class CodexAppServerTests: XCTestCase {
             feedbackUploadTransport: feedbackUploadTransport,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             authRefreshTransport: authRefreshTransport,
+            mcpHTTPTransport: mcpHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             configLayerOverrides: configLayerOverrides
         )
@@ -6769,6 +6846,23 @@ private actor AppServerRefreshCapture {
 
     func append(_ request: URLRequest) {
         requests.append(Request(url: request.url, method: request.httpMethod))
+    }
+}
+
+private final class MCPHTTPTransportCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequests: [URLRequest] = []
+
+    var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequests
+    }
+
+    func append(_ request: URLRequest) {
+        lock.lock()
+        storedRequests.append(request)
+        lock.unlock()
     }
 }
 
