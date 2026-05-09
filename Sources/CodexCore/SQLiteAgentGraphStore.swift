@@ -274,6 +274,95 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func markThreadArchived(
+        threadID: ThreadId,
+        rolloutPath: URL,
+        archivedAt: Date
+    ) async throws -> Bool {
+        let database = handle.database
+        let archivedAtSeconds = Self.epochSeconds(archivedAt)
+        if let modifiedAt = Self.fileModificationDate(rolloutPath) {
+            let updatedAtMilliseconds = allocateThreadUpdatedAt(modifiedAt)
+            try Self.execute(
+                """
+                UPDATE threads
+                SET archived = 1,
+                    archived_at = ?,
+                    rollout_path = ?,
+                    updated_at = ?,
+                    updated_at_ms = ?
+                WHERE id = ?
+                """,
+                bindings: [
+                    .int(archivedAtSeconds),
+                    .text(rolloutPath.path),
+                    .int(Self.epochSeconds(fromMilliseconds: updatedAtMilliseconds)),
+                    .int(updatedAtMilliseconds),
+                    .text(threadID.description),
+                ],
+                database: database
+            )
+        } else {
+            try Self.execute(
+                """
+                UPDATE threads
+                SET archived = 1,
+                    archived_at = ?,
+                    rollout_path = ?
+                WHERE id = ?
+                """,
+                bindings: [
+                    .int(archivedAtSeconds),
+                    .text(rolloutPath.path),
+                    .text(threadID.description),
+                ],
+                database: database
+            )
+        }
+        return sqlite3_changes(database) > 0
+    }
+
+    public func markThreadUnarchived(threadID: ThreadId, rolloutPath: URL) async throws -> Bool {
+        let database = handle.database
+        if let modifiedAt = Self.fileModificationDate(rolloutPath) {
+            let updatedAtMilliseconds = allocateThreadUpdatedAt(modifiedAt)
+            try Self.execute(
+                """
+                UPDATE threads
+                SET archived = 0,
+                    archived_at = NULL,
+                    rollout_path = ?,
+                    updated_at = ?,
+                    updated_at_ms = ?
+                WHERE id = ?
+                """,
+                bindings: [
+                    .text(rolloutPath.path),
+                    .int(Self.epochSeconds(fromMilliseconds: updatedAtMilliseconds)),
+                    .int(updatedAtMilliseconds),
+                    .text(threadID.description),
+                ],
+                database: database
+            )
+        } else {
+            try Self.execute(
+                """
+                UPDATE threads
+                SET archived = 0,
+                    archived_at = NULL,
+                    rollout_path = ?
+                WHERE id = ?
+                """,
+                bindings: [
+                    .text(rolloutPath.path),
+                    .text(threadID.description),
+                ],
+                database: database
+            )
+        }
+        return sqlite3_changes(database) > 0
+    }
+
     public func updateThreadTitle(threadID: ThreadId, title: String) async throws -> Bool {
         let database = handle.database
         try Self.execute(
@@ -588,8 +677,19 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         Int64((date.timeIntervalSince1970 * 1_000).rounded(.down))
     }
 
+    private static func epochSeconds(_ date: Date) -> Int64 {
+        Int64(date.timeIntervalSince1970.rounded(.down))
+    }
+
     private static func epochSeconds(fromMilliseconds milliseconds: Int64) -> Int64 {
         milliseconds / 1_000
+    }
+
+    private static func fileModificationDate(_ url: URL) -> Date? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
     }
 
     private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {

@@ -796,6 +796,104 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(secondDeleteRows, 0)
     }
 
+    func testSQLiteStoreMarksThreadArchivedAndUnarchivedUsingRolloutModificationTime() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let archivedRolloutURL = temp.url.appendingPathComponent("archived-rollout.jsonl")
+        let restoredRolloutURL = temp.url.appendingPathComponent("restored-rollout.jsonl")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let archivedThreadID = try threadID(96)
+        let missingThreadID = try threadID(97)
+        try insertRawSQLiteThread(
+            id: archivedThreadID,
+            agentPath: try AgentPath(validating: "/root/archive"),
+            rolloutPath: "/tmp/original-rollout.jsonl",
+            databaseURL: databaseURL
+        )
+        try Data("archived\n".utf8).write(to: archivedRolloutURL)
+        try Data("restored\n".utf8).write(to: restoredRolloutURL)
+        let archiveModifiedAt = date(milliseconds: 1_700_000_010_500)
+        let restoredModifiedAt = date(milliseconds: 1_700_000_020_250)
+        try FileManager.default.setAttributes([.modificationDate: archiveModifiedAt], ofItemAtPath: archivedRolloutURL.path)
+        try FileManager.default.setAttributes([.modificationDate: restoredModifiedAt], ofItemAtPath: restoredRolloutURL.path)
+
+        let archived = try await store.markThreadArchived(
+            threadID: archivedThreadID,
+            rolloutPath: archivedRolloutURL,
+            archivedAt: date(milliseconds: 1_700_000_011_900)
+        )
+        let missingArchived = try await store.markThreadArchived(
+            threadID: missingThreadID,
+            rolloutPath: archivedRolloutURL,
+            archivedAt: date(milliseconds: 1_700_000_011_900)
+        )
+        let archivedMetadata = try readRawSQLiteThreadArchiveMetadata(id: archivedThreadID, databaseURL: databaseURL)
+        let archivedLookupPath = try await store.findRolloutPath(
+            threadID: archivedThreadID,
+            archiveFilter: .archivedOnly
+        )
+
+        XCTAssertTrue(archived)
+        XCTAssertFalse(missingArchived)
+        XCTAssertEqual(archivedMetadata, ThreadArchiveMetadata(
+            rolloutPath: archivedRolloutURL.path,
+            archived: true,
+            archivedAt: 1_700_000_011,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_010, milliseconds: 1_700_000_010_500)
+        ))
+        XCTAssertEqual(archivedLookupPath, archivedRolloutURL.path)
+
+        let unarchived = try await store.markThreadUnarchived(threadID: archivedThreadID, rolloutPath: restoredRolloutURL)
+        let missingUnarchived = try await store.markThreadUnarchived(threadID: missingThreadID, rolloutPath: restoredRolloutURL)
+        let unarchivedMetadata = try readRawSQLiteThreadArchiveMetadata(id: archivedThreadID, databaseURL: databaseURL)
+        let unarchivedLookupPath = try await store.findRolloutPath(
+            threadID: archivedThreadID,
+            archiveFilter: .unarchivedOnly
+        )
+
+        XCTAssertTrue(unarchived)
+        XCTAssertFalse(missingUnarchived)
+        XCTAssertEqual(unarchivedMetadata, ThreadArchiveMetadata(
+            rolloutPath: restoredRolloutURL.path,
+            archived: false,
+            archivedAt: nil,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_020, milliseconds: 1_700_000_020_250)
+        ))
+        XCTAssertEqual(unarchivedLookupPath, restoredRolloutURL.path)
+    }
+
+    func testSQLiteStoreArchiveLeavesUpdatedAtWhenRolloutModificationTimeIsUnavailable() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let missingRolloutURL = temp.url.appendingPathComponent("missing-rollout.jsonl")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(98)
+        try insertRawSQLiteThread(
+            id: threadID,
+            agentPath: try AgentPath(validating: "/root/archive_missing_mtime"),
+            rolloutPath: "/tmp/original-rollout.jsonl",
+            updatedAt: ThreadUpdatedAt(seconds: 123, milliseconds: 123_456),
+            databaseURL: databaseURL
+        )
+
+        let archived = try await store.markThreadArchived(
+            threadID: threadID,
+            rolloutPath: missingRolloutURL,
+            archivedAt: date(milliseconds: 1_700_000_030_999)
+        )
+        let archivedMetadata = try readRawSQLiteThreadArchiveMetadata(id: threadID, databaseURL: databaseURL)
+
+        XCTAssertTrue(archived)
+        XCTAssertEqual(archivedMetadata, ThreadArchiveMetadata(
+            rolloutPath: missingRolloutURL.path,
+            archived: true,
+            archivedAt: 1_700_000_030,
+            updatedAt: ThreadUpdatedAt(seconds: 123, milliseconds: 123_456)
+        ))
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -858,6 +956,7 @@ final class AgentGraphStoreTests: XCTestCase {
                     memory_mode TEXT,
                     rollout_path TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
+                    archived_at INTEGER,
                     title TEXT,
                     updated_at INTEGER,
                     updated_at_ms INTEGER,
@@ -881,7 +980,9 @@ final class AgentGraphStoreTests: XCTestCase {
         memoryMode: String? = nil,
         rolloutPath: String? = nil,
         archived: Bool = false,
+        archivedAt: Int64? = nil,
         title: String? = nil,
+        updatedAt: ThreadUpdatedAt = ThreadUpdatedAt(seconds: 0, milliseconds: 0),
         gitInfo: ThreadGitInfo = ThreadGitInfo(),
         databaseURL: URL
     ) throws {
@@ -895,13 +996,14 @@ final class AgentGraphStoreTests: XCTestCase {
                     memory_mode,
                     rollout_path,
                     archived,
+                    archived_at,
                     title,
                     updated_at,
                     updated_at_ms,
                     git_sha,
                     git_branch,
                     git_origin_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
@@ -921,16 +1023,21 @@ final class AgentGraphStoreTests: XCTestCase {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 4), SQLITE_OK)
             }
             XCTAssertEqual(sqlite3_bind_int(preparedStatement, 5, archived ? 1 : 0), SQLITE_OK)
-            if let title {
-                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 6, title, -1, testSQLiteTransient), SQLITE_OK)
+            if let archivedAt {
+                XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 6, archivedAt), SQLITE_OK)
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 6), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 7, 0), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, 0), SQLITE_OK)
-            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 9)
-            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 10)
-            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 11)
+            if let title {
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 7, title, -1, testSQLiteTransient), SQLITE_OK)
+            } else {
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 7), SQLITE_OK)
+            }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, updatedAt.seconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 9, updatedAt.milliseconds), SQLITE_OK)
+            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 10)
+            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 11)
+            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 12)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }
@@ -1002,6 +1109,35 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    private func readRawSQLiteThreadArchiveMetadata(id: ThreadId, databaseURL: URL) throws -> ThreadArchiveMetadata? {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT rollout_path, archived, archived_at, updated_at, updated_at_ms FROM threads WHERE id = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
+            let result = sqlite3_step(preparedStatement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            XCTAssertEqual(result, SQLITE_ROW)
+            return ThreadArchiveMetadata(
+                rolloutPath: optionalTextColumn(preparedStatement, index: 0),
+                archived: sqlite3_column_int(preparedStatement, 1) != 0,
+                archivedAt: sqlite3_column_type(preparedStatement, 2) == SQLITE_NULL
+                    ? nil
+                    : sqlite3_column_int64(preparedStatement, 2),
+                updatedAt: ThreadUpdatedAt(
+                    seconds: sqlite3_column_int64(preparedStatement, 3),
+                    milliseconds: sqlite3_column_int64(preparedStatement, 4)
+                )
+            )
+        }
+    }
+
     private func bindOptionalText(_ value: String?, to statement: OpaquePointer, at index: Int32) {
         if let value {
             XCTAssertEqual(sqlite3_bind_text(statement, index, value, -1, testSQLiteTransient), SQLITE_OK)
@@ -1050,6 +1186,13 @@ private let testSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.
 private struct ThreadUpdatedAt: Equatable {
     let seconds: Int64
     let milliseconds: Int64
+}
+
+private struct ThreadArchiveMetadata: Equatable {
+    let rolloutPath: String?
+    let archived: Bool
+    let archivedAt: Int64?
+    let updatedAt: ThreadUpdatedAt
 }
 
 private struct ThreadGitInfo: Equatable {

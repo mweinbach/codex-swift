@@ -855,6 +855,8 @@ Source baseline inspected for this scaffold:
   - added SQLite git SHA, branch, and origin URL patching with Rust's double-option semantics mapped to an explicit Swift patch enum: preserve leaves existing columns unchanged, clear writes SQL `NULL`, set writes the replacement string, and missing rows report `false`.
 - `codex-rs/state/src/runtime/threads.rs` thread delete
   - added SQLite thread metadata deletion by id with Rust's row-count reporting: deleting an existing row returns `1`, repeated or missing deletes return `0`, and the row is no longer discoverable by rollout-path lookup.
+- `codex-rs/state/src/runtime/threads.rs` thread archive state updates
+  - added SQLite archive/unarchive metadata updates that mirror Rust's stored archive flag, `archived_at` seconds, moved rollout path, missing-row no-op behavior, and file-modified-time refresh for `updated_at`/`updated_at_ms` when the rollout file is readable.
 
 ## Known Gaps
 
