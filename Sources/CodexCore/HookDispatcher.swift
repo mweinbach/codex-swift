@@ -42,11 +42,181 @@ public struct HookCommandRunResult: Equatable, Sendable {
     public var startedAt: Int64
     public var completedAt: Int64
     public var durationMs: Int64
+    public var exitCode: Int32?
+    public var stdout: String
+    public var stderr: String
+    public var error: String?
 
-    public init(startedAt: Int64, completedAt: Int64, durationMs: Int64) {
+    public init(
+        startedAt: Int64,
+        completedAt: Int64,
+        durationMs: Int64,
+        exitCode: Int32? = nil,
+        stdout: String = "",
+        stderr: String = "",
+        error: String? = nil
+    ) {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.durationMs = durationMs
+        self.exitCode = exitCode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.error = error
+    }
+}
+
+public struct HookCommandShell: Equatable, Sendable {
+    public var program: String
+    public var arguments: [String]
+
+    public init(program: String = "", arguments: [String] = []) {
+        self.program = program
+        self.arguments = arguments
+    }
+}
+
+public enum HookCommandRunner {
+    public static func runCommand(
+        shell: HookCommandShell,
+        handler: ConfiguredHookHandler,
+        inputJSON: String,
+        cwd: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) async -> HookCommandRunResult {
+        let startedAt = currentUnixTimestamp()
+        let started = DispatchTime.now()
+        let process = Process()
+        let command = buildCommand(shell: shell, handler: handler, environment: environment)
+        process.executableURL = URL(fileURLWithPath: command.program)
+        process.arguments = command.arguments
+        process.currentDirectoryURL = cwd
+        process.environment = command.environment
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            return HookCommandRunResult(
+                startedAt: startedAt,
+                completedAt: currentUnixTimestamp(),
+                durationMs: elapsedMilliseconds(since: started),
+                error: String(describing: error)
+            )
+        }
+
+        let stdoutTask = Task.detached {
+            stdout.fileHandleForReading.readDataToEndOfFile()
+        }
+        let stderrTask = Task.detached {
+            stderr.fileHandleForReading.readDataToEndOfFile()
+        }
+
+        do {
+            try stdin.fileHandleForWriting.write(contentsOf: Data(inputJSON.utf8))
+            try stdin.fileHandleForWriting.close()
+        } catch {
+            process.terminate()
+            _ = await waitForExitOrTimeout(process: process, timeoutSec: 1)
+            stdoutTask.cancel()
+            stderrTask.cancel()
+            return HookCommandRunResult(
+                startedAt: startedAt,
+                completedAt: currentUnixTimestamp(),
+                durationMs: elapsedMilliseconds(since: started),
+                error: "failed to write hook stdin: \(error)"
+            )
+        }
+
+        let timedOut = await waitForExitOrTimeout(process: process, timeoutSec: handler.timeoutSec)
+        let stdoutData = await stdoutTask.value
+        let stderrData = await stderrTask.value
+
+        if timedOut {
+            return HookCommandRunResult(
+                startedAt: startedAt,
+                completedAt: currentUnixTimestamp(),
+                durationMs: elapsedMilliseconds(since: started),
+                stdout: "",
+                stderr: "",
+                error: "hook timed out after \(handler.timeoutSec)s"
+            )
+        }
+
+        return HookCommandRunResult(
+            startedAt: startedAt,
+            completedAt: currentUnixTimestamp(),
+            durationMs: elapsedMilliseconds(since: started),
+            exitCode: process.terminationStatus,
+            stdout: String(decoding: stdoutData, as: UTF8.self),
+            stderr: String(decoding: stderrData, as: UTF8.self),
+            error: nil
+        )
+    }
+
+    public static func buildCommand(
+        shell: HookCommandShell,
+        handler: ConfiguredHookHandler,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> (program: String, arguments: [String], environment: [String: String]) {
+        var mergedEnvironment = environment
+        for (key, value) in handler.environment {
+            mergedEnvironment[key] = value
+        }
+
+        if shell.program.isEmpty {
+            #if os(Windows)
+            let program = environment["COMSPEC"] ?? "cmd.exe"
+            return (program, ["/C", handler.command], mergedEnvironment)
+            #else
+            let program = environment["SHELL"] ?? "/bin/sh"
+            return (program, ["-lc", handler.command], mergedEnvironment)
+            #endif
+        }
+
+        return (shell.program, shell.arguments + [handler.command], mergedEnvironment)
+    }
+
+    private static func waitForExitOrTimeout(process: Process, timeoutSec: UInt64) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                process.waitUntilExit()
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutSec.saturatingNanoseconds)
+                return true
+            }
+            let timedOut = await group.next() ?? false
+            if timedOut {
+                process.terminate()
+                process.waitUntilExit()
+            }
+            group.cancelAll()
+            return timedOut
+        }
+    }
+
+    private static func currentUnixTimestamp() -> Int64 {
+        Int64(Date().timeIntervalSince1970)
+    }
+
+    private static func elapsedMilliseconds(since started: DispatchTime) -> Int64 {
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds
+        return Int64(min(elapsed / 1_000_000, UInt64(Int64.max)))
+    }
+}
+
+private extension UInt64 {
+    var saturatingNanoseconds: UInt64 {
+        let (value, overflow) = multipliedReportingOverflow(by: 1_000_000_000)
+        return overflow ? UInt64.max : value
     }
 }
 

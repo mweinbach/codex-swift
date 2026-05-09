@@ -130,6 +130,94 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertNil(HookDispatcher.matcherPattern(for: .userPromptSubmit, matcher: "^hello"))
         XCTAssertNil(HookDispatcher.matcherPattern(for: .stop, matcher: "^done$"))
     }
+
+    func testCommandRunnerBuildsDefaultAndCustomShellCommands() throws {
+        let handler = try makeHandler(eventName: .preToolUse, matcher: nil, command: "echo $HOOK_VALUE", displayOrder: 0)
+        var environment = ["SHELL": "/bin/zsh"]
+
+        let defaultCommand = HookCommandRunner.buildCommand(
+            shell: HookCommandShell(),
+            handler: handler,
+            environment: environment
+        )
+        XCTAssertEqual(defaultCommand.program, "/bin/zsh")
+        XCTAssertEqual(defaultCommand.arguments, ["-lc", "echo $HOOK_VALUE"])
+
+        let customCommand = HookCommandRunner.buildCommand(
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-lc"]),
+            handler: handler,
+            environment: environment
+        )
+        XCTAssertEqual(customCommand.program, "/bin/sh")
+        XCTAssertEqual(customCommand.arguments, ["-lc", "echo $HOOK_VALUE"])
+
+        environment["HOOK_VALUE"] = "from-env"
+        let envCommand = HookCommandRunner.buildCommand(shell: HookCommandShell(), handler: handler, environment: environment)
+        XCTAssertEqual(envCommand.environment["HOOK_VALUE"], "from-env")
+    }
+
+    func testCommandRunnerCapturesStdoutStderrExitAndStdin() async throws {
+        let handler = try makeHandler(
+            eventName: .preToolUse,
+            matcher: nil,
+            command: "read line; printf \"out:%s\" \"$line\"; printf err >&2; exit 7",
+            displayOrder: 0
+        )
+
+        let result = await HookCommandRunner.runCommand(
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            handler: handler,
+            inputJSON: "payload\n",
+            cwd: URL(fileURLWithPath: "/tmp"),
+            environment: [:]
+        )
+
+        XCTAssertEqual(result.exitCode, 7)
+        XCTAssertEqual(result.stdout, "out:payload")
+        XCTAssertEqual(result.stderr, "err")
+        XCTAssertNil(result.error)
+        XCTAssertGreaterThanOrEqual(result.completedAt, result.startedAt)
+    }
+
+    func testCommandRunnerReturnsSpawnError() async throws {
+        let handler = try makeHandler(eventName: .preToolUse, matcher: nil, command: "echo nope", displayOrder: 0)
+
+        let result = await HookCommandRunner.runCommand(
+            shell: HookCommandShell(program: "/definitely/missing/codex-hook-shell", arguments: ["-lc"]),
+            handler: handler,
+            inputJSON: "{}",
+            cwd: URL(fileURLWithPath: "/tmp"),
+            environment: [:]
+        )
+
+        XCTAssertNil(result.exitCode)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertNotNil(result.error)
+    }
+
+    func testCommandRunnerTimesOutWithRustMessageShape() async throws {
+        let handler = try makeHandler(
+            eventName: .preToolUse,
+            matcher: nil,
+            command: "sleep 2",
+            displayOrder: 0,
+            timeoutSec: 1
+        )
+
+        let result = await HookCommandRunner.runCommand(
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            handler: handler,
+            inputJSON: "{}",
+            cwd: URL(fileURLWithPath: "/tmp"),
+            environment: [:]
+        )
+
+        XCTAssertNil(result.exitCode)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.error, "hook timed out after 1s")
+    }
 }
 
 private func makeHandler(
@@ -138,13 +226,14 @@ private func makeHandler(
     command: String,
     statusMessage: String? = nil,
     source: HookSource = .user,
-    displayOrder: Int64
+    displayOrder: Int64,
+    timeoutSec: UInt64 = 5
 ) throws -> ConfiguredHookHandler {
     try ConfiguredHookHandler(
         eventName: eventName,
         matcher: matcher,
         command: command,
-        timeoutSec: 5,
+        timeoutSec: timeoutSec,
         statusMessage: statusMessage,
         sourcePath: AbsolutePath(absolutePath: "/tmp/hooks.json"),
         source: source,
