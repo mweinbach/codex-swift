@@ -693,7 +693,21 @@ public final class PolicyParser {
                     blockName: "if block"
                 )
                 var nextIndex = thenBlock.nextIndex
+                var branches = [(condition: condition, body: thenBlock.body)]
                 var elseBody: [String] = []
+                while nextIndex < statements.count,
+                      Self.indentationCount(statements[nextIndex]) == headerIndent,
+                      let elifCondition = try Self.parseTopLevelElifHeader(statements[nextIndex]) {
+                    let elifBlock = try Self.collectIndentedBlock(
+                        after: nextIndex,
+                        in: statements,
+                        parentIndent: headerIndent,
+                        identifier: identifier,
+                        blockName: "elif block"
+                    )
+                    branches.append((condition: elifCondition, body: elifBlock.body))
+                    nextIndex = elifBlock.nextIndex
+                }
                 if nextIndex < statements.count,
                    Self.indentationCount(statements[nextIndex]) == headerIndent,
                    Self.isTopLevelElseHeader(statements[nextIndex]) {
@@ -708,9 +722,13 @@ public final class PolicyParser {
                     nextIndex = elseBlock.nextIndex
                 }
 
-                if try Self.evaluateStarlarkCondition(condition, constants: constants) {
-                    try parseStatements(thenBlock.body, identifier: identifier, constants: &constants)
-                } else if !elseBody.isEmpty {
+                var matchedBranch = false
+                for branch in branches where try Self.evaluateStarlarkCondition(branch.condition, constants: constants) {
+                    try parseStatements(branch.body, identifier: identifier, constants: &constants)
+                    matchedBranch = true
+                    break
+                }
+                if !matchedBranch, !elseBody.isEmpty {
                     try parseStatements(elseBody, identifier: identifier, constants: &constants)
                 }
                 index = nextIndex
@@ -1077,15 +1095,26 @@ public final class PolicyParser {
     }
 
     private static func parseTopLevelIfHeader(_ statement: String) throws -> String? {
+        try parseTopLevelConditionalHeader(statement, keyword: "if")
+    }
+
+    private static func parseTopLevelElifHeader(_ statement: String) throws -> String? {
+        try parseTopLevelConditionalHeader(statement, keyword: "elif")
+    }
+
+    private static func parseTopLevelConditionalHeader(
+        _ statement: String,
+        keyword: String
+    ) throws -> String? {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasSuffix(":"),
-              let ifRange = topLevelKeywordRange("if", in: trimmed),
-              ifRange.lowerBound == trimmed.startIndex
+              let keywordRange = topLevelKeywordRange(keyword, in: trimmed),
+              keywordRange.lowerBound == trimmed.startIndex
         else {
             return nil
         }
         let conditionEnd = trimmed.index(before: trimmed.endIndex)
-        let condition = String(trimmed[ifRange.upperBound..<conditionEnd])
+        let condition = String(trimmed[keywordRange.upperBound..<conditionEnd])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !condition.isEmpty else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
@@ -1732,6 +1761,34 @@ public final class PolicyParser {
         constants: [String: ConfigValue]
     ) throws -> Bool {
         let trimmed = strippingEnclosingParentheses(from: condition.trimmingCharacters(in: .whitespacesAndNewlines))
+        let orPieces = splitTopLevelKeywordExpression(trimmed, keyword: "or")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if orPieces.count > 1 {
+            for piece in orPieces {
+                guard !piece.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(condition)
+                }
+                if try evaluateStarlarkCondition(piece, constants: constants) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        let andPieces = splitTopLevelKeywordExpression(trimmed, keyword: "and")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if andPieces.count > 1 {
+            for piece in andPieces {
+                guard !piece.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(condition)
+                }
+                if try !evaluateStarlarkCondition(piece, constants: constants) {
+                    return false
+                }
+            }
+            return true
+        }
+
         if let notRange = topLevelKeywordRange("not", in: trimmed),
            notRange.lowerBound == trimmed.startIndex {
             let operand = String(trimmed[notRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1761,6 +1818,19 @@ public final class PolicyParser {
         }
 
         return try truthy(parsePolicyLiteral(trimmed, constants: constants))
+    }
+
+    private static func splitTopLevelKeywordExpression(_ text: String, keyword: String) -> [String] {
+        var pieces: [String] = []
+        var start = text.startIndex
+        var searchStart = text.startIndex
+        while let range = topLevelKeywordRange(keyword, in: text, startingAt: searchStart) {
+            pieces.append(String(text[start..<range.lowerBound]))
+            start = range.upperBound
+            searchStart = range.upperBound
+        }
+        pieces.append(String(text[start...]))
+        return pieces
     }
 
     private static func truthy(_ value: ConfigValue) -> Bool {

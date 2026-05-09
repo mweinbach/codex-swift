@@ -870,6 +870,43 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkElifAndBooleanConditions() throws {
+        let policy = try parsePolicy("""
+        MODE = "publish"
+        TOOL = "npm"
+        FLAGS = ["--dry-run", "--tag"]
+        ENABLE_NETWORK = True
+        ALLOW_INSTALL = False
+
+        if MODE == "status":
+            prefix_rule([TOOL, "status"], "allow")
+        elif MODE == "publish" and TOOL == "npm":
+            prefix_rule([TOOL, "publish"], "prompt", justification = "review npm publish")
+        elif MODE == "publish":
+            prefix_rule([TOOL, "fallback"], "forbidden")
+        else:
+            prefix_rule([TOOL, "ignored"], "forbidden")
+
+        if ("--dry-run" in FLAGS and ENABLE_NETWORK) or ALLOW_INSTALL:
+            network_rule("registry.npmjs.org", "https", "allow")
+
+        if not (ALLOW_INSTALL or MODE == "install"):
+            host_executable(TOOL, ["/usr/bin/npm"])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "npm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "npm", rest: [.single("publish")]),
+                decision: .prompt,
+                justification: "review npm publish"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "registry.npmjs.org", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["npm": ["/usr/bin/npm"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
