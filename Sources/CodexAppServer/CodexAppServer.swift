@@ -127,7 +127,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
-        acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
+        acceptedLineAnalyticsUploader: (any AcceptedLineAnalyticsUploading)? = nil,
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
@@ -147,7 +147,13 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.activeProfile = activeProfile
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
-        self.acceptedLineAnalyticsUploader = acceptedLineAnalyticsUploader
+        self.acceptedLineAnalyticsUploader = acceptedLineAnalyticsUploader ?? URLSessionAcceptedLineAnalyticsUploader(
+            codexHome: codexHome,
+            authCredentialsStoreMode: authCredentialsStoreMode,
+            baseURL: CodexConfigDefaults.chatgptBaseURL,
+            environment: environment,
+            refreshTransport: authRefreshTransport
+        )
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.addCreditsNudgeEmailSender = addCreditsNudgeEmailSender
         self.authRefreshTransport = authRefreshTransport

@@ -132,6 +132,79 @@ public struct DisabledAcceptedLineAnalyticsUploader: AcceptedLineAnalyticsUpload
     public func upload(_: AcceptedLineAnalyticsUploadRequest) async throws {}
 }
 
+public struct URLSessionAcceptedLineAnalyticsUploader: AcceptedLineAnalyticsUploading, @unchecked Sendable {
+    public static let timeoutMilliseconds: UInt64 = 10_000
+
+    private let codexHome: URL
+    private let authCredentialsStoreMode: AuthCredentialsStoreMode
+    private let baseURL: String
+    private let environment: [String: String]
+    private let refreshTransport: CodexAuthStorage.RefreshTransport?
+    private let keyringStore: any AuthKeyringStore
+    private let transport: any APITransport
+
+    public init(
+        codexHome: URL,
+        authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        baseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        refreshTransport: CodexAuthStorage.RefreshTransport? = nil,
+        keyringStore: any AuthKeyringStore = SystemAuthKeyringStore(),
+        transport: any APITransport = URLSessionAPITransport()
+    ) {
+        self.codexHome = codexHome
+        self.authCredentialsStoreMode = authCredentialsStoreMode
+        self.baseURL = baseURL
+        self.environment = environment
+        self.refreshTransport = refreshTransport
+        self.keyringStore = keyringStore
+        self.transport = transport
+    }
+
+    public func upload(_ request: AcceptedLineAnalyticsUploadRequest) async throws {
+        guard !request.events.isEmpty,
+              let auth = try CodexAuthStorage.loadAuthDotJSON(
+                codexHome: codexHome,
+                mode: authCredentialsStoreMode,
+                keyringStore: keyringStore
+              ),
+              auth.tokens != nil,
+              let tokens = try await CodexAuthStorage.loadFreshTokenData(
+                codexHome: codexHome,
+                mode: authCredentialsStoreMode,
+                environment: environment,
+                refreshTransport: refreshTransport,
+                keyringStore: keyringStore
+              )
+        else {
+            return
+        }
+
+        let payload = try AcceptedLines.jsonValue(request)
+        let apiRequest = APIRequest(
+            method: .post,
+            url: Self.analyticsEventsURL(baseURL: baseURL),
+            headers: ["Content-Type": "application/json"],
+            body: payload,
+            timeoutMilliseconds: Self.timeoutMilliseconds
+        ).addingAuthHeaders(from: StaticAPIAuthProvider(
+            bearerToken: tokens.accessToken,
+            accountID: tokens.accountID
+        ))
+
+        switch await transport.execute(apiRequest) {
+        case .success:
+            return
+        case let .failure(error):
+            throw error
+        }
+    }
+
+    public static func analyticsEventsURL(baseURL: String) -> String {
+        "\(baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/codex/analytics-events/events"
+    }
+}
+
 public actor AcceptedLineAnalyticsClient {
     private var reducer: AcceptedLineFingerprintReducer
     private let uploader: any AcceptedLineAnalyticsUploading
@@ -344,6 +417,11 @@ public enum AcceptedLines {
         _ events: [AcceptedLineFingerprintsEventRequest]
     ) -> [[AcceptedLineFingerprintsEventRequest]] {
         events.map { [$0] }
+    }
+
+    public static func jsonValue<T: Encodable>(_ value: T) throws -> JSONValue {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
     public static func acceptedLineRepoHash(cwd: URL) -> String? {
