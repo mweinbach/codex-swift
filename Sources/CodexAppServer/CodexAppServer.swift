@@ -5499,12 +5499,9 @@ public enum CodexAppServer {
 
         process.waitUntilExit()
         let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        var stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        if timedOut, stderr.isEmpty {
-            stderr = "command timed out"
-        }
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return [
-            "exitCode": timedOut ? -1 : Int(process.terminationStatus),
+            "exitCode": timedOut ? 124 : Int(process.terminationStatus),
             "stdout": stdout,
             "stderr": stderr
         ]

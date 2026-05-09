@@ -4898,6 +4898,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "err\n")
     }
 
+    func testCommandExecBufferedTimeoutReportsRustExitCode() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"cwd":"\#(cwd.url.path)","timeoutMs":10}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 124)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testExecOneOffCommandResolvesExecutableThroughEnvironmentPath() throws {
         let codexHome = try TemporaryDirectory()
         let configuration = CodexAppServerConfiguration(
