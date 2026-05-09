@@ -685,6 +685,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `chr(...)` and `ord(...)` over supported integer and single-codepoint string policy expressions, covering generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark representation builtin
   - Added Swift execpolicy parser support for `repr(...)` over supported policy values, including top-level string quoting and nested list/dictionary representations used in generated rule values, hosts, paths, and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark type builtin
+  - Added Swift execpolicy parser support for `type(...)` over supported policy values, returning Rust-style type-name strings for strings, integers, floats, booleans, arrays, and dictionaries used in generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes

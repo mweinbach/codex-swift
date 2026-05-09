@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -3501,6 +3501,13 @@ public final class PolicyParser {
             )
         case "repr":
             return try parseStarlarkRepresentationCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "type":
+            return try parseStarlarkTypeCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3925,6 +3932,21 @@ public final class PolicyParser {
         return .string(starlarkRepresentation(value))
     }
 
+    private static func parseStarlarkTypeCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        return .string(starlarkTypeName(value))
+    }
+
     private static func parseStarlarkStringConversionCall(
         _ rawArguments: [String],
         expression: String,
@@ -3990,6 +4012,23 @@ public final class PolicyParser {
             return .bool(truthy(value))
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkTypeName(_ value: ConfigValue) -> String {
+        switch value {
+        case .string:
+            return "string"
+        case .integer:
+            return "int"
+        case .double:
+            return "float"
+        case .bool:
+            return "bool"
+        case .array:
+            return "list"
+        case .table:
+            return "dict"
         }
     }
 
