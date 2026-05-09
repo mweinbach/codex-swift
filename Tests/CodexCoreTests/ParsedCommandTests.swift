@@ -249,6 +249,12 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["cat", "--", "./-strange-file-name"]), [
             .read(cmd: "cat -- ./-strange-file-name", name: "-strange-file-name", path: "./-strange-file-name")
         ])
+        XCTAssertEqual(parseCommand(["cat", "-n", "README.md"]), [
+            .read(cmd: "cat -n README.md", name: "README.md", path: "README.md")
+        ])
+        XCTAssertEqual(parseCommand(["cat", "-n", "README.md", "CHANGELOG.md"]), [
+            .unknown(cmd: "cat -n README.md CHANGELOG.md")
+        ])
         XCTAssertEqual(parseCommand(["/bin/bash", "-lc", "sed -n '1,10p' Cargo.toml"]), [
             .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])

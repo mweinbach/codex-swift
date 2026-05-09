@@ -354,8 +354,7 @@ private func summarizeMainTokens(_ mainCommand: [String]) -> ParsedCommand {
         )
 
     case "cat":
-        let effectiveTail = tail.first == "--" ? Array(tail.dropFirst()) : tail
-        if effectiveTail.count == 1, let path = effectiveTail.first {
+        if let path = singleNonFlagOperand(tail, flagsWithValues: []) {
             return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
         }
         return .unknown(cmd: commandString(for: mainCommand))
