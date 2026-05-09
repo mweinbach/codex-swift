@@ -480,6 +480,20 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testTurnStartRejectsPermissionsWithSandboxPolicy() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":10,"method":"turn/start","params":{"threadId":"00000000-0000-0000-0000-000000000000","input":[{"type":"text","text":"Hello"}],"permissions":{"profile":"readOnly"},"sandboxPolicy":{"mode":"readOnly"}}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandboxPolicy`")
+    }
+
     func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

@@ -1310,6 +1310,13 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func requireTurnStartContextOverrideCompatibility(params: [String: Any]?) throws {
+        if let sandboxPolicy = params?["sandboxPolicy"], !(sandboxPolicy is NSNull),
+           let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("`permissions` cannot be combined with `sandboxPolicy`")
+        }
+    }
+
     fileprivate static func requireGranularApprovalPolicyExperimentalAPI(
         params: [String: Any]?,
         experimentalAPIEnabled: Bool
@@ -14035,6 +14042,7 @@ final class CodexAppServerMessageProcessor {
                         params: params,
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
+                    try CodexAppServer.requireTurnStartContextOverrideCompatibility(params: params)
                     let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,
