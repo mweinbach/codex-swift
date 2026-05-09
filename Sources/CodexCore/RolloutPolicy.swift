@@ -37,6 +37,10 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case execCommandEnd = "exec_command_end"
     case viewImageToolCall = "view_image_tool_call"
     case execApprovalRequest = "exec_approval_request"
+    case requestPermissions = "request_permissions"
+    case requestUserInput = "request_user_input"
+    case dynamicToolCallRequest = "dynamic_tool_call_request"
+    case dynamicToolCallResponse = "dynamic_tool_call_response"
     case elicitationRequest = "elicitation_request"
     case applyPatchApprovalRequest = "apply_patch_approval_request"
     case deprecationNotice = "deprecation_notice"
@@ -158,6 +162,14 @@ public enum RolloutPolicy {
             return .viewImageToolCall
         case .execApprovalRequest:
             return .execApprovalRequest
+        case .requestPermissions:
+            return .requestPermissions
+        case .requestUserInput:
+            return .requestUserInput
+        case .dynamicToolCallRequest:
+            return .dynamicToolCallRequest
+        case .dynamicToolCallResponse:
+            return .dynamicToolCallResponse
         case .elicitationRequest:
             return .elicitationRequest
         case .applyPatchApprovalRequest:
@@ -324,7 +336,8 @@ public enum RolloutPolicy {
         case .error,
              .guardianAssessment,
              .execCommandEnd,
-             .viewImageToolCall:
+             .viewImageToolCall,
+             .dynamicToolCallResponse:
             return .extended
         case .warning,
              .guardianWarning,
@@ -347,6 +360,9 @@ public enum RolloutPolicy {
              .terminalInteraction,
              .execCommandOutputDelta,
              .execApprovalRequest,
+             .requestPermissions,
+             .requestUserInput,
+             .dynamicToolCallRequest,
              .elicitationRequest,
              .applyPatchApprovalRequest,
              .backgroundEvent,

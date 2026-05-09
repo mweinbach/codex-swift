@@ -112,7 +112,8 @@ final class RolloutPolicyTests: XCTestCase {
             .error,
             .guardianAssessment,
             .execCommandEnd,
-            .viewImageToolCall
+            .viewImageToolCall,
+            .dynamicToolCallResponse
         ]
 
         for event in RolloutEventMessageKind.allCases {
@@ -188,6 +189,43 @@ final class RolloutPolicyTests: XCTestCase {
             .imageGenerationBegin
         )
         XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .requestPermissions(RequestPermissionsEvent(
+                callID: "perm-1",
+                turnID: "turn-1",
+                startedAtMilliseconds: 1_000,
+                permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true))
+            ))),
+            .requestPermissions
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .requestUserInput(RequestUserInputEvent(
+                callID: "input-1",
+                questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick one")]
+            ))),
+            .requestUserInput
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .dynamicToolCallRequest(DynamicToolCallRequest(
+                callID: "dyn-1",
+                turnID: "turn-1",
+                tool: "lookup",
+                arguments: .object([:])
+            ))),
+            .dynamicToolCallRequest
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .dynamicToolCallResponse(DynamicToolCallResponseEvent(
+                callID: "dyn-1",
+                turnID: "turn-1",
+                tool: "lookup",
+                arguments: .object([:]),
+                contentItems: [.text("done")],
+                success: true,
+                duration: ProtocolDuration(secs: 1)
+            ))),
+            .dynamicToolCallResponse
+        )
+        XCTAssertEqual(
             RolloutPolicy.eventKind(for: .imageGenerationEnd(ImageGenerationEndEvent(
                 callID: "ig-1",
                 status: "completed",
@@ -220,6 +258,43 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationListVoicesResponse(
             RealtimeConversationListVoicesResponseEvent(voices: .builtin())
         )))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.requestPermissions(RequestPermissionsEvent(
+            callID: "perm-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 1_000,
+            permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true))
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.requestUserInput(RequestUserInputEvent(
+            callID: "input-1",
+            questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick one")]
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.dynamicToolCallRequest(DynamicToolCallRequest(
+            callID: "dyn-1",
+            turnID: "turn-1",
+            tool: "lookup",
+            arguments: .object([:])
+        ))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(
+            .dynamicToolCallResponse(DynamicToolCallResponseEvent(
+                callID: "dyn-1",
+                turnID: "turn-1",
+                tool: "lookup",
+                arguments: .object([:]),
+                contentItems: [.text("done")],
+                success: true,
+                duration: ProtocolDuration(secs: 1)
+            )),
+            mode: .extended
+        ))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.dynamicToolCallResponse(DynamicToolCallResponseEvent(
+            callID: "dyn-1",
+            turnID: "turn-1",
+            tool: "lookup",
+            arguments: .object([:]),
+            contentItems: [.text("done")],
+            success: true,
+            duration: ProtocolDuration(secs: 1)
+        ))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.threadRolledBack(ThreadRolledBackEvent(numTurns: 1))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))

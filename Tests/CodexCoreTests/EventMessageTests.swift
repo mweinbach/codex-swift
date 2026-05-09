@@ -173,6 +173,108 @@ final class EventMessageTests: XCTestCase {
         }
     }
 
+    func testEventMessageCoversRequestAndDynamicToolEventsLikeRust() throws {
+        let permissions = EventMessage.requestPermissions(RequestPermissionsEvent(
+            callID: "perm-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 1_000,
+            reason: "needs network",
+            permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true)),
+            cwd: "/repo"
+        ))
+        try XCTAssertJSONObjectEqual(permissions, [
+            "type": "request_permissions",
+            "call_id": "perm-1",
+            "turn_id": "turn-1",
+            "started_at_ms": 1_000,
+            "reason": "needs network",
+            "permissions": [
+                "network": [
+                    "enabled": true
+                ]
+            ],
+            "cwd": "/repo"
+        ])
+
+        let userInput = EventMessage.requestUserInput(RequestUserInputEvent(
+            callID: "input-1",
+            turnID: "turn-1",
+            questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick one")]
+        ))
+        try XCTAssertJSONObjectEqual(userInput, [
+            "type": "request_user_input",
+            "call_id": "input-1",
+            "turn_id": "turn-1",
+            "questions": [
+                [
+                    "id": "choice",
+                    "header": "Choice",
+                    "question": "Pick one",
+                    "isOther": false,
+                    "isSecret": false
+                ]
+            ]
+        ])
+
+        let request = EventMessage.dynamicToolCallRequest(DynamicToolCallRequest(
+            callID: "dyn-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 2_000,
+            tool: "lookup",
+            arguments: .object(["id": .string("ISSUE-1")])
+        ))
+        try XCTAssertJSONObjectEqual(request, [
+            "type": "dynamic_tool_call_request",
+            "callId": "dyn-1",
+            "turnId": "turn-1",
+            "startedAtMs": 2_000,
+            "namespace": NSNull(),
+            "tool": "lookup",
+            "arguments": [
+                "id": "ISSUE-1"
+            ]
+        ])
+
+        let response = EventMessage.dynamicToolCallResponse(DynamicToolCallResponseEvent(
+            callID: "dyn-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 2_250,
+            tool: "lookup",
+            arguments: .object(["id": .string("ISSUE-1")]),
+            contentItems: [.text("done")],
+            success: true,
+            duration: ProtocolDuration(secs: 0, nanos: 250_000_000)
+        ))
+        try XCTAssertJSONObjectEqual(response, [
+            "type": "dynamic_tool_call_response",
+            "call_id": "dyn-1",
+            "turn_id": "turn-1",
+            "completed_at_ms": 2_250,
+            "namespace": NSNull(),
+            "tool": "lookup",
+            "arguments": [
+                "id": "ISSUE-1"
+            ],
+            "content_items": [
+                [
+                    "type": "inputText",
+                    "text": "done"
+                ]
+            ],
+            "success": true,
+            "error": NSNull(),
+            "duration": [
+                "secs": 0,
+                "nanos": 250_000_000
+            ]
+        ])
+
+        for event in [permissions, userInput, request, response] {
+            let data = try JSONEncoder().encode(event)
+            XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), event)
+        }
+    }
+
     func testUnitEventMessagesUseTypeOnlyRustShape() throws {
         try XCTAssertJSONObjectEqual(EventMessage.contextCompacted(ContextCompactedEvent()), [
             "type": "context_compacted"

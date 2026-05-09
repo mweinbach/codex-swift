@@ -97,6 +97,16 @@ public struct DynamicToolCallRequest: Codable, Equatable, Sendable {
         tool = try container.decode(String.self, forKey: .tool)
         arguments = try container.decode(JSONValue.self, forKey: .arguments)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(callID, forKey: .callID)
+        try container.encode(turnID, forKey: .turnID)
+        try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
+        try container.encodeIfPresentOrNull(namespace, forKey: .namespace)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(arguments, forKey: .arguments)
+    }
 }
 
 public struct DynamicToolResponse: Codable, Equatable, Sendable {
@@ -111,6 +121,84 @@ public struct DynamicToolResponse: Codable, Equatable, Sendable {
     public init(contentItems: [DynamicToolCallOutputContentItem], success: Bool) {
         self.contentItems = contentItems
         self.success = success
+    }
+}
+
+public struct DynamicToolCallResponseEvent: Codable, Equatable, Sendable {
+    public let callID: String
+    public let turnID: String
+    public let completedAtMilliseconds: Int64
+    public let namespace: String?
+    public let tool: String
+    public let arguments: JSONValue
+    public let contentItems: [DynamicToolCallOutputContentItem]
+    public let success: Bool
+    public let error: String?
+    public let duration: ProtocolDuration
+
+    private enum CodingKeys: String, CodingKey {
+        case callID = "call_id"
+        case turnID = "turn_id"
+        case completedAtMilliseconds = "completed_at_ms"
+        case namespace
+        case tool
+        case arguments
+        case contentItems = "content_items"
+        case success
+        case error
+        case duration
+    }
+
+    public init(
+        callID: String,
+        turnID: String,
+        completedAtMilliseconds: Int64 = 0,
+        namespace: String? = nil,
+        tool: String,
+        arguments: JSONValue,
+        contentItems: [DynamicToolCallOutputContentItem],
+        success: Bool,
+        error: String? = nil,
+        duration: ProtocolDuration
+    ) {
+        self.callID = callID
+        self.turnID = turnID
+        self.completedAtMilliseconds = completedAtMilliseconds
+        self.namespace = namespace
+        self.tool = tool
+        self.arguments = arguments
+        self.contentItems = contentItems
+        self.success = success
+        self.error = error
+        self.duration = duration
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        callID = try container.decode(String.self, forKey: .callID)
+        turnID = try container.decode(String.self, forKey: .turnID)
+        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        namespace = try container.decodeIfPresent(String.self, forKey: .namespace)
+        tool = try container.decode(String.self, forKey: .tool)
+        arguments = try container.decode(JSONValue.self, forKey: .arguments)
+        contentItems = try container.decode([DynamicToolCallOutputContentItem].self, forKey: .contentItems)
+        success = try container.decode(Bool.self, forKey: .success)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        duration = try container.decode(ProtocolDuration.self, forKey: .duration)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(callID, forKey: .callID)
+        try container.encode(turnID, forKey: .turnID)
+        try container.encode(completedAtMilliseconds, forKey: .completedAtMilliseconds)
+        try container.encodeIfPresentOrNull(namespace, forKey: .namespace)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(arguments, forKey: .arguments)
+        try container.encode(contentItems, forKey: .contentItems)
+        try container.encode(success, forKey: .success)
+        try container.encodeIfPresentOrNull(error, forKey: .error)
+        try container.encode(duration, forKey: .duration)
     }
 }
 
@@ -148,6 +236,16 @@ public enum DynamicToolCallOutputContentItem: Codable, Equatable, Sendable {
         case let .imageURL(imageURL):
             try container.encode(ItemType.inputImage, forKey: .type)
             try container.encode(imageURL, forKey: .imageURL)
+        }
+    }
+}
+
+private extension KeyedEncodingContainer {
+    mutating func encodeIfPresentOrNull<T: Encodable>(_ value: T?, forKey key: Key) throws {
+        if let value {
+            try encode(value, forKey: key)
+        } else {
+            try encodeNil(forKey: key)
         }
     }
 }

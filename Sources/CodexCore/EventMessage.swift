@@ -64,6 +64,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case execCommandEnd(ExecCommandEndEvent)
     case viewImageToolCall(ViewImageToolCallEvent)
     case execApprovalRequest(ExecApprovalRequestEvent)
+    case requestPermissions(RequestPermissionsEvent)
+    case requestUserInput(RequestUserInputEvent)
+    case dynamicToolCallRequest(DynamicToolCallRequest)
+    case dynamicToolCallResponse(DynamicToolCallResponseEvent)
     case elicitationRequest(ElicitationRequestEvent)
     case applyPatchApprovalRequest(ApplyPatchApprovalRequestEvent)
     case deprecationNotice(DeprecationNoticeEvent)
@@ -135,6 +139,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case execCommandEnd = "exec_command_end"
         case viewImageToolCall = "view_image_tool_call"
         case execApprovalRequest = "exec_approval_request"
+        case requestPermissions = "request_permissions"
+        case requestUserInput = "request_user_input"
+        case dynamicToolCallRequest = "dynamic_tool_call_request"
+        case dynamicToolCallResponse = "dynamic_tool_call_response"
         case elicitationRequest = "elicitation_request"
         case applyPatchApprovalRequest = "apply_patch_approval_request"
         case deprecationNotice = "deprecation_notice"
@@ -266,6 +274,14 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .viewImageToolCall(try ViewImageToolCallEvent(from: decoder))
         case .execApprovalRequest:
             self = .execApprovalRequest(try ExecApprovalRequestEvent(from: decoder))
+        case .requestPermissions:
+            self = .requestPermissions(try RequestPermissionsEvent(from: decoder))
+        case .requestUserInput:
+            self = .requestUserInput(try RequestUserInputEvent(from: decoder))
+        case .dynamicToolCallRequest:
+            self = .dynamicToolCallRequest(try DynamicToolCallRequest(from: decoder))
+        case .dynamicToolCallResponse:
+            self = .dynamicToolCallResponse(try DynamicToolCallResponseEvent(from: decoder))
         case .elicitationRequest:
             self = .elicitationRequest(try ElicitationRequestEvent(from: decoder))
         case .applyPatchApprovalRequest:
@@ -438,6 +454,18 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .execApprovalRequest(event):
             try container.encode(EventType.execApprovalRequest, forKey: .type)
+            try event.encode(to: encoder)
+        case let .requestPermissions(event):
+            try container.encode(EventType.requestPermissions, forKey: .type)
+            try event.encode(to: encoder)
+        case let .requestUserInput(event):
+            try container.encode(EventType.requestUserInput, forKey: .type)
+            try event.encode(to: encoder)
+        case let .dynamicToolCallRequest(event):
+            try container.encode(EventType.dynamicToolCallRequest, forKey: .type)
+            try event.encode(to: encoder)
+        case let .dynamicToolCallResponse(event):
+            try container.encode(EventType.dynamicToolCallResponse, forKey: .type)
             try event.encode(to: encoder)
         case let .elicitationRequest(event):
             try container.encode(EventType.elicitationRequest, forKey: .type)
