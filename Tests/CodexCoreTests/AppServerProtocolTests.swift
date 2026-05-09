@@ -50,6 +50,67 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testChatGPTAuthTokensRefreshServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.ChatGPTAuthTokensRefreshParams(
+            reason: .unauthorized,
+            previousAccountID: "org-123"
+        )
+        let request = AppServerProtocol.ServerRequest.chatGPTAuthTokensRefresh(
+            requestID: .integer(8),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(8))
+        XCTAssertEqual(request.method, "account/chatgptAuthTokens/refresh")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "account/chatgptAuthTokens/refresh",
+            "id": 8,
+            "params": [
+                "reason": "unauthorized",
+                "previousAccountId": "org-123"
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.chatGPTAuthTokensRefresh(params).request(withID: .integer(8)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"account/chatgptAuthTokens/refresh","id":8,"params":{"reason":"unauthorized","previousAccountId":"org-123"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testChatGPTAuthTokensRefreshServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.chatGPTAuthTokensRefresh(
+            requestID: .integer(8),
+            response: AppServerProtocol.ChatGPTAuthTokensRefreshResponse(
+                accessToken: "access-token",
+                chatGPTAccountID: "org-123",
+                chatGPTPlanType: nil
+            )
+        )
+
+        XCTAssertEqual(response.id, .integer(8))
+        XCTAssertEqual(response.method, "account/chatgptAuthTokens/refresh")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "account/chatgptAuthTokens/refresh",
+            "id": 8,
+            "response": [
+                "accessToken": "access-token",
+                "chatgptAccountId": "org-123",
+                "chatgptPlanType": NSNull()
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"account/chatgptAuthTokens/refresh","id":8,"response":{"accessToken":"access-token","chatgptAccountId":"org-123","chatgptPlanType":null}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,

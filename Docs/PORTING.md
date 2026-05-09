@@ -282,8 +282,8 @@ Source baseline inspected for this scaffold:
   - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
 - `codex-rs/hooks/src/legacy_notify.rs`
   - agent-turn-complete notification payload wire shape, optional client omission, nullable last assistant message, notifier command argument construction, and fire-and-forget process invocation
-- `codex-rs/app-server-protocol/src/protocol/common.rs` and `codex-rs/app-server-protocol/src/protocol/v2/attestation.rs`
-  - server-initiated `attestation/generate` request and response protocol envelopes, empty params shape, token response shape, request id preservation, method-tag validation, and request-payload-to-request helper behavior
+- `codex-rs/app-server-protocol/src/protocol/common.rs`, `codex-rs/app-server-protocol/src/protocol/v2/attestation.rs`, and `codex-rs/app-server-protocol/src/protocol/v2/account.rs`
+  - server-initiated `attestation/generate` and `account/chatgptAuthTokens/refresh` request/response protocol envelopes, empty attestation params shape, token response shapes, request id preservation, method-tag validation, and request-payload-to-request helper behavior
 - `codex-rs/protocol/src/protocol.rs` session-source models plus `codex-rs/codex-api/src/requests/headers.rs`
   - session source/subagent source wire shapes, custom/internal source helpers, thread-spawn metadata accessors, rollout session-meta `forked_from_id`/`thread_source`/agent/base-instruction/dynamic-tool/memory-mode fields, product-restriction mapping, display strings, conversation headers, underscore plus hyphenated session/thread header emission, and `x-openai-subagent` header value derivation
 - `codex-rs/protocol/src/protocol.rs` exec event support models
