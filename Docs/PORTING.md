@@ -616,6 +616,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's method-level experimental API guard for `process/spawn`, `process/writeStdin`, `process/resizePty`, and `process/kill`, preserving live process lifecycle behavior after opt-in.
 - `codex-rs/app-server-protocol` experimental collaboration-mode gating
   - matched Rust's method-level experimental API guard for `collaborationMode/list`, preserving the existing preset response after opt-in.
+- `codex-rs/app-server` fuzzy file-search sessions
+  - added v2 `fuzzyFileSearch/sessionStart`, `fuzzyFileSearch/sessionUpdate`, and `fuzzyFileSearch/sessionStop` routes with Rust's experimental API guard, per-session roots, missing-session errors, update/completed notification shapes, blank snapshots for empty queries, and stop removal behavior.
 
 ## Known Gaps
 

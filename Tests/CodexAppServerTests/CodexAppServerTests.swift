@@ -7897,6 +7897,86 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
     }
 
+    func testFuzzyFileSearchSessionRoutesRequireExperimentalAPI() throws {
+        let codexHome = try TemporaryDirectory()
+
+        for (index, method) in [
+            "fuzzyFileSearch/sessionStart",
+            "fuzzyFileSearch/sessionUpdate",
+            "fuzzyFileSearch/sessionStop"
+        ].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(method)","params":{}}"#,
+                codexHome: codexHome.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(method) requires experimentalApi capability")
+        }
+    }
+
+    func testFuzzyFileSearchSessionStreamsUpdatesAndCompletion() throws {
+        let codexHome = try TemporaryDirectory()
+        let root = try TemporaryDirectory()
+        try "x".write(to: root.url.appendingPathComponent("alpha.txt"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let start = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-1","roots":["\#(root.url.path)"]}}"#.utf8
+        )))
+        XCTAssertEqual((start["result"] as? [String: Any])?.isEmpty, true)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-1","query":"ALP"}}"#.utf8
+        )))
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "fuzzyFileSearch/sessionUpdated")
+        let updateParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(updateParams["sessionId"] as? String, "session-1")
+        XCTAssertEqual(updateParams["query"] as? String, "ALP")
+        let files = try XCTUnwrap(updateParams["files"] as? [[String: Any]])
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0]["root"] as? String, root.url.path)
+        XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
+        XCTAssertEqual(messages[2]["method"] as? String, "fuzzyFileSearch/sessionCompleted")
+        let completedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["sessionId"] as? String, "session-1")
+    }
+
+    func testFuzzyFileSearchSessionStopRemovesSessionAndEmptyQuerySendsBlankSnapshot() throws {
+        let codexHome = try TemporaryDirectory()
+        let root = try TemporaryDirectory()
+        try "x".write(to: root.url.appendingPathComponent("alpha.txt"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-stop","roots":["\#(root.url.path)"]}}"#.utf8
+        )))
+        let emptyMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-stop","query":""}}"#.utf8
+        )))
+        let emptyParams = try XCTUnwrap(emptyMessages[1]["params"] as? [String: Any])
+        XCTAssertEqual((emptyParams["files"] as? [Any])?.count, 0)
+
+        let stop = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"fuzzyFileSearch/sessionStop","params":{"sessionId":"session-stop"}}"#.utf8
+        )))
+        XCTAssertEqual((stop["result"] as? [String: Any])?.isEmpty, true)
+
+        let missing = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-stop","query":"alp"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "fuzzy file search session not found: session-stop")
+    }
+
     func testCommandExecReturnsStdoutStderrAndExitCode() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

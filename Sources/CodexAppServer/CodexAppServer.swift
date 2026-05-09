@@ -591,7 +591,7 @@ private struct AccountUsageWindow: Decodable {
 public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
-    private static let fuzzyFileSearchLimitPerRoot = 50
+    fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
     fileprivate static let platformFamily = "unix"
     fileprivate static var platformOS: String {
@@ -10710,7 +10710,7 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func fuzzyFileSearch(query: String, root: String) -> [[String: Any]] {
+    fileprivate static func fuzzyFileSearch(query: String, root: String) -> [[String: Any]] {
         let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
@@ -13137,6 +13137,7 @@ final class CodexAppServerMessageProcessor {
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
+    private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
 
@@ -13665,6 +13666,73 @@ final class CodexAppServerMessageProcessor {
             throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
         }
         session.terminate()
+        return [:]
+    }
+
+    private func fuzzyFileSearchSessionStartResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
+            throw AppServerError.invalidRequest("missing sessionId")
+        }
+        guard !sessionID.isEmpty else {
+            throw AppServerError.invalidRequest("sessionId must not be empty")
+        }
+        fuzzyFileSearchSessions[sessionID] = (params?["roots"] as? [String]) ?? []
+        return [:]
+    }
+
+    private func fuzzyFileSearchSessionUpdateResult(params: [String: Any]?) throws -> ([String: Any], [[String: Any]]) {
+        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
+            throw AppServerError.invalidRequest("missing sessionId")
+        }
+        guard let roots = fuzzyFileSearchSessions[sessionID] else {
+            throw AppServerError.invalidRequest("fuzzy file search session not found: \(sessionID)")
+        }
+        guard let query = CodexAppServer.stringParam(params?["query"]) else {
+            throw AppServerError.invalidRequest("missing query")
+        }
+        let files: [[String: Any]]
+        if query.isEmpty {
+            files = []
+        } else {
+            files = roots.flatMap { root in
+                CodexAppServer.fuzzyFileSearch(query: query, root: root)
+                    .prefix(CodexAppServer.fuzzyFileSearchLimitPerRoot)
+            }
+            .sorted { lhs, rhs in
+                let lhsScore = lhs["score"] as? Int ?? 0
+                let rhsScore = rhs["score"] as? Int ?? 0
+                if lhsScore != rhsScore {
+                    return lhsScore > rhsScore
+                }
+                return (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
+            }
+        }
+        return (
+            [:],
+            [
+                [
+                    "method": "fuzzyFileSearch/sessionUpdated",
+                    "params": [
+                        "sessionId": sessionID,
+                        "query": query,
+                        "files": files
+                    ]
+                ],
+                [
+                    "method": "fuzzyFileSearch/sessionCompleted",
+                    "params": [
+                        "sessionId": sessionID
+                    ]
+                ]
+            ]
+        )
+    }
+
+    private func fuzzyFileSearchSessionStopResult(params: [String: Any]?) throws -> [String: Any] {
+        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
+            throw AppServerError.invalidRequest("missing sessionId")
+        }
+        fuzzyFileSearchSessions.removeValue(forKey: sessionID)
         return [:]
     }
 
@@ -14287,6 +14355,32 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.fuzzyFileSearchResult(params: params)
+                    )
+                case "fuzzyFileSearch/sessionStart":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "fuzzyFileSearch/sessionStart",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try fuzzyFileSearchSessionStartResult(params: params)
+                    )
+                case "fuzzyFileSearch/sessionUpdate":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "fuzzyFileSearch/sessionUpdate",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    let result = try fuzzyFileSearchSessionUpdateResult(params: params)
+                    response = CodexAppServer.responseObject(id: id, result: result.0)
+                    notifications.append(contentsOf: result.1)
+                case "fuzzyFileSearch/sessionStop":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "fuzzyFileSearch/sessionStop",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try fuzzyFileSearchSessionStopResult(params: params)
                     )
                 case "command/exec", "execOneOffCommand":
                     if method == "command/exec" {
