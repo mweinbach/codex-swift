@@ -341,6 +341,14 @@ final class ParsedCommandTests: XCTestCase {
             .listFiles(cmd: "rg --files", path: nil)
         ])
 
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | tail -c 100"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | tail -c +10"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+
         XCTAssertEqual(parseCommand(["sed", "-n", "260,640p", "exec/src/event_processor_with_human_output.rs", "|", "nl", "-ba"]), [
             .read(
                 cmd: "sed -n '260,640p' exec/src/event_processor_with_human_output.rs",
