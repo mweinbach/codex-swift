@@ -7835,6 +7835,22 @@ public enum CodexAppServer {
         return environment
     }
 
+    fileprivate static func processSpawnEnvironment(
+        base: [String: String],
+        overrides: [String: String?]
+    ) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment.merge(base) { _, new in new }
+        for (key, value) in overrides {
+            if let value {
+                environment[key] = value
+            } else {
+                environment.removeValue(forKey: key)
+            }
+        }
+        return environment
+    }
+
     fileprivate static func commandExecWriteParams(params: [String: Any]?) throws -> AppServerCommandExecWriteParams {
         let processID = try commandExecProcessID(params: params)
         let deltaBase64 = stringParam(params?["deltaBase64"])
@@ -8062,7 +8078,7 @@ public enum CodexAppServer {
         var overrides: [String: String?] = [:]
         for (key, value) in object {
             if value is NSNull {
-                overrides[key] = nil
+                overrides[key] = .some(nil)
             } else if let value = stringParam(value) {
                 overrides[key] = value
             }
@@ -12345,15 +12361,10 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             process.arguments = params.command
         }
         process.currentDirectoryURL = URL(fileURLWithPath: params.cwd, isDirectory: true)
-        var mergedEnvironment = environment
-        for (key, value) in params.environmentOverrides {
-            if let value {
-                mergedEnvironment[key] = value
-            } else {
-                mergedEnvironment.removeValue(forKey: key)
-            }
-        }
-        process.environment = mergedEnvironment
+        process.environment = CodexAppServer.processSpawnEnvironment(
+            base: environment,
+            overrides: params.environmentOverrides
+        )
     }
 
     deinit {

@@ -7149,6 +7149,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecEnvironmentNullOverridesUnsetVariables() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let configuration = testConfiguration(
+            codexHome: codexHome.url,
+            environment: [
+                "CODEX_SWIFT_COMMAND_KEEP": "server-value",
+                "CODEX_SWIFT_COMMAND_UNSET": "server-value"
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/usr/bin/env"],"cwd":"\#(cwd.url.path)","env":{"CODEX_SWIFT_COMMAND_KEEP":"override-value","CODEX_SWIFT_COMMAND_UNSET":null}}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        let environmentLines = Set((try XCTUnwrap(result["stdout"] as? String)).split(separator: "\n").map(String.init))
+        XCTAssertTrue(environmentLines.contains("CODEX_SWIFT_COMMAND_KEEP=override-value"))
+        XCTAssertFalse(environmentLines.contains { $0.hasPrefix("CODEX_SWIFT_COMMAND_UNSET=") })
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecBufferedTimeoutReportsRustExitCode() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7683,6 +7706,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["stderr"] as? String, "err")
         XCTAssertEqual(params["stdoutCapReached"] as? Bool, false)
         XCTAssertEqual(params["stderrCapReached"] as? Bool, false)
+    }
+
+    func testProcessSpawnInheritsServerEnvironmentAndAppliesOverrides() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                environment: [
+                    "CODEX_SWIFT_PROCESS_TEST": "server-value",
+                    "CODEX_SWIFT_PROCESS_UNSET": "server-value"
+                ]
+            ),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/usr/bin/env"],"processHandle":"proc-env","cwd":"\#(cwd.url.path)","env":{"CODEX_SWIFT_PROCESS_TEST":"override-value","CODEX_SWIFT_PROCESS_UNSET":null}}}"#.utf8
+        )))
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-env")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        let stdout = try XCTUnwrap(params["stdout"] as? String)
+        let environmentLines = Set(stdout.split(separator: "\n").map(String.init))
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            XCTAssertTrue(environmentLines.contains("HOME=\(home)"))
+        }
+        XCTAssertTrue(environmentLines.contains("CODEX_SWIFT_PROCESS_TEST=override-value"))
+        XCTAssertFalse(environmentLines.contains { $0.hasPrefix("CODEX_SWIFT_PROCESS_UNSET=") })
+        XCTAssertEqual(params["stderr"] as? String, "")
     }
 
     func testProcessSpawnCanStreamOutputDeltas() async throws {
