@@ -291,6 +291,32 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testCdOptionsAndAbsoluteTargetsMatchRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd -P Sources && cat CodexCore/ParsedCommand.swift"]), [
+            .read(
+                cmd: "cat CodexCore/ParsedCommand.swift",
+                name: "ParsedCommand.swift",
+                path: "Sources/CodexCore/ParsedCommand.swift"
+            )
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd -- Sources && cat CodexCore/ParsedCommand.swift"]), [
+            .read(
+                cmd: "cat CodexCore/ParsedCommand.swift",
+                name: "ParsedCommand.swift",
+                path: "Sources/CodexCore/ParsedCommand.swift"
+            )
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd /tmp/project && cat src/lib.rs"]), [
+            .read(cmd: "cat src/lib.rs", name: "lib.rs", path: "/tmp/project/src/lib.rs")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd /tmp/project && rg -n TODO src"]), [
+            .search(cmd: "rg -n TODO src", query: "TODO", path: "src")
+        ])
+    }
+
     func testSupportsSingleStringScriptWithCdAndPipe() {
         let inner = #"cd /Users/pakrym/code/codex && rg -n "codex_api" codex-rs -S | head -n 50"#
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [

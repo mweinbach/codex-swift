@@ -177,8 +177,8 @@ private func parseTokenParts(_ parts: [[String]]) -> [ParsedCommand] {
 
     for tokens in parts where !tokens.isEmpty {
         if tokens.first == "cd" {
-            if let dir = tokens.dropFirst().first {
-                cwd = isAbsoluteLike(dir) ? nil : (cwd.map { joinPaths($0, dir) } ?? dir)
+            if let dir = cdTarget(Array(tokens.dropFirst())) {
+                cwd = cwd.map { joinPaths($0, dir) } ?? dir
             }
             continue
         }
@@ -189,9 +189,11 @@ private func parseTokenParts(_ parts: [[String]]) -> [ParsedCommand] {
             case let .read(cmd, name, path):
                 parsedCommands.append(.read(cmd: cmd, name: name, path: joinPaths(cwd, path)))
             case let .listFiles(cmd, path):
-                parsedCommands.append(.listFiles(cmd: cmd, path: path.map { joinPaths(cwd, $0) }))
+                let rebasedPath = path.map { isAbsoluteLike(cwd) ? $0 : joinPaths(cwd, $0) }
+                parsedCommands.append(.listFiles(cmd: cmd, path: rebasedPath))
             case let .search(cmd, query, path):
-                parsedCommands.append(.search(cmd: cmd, query: query, path: path.map { joinPaths(cwd, $0) }))
+                let rebasedPath = path.map { isAbsoluteLike(cwd) ? $0 : joinPaths(cwd, $0) }
+                parsedCommands.append(.search(cmd: cmd, query: query, path: rebasedPath))
             case .unknown:
                 parsedCommands.append(parsed)
             }
@@ -686,6 +688,31 @@ private func parseFindQueryAndPath(_ tail: [String]) -> (String?, String?) {
     }
 
     return (query, path)
+}
+
+private func cdTarget(_ args: [String]) -> String? {
+    guard !args.isEmpty else {
+        return nil
+    }
+    var target: String?
+    var index = 0
+    while index < args.count {
+        let arg = args[index]
+        if arg == "--" {
+            return args[safe: index + 1]
+        }
+        if arg == "-L" || arg == "-P" {
+            index += 1
+            continue
+        }
+        if arg.hasPrefix("-") {
+            index += 1
+            continue
+        }
+        target = arg
+        index += 1
+    }
+    return target
 }
 
 private func isValidSedNArg(_ argument: String?) -> Bool {

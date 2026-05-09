@@ -538,6 +538,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules
   - Added Swift execpolicy host-executable parsing, validation, deduplication, last-definition-wins behavior, deferred example validation with host executable resolution, and optional absolute-path command matching that records `resolvedProgram`.
+- `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
+  - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, and absolute-`cd` path joining for read summaries.
 
 ## Known Gaps
 
