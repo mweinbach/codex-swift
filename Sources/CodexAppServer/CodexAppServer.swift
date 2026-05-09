@@ -11902,11 +11902,8 @@ public enum CodexAppServer {
 
         if let value = edit.value {
             setConfigValue(value, at: path, mergeStrategy: edit.mergeStrategy, in: &config)
-        } else if !removeConfigValue(at: path, in: &config) {
-            throw AppServerError.invalidRequestWithData(
-                "Path not found",
-                data: ["config_write_error_code": "configPathNotFound"]
-            )
+        } else {
+            _ = removeConfigValue(at: path, in: &config)
         }
     }
 

@@ -8242,6 +8242,23 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["model"] as? String, "gpt-new")
     }
 
+    func testConfigValueWriteClearsMissingPathAsNoOpLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"features.personality","value":null,"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(result["filePath"] as? String, configFile.standardizedFileURL.path)
+        XCTAssertTrue((result["version"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertTrue(result["overriddenMetadata"] is NSNull)
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+    }
+
     func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
