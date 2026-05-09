@@ -660,6 +660,8 @@ Source baseline inspected for this scaffold:
   - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile.
 - `AGENTS.md` and `Docs/SwiftPort` Swift guidance
   - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` optional/null semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
+- `codex-rs/shell-command` command parser
+  - matched Rust's tree-sitter Bash rejection for malformed connector layouts, including leading operators, trailing operators, doubled semicolons, and empty pipeline segments, so Swift now collapses these shell scripts to a whole-script `unknown` instead of salvaging known commands.
 
 ## Known Gaps
 

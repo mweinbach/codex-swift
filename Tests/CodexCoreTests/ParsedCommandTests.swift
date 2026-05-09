@@ -541,6 +541,19 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testMalformedShellConnectorLayoutsCollapseLikeRustBashParser() {
+        for script in [
+            "&& rg --files",
+            "rg --files &&",
+            "rg foo ;; rg bar",
+            "rg --files | | wc -l"
+        ] {
+            XCTAssertEqual(parseCommand(["bash", "-lc", script]), [
+                .unknown(cmd: script)
+            ], script)
+        }
+    }
+
     func testPathAndFlagEdgeCasesFromRustParser() {
         XCTAssertEqual(parseCommand(["cat", #"pkg\src\main.rs"#]), [
             .read(cmd: ##"cat "pkg\\src\\main.rs""##, name: "main.rs", path: #"pkg\src\main.rs"#)

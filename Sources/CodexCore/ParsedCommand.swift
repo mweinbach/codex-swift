@@ -143,7 +143,10 @@ private func parseShellWrappedCommand(_ command: [String]) -> [ParsedCommand]? {
         return nil
     }
 
-    guard !containsUnsupportedShellSyntax(script), let scriptTokens = shellSplit(script) else {
+    guard !containsUnsupportedShellSyntax(script),
+          let scriptTokens = shellSplit(script),
+          hasValidConnectorLayout(scriptTokens)
+    else {
         return [.unknown(cmd: script)]
     }
 
@@ -535,6 +538,25 @@ private func splitOnConnectors(_ tokens: [String]) -> [[String]] {
         output.append(current)
     }
     return output
+}
+
+private func hasValidConnectorLayout(_ tokens: [String]) -> Bool {
+    guard !tokens.isEmpty else {
+        return false
+    }
+
+    var previousWasConnector = true
+    for token in tokens {
+        if token == "&&" || token == "||" || token == "|" || token == ";" {
+            if previousWasConnector {
+                return false
+            }
+            previousWasConnector = true
+        } else {
+            previousWasConnector = false
+        }
+    }
+    return !previousWasConnector
 }
 
 private func trimAtConnector(_ tokens: [String]) -> [String] {
