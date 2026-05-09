@@ -432,7 +432,7 @@ public enum NonInteractiveExec {
         toolSearchIndex: ToolSearchIndex? = nil
     ) async -> ResponseItem {
         switch item {
-        case let .functionCall(_, name, arguments, callID):
+        case let .functionCall(_, name, _, arguments, callID):
             return await executeFunctionCall(
                 name: name,
                 arguments: arguments,
@@ -1142,7 +1142,7 @@ public enum NonInteractiveExec {
     private static func toolHookPayload(for item: ResponseItem) -> ToolHookPayload? {
         let decoder = JSONDecoder()
         switch item {
-        case let .functionCall(_, name, arguments, callID):
+        case let .functionCall(_, name, _, arguments, callID):
             switch name {
             case "exec_command":
                 guard let params = try? decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8)) else {
@@ -1258,7 +1258,7 @@ public enum NonInteractiveExec {
     ) -> ResponseItem {
         let message = blockedToolMessage(hookPayload: hookPayload, reason: reason)
         switch item {
-        case let .functionCall(_, _, _, callID):
+        case let .functionCall(_, _, _, _, callID):
             return functionOutput(callID: callID, content: message, success: false)
         case let .customToolCall(_, _, callID, _, _):
             return .customToolCallOutput(callID: callID, output: message)
@@ -1275,7 +1275,7 @@ public enum NonInteractiveExec {
         message: String
     ) -> ResponseItem {
         switch item {
-        case let .functionCall(_, _, _, callID):
+        case let .functionCall(_, _, _, _, callID):
             return functionOutput(callID: callID, content: message, success: false)
         case let .customToolCall(_, _, callID, _, _):
             return .customToolCallOutput(callID: callID, output: message)

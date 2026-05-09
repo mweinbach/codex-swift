@@ -270,7 +270,7 @@ final class NonInteractiveExecTests: XCTestCase {
                 .success(await script.next(prompt))
             },
             executeFunctionCall: { item in
-                guard case let .functionCall(_, name, _, callID) = item else {
+                guard case let .functionCall(_, name, _, _, callID) = item else {
                     return .functionCallOutput(
                         callID: "bad",
                         output: FunctionCallOutputPayload(content: "bad", success: false)
@@ -314,7 +314,7 @@ final class NonInteractiveExecTests: XCTestCase {
                 .success(await script.next(prompt))
             },
             executeFunctionCall: { item in
-                guard case let .functionCall(_, _, _, callID) = item else {
+                guard case let .functionCall(_, _, _, _, callID) = item else {
                     return .functionCallOutput(
                         callID: "bad",
                         output: FunctionCallOutputPayload(content: "bad", success: false)
@@ -346,7 +346,7 @@ final class NonInteractiveExecTests: XCTestCase {
                 .success(await script.next(prompt))
             },
             executeFunctionCall: { item -> NonInteractiveExec.FunctionCallExecutionResult in
-                guard case let .functionCall(_, _, _, callID) = item else {
+                guard case let .functionCall(_, _, _, _, callID) = item else {
                     return NonInteractiveExec.FunctionCallExecutionResult(
                         output: .functionCallOutput(
                             callID: "bad",

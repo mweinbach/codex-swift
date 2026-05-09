@@ -77,7 +77,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                 }
                 messages.append(.object(message))
 
-            case let .functionCall(_, name, arguments, callID):
+            case let .functionCall(_, name, _, arguments, callID):
                 var message: [String: JSONValue] = [
                     "role": .string("assistant"),
                     "content": .null,

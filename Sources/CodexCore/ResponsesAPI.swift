@@ -345,7 +345,7 @@ private extension ResponseItem {
             return id
         case let .localShellCall(id, _, _, _):
             return id
-        case let .functionCall(id, _, _, _):
+        case let .functionCall(id, _, _, _, _):
             return id
         case let .customToolCall(id, _, _, _, _):
             return id

@@ -732,7 +732,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         encryptedContent: String? = nil
     )
     case localShellCall(id: String? = nil, callID: String?, status: LocalShellStatus, action: LocalShellAction)
-    case functionCall(id: String? = nil, name: String, arguments: String, callID: String)
+    case functionCall(id: String? = nil, name: String, namespace: String? = nil, arguments: String, callID: String)
     case toolSearchCall(
         id: String? = nil,
         callID: String? = nil,
@@ -761,6 +761,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case summary
         case callID = "call_id"
         case name
+        case namespace
         case arguments
         case input
         case output
@@ -819,6 +820,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
                 self = .functionCall(
                     id: try container.decodeIfPresent(String.self, forKey: .id),
                     name: name,
+                    namespace: try container.decodeIfPresent(String.self, forKey: .namespace),
                     arguments: arguments,
                     callID: callID
                 )
@@ -942,10 +944,11 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encodeIfPresent(callID, forKey: .callID)
             try container.encode(status, forKey: .status)
             try container.encode(action, forKey: .action)
-        case let .functionCall(id, name, arguments, callID):
+        case let .functionCall(id, name, namespace, arguments, callID):
             try container.encode("function_call", forKey: .type)
             try container.encodeIfPresent(id, forKey: .id)
             try container.encode(name, forKey: .name)
+            try container.encodeIfPresent(namespace, forKey: .namespace)
             try container.encode(arguments, forKey: .arguments)
             try container.encode(callID, forKey: .callID)
         case let .toolSearchCall(id, callID, status, execution, arguments):

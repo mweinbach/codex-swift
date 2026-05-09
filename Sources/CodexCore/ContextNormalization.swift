@@ -6,7 +6,7 @@ public enum ContextNormalization {
 
         for (index, item) in items.enumerated() {
             switch item {
-            case let .functionCall(_, _, _, callID):
+            case let .functionCall(_, _, _, _, callID):
                 let hasOutput = items.contains { candidate in
                     if case let .functionCallOutput(existing, _) = candidate {
                         return existing == callID
@@ -97,7 +97,7 @@ public enum ContextNormalization {
 
     public static func removeOrphanOutputs(_ items: inout [ResponseItem]) {
         let functionCallIDs = Set(items.compactMap { item -> String? in
-            if case let .functionCall(_, _, _, callID) = item {
+            if case let .functionCall(_, _, _, _, callID) = item {
                 return callID
             }
             return nil
@@ -140,7 +140,7 @@ public enum ContextNormalization {
 
     public static func removeCorresponding(for item: ResponseItem, from items: inout [ResponseItem]) {
         switch item {
-        case let .functionCall(_, _, _, callID):
+        case let .functionCall(_, _, _, _, callID):
             removeFirstMatching(from: &items) { candidate in
                 if case let .functionCallOutput(existing, _) = candidate {
                     return existing == callID
@@ -150,7 +150,7 @@ public enum ContextNormalization {
 
         case let .functionCallOutput(callID, _):
             if removeFirstMatching(from: &items, predicate: { candidate in
-                if case let .functionCall(_, _, _, existing) = candidate {
+                if case let .functionCall(_, _, _, _, existing) = candidate {
                     return existing == callID
                 }
                 return false

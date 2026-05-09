@@ -298,6 +298,36 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testRoundTripsFunctionCallNamespaceLikeRust() throws {
+        let json = #"""
+        {
+            "type": "function_call",
+            "name": "search",
+            "namespace": "browser",
+            "arguments": "{\"query\":\"swift\"}",
+            "call_id": "call-1"
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .functionCall(name: "search", namespace: "browser", arguments: #"{"query":"swift"}"#, callID: "call-1"))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "function_call",
+            "name": "search",
+            "namespace": "browser",
+            "arguments": #"{"query":"swift"}"#,
+            "call_id": "call-1"
+        ])
+
+        try XCTAssertJSONObjectEqual(ResponseItem.functionCall(name: "search", arguments: "{}", callID: "call-2"), [
+            "type": "function_call",
+            "name": "search",
+            "arguments": "{}",
+            "call_id": "call-2"
+        ])
+    }
+
     func testRoundTripsWebSearchCallActions() throws {
         let json = #"""
         {
