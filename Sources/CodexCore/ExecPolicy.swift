@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -3494,6 +3494,13 @@ public final class PolicyParser {
             )
         case "ord":
             return try parseStarlarkOrdinalCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "repr":
+            return try parseStarlarkRepresentationCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3901,6 +3908,21 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
         return .integer(Int64(scalar.value))
+    }
+
+    private static func parseStarlarkRepresentationCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        return .string(starlarkRepresentation(value))
     }
 
     private static func parseStarlarkStringConversionCall(
