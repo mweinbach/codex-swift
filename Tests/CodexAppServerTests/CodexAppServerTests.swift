@@ -2873,6 +2873,121 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
     }
 
+    func testExternalAgentConfigDetectAndImportCommandsRendersSupportedSkills() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let commands = repo.url.appendingPathComponent(".claude/commands", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: commands.appendingPathComponent("nested", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try """
+        ---
+        description: Run Claude Code checks
+        ---
+
+        Ask Claude to inspect CLAUDE.md.
+        """.write(
+            to: commands.appendingPathComponent("nested/check.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        description: Needs args
+        ---
+
+        Use $ARGUMENTS here.
+        """.write(
+            to: commands.appendingPathComponent("unsupported.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        description: First duplicate
+        ---
+
+        One.
+        """.write(
+            to: commands.appendingPathComponent("dupe!.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        description: Second duplicate
+        ---
+
+        Two.
+        """.write(
+            to: commands.appendingPathComponent("dupe?.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "ignore me".write(
+            to: commands.appendingPathComponent("README.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["COMMANDS"])
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate commands from \(commands.path) to \(repo.url.path)/.agents/skills"
+        )
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        XCTAssertEqual(details["commands"] as? [[String: String]], [["name": "source-command-nested-check"]])
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"COMMANDS","description":"Commands","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+        let skill = try String(
+            contentsOf: repo.url.appendingPathComponent(".agents/skills/source-command-nested-check/SKILL.md"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(skill, """
+        ---
+        name: "source-command-nested-check"
+        description: "Run Codex checks"
+        ---
+
+        # source-command-nested-check
+
+        Use this skill when the user asks to run the migrated source command `nested-check`.
+
+        ## Command Template
+
+        Ask Codex to inspect AGENTS.md.
+
+        """)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repo.url.appendingPathComponent(".agents/skills/source-command-unsupported").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repo.url.appendingPathComponent(".agents/skills/source-command-dupe").path
+        ))
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
     func testExternalAgentConfigDetectAndImportAgentsMdUsesRepoSourcePriority() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()

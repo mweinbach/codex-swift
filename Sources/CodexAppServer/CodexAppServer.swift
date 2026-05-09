@@ -2880,6 +2880,10 @@ public enum CodexAppServer {
             items.append(item)
         }
         if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentCommands(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        if params?["includeHome"] as? Bool == true,
            let item = try detectExternalAgentAgentsMd(cwd: nil, configuration: configuration) {
             items.append(item)
         }
@@ -2891,6 +2895,9 @@ public enum CodexAppServer {
                 items.append(item)
             }
             if let item = try detectExternalAgentSkills(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentCommands(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
             if let item = try detectExternalAgentAgentsMd(cwd: repoRoot.path, configuration: configuration) {
@@ -2919,6 +2926,8 @@ public enum CodexAppServer {
             switch itemType {
             case "AGENTS_MD":
                 try importExternalAgentAgentsMd(cwd: cwd, configuration: configuration)
+            case "COMMANDS":
+                try importExternalAgentCommands(cwd: cwd, configuration: configuration)
             case "CONFIG":
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
             case "SKILLS":
@@ -3012,6 +3021,26 @@ public enum CodexAppServer {
         return item
     }
 
+    private static func detectExternalAgentCommands(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = externalAgentCommandsPaths(cwd: cwd, configuration: configuration)
+        let names = try missingExternalAgentCommandSkillNames(sourceCommands: paths.sourceCommands, targetSkills: paths.targetSkills)
+        guard !names.isEmpty else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "COMMANDS",
+            "description": "Migrate commands from \(paths.sourceCommands.path) to \(paths.targetSkills.path)",
+            "details": [
+                "commands": names.map { ["name": $0] }
+            ]
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
     private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
         let paths: (sourceSettings: URL, targetConfig: URL, cwd: String?)
         if let cwd, !cwd.isEmpty,
@@ -3071,6 +3100,34 @@ public enum CodexAppServer {
         )
         let contents = try String(contentsOf: paths.sourceAgentsMd, encoding: .utf8)
         try rewriteExternalAgentTerms(contents).write(to: paths.targetAgentsMd, atomically: true, encoding: .utf8)
+    }
+
+    private static func importExternalAgentCommands(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = externalAgentCommandsPaths(cwd: cwd, configuration: configuration)
+        guard isDirectory(path: paths.sourceCommands.path) else {
+            return
+        }
+        try FileManager.default.createDirectory(at: paths.targetSkills, withIntermediateDirectories: true)
+        for source in try supportedExternalAgentCommandSources(sourceCommands: paths.sourceCommands) {
+            let target = paths.targetSkills.appendingPathComponent(source.name, isDirectory: true)
+            guard !FileManager.default.fileExists(atPath: target.path),
+                  let description = nonEmptyExternalAgentScalar(source.document.frontmatter["description"])
+            else {
+                continue
+            }
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            try renderExternalAgentCommandSkill(
+                body: source.document.body,
+                name: source.name,
+                description: description,
+                sourceName: externalAgentCommandSourceName(sourceCommands: paths.sourceCommands, sourceFile: source.file)
+            )
+            .write(to: target.appendingPathComponent("SKILL.md", isDirectory: false), atomically: true, encoding: .utf8)
+        }
     }
 
     private static func importExternalAgentSkills(cwd: String?, configuration: CodexAppServerConfiguration) throws {
@@ -3214,6 +3271,20 @@ public enum CodexAppServer {
         )
     }
 
+    private static func externalAgentCommandsPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) -> (sourceCommands: URL, targetSkills: URL, cwd: String?) {
+        let skillPaths = externalAgentSkillsPaths(cwd: cwd, configuration: configuration)
+        return (
+            sourceCommands: skillPaths.sourceSkills
+                .deletingLastPathComponent()
+                .appendingPathComponent("commands", isDirectory: true),
+            targetSkills: skillPaths.targetSkills,
+            cwd: skillPaths.cwd
+        )
+    }
+
     private static func homeExternalAgentTargetSkillsDirectory(configuration: CodexAppServerConfiguration) -> URL {
         configuration.codexHome
             .deletingLastPathComponent()
@@ -3238,6 +3309,242 @@ public enum CodexAppServer {
             }
         }
         return names
+    }
+
+    private static func missingExternalAgentCommandSkillNames(sourceCommands: URL, targetSkills: URL) throws -> [String] {
+        try supportedExternalAgentCommandSources(sourceCommands: sourceCommands).compactMap { source in
+            FileManager.default.fileExists(atPath: targetSkills.appendingPathComponent(source.name, isDirectory: true).path)
+                ? nil
+                : source.name
+        }
+    }
+
+    private struct ExternalAgentCommandDocument {
+        var frontmatter: [String: String]
+        var body: String
+    }
+
+    private struct ExternalAgentCommandSource {
+        var file: URL
+        var name: String
+        var document: ExternalAgentCommandDocument
+    }
+
+    private static func supportedExternalAgentCommandSources(sourceCommands: URL) throws -> [ExternalAgentCommandSource] {
+        var byName: [String: [ExternalAgentCommandSource]] = [:]
+        for file in try externalAgentCommandSourceFiles(sourceCommands) {
+            let document = try parseExternalAgentCommandDocument(file)
+            guard let name = externalAgentCommandSkillNameIfSupported(
+                sourceCommands: sourceCommands,
+                sourceFile: file,
+                document: document
+            ) else {
+                continue
+            }
+            byName[name, default: []].append(ExternalAgentCommandSource(file: file, name: name, document: document))
+        }
+        return byName.keys.sorted().compactMap { name in
+            guard byName[name]?.count == 1 else {
+                return nil
+            }
+            return byName[name]?[0]
+        }
+    }
+
+    private static func externalAgentCommandSourceFiles(_ sourceCommands: URL) throws -> [URL] {
+        var files: [URL] = []
+        try collectExternalAgentMarkdownFiles(in: sourceCommands, files: &files)
+        return files.sorted { $0.path < $1.path }
+    }
+
+    private static func collectExternalAgentMarkdownFiles(in directory: URL, files: inout [URL]) throws {
+        guard isDirectory(path: directory.path) else {
+            return
+        }
+        for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) {
+            let path = directory.appendingPathComponent(name)
+            if isDirectory(path: path.path) {
+                try collectExternalAgentMarkdownFiles(in: path, files: &files)
+            } else if isRegularFile(path: path.path), path.pathExtension == "md" {
+                files.append(path)
+            }
+        }
+    }
+
+    private static func externalAgentCommandSkillNameIfSupported(
+        sourceCommands: URL,
+        sourceFile: URL,
+        document: ExternalAgentCommandDocument
+    ) -> String? {
+        guard sourceFile.deletingPathExtension().lastPathComponent != "README" else {
+            return nil
+        }
+        let sourceName = externalAgentCommandSourceName(sourceCommands: sourceCommands, sourceFile: sourceFile)
+        guard let description = nonEmptyExternalAgentScalar(document.frontmatter["description"]) else {
+            return nil
+        }
+        let name = slugifyExternalAgentName("source-command-\(sourceName)")
+        guard name.count <= 64, description.count <= 1024 else {
+            return nil
+        }
+        guard !hasUnsupportedExternalAgentCommandTemplateFeatures(document.body) else {
+            return nil
+        }
+        return name
+    }
+
+    private static func externalAgentCommandSourceName(sourceCommands: URL, sourceFile: URL) -> String {
+        let base = sourceCommands.standardizedFileURL.path
+        var path = sourceFile.standardizedFileURL.deletingPathExtension().path
+        if path == base {
+            path = sourceFile.deletingPathExtension().lastPathComponent
+        } else if path.hasPrefix(base + "/") {
+            path.removeFirst(base.count + 1)
+        }
+        return path.split(separator: "/").map(String.init).joined(separator: "-")
+    }
+
+    private static func parseExternalAgentCommandDocument(_ sourceFile: URL) throws -> ExternalAgentCommandDocument {
+        let content = try String(contentsOf: sourceFile, encoding: .utf8)
+        let prefixLength: Int
+        if content.hasPrefix("---\n") {
+            prefixLength = 4
+        } else if content.hasPrefix("---\r\n") {
+            prefixLength = 5
+        } else {
+            return ExternalAgentCommandDocument(frontmatter: [:], body: content)
+        }
+        let restStart = content.index(content.startIndex, offsetBy: prefixLength)
+        let rest = String(content[restStart...])
+        guard let end = externalAgentFrontmatterEnd(in: rest) else {
+            return ExternalAgentCommandDocument(frontmatter: [:], body: content)
+        }
+        let frontmatter = String(rest[..<end.rawEnd])
+        let body = String(rest[end.bodyStart...])
+        return ExternalAgentCommandDocument(frontmatter: parseScalarFrontmatter(frontmatter), body: body)
+    }
+
+    private static func externalAgentFrontmatterEnd(in rest: String) -> (rawEnd: String.Index, bodyStart: String.Index)? {
+        let delimiters = ["\r\n---\r\n", "\r\n---\n", "\n---\r\n", "\n---\n", "\r\n---", "\n---"]
+        return delimiters.compactMap { delimiter -> (rawEnd: String.Index, bodyStart: String.Index)? in
+            guard let range = rest.range(of: delimiter) else {
+                return nil
+            }
+            return (range.lowerBound, range.upperBound)
+        }.min { left, right in
+            left.rawEnd < right.rawEnd
+        }
+    }
+
+    private static func parseScalarFrontmatter(_ frontmatter: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for rawLine in frontmatter.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#"), let colon = line.firstIndex(of: ":") else {
+                continue
+            }
+            let key = line[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                continue
+            }
+            let rawValue = line[line.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawValue.hasPrefix("["),
+                  !rawValue.hasPrefix("{"),
+                  rawValue != "null",
+                  rawValue != "~"
+            else {
+                continue
+            }
+            result[key] = unquoteSimpleYAMLScalar(rawValue)
+        }
+        return result
+    }
+
+    private static func unquoteSimpleYAMLScalar(_ value: String) -> String {
+        if value.count >= 2,
+           let first = value.first,
+           let last = value.last,
+           (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+            return String(value.dropFirst().dropLast())
+        }
+        return value
+    }
+
+    private static func nonEmptyExternalAgentScalar(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private static func hasUnsupportedExternalAgentCommandTemplateFeatures(_ template: String) -> Bool {
+        template.contains("$ARGUMENTS") ||
+            containsNumberedExternalAgentArgumentPlaceholder(template) ||
+            (template.contains("{{") && template.contains("}}")) ||
+            template.contains("!`") ||
+            template.contains("! `") ||
+            template.split(whereSeparator: { $0.isWhitespace }).contains { token in
+                token.hasPrefix("@") && token.count > 1
+            }
+    }
+
+    private static func containsNumberedExternalAgentArgumentPlaceholder(_ template: String) -> Bool {
+        let bytes = Array(template.utf8)
+        guard bytes.count >= 2 else {
+            return false
+        }
+        for index in 0..<(bytes.count - 1)
+            where bytes[index] == UInt8(ascii: "$") &&
+            bytes[index + 1] >= UInt8(ascii: "0") &&
+            bytes[index + 1] <= UInt8(ascii: "9") {
+            return true
+        }
+        return false
+    }
+
+    private static func renderExternalAgentCommandSkill(
+        body: String,
+        name: String,
+        description: String,
+        sourceName: String
+    ) -> String {
+        let rewrittenBody = rewriteExternalAgentTerms(body.trimmingCharacters(in: .whitespacesAndNewlines))
+        let templateBody = rewrittenBody.isEmpty ? "No command template body was found." : rewrittenBody
+        return """
+        ---
+        name: \(yamlExternalAgentString(name))
+        description: \(yamlExternalAgentString(rewriteExternalAgentTerms(description)))
+        ---
+
+        # \(name)
+
+        Use this skill when the user asks to run the migrated source command `\(sourceName)`.
+
+        ## Command Template
+
+        \(templateBody)
+
+        """
+    }
+
+    private static func yamlExternalAgentString(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    private static func slugifyExternalAgentName(_ value: String) -> String {
+        var slug = ""
+        var lastWasDash = false
+        for scalar in value.unicodeScalars {
+            if scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(UnicodeScalar(String(scalar).lowercased())!)
+                lastWasDash = false
+            } else if !lastWasDash {
+                slug.append("-")
+                lastWasDash = true
+            }
+        }
+        let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "migrated" : trimmed
     }
 
     private static func copyExternalAgentSkillDirectory(source: URL, target: URL) throws {
