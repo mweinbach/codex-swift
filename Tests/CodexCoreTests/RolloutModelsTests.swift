@@ -443,6 +443,32 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertEqual(resumedHistory.rolloutItems, [eventItem, responseItem])
         XCTAssertEqual(resumedHistory.eventMessages, [.warning(WarningEvent(message: "heads up"))])
 
+        let nilRolloutPath = ResumedHistory(
+            conversationID: id,
+            history: [eventItem],
+            rolloutPath: nil
+        )
+        try XCTAssertJSONObjectEqual(InitialHistory.resumed(nilRolloutPath), [
+            "Resumed": [
+                "conversation_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                "history": [
+                    [
+                        "type": "event_msg",
+                        "payload": [
+                            "type": "warning",
+                            "message": "heads up"
+                        ]
+                    ]
+                ],
+                "rollout_path": NSNull()
+            ]
+        ])
+        let nilPathJSON = #"{"Resumed":{"conversation_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","history":[],"rollout_path":null}}"#
+        XCTAssertEqual(
+            try JSONDecoder().decode(InitialHistory.self, from: Data(nilPathJSON.utf8)),
+            .resumed(ResumedHistory(conversationID: id, history: [], rolloutPath: nil))
+        )
+
         let forkedHistory = InitialHistory.forked([responseItem, eventItem])
         try XCTAssertJSONObjectEqual(forkedHistory, [
             "Forked": [

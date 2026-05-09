@@ -481,7 +481,7 @@ public struct RolloutLine: Equatable, Codable, Sendable {
 public struct ResumedHistory: Equatable, Codable, Sendable {
     public let conversationID: ConversationId
     public let history: [RolloutRecordItem]
-    public let rolloutPath: String
+    public let rolloutPath: String?
 
     private enum CodingKeys: String, CodingKey {
         case conversationID = "conversation_id"
@@ -489,10 +489,24 @@ public struct ResumedHistory: Equatable, Codable, Sendable {
         case rolloutPath = "rollout_path"
     }
 
-    public init(conversationID: ConversationId, history: [RolloutRecordItem], rolloutPath: String) {
+    public init(conversationID: ConversationId, history: [RolloutRecordItem], rolloutPath: String?) {
         self.conversationID = conversationID
         self.history = history
         self.rolloutPath = rolloutPath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        conversationID = try container.decode(ConversationId.self, forKey: .conversationID)
+        history = try container.decode([RolloutRecordItem].self, forKey: .history)
+        rolloutPath = try container.decodeIfPresent(String.self, forKey: .rolloutPath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(conversationID, forKey: .conversationID)
+        try container.encode(history, forKey: .history)
+        try container.encode(rolloutPath, forKey: .rolloutPath)
     }
 }
 

@@ -52,6 +52,8 @@ Source baseline inspected for this scaffold:
   - string-backed Codable conversation IDs with UUIDv7 generation
 - `codex-rs/protocol/src/thread_id.rs` and `codex-rs/protocol/src/session_id.rs`
   - string-backed Codable thread/session IDs with UUIDv7 generation and thread/session conversion helpers
+- `codex-rs/protocol/src/protocol.rs` `InitialHistory` / `ResumedHistory`
+  - Rust external tags for `New`, `Cleared`, `Resumed`, and `Forked`, rollout item/event extraction, and nullable `rollout_path` encoding/decoding for resumed histories
 - `codex-rs/protocol/src/config_types.rs`
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
 - `codex-rs/protocol/src/openai_models.rs`

@@ -80,7 +80,7 @@ public enum ResumeCommandResolver {
         case let .resumed(resumed):
             return ResumeCommandResolvedSession(
                 conversationID: resumed.conversationID,
-                path: resumed.rolloutPath,
+                path: resumed.rolloutPath ?? path,
                 historyItemCount: resumed.history.count
             )
         case .new, .cleared:
