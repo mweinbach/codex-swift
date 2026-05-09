@@ -37,25 +37,46 @@ final class RolloutPolicyTests: XCTestCase {
     }
 
     func testEventMessagePersistenceMatchesRustBuckets() {
-        let persisted: Set<RolloutEventMessageKind> = [
+        let limited: Set<RolloutEventMessageKind> = [
             .userMessage,
             .agentMessage,
             .agentReasoning,
             .agentReasoningRawContent,
+            .patchApplyEnd,
             .tokenCount,
             .contextCompacted,
             .enteredReviewMode,
             .exitedReviewMode,
+            .mcpToolCallEnd,
             .undoCompleted,
-            .turnAborted
+            .turnAborted,
+            .webSearchEnd,
+            .imageGenerationEnd
+        ]
+        let extendedOnly: Set<RolloutEventMessageKind> = [
+            .error,
+            .execCommandEnd,
+            .viewImageToolCall
         ]
 
         for event in RolloutEventMessageKind.allCases {
             XCTAssertEqual(
                 RolloutPolicy.shouldPersistEventMessage(event),
-                persisted.contains(event),
+                limited.contains(event),
                 event.rawValue
             )
+            XCTAssertEqual(
+                RolloutPolicy.shouldPersistEventMessage(event, mode: .extended),
+                limited.contains(event) || extendedOnly.contains(event),
+                event.rawValue
+            )
+        }
+
+        for event in limited {
+            XCTAssertEqual(RolloutPolicy.eventMessagePersistenceMode(event), .limited, event.rawValue)
+        }
+        for event in extendedOnly {
+            XCTAssertEqual(RolloutPolicy.eventMessagePersistenceMode(event), .extended, event.rawValue)
         }
     }
 
@@ -77,6 +98,13 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.imageGenerationEnd(ImageGenerationEndEvent(
+            callID: "ig-1",
+            status: "completed",
+            result: "base64-png"
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.error(ErrorEvent(message: "boom"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.error(ErrorEvent(message: "boom")), mode: .extended))
     }
 
     func testRolloutItemPersistenceMatchesRustBuckets() {

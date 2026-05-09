@@ -66,6 +66,11 @@ public enum RolloutItem: Equatable, Sendable {
     case eventMessage(RolloutEventMessageKind)
 }
 
+public enum EventPersistenceMode: Equatable, Sendable {
+    case limited
+    case extended
+}
+
 public enum RolloutPolicy {
     public static func eventKind(for event: EventMessage) -> RolloutEventMessageKind {
         switch event {
@@ -216,21 +221,44 @@ public enum RolloutPolicy {
         }
     }
 
-    public static func shouldPersistEventMessage(_ event: RolloutEventMessageKind) -> Bool {
+    public static func shouldPersistEventMessage(
+        _ event: RolloutEventMessageKind,
+        mode: EventPersistenceMode = .limited
+    ) -> Bool {
+        switch (eventMessagePersistenceMode(event), mode) {
+        case (.limited?, _),
+             (.extended?, .extended):
+            return true
+        case (.extended?, .limited),
+             (nil, _):
+            return false
+        }
+    }
+
+    public static func eventMessagePersistenceMode(
+        _ event: RolloutEventMessageKind
+    ) -> EventPersistenceMode? {
         switch event {
         case .userMessage,
              .agentMessage,
              .agentReasoning,
              .agentReasoningRawContent,
+             .patchApplyEnd,
              .tokenCount,
              .contextCompacted,
              .enteredReviewMode,
              .exitedReviewMode,
+             .mcpToolCallEnd,
              .undoCompleted,
-             .turnAborted:
-            return true
+             .turnAborted,
+             .webSearchEnd,
+             .imageGenerationEnd:
+            return .limited
         case .error,
-             .warning,
+             .execCommandEnd,
+             .viewImageToolCall:
+            return .extended
+        case .warning,
              .taskStarted,
              .taskComplete,
              .agentMessageDelta,
@@ -240,22 +268,17 @@ public enum RolloutPolicy {
              .rawResponseItem,
              .sessionConfigured,
              .mcpToolCallBegin,
-             .mcpToolCallEnd,
              .webSearchBegin,
-             .webSearchEnd,
              .imageGenerationBegin,
-             .imageGenerationEnd,
              .execCommandBegin,
              .terminalInteraction,
              .execCommandOutputDelta,
-             .execCommandEnd,
              .execApprovalRequest,
              .elicitationRequest,
              .applyPatchApprovalRequest,
              .backgroundEvent,
              .streamError,
              .patchApplyBegin,
-             .patchApplyEnd,
              .turnDiff,
              .getHistoryEntryResponse,
              .undoStarted,
@@ -266,7 +289,6 @@ public enum RolloutPolicy {
              .listSkillsResponse,
              .planUpdate,
              .shutdownComplete,
-             .viewImageToolCall,
              .deprecationNotice,
              .itemStarted,
              .itemCompleted,
@@ -274,11 +296,14 @@ public enum RolloutPolicy {
              .reasoningContentDelta,
              .reasoningRawContentDelta,
              .skillsUpdateAvailable:
-            return false
+            return nil
         }
     }
 
-    public static func shouldPersistEventMessage(_ event: EventMessage) -> Bool {
-        shouldPersistEventMessage(eventKind(for: event))
+    public static func shouldPersistEventMessage(
+        _ event: EventMessage,
+        mode: EventPersistenceMode = .limited
+    ) -> Bool {
+        shouldPersistEventMessage(eventKind(for: event), mode: mode)
     }
 }
