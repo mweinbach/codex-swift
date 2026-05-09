@@ -639,42 +639,104 @@ public final class PolicyParser {
         let pendingValidationStartIndex = pendingExampleValidations.count
         let source = Self.stripLineComments(from: policyFileContents)
         var constants: [String: ConfigValue] = [:]
-        for statement in Self.topLevelStatements(from: source) {
-            if let assignment = try Self.parseTopLevelLiteralAssignment(statement, constants: constants) {
-                constants[assignment.key] = assignment.value
+        try parseStatements(Self.topLevelStatements(from: source), identifier: policyIdentifier, constants: &constants)
+        try validatePendingExamples(from: pendingValidationStartIndex)
+    }
+
+    private func parseStatements(
+        _ statements: [String],
+        identifier: String,
+        constants: inout [String: ConfigValue]
+    ) throws {
+        var index = 0
+        while index < statements.count {
+            let statement = statements[index]
+            let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                index += 1
                 continue
             }
 
-            let prefixRuleBodies = try Self.extractCallBodies(
-                named: "prefix_rule",
-                from: statement,
-                identifier: policyIdentifier
-            )
-            for body in prefixRuleBodies {
-                try addPrefixRule(from: body, constants: constants)
+            if let forLoop = try Self.parseTopLevelForHeader(statement) {
+                let headerIndent = Self.indentationCount(statement)
+                var body: [String] = []
+                var bodyIndex = index + 1
+                while bodyIndex < statements.count {
+                    let candidate = statements[bodyIndex]
+                    if candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        body.append(candidate)
+                        bodyIndex += 1
+                        continue
+                    }
+                    guard Self.indentationCount(candidate) > headerIndent else {
+                        break
+                    }
+                    body.append(candidate)
+                    bodyIndex += 1
+                }
+
+                guard body.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+                    throw ExecPolicyError.invalidSyntax("\(identifier): for loop body cannot be empty")
+                }
+
+                let iterable = try Self.parsePolicyLiteral(forLoop.iterableText, constants: constants)
+                guard case let .array(items) = iterable else {
+                    throw ConfigOverrideError.invalidLiteral(forLoop.iterableText)
+                }
+
+                var loopConstants = constants
+                for item in items {
+                    loopConstants[forLoop.variable] = item
+                    try parseStatements(body, identifier: identifier, constants: &loopConstants)
+                }
+                constants = loopConstants
+                index = bodyIndex
+                continue
             }
-            let networkRuleBodies = try Self.extractCallBodies(
-                named: "network_rule",
-                from: statement,
-                identifier: policyIdentifier
-            )
-            for body in networkRuleBodies {
-                try addNetworkRule(from: body, constants: constants)
-            }
-            let hostExecutableBodies = try Self.extractCallBodies(
-                named: "host_executable",
-                from: statement,
-                identifier: policyIdentifier
-            )
-            for body in hostExecutableBodies {
-                try addHostExecutable(from: body, constants: constants)
-            }
+
+            try parseStatement(statement, identifier: identifier, constants: &constants)
+            index += 1
         }
-        try validatePendingExamples(from: pendingValidationStartIndex)
     }
 
     public func build() -> ExecPolicy {
         policy
+    }
+
+    private func parseStatement(
+        _ statement: String,
+        identifier: String,
+        constants: inout [String: ConfigValue]
+    ) throws {
+        if let assignment = try Self.parseTopLevelLiteralAssignment(statement, constants: constants) {
+            constants[assignment.key] = assignment.value
+            return
+        }
+
+        let prefixRuleBodies = try Self.extractCallBodies(
+            named: "prefix_rule",
+            from: statement,
+            identifier: identifier
+        )
+        for body in prefixRuleBodies {
+            try addPrefixRule(from: body, constants: constants)
+        }
+        let networkRuleBodies = try Self.extractCallBodies(
+            named: "network_rule",
+            from: statement,
+            identifier: identifier
+        )
+        for body in networkRuleBodies {
+            try addNetworkRule(from: body, constants: constants)
+        }
+        let hostExecutableBodies = try Self.extractCallBodies(
+            named: "host_executable",
+            from: statement,
+            identifier: identifier
+        )
+        for body in hostExecutableBodies {
+            try addHostExecutable(from: body, constants: constants)
+        }
     }
 
     private func addPrefixRule(from body: String, constants: [String: ConfigValue]) throws {
@@ -963,6 +1025,47 @@ public final class PolicyParser {
         } catch {
             return nil
         }
+    }
+
+    private static func parseTopLevelForHeader(_ statement: String) throws -> (
+        variable: String,
+        iterableText: String
+    )? {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(":"),
+              let forRange = topLevelKeywordRange("for", in: trimmed),
+              forRange.lowerBound == trimmed.startIndex,
+              let inRange = topLevelKeywordRange("in", in: trimmed, startingAt: forRange.upperBound)
+        else {
+            return nil
+        }
+
+        let variable = String(trimmed[forRange.upperBound..<inRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableEnd = trimmed.index(before: trimmed.endIndex)
+        let iterableText = String(trimmed[inRange.upperBound..<iterableEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(variable),
+              !iterableText.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        return (variable, iterableText)
+    }
+
+    private static func indentationCount(_ statement: String) -> Int {
+        var count = 0
+        for character in statement {
+            switch character {
+            case " ":
+                count += 1
+            case "\t":
+                count += 4
+            default:
+                return count
+            }
+        }
+        return count
     }
 
     private static func topLevelStatements(from source: String) -> [String] {

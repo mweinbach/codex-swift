@@ -747,6 +747,72 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkTopLevelForLoops() throws {
+        let policy = try parsePolicy("""
+        TOOLS = ["git", "jj"]
+        HOSTS = ["api.github.com", "registry.npmjs.org"]
+        DECISIONS = ["prompt", "forbidden"]
+        PATH_TOOLS = ["git"]
+
+        for tool in TOOLS:
+            prefix_rule(
+                [tool, "status"],
+                DECISIONS[0],
+                match = [f"{tool} status"],
+                not_match = [[tool, "commit"]],
+                justification = f"inspect {tool}",
+            )
+
+        for host in HOSTS:
+            network_rule(host, "https", "allow", justification = "allow " + host)
+
+        for tool in PATH_TOOLS:
+            PATH = "/usr/bin/" + tool
+            host_executable(tool, [PATH])
+        prefix_rule([tool, "fallback"], DECISIONS[-1])
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt,
+                    justification: "inspect git"
+                ),
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("fallback")]),
+                    decision: .forbidden
+                )
+            ]
+        )
+        XCTAssertEqual(
+            policy.rules(for: "jj"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "jj", rest: [.single("status")]),
+                    decision: .prompt,
+                    justification: "inspect jj"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(
+                host: "api.github.com",
+                protocol: .https,
+                decision: .allow,
+                justification: "allow api.github.com"
+            ),
+            NetworkRule(
+                host: "registry.npmjs.org",
+                protocol: .https,
+                decision: .allow,
+                justification: "allow registry.npmjs.org"
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
