@@ -1325,6 +1325,50 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkTupleLiterals() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = (("git", "status", "prompt"), ("jj", "log", "allow"))
+        GIT_PATHS = ("/usr/bin/git", "/opt/homebrew/bin/git")
+        GIT_MATCHES = (("git", "status"), ("git", "status", "--short"))
+        GIT_NOT_MATCHES = (("git", "diff"),)
+
+        for tool, subcommand, decision in COMMANDS:
+            pattern = (tool, subcommand)
+            prefix_rule(
+                pattern,
+                decision,
+                GIT_MATCHES if tool == "git" else (),
+                GIT_NOT_MATCHES if tool == "git" else (),
+                "tuple " + tool,
+            )
+
+        prefix_rule(pattern = ("hg", ("status", "st")), decision = "prompt")
+        host_executable("git", GIT_PATHS)
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "tuple git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "tuple jj"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.alts(["status", "st"])]),
+                decision: .prompt
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkLengthComparisonsAndMembership() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

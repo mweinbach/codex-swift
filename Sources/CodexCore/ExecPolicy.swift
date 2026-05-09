@@ -1586,7 +1586,11 @@ public final class PolicyParser {
         constants: [String: ConfigValue] = [:],
         functions: [String: StarlarkFunction] = [:]
     ) throws -> ConfigValue {
-        let trimmed = strippingEnclosingParentheses(from: valueText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let rawTrimmed = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let tuple = try parseStarlarkTupleLiteral(rawTrimmed, constants: constants, functions: functions) {
+            return tuple
+        }
+        let trimmed = strippingEnclosingParentheses(from: rawTrimmed)
         if trimmed == "True" {
             return .bool(true)
         }
@@ -1671,6 +1675,38 @@ public final class PolicyParser {
         } catch {
             return try ConfigValueParser.parseTomlLiteral(removingTrailingArrayCommas(from: trimmed))
         }
+    }
+
+    private static func parseStarlarkTupleLiteral(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasPrefix("("),
+              text.hasSuffix(")"),
+              enclosesWholeExpression(text)
+        else {
+            return nil
+        }
+
+        let body = String(text.dropFirst().dropLast())
+        let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedBody.isEmpty {
+            return .array([])
+        }
+
+        let elements = splitTopLevel(body, separator: ",")
+        guard elements.count > 1 else {
+            return nil
+        }
+
+        return .array(try elements.compactMap { item in
+            let trimmedItem = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedItem.isEmpty else {
+                return nil
+            }
+            return try parsePolicyLiteral(trimmedItem, constants: constants, functions: functions)
+        })
     }
 
     private static func strippingEnclosingParentheses(from text: String) -> String {
