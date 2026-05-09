@@ -8,6 +8,7 @@ final class ConfigRequirementsTests: XCTestCase {
         allowed_approvals_reviewers = ["guardian_subagent"]
         allowed_web_search_modes = ["cached"]
         enforce_residency = "us"
+        guardian_policy_config = "Use the company guardian policy."
 
         [features]
         tool_search = true
@@ -28,6 +29,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(emptyTarget.allowedWebSearchModes, [.cached])
         XCTAssertEqual(emptyTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(emptyTarget.enforceResidency, .us)
+        XCTAssertEqual(emptyTarget.guardianPolicyConfig, "Use the company guardian policy.")
         XCTAssertEqual(emptyTarget.network?.enabled, true)
         XCTAssertEqual(emptyTarget.permissions?.filesystem?.denyRead, [
             FilesystemDenyReadPattern("/private/keys")
@@ -43,6 +45,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(populatedTarget.allowedWebSearchModes, [.live])
         XCTAssertEqual(populatedTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(populatedTarget.enforceResidency, .us)
+        XCTAssertEqual(populatedTarget.guardianPolicyConfig, "Use the company guardian policy.")
         XCTAssertEqual(populatedTarget.network?.enabled, true)
         XCTAssertEqual(populatedTarget.permissions?.filesystem?.denyRead, [
             FilesystemDenyReadPattern("/private/keys")
@@ -75,6 +78,23 @@ final class ConfigRequirementsTests: XCTestCase {
         """)
 
         XCTAssertEqual(config.allowedApprovalsReviewers, [.user, .autoReview, .autoReview])
+        let requirements = try config.requirements()
+        XCTAssertEqual(requirements.approvalsReviewer.value, .user)
+        XCTAssertNoThrow(try requirements.approvalsReviewer.canSet(.autoReview).get())
+    }
+
+    func testAllowedApprovalsReviewersConstraintMatchesRust() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        allowed_approvals_reviewers = ["guardian_subagent"]
+        """)
+        let requirements = try config.requirements()
+
+        XCTAssertEqual(requirements.approvalsReviewer.value, .autoReview)
+        XCTAssertNoThrow(try requirements.approvalsReviewer.canSet(.autoReview).get())
+        XCTAssertConstraintFailure(
+            requirements.approvalsReviewer.canSet(.user),
+            .invalidValue(candidate: "User", allowed: "[AutoReview]")
+        )
     }
 
     func testDeserializeAllowedSandboxModes() throws {
@@ -517,6 +537,34 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertThrowsError(try config.requirements()) { error in
             XCTAssertEqual(error as? ConstraintError, .emptyField(fieldName: "allowed_approval_policies"))
         }
+    }
+
+    func testEmptyAllowedApprovalsReviewersMatchesRustConstraintError() {
+        let config = ConfigRequirementsToml(allowedApprovalsReviewers: [])
+        XCTAssertThrowsError(try config.requirements()) { error in
+            XCTAssertEqual(error as? ConstraintError, .emptyField(fieldName: "allowed_approvals_reviewers"))
+        }
+    }
+
+    func testGuardianPolicyConfigBlankIsEmptyAndDoesNotBlockLowerPrecedenceValue() throws {
+        let blank = try ConfigRequirementsToml.parse("""
+        guardian_policy_config = "   \t"
+        """)
+        XCTAssertTrue(blank.isEmpty)
+
+        var merged = blank
+        let lower = try ConfigRequirementsToml.parse("""
+        guardian_policy_config = "Use the system guardian policy."
+        """)
+        merged.mergeUnsetFields(from: lower)
+        XCTAssertEqual(merged.guardianPolicyConfig, "Use the system guardian policy.")
+        XCTAssertFalse(merged.isEmpty)
+
+        var high = try ConfigRequirementsToml.parse("""
+        guardian_policy_config = "Use the higher guardian policy."
+        """)
+        high.mergeUnsetFields(from: lower)
+        XCTAssertEqual(high.guardianPolicyConfig, "Use the higher guardian policy.")
     }
 
     func testAllowedSandboxModesMustIncludeReadOnly() {

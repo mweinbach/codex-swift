@@ -151,6 +151,15 @@ public enum ApprovalsReviewer: Equatable, Sendable {
     case user
     case autoReview
 
+    public var rustDebugDescription: String {
+        switch self {
+        case .user:
+            "User"
+        case .autoReview:
+            "AutoReview"
+        }
+    }
+
     public var appServerRawValue: String {
         switch self {
         case .user:
@@ -159,6 +168,10 @@ public enum ApprovalsReviewer: Equatable, Sendable {
             "guardian_subagent"
         }
     }
+}
+
+extension ApprovalsReviewer: DefaultValue {
+    public static var defaultValue: ApprovalsReviewer { .user }
 }
 
 extension ApprovalsReviewer: Codable {

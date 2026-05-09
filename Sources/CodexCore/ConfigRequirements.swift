@@ -49,6 +49,7 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
 
 public struct ConfigRequirements: Equatable, Sendable {
     public var approvalPolicy: Constrained<AskForApproval>
+    public var approvalsReviewer: Constrained<ApprovalsReviewer>
     public var sandboxPolicy: Constrained<SandboxPolicy>
     public var managedHooks: ManagedHooksRequirement?
     public var mcpServers: [String: McpServerRequirement]?
@@ -57,6 +58,7 @@ public struct ConfigRequirements: Equatable, Sendable {
 
     public init(
         approvalPolicy: Constrained<AskForApproval> = .allowAnyFromDefault(),
+        approvalsReviewer: Constrained<ApprovalsReviewer> = .allowAnyFromDefault(),
         sandboxPolicy: Constrained<SandboxPolicy> = .allowAny(.readOnly),
         managedHooks: ManagedHooksRequirement? = nil,
         mcpServers: [String: McpServerRequirement]? = nil,
@@ -64,6 +66,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         filesystem: FilesystemConstraints? = nil
     ) {
         self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
         self.sandboxPolicy = sandboxPolicy
         self.managedHooks = managedHooks
         self.mcpServers = mcpServers
@@ -358,6 +361,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var enforceResidency: ResidencyRequirement?
     public var network: NetworkRequirementsToml?
     public var permissions: PermissionsRequirementsToml?
+    public var guardianPolicyConfig: String?
 
     public init(
         allowedApprovalPolicies: [AskForApproval]? = nil,
@@ -374,7 +378,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         apps: AppsRequirementsToml? = nil,
         enforceResidency: ResidencyRequirement? = nil,
         network: NetworkRequirementsToml? = nil,
-        permissions: PermissionsRequirementsToml? = nil
+        permissions: PermissionsRequirementsToml? = nil,
+        guardianPolicyConfig: String? = nil
     ) {
         self.allowedApprovalPolicies = allowedApprovalPolicies
         self.allowedApprovalsReviewers = allowedApprovalsReviewers
@@ -391,6 +396,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.enforceResidency = enforceResidency
         self.network = network
         self.permissions = permissions
+        self.guardianPolicyConfig = guardianPolicyConfig
     }
 
     public var isEmpty: Bool {
@@ -406,7 +412,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             (apps?.isEmpty ?? true) &&
             enforceResidency == nil &&
             network == nil &&
-            (permissions?.isEmpty ?? true)
+            (permissions?.isEmpty ?? true) &&
+            (guardianPolicyConfig?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
@@ -460,6 +467,12 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if permissions == nil, let value = other.permissions {
             permissions = value
         }
+        if guardianPolicyConfig?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true,
+           let value = other.guardianPolicyConfig,
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guardianPolicyConfig = value
+        }
     }
 
     public func requirements() throws -> ConfigRequirements {
@@ -475,6 +488,20 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             )
         } else {
             approvalPolicy = .allowAnyFromDefault()
+        }
+
+        let approvalsReviewer: Constrained<ApprovalsReviewer>
+        if let reviewers = allowedApprovalsReviewers {
+            guard let first = reviewers.first else {
+                throw ConstraintError.emptyField("allowed_approvals_reviewers")
+            }
+            approvalsReviewer = try Constrained.allowValues(
+                first,
+                allowed: reviewers,
+                debugDescription: { $0.rustDebugDescription }
+            )
+        } else {
+            approvalsReviewer = .allowAnyFromDefault()
         }
 
         let defaultSandboxPolicy = SandboxPolicy.readOnly
@@ -514,6 +541,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
 
         return ConfigRequirements(
             approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
             sandboxPolicy: sandboxPolicy,
             managedHooks: managedHooks,
             mcpServers: mcpServers,
@@ -566,6 +594,12 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let permissionsValue = table["permissions"] {
             result.permissions = try parsePermissionsRequirements(permissionsValue)
+        }
+        if let guardianPolicyConfigValue = table["guardian_policy_config"] {
+            result.guardianPolicyConfig = try stringValue(
+                guardianPolicyConfigValue,
+                key: "guardian_policy_config"
+            )
         }
 
         return result
@@ -923,6 +957,13 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         guard case let .string(string) = value else {
             return nil
+        }
+        return string
+    }
+
+    private static func stringValue(_ value: ConfigValue, key: String) throws -> String {
+        guard case let .string(string) = value else {
+            throw ConfigRequirementsParseError.invalidLine(key)
         }
         return string
     }
