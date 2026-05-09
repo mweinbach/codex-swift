@@ -288,14 +288,26 @@ final class ParsedCommandTests: XCTestCase {
     }
 
     func testAdditionalRustParserCommandVariants() {
+        XCTAssertEqual(parseCommand(["git", "grep", "TODO", "src"]), [
+            .search(cmd: "git grep TODO src", query: "TODO", path: "src")
+        ])
         XCTAssertEqual(parseCommand(["git", "grep", "-l", "TODO", "src"]), [
             .search(cmd: "git grep -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["git", "ls-files"]), [
+            .listFiles(cmd: "git ls-files", path: nil)
+        ])
+        XCTAssertEqual(parseCommand(["git", "ls-files", "src"]), [
+            .listFiles(cmd: "git ls-files src", path: "src")
         ])
         XCTAssertEqual(parseCommand(["git", "ls-files", "--exclude", "target", "src"]), [
             .listFiles(cmd: "git ls-files --exclude target src", path: "src")
         ])
         XCTAssertEqual(parseCommand(["eza", "--color=always", "src"]), [
             .listFiles(cmd: "eza '--color=always' src", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["exa", "-I", "target", "."]), [
+            .listFiles(cmd: "exa -I target .", path: ".")
         ])
         XCTAssertEqual(parseCommand(["tree", "-L", "2", "src"]), [
             .listFiles(cmd: "tree -L 2 src", path: "src")
@@ -311,12 +323,39 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testGrepFilesWithMatchesFlagsMatchRust() {
+        XCTAssertEqual(parseCommand(["grep", "-l", "TODO", "src"]), [
+            .search(cmd: "grep -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["grep", "--files-with-matches", "TODO", "src"]), [
+            .search(cmd: "grep --files-with-matches TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["grep", "-L", "TODO", "src"]), [
+            .search(cmd: "grep -L TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["grep", "--files-without-match", "TODO", "src"]), [
+            .search(cmd: "grep --files-without-match TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["egrep", "-R", "TODO", "src"]), [
+            .search(cmd: "egrep -R TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["fgrep", "-l", "TODO", "src"]), [
+            .search(cmd: "fgrep -l TODO src", query: "TODO", path: "src")
+        ])
+    }
+
     func testAwkPythonAndMutatingXargsParity() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "awk '{print $1}' Cargo.toml"]), [
             .read(cmd: "awk '{print $1}' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
         XCTAssertEqual(parseCommand(["bash", "-lc", #"python3 -c "import glob; print(glob.glob('*.rs'))""#]), [
             .listFiles(cmd: #"python3 -c 'import glob; print(glob.glob('\''*.rs'\''))'"#, path: nil)
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"python -c "import os; print(os.listdir('.'))""#]), [
+            .listFiles(cmd: #"python -c 'import os; print(os.listdir('\''.'\''))'"#, path: nil)
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"python -c "print('hello')""#]), [
+            .unknown(cmd: #"python -c "print('hello')""#)
         ])
 
         let mutatingPipeline = #"rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'"#
@@ -370,6 +409,14 @@ final class ParsedCommandTests: XCTestCase {
                 name: "ParsedCommand.swift",
                 path: "Sources/CodexCore/ParsedCommand.swift"
             )
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd -- -weird && cat foo.txt"]), [
+            .read(cmd: "cat foo.txt", name: "foo.txt", path: "-weird/foo.txt")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd dir1 dir2 && cat foo.txt"]), [
+            .read(cmd: "cat foo.txt", name: "foo.txt", path: "dir2/foo.txt")
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd /tmp/project && cat src/lib.rs"]), [
@@ -426,6 +473,14 @@ final class ParsedCommandTests: XCTestCase {
             .read(cmd: "sed -n 10p -- file.txt | nl -ba", name: "file.txt", path: "file.txt")
         ])
 
+        XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n +522 README.md"]), [
+            .read(cmd: "tail -n +522 README.md", name: "README.md", path: "README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | head -n 1"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+
         let inner = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'"
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
             .read(
@@ -475,6 +530,10 @@ final class ParsedCommandTests: XCTestCase {
 
         XCTAssertEqual(parseCommand(["ls", "--time-style=long-iso", "./dist"]), [
             .listFiles(cmd: "ls '--time-style=long-iso' ./dist", path: ".")
+        ])
+
+        XCTAssertEqual(parseCommand(["ls", "-I", "*.test.js"]), [
+            .listFiles(cmd: "ls -I '*.test.js'", path: nil)
         ])
 
         XCTAssertEqual(parseCommand(["yes", "|", "rg", "-n", "foo bar", "-S"]), [
