@@ -8257,6 +8257,9 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cwd: try optionalAbsolutePathParam(params?["cwd"], name: "cwd").map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            },
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )

@@ -7865,6 +7865,45 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["layers"])
     }
 
+    func testConfigReadUsesCwdProjectLayers() throws {
+        let codexHome = try TemporaryDirectory()
+        try #"model = "gpt-user""#.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let repo = codexHome.url.appendingPathComponent("repo", isDirectory: true)
+        let nested = repo.appendingPathComponent("Sources/App", isDirectory: true)
+        let dotCodex = repo.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        try "gitdir: .git\n".write(to: repo.appendingPathComponent(".git", isDirectory: false), atomically: true, encoding: .utf8)
+        try #"model = "gpt-project""#.write(
+            to: dotCodex.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"cwd":"\#(nested.path)","includeLayers":true}}"#,
+            codexHome: codexHome.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "gpt-project")
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        let modelOrigin = try XCTUnwrap(origins["model"] as? [String: Any])
+        let modelOriginName = try XCTUnwrap(modelOrigin["name"] as? [String: Any])
+        XCTAssertEqual(modelOriginName["type"] as? String, "project")
+        XCTAssertEqual(modelOriginName["dotCodexFolder"] as? String, dotCodex.standardizedFileURL.path)
+        let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
+        XCTAssertTrue(layers.contains { layer in
+            (layer["name"] as? [String: Any])?["type"] as? String == "project"
+                && (layer["config"] as? [String: Any])?["model"] as? String == "gpt-project"
+        })
+    }
+
     func testConfigRequirementsReadReturnsNullWhenUnset() throws {
         let temp = try TemporaryDirectory()
         let missingRequirements = temp.url.appendingPathComponent("missing-requirements.toml", isDirectory: false)
