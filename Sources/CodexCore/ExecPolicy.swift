@@ -2924,6 +2924,14 @@ public final class PolicyParser {
         expression: String
     ) throws -> ConfigValue {
         switch (lhs, rhs) {
+        case let (.string(lhs), .integer(rhs)):
+            return .string(try repeatingStarlarkString(lhs, count: rhs, expression: expression))
+        case let (.integer(lhs), .string(rhs)):
+            return .string(try repeatingStarlarkString(rhs, count: lhs, expression: expression))
+        case let (.array(lhs), .integer(rhs)):
+            return .array(try repeatingStarlarkArray(lhs, count: rhs, expression: expression))
+        case let (.integer(lhs), .array(rhs)):
+            return .array(try repeatingStarlarkArray(rhs, count: lhs, expression: expression))
         case let (.integer(lhs), .integer(rhs)):
             return .integer(lhs * rhs)
         case let (.double(lhs), .double(rhs)):
@@ -2935,6 +2943,34 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func repeatingStarlarkString(
+        _ string: String,
+        count rawCount: Int64,
+        expression: String
+    ) throws -> String {
+        guard let count = Int(exactly: rawCount) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        guard count > 0 else {
+            return ""
+        }
+        return String(repeating: string, count: count)
+    }
+
+    private static func repeatingStarlarkArray(
+        _ items: [ConfigValue],
+        count rawCount: Int64,
+        expression: String
+    ) throws -> [ConfigValue] {
+        guard let count = Int(exactly: rawCount) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        guard count > 0 else {
+            return []
+        }
+        return Array(repeating: items, count: count).flatMap { $0 }
     }
 
     private static func evaluateStarlarkDivision(
