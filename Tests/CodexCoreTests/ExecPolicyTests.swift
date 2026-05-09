@@ -938,6 +938,49 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkDictComprehensionsAndDirectIteration() throws {
+        let policy = try parsePolicy("""
+        BASE = {
+            "pnpm": ["install", "prompt"],
+            "git": ["status", "allow"],
+            "hg": ["status", "forbidden"],
+        }
+        ENABLED = {tool: spec for tool, spec in BASE.items() if spec[1] != "forbidden"}
+        HOSTS = {tool: tool + ".example.com" for tool in ENABLED if tool != "pnpm"}
+        EXAMPLES = [tool for tool in ENABLED if tool.startswith("g")]
+
+        for tool in ENABLED:
+            prefix_rule([tool, ENABLED[tool][0]], ENABLED[tool][1], justification = "dict comprehension " + tool)
+
+        for tool in HOSTS:
+            network_rule(HOSTS[tool], "https", "allow")
+
+        for letter in "g":
+            if len(EXAMPLES) == 1 and letter == "g":
+                host_executable("git", ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "dict comprehension git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .prompt,
+                justification: "dict comprehension pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "git.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkRangeAndComputedIndexes() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

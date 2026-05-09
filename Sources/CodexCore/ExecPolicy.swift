@@ -701,9 +701,7 @@ public final class PolicyParser {
                     constants: constants,
                     functions: functions
                 )
-                guard case let .array(items) = iterable else {
-                    throw ConfigOverrideError.invalidLiteral(forLoop.iterableText)
-                }
+                let items = try Self.starlarkIterableItems(iterable, expression: forLoop.iterableText)
 
                 var loopConstants = constants
                 for item in items {
@@ -3335,9 +3333,7 @@ public final class PolicyParser {
         }
 
         let iterable = try parsePolicyLiteral(iterableText, constants: constants, functions: functions)
-        guard case let .array(items) = iterable else {
-            throw ConfigOverrideError.invalidLiteral("[\(body)]")
-        }
+        let items = try starlarkIterableItems(iterable, expression: "[\(body)]")
 
         var result: [ConfigValue] = []
         for item in items {
@@ -3358,6 +3354,13 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
         let body = String(text.dropFirst().dropLast())
+        if let comprehension = try parseStarlarkDictComprehension(
+            body,
+            constants: constants,
+            functions: functions
+        ) {
+            return .table(comprehension)
+        }
         if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .table([:])
         }
@@ -3384,6 +3387,67 @@ public final class PolicyParser {
             table[key] = try parsePolicyLiteral(rawValue, constants: constants, functions: functions)
         }
         return .table(table)
+    }
+
+    private static func parseStarlarkDictComprehension(
+        _ body: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> [String: ConfigValue]? {
+        guard let forRange = topLevelKeywordRange("for", in: body),
+              let inRange = topLevelKeywordRange("in", in: body, startingAt: forRange.upperBound)
+        else {
+            return nil
+        }
+
+        let keyValueText = String(body[..<forRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let colonIndex = topLevelColonIndex(in: keyValueText) else {
+            throw ConfigOverrideError.invalidLiteral("{\(body)}")
+        }
+        let rawKey = String(keyValueText[..<colonIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let valueStart = keyValueText.index(after: colonIndex)
+        let rawValue = String(keyValueText[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetText = String(body[forRange.upperBound..<inRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableAndFilter = String(body[inRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableText: String
+        let filterCondition: String?
+        if let ifRange = topLevelKeywordRange("if", in: iterableAndFilter) {
+            iterableText = String(iterableAndFilter[..<ifRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            filterCondition = String(iterableAndFilter[ifRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            iterableText = iterableAndFilter
+            filterCondition = nil
+        }
+        let targets = try parseStarlarkLoopTargets(targetText, expression: "{\(body)}")
+        guard !rawKey.isEmpty,
+              !rawValue.isEmpty,
+              !iterableText.isEmpty,
+              filterCondition?.isEmpty != true
+        else {
+            throw ConfigOverrideError.invalidLiteral("{\(body)}")
+        }
+
+        let iterable = try parsePolicyLiteral(iterableText, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: "{\(body)}")
+
+        var table: [String: ConfigValue] = [:]
+        for item in items {
+            var scopedConstants = constants
+            try bindStarlarkLoopTargets(targets, to: item, constants: &scopedConstants, expression: "{\(body)}")
+            if let filterCondition,
+               try !evaluateStarlarkCondition(filterCondition, constants: scopedConstants, functions: functions) {
+                continue
+            }
+            let key = try parsePolicyLiteral(rawKey, constants: scopedConstants, functions: functions)
+            guard case let .string(key) = key else {
+                throw ConfigOverrideError.invalidLiteral("{\(body)}")
+            }
+            table[key] = try parsePolicyLiteral(rawValue, constants: scopedConstants, functions: functions)
+        }
+        return table
     }
 
     private static func topLevelColonIndex(in text: String) -> String.Index? {
