@@ -363,6 +363,92 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
     }
 
+    func testUserPromptSubmitOutputParsesBlockAndAdditionalContextLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseUserPromptSubmitOutput("""
+        {
+          "decision": "block",
+          "reason": "  no prompt  ",
+          "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "prompt note"
+          }
+        }
+        """))
+        XCTAssertTrue(parsed.shouldBlock)
+        XCTAssertEqual(parsed.reason, "  no prompt  ")
+        XCTAssertNil(parsed.invalidBlockReason)
+        XCTAssertEqual(parsed.additionalContext, "prompt note")
+    }
+
+    func testUserPromptSubmitOutputKeepsReasonWithoutDecisionLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseUserPromptSubmitOutput(#"{"reason":"context only"}"#))
+        XCTAssertFalse(parsed.shouldBlock)
+        XCTAssertEqual(parsed.reason, "context only")
+        XCTAssertNil(parsed.invalidBlockReason)
+        XCTAssertNil(parsed.additionalContext)
+    }
+
+    func testUserPromptSubmitOutputReportsInvalidBlockReasonLikeRust() throws {
+        let missing = try XCTUnwrap(HooksProtocol.parseUserPromptSubmitOutput(#"{"decision":"block"}"#))
+        XCTAssertFalse(missing.shouldBlock)
+        XCTAssertEqual(
+            missing.invalidBlockReason,
+            "UserPromptSubmit hook returned decision:block without a non-empty reason"
+        )
+
+        let empty = try XCTUnwrap(HooksProtocol.parseUserPromptSubmitOutput(#"{"decision":"block","reason":"  "}"#))
+        XCTAssertFalse(empty.shouldBlock)
+        XCTAssertEqual(
+            empty.invalidBlockReason,
+            "UserPromptSubmit hook returned decision:block without a non-empty reason"
+        )
+    }
+
+    func testUserPromptSubmitOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"decision":"approve"}"#))
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"decision":"block","extra":1}"#))
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"hookSpecificOutput":{"additionalContext":"missing event"}}"#))
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":3}}"#))
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","extra":1}}"#))
+        XCTAssertNil(HooksProtocol.parseUserPromptSubmitOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
+    }
+
+    func testStopOutputParsesBlockDecisionLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseStopOutput(#"{"decision":"block","reason":"  keep running  "}"#))
+        XCTAssertTrue(parsed.shouldBlock)
+        XCTAssertEqual(parsed.reason, "  keep running  ")
+        XCTAssertNil(parsed.invalidBlockReason)
+    }
+
+    func testStopOutputKeepsReasonWithoutDecisionAndUniversalFieldsLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parseStopOutput("""
+        {"continue":false,"stopReason":"done","suppressOutput":true,"reason":"context only"}
+        """))
+        XCTAssertEqual(parsed.universal.continueProcessing, false)
+        XCTAssertEqual(parsed.universal.stopReason, "done")
+        XCTAssertEqual(parsed.universal.suppressOutput, true)
+        XCTAssertFalse(parsed.shouldBlock)
+        XCTAssertEqual(parsed.reason, "context only")
+        XCTAssertNil(parsed.invalidBlockReason)
+    }
+
+    func testStopOutputReportsInvalidBlockReasonLikeRust() throws {
+        let missing = try XCTUnwrap(HooksProtocol.parseStopOutput(#"{"decision":"block"}"#))
+        XCTAssertFalse(missing.shouldBlock)
+        XCTAssertEqual(missing.invalidBlockReason, "Stop hook returned decision:block without a non-empty reason")
+
+        let empty = try XCTUnwrap(HooksProtocol.parseStopOutput(#"{"decision":"block","reason":"  "}"#))
+        XCTAssertFalse(empty.shouldBlock)
+        XCTAssertEqual(empty.invalidBlockReason, "Stop hook returned decision:block without a non-empty reason")
+    }
+
+    func testStopOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parseStopOutput(#"{"decision":"approve"}"#))
+        XCTAssertNil(HooksProtocol.parseStopOutput(#"{"decision":"block","extra":1}"#))
+        XCTAssertNil(HooksProtocol.parseStopOutput(#"{"hookSpecificOutput":{"hookEventName":"Stop"}}"#))
+        XCTAssertNil(HooksProtocol.parseStopOutput(#"{"reason":7}"#))
+    }
+
     func testPermissionRequestOutputParsesAllowAndDenyDecisionsLikeRust() throws {
         let allowed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
         {

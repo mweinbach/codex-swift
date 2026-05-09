@@ -324,6 +324,47 @@ public struct HookPostToolUseOutput: Equatable, Sendable {
     }
 }
 
+public struct HookUserPromptSubmitOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let shouldBlock: Bool
+    public let reason: String?
+    public let invalidBlockReason: String?
+    public let additionalContext: String?
+
+    public init(
+        universal: HookUniversalOutput,
+        shouldBlock: Bool,
+        reason: String?,
+        invalidBlockReason: String? = nil,
+        additionalContext: String?
+    ) {
+        self.universal = universal
+        self.shouldBlock = shouldBlock
+        self.reason = reason
+        self.invalidBlockReason = invalidBlockReason
+        self.additionalContext = additionalContext
+    }
+}
+
+public struct HookStopOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let shouldBlock: Bool
+    public let reason: String?
+    public let invalidBlockReason: String?
+
+    public init(
+        universal: HookUniversalOutput,
+        shouldBlock: Bool,
+        reason: String?,
+        invalidBlockReason: String? = nil
+    ) {
+        self.universal = universal
+        self.shouldBlock = shouldBlock
+        self.reason = reason
+        self.invalidBlockReason = invalidBlockReason
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -461,6 +502,60 @@ public enum HooksProtocol {
             universal: universal,
             decision: decision,
             invalidReason: invalidReason
+        )
+    }
+
+    public static func parseUserPromptSubmitOutput(_ stdout: String) -> HookUserPromptSubmitOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(
+                object,
+                extraAllowedKeys: ["decision", "reason", "hookSpecificOutput"]
+              ),
+              let decision = optionalStringEnumValue(object["decision"], allowedValues: ["block"]),
+              let reason = optionalStringValue(object["reason"])
+        else {
+            return nil
+        }
+
+        let hookSpecific = parseAdditionalContextHookSpecificOutput(
+            object["hookSpecificOutput"],
+            allowedKeys: ["hookEventName", "additionalContext"]
+        )
+        guard hookSpecific.valid else {
+            return nil
+        }
+
+        let shouldBlock = decision == "block"
+        let invalidBlockReason = shouldBlock && trimmedReason(reason) == nil
+            ? invalidBlockMessage("UserPromptSubmit")
+            : nil
+        return HookUserPromptSubmitOutput(
+            universal: universal,
+            shouldBlock: shouldBlock && invalidBlockReason == nil,
+            reason: reason,
+            invalidBlockReason: invalidBlockReason,
+            additionalContext: hookSpecific.additionalContext
+        )
+    }
+
+    public static func parseStopOutput(_ stdout: String) -> HookStopOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(object, extraAllowedKeys: ["decision", "reason"]),
+              let decision = optionalStringEnumValue(object["decision"], allowedValues: ["block"]),
+              let reason = optionalStringValue(object["reason"])
+        else {
+            return nil
+        }
+
+        let shouldBlock = decision == "block"
+        let invalidBlockReason = shouldBlock && trimmedReason(reason) == nil
+            ? invalidBlockMessage("Stop")
+            : nil
+        return HookStopOutput(
+            universal: universal,
+            shouldBlock: shouldBlock && invalidBlockReason == nil,
+            reason: reason,
+            invalidBlockReason: invalidBlockReason
         )
     }
 
@@ -628,29 +723,18 @@ public enum HooksProtocol {
         additionalContext: String?,
         invalidReason: String?
     ) {
-        guard let value else {
-            return (true, nil, nil)
-        }
-        if value is NSNull {
-            return (true, nil, nil)
-        }
-        guard let object = value as? [String: Any],
-              Set(object.keys).isSubset(of: [
-                "hookEventName",
-                "additionalContext",
-                "updatedMCPToolOutput",
-              ]),
-              let eventName = object["hookEventName"] as? String,
-              allHookEventWireNames.contains(eventName),
-              let additionalContext = optionalStringValue(object["additionalContext"])
-        else {
+        let parsed = parseAdditionalContextHookSpecificOutput(
+            value,
+            allowedKeys: ["hookEventName", "additionalContext", "updatedMCPToolOutput"]
+        )
+        guard parsed.valid else {
             return (false, nil, nil)
         }
 
         return (
             true,
-            additionalContext,
-            isNonNullJSONValue(object["updatedMCPToolOutput"])
+            parsed.additionalContext,
+            isNonNullJSONValue(parsed.object?["updatedMCPToolOutput"])
                 ? "PostToolUse hook returned unsupported updatedMCPToolOutput"
                 : nil
         )
@@ -661,6 +745,27 @@ public enum HooksProtocol {
             return "PostToolUse hook returned unsupported suppressOutput"
         }
         return nil
+    }
+
+    private static func parseAdditionalContextHookSpecificOutput(
+        _ value: Any?,
+        allowedKeys: Set<String>
+    ) -> (valid: Bool, object: [String: Any]?, additionalContext: String?) {
+        guard let value else {
+            return (true, nil, nil)
+        }
+        if value is NSNull {
+            return (true, nil, nil)
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).isSubset(of: allowedKeys),
+              let eventName = object["hookEventName"] as? String,
+              allHookEventWireNames.contains(eventName),
+              let additionalContext = optionalStringValue(object["additionalContext"])
+        else {
+            return (false, nil, nil)
+        }
+        return (true, object, additionalContext)
     }
 
     private static func parsePermissionRequestHookSpecificOutput(_ value: Any?) -> (
