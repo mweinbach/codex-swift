@@ -472,6 +472,53 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyFromLegacySandboxPolicyPreservesDenyEntriesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = temp.url.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let cwdPath = try AbsolutePath(absolutePath: cwd.path)
+        let denyEntry = FileSystemSandboxEntry(path: .globPattern("\(cwdPath.path)/**/*.env"), access: .none)
+
+        let rebuilt = FileSystemSandboxPolicy.fromLegacySandboxPolicyPreservingDenyEntries(
+            .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            cwd: cwdPath.path,
+            existing: .restricted(entries: [denyEntry], globScanMaxDepth: 4)
+        )
+
+        XCTAssertEqual(
+            rebuilt,
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".git").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".agents").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".codex").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .path(cwd.appendingPathComponent(".codex").path), access: .read),
+                denyEntry
+            ], globScanMaxDepth: 4)
+        )
+    }
+
+    func testFileSystemSandboxPolicyFromLegacySandboxPolicyPreservingDenyEntriesReturnsUnrestrictedLikeRust() {
+        let existing = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .globPattern("/repo/**/*.env"), access: .none)
+        ], globScanMaxDepth: 2)
+
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.fromLegacySandboxPolicyPreservingDenyEntries(
+                .dangerFullAccess,
+                cwd: "/repo",
+                existing: existing
+            ),
+            .unrestricted
+        )
+    }
+
     func testPermissionProfileFromLegacySandboxPolicyForCwdUsesProjectedRuntimePolicyLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = temp.url.appendingPathComponent("repo", isDirectory: true)

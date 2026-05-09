@@ -577,6 +577,30 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
     }
 
+    public static func fromLegacySandboxPolicyPreservingDenyEntries(
+        _ sandboxPolicy: SandboxPolicy,
+        cwd: String,
+        existing: FileSystemSandboxPolicy
+    ) -> FileSystemSandboxPolicy {
+        let rebuilt = fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd)
+        guard case let .restricted(entries, _) = rebuilt else {
+            return rebuilt
+        }
+
+        var preservedEntries = entries
+        let existingGlobScanMaxDepth: Int?
+        if case let .restricted(existingEntries, globScanMaxDepth) = existing {
+            existingGlobScanMaxDepth = globScanMaxDepth
+            for denyEntry in existingEntries where denyEntry.access == .none && !preservedEntries.contains(denyEntry) {
+                preservedEntries.append(denyEntry)
+            }
+        } else {
+            existingGlobScanMaxDepth = nil
+        }
+
+        return .restricted(entries: preservedEntries, globScanMaxDepth: existingGlobScanMaxDepth)
+    }
+
     public func withAdditionalLegacyWorkspaceWritableRoots(_ additionalWritableRoots: [AbsolutePath]) -> FileSystemSandboxPolicy {
         guard case let .restricted(currentEntries, globScanMaxDepth) = self else {
             return self

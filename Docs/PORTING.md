@@ -538,6 +538,8 @@ Source baseline inspected for this scaffold:
   - Added Swift helpers that derive `SandboxEnforcement`, `NetworkSandboxPolicy`, and typed `PermissionProfile` values from legacy `SandboxPolicy` inputs.
 - `codex-rs/protocol/src/{permissions.rs,models.rs}` cwd-aware legacy sandbox projection
   - Added Swift helpers that rebuild Rust's cwd-sensitive filesystem policy and permission profile from legacy sandbox settings, including workspace-root `.codex` first-creation protection and existing metadata carveouts for explicit writable roots.
+- `codex-rs/protocol/src/permissions.rs` legacy deny-preserving policy rebuild
+  - Added Swift parity for rebuilding runtime filesystem permissions from a legacy sandbox while preserving existing deny-read entries and glob scan depth.
 - `codex-rs/protocol/src/models.rs` permission profile runtime permissions
   - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 - `codex-rs/protocol/src/permissions.rs` filesystem deny-read preservation
