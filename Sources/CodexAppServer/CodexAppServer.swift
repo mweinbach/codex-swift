@@ -12154,6 +12154,14 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: FileHandle, stderr: FileHandle?) async {
+        let stdoutTask = Task.detached {
+            Self.readToEnd(stdout)
+        }
+        let stderrTask = stderr.map { handle in
+            Task.detached {
+                Self.readToEnd(handle)
+            }
+        }
         if let timeoutMs = params.timeoutMs {
             let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
             while process.isRunning && Date() < deadline {
@@ -12168,9 +12176,9 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         }
         await exitSignal.wait()
         pseudoTerminal?.closeSlaveHandles()
-        let stdoutCapture = Self.capture(Self.readToEnd(stdout), cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(stderr.map(Self.readToEnd) ?? Data(), cap: params.outputBytesCap)
-        if params.streamStdoutStderr {
+        let stdoutCapture = Self.capture(await stdoutTask.value, cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(await stderrTask?.value ?? Data(), cap: params.outputBytesCap)
+        if params.streamStdoutStderr || params.tty {
             await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
             await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
         }
@@ -12202,8 +12210,8 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             id: requestID,
             result: [
                 "exitCode": lock.withLock { timedOut } ? 124 : Int(process.terminationStatus),
-                "stdout": params.streamStdoutStderr ? "" : stdout.text,
-                "stderr": params.streamStdoutStderr ? "" : stderr.text
+                "stdout": (params.streamStdoutStderr || params.tty) ? "" : stdout.text,
+                "stderr": (params.streamStdoutStderr || params.tty) ? "" : stderr.text
             ]
         ))
     }
@@ -12438,6 +12446,14 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: FileHandle, stderr: FileHandle?) async {
+        let stdoutTask = Task.detached {
+            Self.readToEnd(stdout)
+        }
+        let stderrTask = stderr.map { handle in
+            Task.detached {
+                Self.readToEnd(handle)
+            }
+        }
         if let timeoutMs = params.timeoutMs {
             let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
             while process.isRunning && Date() < deadline {
@@ -12452,9 +12468,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         }
         await exitSignal.wait()
         pseudoTerminal?.closeSlaveHandles()
-        let stdoutCapture = Self.capture(Self.readToEnd(stdout), cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(stderr.map(Self.readToEnd) ?? Data(), cap: params.outputBytesCap)
-        if params.streamStdoutStderr {
+        let stdoutCapture = Self.capture(await stdoutTask.value, cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(await stderrTask?.value ?? Data(), cap: params.outputBytesCap)
+        if params.streamStdoutStderr || params.tty {
             await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
             await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
         }
@@ -12483,9 +12499,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             "params": [
                 "processHandle": params.processHandle,
                 "exitCode": lock.withLock { timedOut } ? 124 : Int(process.terminationStatus),
-                "stdout": params.streamStdoutStderr ? "" : stdout.text,
+                "stdout": (params.streamStdoutStderr || params.tty) ? "" : stdout.text,
                 "stdoutCapReached": stdout.capReached,
-                "stderr": params.streamStdoutStderr ? "" : stderr.text,
+                "stderr": (params.streamStdoutStderr || params.tty) ? "" : stderr.text,
                 "stderrCapReached": stderr.capReached
             ]
         ])

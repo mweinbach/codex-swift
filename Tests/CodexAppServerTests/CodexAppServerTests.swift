@@ -7386,6 +7386,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
     }
 
+    func testCommandExecTtySessionReportsPtyOutput() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf pty-out"],"processId":"cmd-pty-output","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+
+        let firstData = try await nextNotificationPayload(notificationCapture)
+        let secondData = try await nextNotificationPayload(notificationCapture)
+        let messages = try decodeMessages(firstData) + decodeMessages(secondData)
+        let output = try XCTUnwrap(messages.first { $0["method"] as? String == "command/exec/outputDelta" })
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processId"] as? String, "cmd-pty-output")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "pty-out"
+        )
+
+        let response = try XCTUnwrap(messages.first { $0["id"] as? Int == 1 })
+        XCTAssertEqual(response["id"] as? Int, 1)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecFollowUpsReportNoActiveProcess() throws {
         let temp = try TemporaryDirectory()
 
@@ -7705,6 +7740,44 @@ final class CodexAppServerTests: XCTestCase {
             #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-pty"}}"#.utf8
         )))
         XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
+    }
+
+    func testProcessSpawnTtyReportsPtyOutput() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf pty-proc"],"processHandle":"proc-pty-output","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let firstData = try await nextNotificationPayload(notificationCapture)
+        let secondData = try await nextNotificationPayload(notificationCapture)
+        let notifications = try decodeMessages(firstData) + decodeMessages(secondData)
+        let output = try XCTUnwrap(notifications.first { $0["method"] as? String == "process/outputDelta" })
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processHandle"] as? String, "proc-pty-output")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "pty-proc"
+        )
+
+        let exited = try XCTUnwrap(notifications.first { $0["method"] as? String == "process/exited" })
+        let params = try XCTUnwrap(exited["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-pty-output")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        XCTAssertEqual(params["stdout"] as? String, "")
+        XCTAssertEqual(params["stdoutCapReached"] as? Bool, false)
+        XCTAssertEqual(params["stderr"] as? String, "")
+        XCTAssertEqual(params["stderrCapReached"] as? Bool, false)
     }
 
     func testProcessSpawnTimeoutReportsRustExitCode() async throws {
