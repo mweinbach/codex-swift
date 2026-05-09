@@ -244,7 +244,7 @@ Source baseline inspected for this scaffold:
   - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
-  - MCP image output conversion now preserves Rust's default image detail, `_meta` image-detail override, and unsupported block fallback text when mixed with image content.
+  - MCP image output conversion now preserves Rust's default image detail, `_meta` image-detail override including standard `high` values, existing data URLs, and unsupported block fallback text when mixed with image content.
 - `codex-rs/core/src/function_tool.rs`
   - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, and fatal errors
 - `codex-rs/exec-server/src/environment_{provider,toml}.rs` and `codex-rs/core/src/environment_selection.rs`

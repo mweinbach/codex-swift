@@ -137,6 +137,39 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testMcpCallToolResultImageContentPreservesStandardDetailMetadataLikeRust() {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .image(McpImageContent(
+                    data: "BASE64",
+                    mimeType: "image/png",
+                    meta: .object([McpImageContent.imageDetailMetaKey: .string("high")])
+                ))
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputImage(imageURL: "data:image/png;base64,BASE64", detail: .high)
+        ])
+    }
+
+    func testMcpCallToolResultImageContentPreservesExistingDataURLsLikeRust() {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .image(McpImageContent(
+                    data: "data:image/png;base64,BASE64",
+                    mimeType: "image/png"
+                ))
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail)
+        ])
+    }
+
     func testMcpCallToolResultImageContentDefaultsMissingMimeLikeRust() throws {
         let json = #"""
         {
