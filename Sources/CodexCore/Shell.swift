@@ -181,14 +181,14 @@ public enum ShellResolver {
                 providedPath: path,
                 defaultShellPath: defaultShellPath,
                 binaryName: "pwsh",
-                fallbackPaths: ["/usr/local/bin/pwsh"]
+                fallbackPaths: pwshFallbackPaths
             )
             ?? getShell(
                 shellType,
                 providedPath: path,
                 defaultShellPath: defaultShellPath,
                 binaryName: "powershell",
-                fallbackPaths: []
+                fallbackPaths: powerShellFallbackPaths
             )
         case .cmd:
             return getShell(
@@ -280,14 +280,48 @@ public enum ShellResolver {
         }
 
         let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        for directory in pathValue.split(separator: ":", omittingEmptySubsequences: true) {
-            let candidate = String(directory) + "/" + binaryName
+        for directory in pathValue.split(separator: pathListSeparator, omittingEmptySubsequences: true) {
+            let directory = String(directory)
+            let separator = directory.hasSuffix("/") || directory.hasSuffix("\\") ? "" : pathComponentSeparator
+            let candidate = directory + separator + binaryName
             if isFile(candidate), FileManager.default.isExecutableFile(atPath: candidate) {
                 return candidate
             }
         }
 
         return nil
+    }
+
+    static var pwshFallbackPaths: [String] {
+        #if os(Windows)
+        [#"C:\Program Files\PowerShell\7\pwsh.exe"#]
+        #else
+        ["/usr/local/bin/pwsh"]
+        #endif
+    }
+
+    static var powerShellFallbackPaths: [String] {
+        #if os(Windows)
+        [#"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#]
+        #else
+        []
+        #endif
+    }
+
+    private static var pathListSeparator: Character {
+        #if os(Windows)
+        ";"
+        #else
+        ":"
+        #endif
+    }
+
+    private static var pathComponentSeparator: String {
+        #if os(Windows)
+        #"\"#
+        #else
+        "/"
+        #endif
     }
 
     private static func isFile(_ path: String) -> Bool {

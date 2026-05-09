@@ -131,6 +131,16 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual((shell?.shellPath as NSString?)?.lastPathComponent, "bash")
     }
 
+    func testPowerShellFallbackPathsMatchRustPlatformConstants() {
+        #if os(Windows)
+        XCTAssertEqual(ShellResolver.pwshFallbackPaths, [#"C:\Program Files\PowerShell\7\pwsh.exe"#])
+        XCTAssertEqual(ShellResolver.powerShellFallbackPaths, [#"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#])
+        #else
+        XCTAssertEqual(ShellResolver.pwshFallbackPaths, ["/usr/local/bin/pwsh"])
+        XCTAssertEqual(ShellResolver.powerShellFallbackPaths, [])
+        #endif
+    }
+
     #if os(Linux) || os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
     func testDefaultUserShellUsesUnixAccountShellLikeRust() throws {
         guard let accountShellPath = currentAccountShellPathForTest(),
