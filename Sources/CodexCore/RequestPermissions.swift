@@ -446,6 +446,17 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
 }
 
 public extension ManagedFileSystemPermissions {
+    static func fromSandboxPolicy(_ policy: FileSystemSandboxPolicy) -> ManagedFileSystemPermissions? {
+        switch policy {
+        case let .restricted(entries, globScanMaxDepth):
+            return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+        case .unrestricted:
+            return .unrestricted
+        case .externalSandbox:
+            return nil
+        }
+    }
+
     var fileSystemSandboxPolicy: FileSystemSandboxPolicy {
         switch self {
         case let .restricted(entries, globScanMaxDepth):
@@ -593,6 +604,38 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
                 network: networkAccess ? .enabled : .restricted,
                 excludeTmpdirEnvVar: excludeTmpdirEnvVar,
                 excludeSlashTmp: excludeSlashTmp
+            )
+        }
+    }
+
+    public static func fromRuntimePermissions(
+        fileSystem: FileSystemSandboxPolicy,
+        network: NetworkSandboxPolicy
+    ) -> PermissionProfile {
+        let enforcement: SandboxEnforcement
+        switch fileSystem {
+        case .restricted, .unrestricted:
+            enforcement = .managed
+        case .externalSandbox:
+            enforcement = .external
+        }
+        return fromRuntimePermissionsWithEnforcement(enforcement, fileSystem: fileSystem, network: network)
+    }
+
+    public static func fromRuntimePermissionsWithEnforcement(
+        _ enforcement: SandboxEnforcement,
+        fileSystem: FileSystemSandboxPolicy,
+        network: NetworkSandboxPolicy
+    ) -> PermissionProfile {
+        switch fileSystem {
+        case .externalSandbox:
+            return .external(network: network)
+        case .unrestricted where enforcement == .disabled:
+            return .disabled
+        case .restricted, .unrestricted:
+            return .managed(
+                fileSystem: ManagedFileSystemPermissions.fromSandboxPolicy(fileSystem) ?? .unrestricted,
+                network: network
             )
         }
     }

@@ -519,6 +519,8 @@ Source baseline inspected for this scaffold:
   - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 - `codex-rs/protocol/src/permissions.rs` special filesystem path parsing
   - Added Swift parsing for Rust special filesystem path tokens, including the legacy `current_working_directory` alias for project roots and forward-compatible unknown-token preservation.
+- `codex-rs/protocol/src/models.rs` runtime permission profile construction
+  - Added Swift helpers for deriving `ManagedFileSystemPermissions` and `PermissionProfile` from runtime filesystem/network policies, including Rust's external-sandbox override and disabled-unrestricted behavior.
 
 ## Known Gaps
 

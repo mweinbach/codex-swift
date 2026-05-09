@@ -457,6 +457,51 @@ final class SubmissionTests: XCTestCase {
         ]))
     }
 
+    func testPermissionProfileFromRuntimePermissionsMatchesRust() {
+        let entries = [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ]
+        let restricted = FileSystemSandboxPolicy.restricted(entries: entries, globScanMaxDepth: 2)
+        XCTAssertEqual(
+            ManagedFileSystemPermissions.fromSandboxPolicy(restricted),
+            .restricted(entries: entries, globScanMaxDepth: 2)
+        )
+        XCTAssertNil(ManagedFileSystemPermissions.fromSandboxPolicy(.externalSandbox))
+        XCTAssertEqual(
+            PermissionProfile.fromRuntimePermissions(fileSystem: restricted, network: .restricted),
+            .managed(fileSystem: .restricted(entries: entries, globScanMaxDepth: 2), network: .restricted)
+        )
+
+        XCTAssertEqual(
+            PermissionProfile.fromRuntimePermissions(fileSystem: .externalSandbox, network: .restricted),
+            .external(network: .restricted)
+        )
+        XCTAssertEqual(
+            PermissionProfile.fromRuntimePermissionsWithEnforcement(
+                .managed,
+                fileSystem: .externalSandbox,
+                network: .restricted
+            ),
+            .external(network: .restricted)
+        )
+        XCTAssertEqual(
+            PermissionProfile.fromRuntimePermissionsWithEnforcement(
+                .disabled,
+                fileSystem: .unrestricted,
+                network: .restricted
+            ),
+            .disabled
+        )
+        XCTAssertEqual(
+            PermissionProfile.fromRuntimePermissionsWithEnforcement(
+                .external,
+                fileSystem: .unrestricted,
+                network: .restricted
+            ),
+            .managed(fileSystem: .unrestricted, network: .restricted)
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
