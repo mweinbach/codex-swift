@@ -10886,7 +10886,7 @@ public enum CodexAppServer {
             return UInt64(double)
         case let .string(string)?:
             return UInt64(string)
-        case .bool, .array, .table, .integer, .double, .none:
+        case .bool?, .array?, .table?, .integer?, .double?, .none?, nil:
             return nil
         }
     }
@@ -11594,6 +11594,8 @@ public enum CodexAppServer {
 
     private static func configValueObject(_ value: ConfigValue) -> Any {
         switch value {
+        case .none:
+            return NSNull()
         case let .string(string):
             return string
         case let .integer(integer):
@@ -12071,6 +12073,8 @@ public enum CodexAppServer {
 
     private static func tomlLiteral(_ value: ConfigValue) -> String {
         switch value {
+        case .none:
+            return "null"
         case let .string(string):
             return tomlString(string)
         case let .integer(integer):

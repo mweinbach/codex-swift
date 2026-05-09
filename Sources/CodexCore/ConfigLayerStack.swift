@@ -349,7 +349,7 @@ public struct ConfigLayerStack: Equatable, Sendable {
                 recordOrigins(value: nestedValue, metadata: metadata, path: &path, origins: &origins)
                 path.removeLast()
             }
-        case .string, .integer, .double, .bool:
+        case .string, .integer, .double, .bool, .none:
             if !path.isEmpty {
                 origins[path.joined(separator: ".")] = metadata
             }
@@ -373,6 +373,8 @@ public enum ConfigFingerprint {
 
     private static func canonicalJSONString(for value: ConfigValue) throws -> String {
         switch value {
+        case .none:
+            return "null"
         case let .string(string):
             return try jsonFragment(string)
         case let .integer(integer):

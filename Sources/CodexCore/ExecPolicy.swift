@@ -1291,7 +1291,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["update", "clear", "pop", "popitem"].contains(methodName) else {
+        guard ["update", "clear", "pop", "popitem", "setdefault"].contains(methodName) else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
@@ -1300,7 +1300,7 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
         guard case var .table(items) = receiver else {
-            if methodName == "clear" || methodName == "pop" || methodName == "popitem" {
+            if methodName == "clear" || methodName == "pop" || methodName == "popitem" || methodName == "setdefault" {
                 return false
             }
             throw ConfigOverrideError.invalidLiteral(trimmed)
@@ -1335,6 +1335,14 @@ public final class PolicyParser {
             )
         case "popitem":
             _ = try popFirstStarlarkDictItem(from: &items, rawArguments: rawArguments, expression: trimmed)
+        case "setdefault":
+            _ = try setDefaultStarlarkDictValue(
+                in: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
         default:
             return false
         }
@@ -1425,7 +1433,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard methodName == "pop" || methodName == "popitem" else {
+        guard methodName == "pop" || methodName == "popitem" || methodName == "setdefault" else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
@@ -1451,6 +1459,14 @@ public final class PolicyParser {
             )
         case "popitem":
             item = try popFirstStarlarkDictItem(from: &items, rawArguments: rawArguments, expression: trimmed)
+        case "setdefault":
+            item = try setDefaultStarlarkDictValue(
+                in: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
         default:
             return false
         }
@@ -1497,6 +1513,32 @@ public final class PolicyParser {
         }
         items.removeValue(forKey: key)
         return .array([.string(key), value])
+    }
+
+    private static func setDefaultStarlarkDictValue(
+        in items: inout [String: ConfigValue],
+        rawArguments: [String],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1 || rawArguments.count == 2,
+              let rawKey = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
+        guard case let .string(key) = key else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        if let existing = items[key] {
+            return existing
+        }
+        let defaultValue = rawArguments.count == 2
+            ? try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+            : .none
+        items[key] = defaultValue
+        return defaultValue
     }
 
     private static func parseStarlarkListMutationStatement(
@@ -2516,6 +2558,9 @@ public final class PolicyParser {
         }
         if trimmed == "False" {
             return .bool(false)
+        }
+        if trimmed == "None" {
+            return .none
         }
         if let conditional = try parseStarlarkConditionalExpression(
             trimmed,
@@ -5185,6 +5230,8 @@ public final class PolicyParser {
             return "float"
         case .bool:
             return "bool"
+        case .none:
+            return "NoneType"
         case .array:
             return "list"
         case .table:
@@ -5252,6 +5299,8 @@ public final class PolicyParser {
             return String(value)
         case let .bool(value):
             return value ? "True" : "False"
+        case .none:
+            return "None"
         case let .array(items):
             return "[" + items.map(starlarkRepresentation).joined(separator: ", ") + "]"
         case let .table(items):
@@ -6038,6 +6087,8 @@ public final class PolicyParser {
             return value != 0
         case let .double(value):
             return value != 0
+        case .none:
+            return false
         }
     }
 

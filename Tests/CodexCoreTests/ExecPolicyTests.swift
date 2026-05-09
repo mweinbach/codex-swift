@@ -2088,6 +2088,74 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkDictSetDefaultReturnValues() throws {
+        let policy = try parsePolicy("""
+        SETTINGS = {
+            "git": {"command": "status", "decision": "allow"},
+        }
+        EXISTING = SETTINGS.setdefault("git", {"command": "fallback", "decision": "forbidden"})
+        MISSING = SETTINGS.setdefault("pnpm", {"command": "install", "decision": "prompt"})
+        NONE_VALUE = SETTINGS.setdefault("hg")
+
+        def ensure_extra(settings):
+            settings.setdefault("node", {"command": "test", "decision": "allow"})
+            settings.setdefault("deno")
+            return settings
+
+        EXTRA = ensure_extra({})
+        SETTINGS.update(EXTRA)
+
+        for tool in sorted(["git", "pnpm", "node"]):
+            config = SETTINGS[tool]
+            prefix_rule([tool, config["command"]], config["decision"], justification = "setdefault " + tool)
+
+        if EXISTING["command"] == "status" and MISSING["command"] == "install":
+            prefix_rule(["setdefault", "returned"], "allow")
+
+        if SETTINGS["hg"] == None and EXTRA["deno"] == None and SETTINGS["deno"] == None and type(NONE_VALUE) == "NoneType" and str(NONE_VALUE) == "None" and repr(NONE_VALUE) == "None":
+            prefix_rule(["none", "ok"], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "setdefault git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .prompt,
+                justification: "setdefault pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "node"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "node", rest: [.single("test")]),
+                decision: .allow,
+                justification: "setdefault node"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "setdefault"), [
+            PrefixRule(pattern: PrefixPattern(first: "setdefault", rest: [.single("returned")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.rules(for: "none"), [
+            PrefixRule(pattern: PrefixPattern(first: "none", rest: [.single("ok")]), decision: .allow)
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        VALUE = SETTINGS.setdefault()
+        prefix_rule(["git", "status"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        VALUE = SETTINGS.setdefault(["bad"], "value")
+        prefix_rule(["git", "status"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkListPopReturnValues() throws {
         let policy = try parsePolicy("""
         COMMANDS = ["status", "diff", "log", "show"]

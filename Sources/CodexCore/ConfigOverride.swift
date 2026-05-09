@@ -1,6 +1,7 @@
 import Foundation
 
 public indirect enum ConfigValue: Equatable, Sendable {
+    case none
     case string(String)
     case integer(Int64)
     case double(Double)
@@ -37,6 +38,10 @@ public indirect enum ConfigValue: Equatable, Sendable {
 extension ConfigValue: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .none
+            return
+        }
         if let value = try? container.decode(Bool.self) {
             self = .bool(value)
             return
@@ -69,6 +74,9 @@ extension ConfigValue: Codable {
 
     public func encode(to encoder: Encoder) throws {
         switch self {
+        case .none:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
         case let .string(value):
             var container = encoder.singleValueContainer()
             try container.encode(value)
