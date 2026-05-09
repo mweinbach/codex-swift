@@ -21,12 +21,17 @@ into Swift without changing unrelated surfaces.
 - Avoid ambiguous literal call sites. Prefer argument labels, enums, option
   structs, and named methods; use exact argument comments only when an existing
   unlabeled API forces an opaque literal.
+- Prefer Swift interpolation over `String(format:)` unless the exact formatting
+  behavior is part of the Rust-compatible output.
 - Prefer exhaustive `switch` statements over `default` for closed enums.
 - Document newly added protocols with their role, expected implementers, and
   concurrency expectations.
 - Use native Swift `async` protocol requirements plus `Sendable` and `@Sendable`
   where values or closures cross concurrency boundaries.
-- Prefer whole-object assertions in protocol/config tests.
+- Prefer whole-object assertions in protocol/config tests, especially when JSON
+  omitted-versus-null behavior matters.
+- Keep implementation details `internal` or `private` unless another SwiftPM
+  target needs them.
 - Avoid broad refactors while porting a behavior slice.
 - Do not mark a slice complete until the Swift tests cover the Rust behavior
   being claimed.

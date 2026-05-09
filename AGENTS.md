@@ -26,11 +26,16 @@ explicitly records an intentional Swift limitation.
   read like `foo(false)` or `bar(nil)`. Prefer enums, option structs, named
   methods, or other Swift API shapes that make the call site self-documenting.
 - Avoid unlabeled parameters except for conventional first arguments where the
-  call site remains clear. If an existing unlabeled API forces an opaque literal,
-  use a short argument comment such as `foo(/* animated: */ false)`.
-- Keep argument comments exact and useful. Match the callee's semantic parameter
-  name and do not add comments for obvious string literals or values that are
-  already clear from labels.
+  call site remains clear, such as collection transforms or XCTest assertions.
+  If an existing positional API forces an opaque literal, use a short argument
+  comment such as `setExpanded(/* animated: */ false)` or
+  `loadHistory(/* limit: */ 0)`.
+- Keep argument comments exact and useful. Match the callee's semantic
+  parameter label or local parameter name, and do not add comments for obvious
+  string literals or values that are already clear from labels. Prefer fixing
+  the API shape over adding comments when the API is local to the Swift port.
+- Prefer Swift string interpolation over `String(format:)` when no fixed
+  locale, numeric precision, or C-format compatibility is required.
 - Prefer exhaustive `switch` statements for enums. Avoid `default` unless the
   enum is intentionally open-ended or forward-compatible decoding requires it.
 - Newly added protocols should include doc comments explaining the protocol's
@@ -38,6 +43,10 @@ explicitly records an intentional Swift limitation.
 - Avoid boolean state pairs when a single enum models the state more accurately.
 - Avoid small helper methods that are referenced only once unless they isolate a
   non-obvious parity rule or improve testability.
+- Keep implementation details `internal` or `private` by default. Make APIs
+  `public` only when another package target or executable actually needs them.
+- Prefer adding focused files over expanding large orchestration files. Move
+  tests and parity notes close to the implementation that owns the behavior.
 
 ## Swift Concurrency
 
@@ -57,6 +66,9 @@ explicitly records an intentional Swift limitation.
   contract directly with `async`/`throws`, return `Sendable` values where
   relevant, and keep implementations actor-safe instead of bypassing checking
   with broad annotations.
+- When async work needs to outlive a scope, keep ownership explicit with a
+  stored `Task`, cancellation path, or actor boundary. Do not hide lifetime
+  problems behind detached work.
 
 ## Codable And Wire Shapes
 
@@ -74,6 +86,9 @@ explicitly records an intentional Swift limitation.
 - Swift optionals must preserve the Rust wire contract. Use `encodeIfPresent`
   only for fields Rust omits when absent; explicitly encode `null` for fields
   Rust serializes as `null`.
+- Decode unknown or future variants only where Rust accepts them. If Rust rejects
+  a malformed or unknown value, preserve the rejection and error text where the
+  Swift surface exposes that text.
 
 ## Module Boundaries
 
@@ -88,17 +103,24 @@ explicitly records an intentional Swift limitation.
 - Prefer adding focused files over expanding already-large files. If a file is
   becoming a catch-all, move the new behavior and its tests toward a smaller
   module boundary.
+- If you add a first-party executable or resource lookup, keep it stable under
+  SwiftPM test execution and from changed working directories. Prefer injected
+  paths in tests over assuming the process starts at the package root.
 
 ## Tests
 
 - Start with the focused test filter for the changed area, then broaden to
   adjacent tests, then run the full suite.
 - Prefer equality over whole objects where practical. Use targeted field checks
-  only when the object contains nondeterministic data.
+  only when the object contains nondeterministic data or a very large fixture
+  would obscure the parity rule.
 - Avoid mutating process-global state in tests. Prefer injecting environment,
   clocks, transports, file systems, or config roots.
 - Keep fixtures small and explicit. When comparing Rust parity, mention the Rust
   source behavior in the test name or nearby assertion context.
+- When a test spawns a Swift executable, resolve the built product through the
+  package's test helpers or an injected path. Avoid fragile relative paths to
+  `.build` products.
 - If SwiftPM reports sandbox/cache/manifest access errors in this local
   environment, rerun the same command with the required permission rather than
   changing code to accommodate the sandbox.
