@@ -188,6 +188,22 @@ final class RolloutPolicyTests: XCTestCase {
             )),
             .realtimeConversationListVoicesResponse
         )
+        let goalThreadID = try! ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                threadID: goalThreadID,
+                goal: ThreadGoal(
+                    threadID: goalThreadID,
+                    objective: "port",
+                    status: .active,
+                    tokensUsed: 0,
+                    timeUsedSeconds: 0,
+                    createdAt: 1,
+                    updatedAt: 1
+                )
+            ))),
+            .threadGoalUpdated
+        )
         XCTAssertEqual(RolloutPolicy.eventKind(for: .userMessage(UserMessageEvent(message: "hello"))), .userMessage)
         XCTAssertEqual(
             RolloutPolicy.eventKind(for: .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))),
@@ -293,6 +309,18 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationListVoicesResponse(
             RealtimeConversationListVoicesResponseEvent(voices: .builtin())
         )))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.threadGoalUpdated(ThreadGoalUpdatedEvent(
+            threadID: goalThreadID,
+            goal: ThreadGoal(
+                threadID: goalThreadID,
+                objective: "port",
+                status: .active,
+                tokensUsed: 0,
+                timeUsedSeconds: 0,
+                createdAt: 1,
+                updatedAt: 1
+            )
+        ))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.requestPermissions(RequestPermissionsEvent(
             callID: "perm-1",
             turnID: "turn-1",

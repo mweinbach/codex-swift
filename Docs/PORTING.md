@@ -330,7 +330,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` MCP list-tools response plus `codex-rs/mcp-types/src/lib.rs`
   - MCP tool/resource/resource-template maps, auth-status map payloads, MCP annotations, tool annotation hints, input/output schema defaults, camelCase MCP field names, fully qualified MCP tool naming, duplicate qualified-tool skipping, SHA-1 suffix truncation for OpenAI's 64-character tool-name limit, and per-server MCP tool allow/deny filtering
 - `codex-rs/protocol/src/protocol.rs` status/error/notification event models
-  - Codex error-info wire variants including non-steerable-turn and rollback failures, task start/complete events, warning/Guardian-warning/error/stream-error payloads, model reroute/verification events, deprecation and undo notices, stream info, and turn-abort reason values including budget limits
+  - Codex error-info wire variants including non-steerable-turn and rollback failures, task start/complete events, warning/Guardian-warning/error/stream-error payloads, model reroute/verification events, thread-goal update events, deprecation and undo notices, stream info, and turn-abort reason values including budget limits
 - `codex-rs/protocol/src/protocol.rs` streaming content delta event models
   - legacy agent/reasoning delta payloads, reasoning section-break defaults, modern content/plan-delta payloads, and legacy-event projection helpers
 - `codex-rs/protocol/src/protocol.rs` event envelope/tagged message model

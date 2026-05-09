@@ -514,6 +514,67 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(review, .enteredReviewMode(ReviewRequest(target: .uncommittedChanges)))
     }
 
+    func testEventMessageCarriesThreadGoalUpdatedLikeRust() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let goal = ThreadGoal(
+            threadID: threadID,
+            objective: "port everything",
+            status: .budgetLimited,
+            tokensUsed: 42,
+            timeUsedSeconds: 7,
+            createdAt: 1_000,
+            updatedAt: 2_000
+        )
+        let message = EventMessage.threadGoalUpdated(ThreadGoalUpdatedEvent(threadID: threadID, goal: goal))
+
+        try XCTAssertJSONObjectEqual(message, [
+            "type": "thread_goal_updated",
+            "threadId": threadID.description,
+            "goal": [
+                "threadId": threadID.description,
+                "objective": "port everything",
+                "status": "budgetLimited",
+                "tokensUsed": 42,
+                "timeUsedSeconds": 7,
+                "createdAt": 1_000,
+                "updatedAt": 2_000
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "thread_goal_updated",
+          "threadId": "\(threadID.description)",
+          "turnId": "turn-1",
+          "goal": {
+            "threadId": "\(threadID.description)",
+            "objective": "ship parity",
+            "status": "active",
+            "tokenBudget": 1000,
+            "tokensUsed": 12,
+            "timeUsedSeconds": 34,
+            "createdAt": 100,
+            "updatedAt": 200
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded, .threadGoalUpdated(ThreadGoalUpdatedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            goal: ThreadGoal(
+                threadID: threadID,
+                objective: "ship parity",
+                status: .active,
+                tokenBudget: 1_000,
+                tokensUsed: 12,
+                timeUsedSeconds: 34,
+                createdAt: 100,
+                updatedAt: 200
+            )
+        )))
+    }
+
     func testEventMessageCarriesGuardianAssessmentLikeRust() throws {
         let assessment = GuardianAssessmentEvent(
             id: "guardian-1",

@@ -23,6 +23,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case agentReasoningRawContentDelta = "agent_reasoning_raw_content_delta"
     case agentReasoningSectionBreak = "agent_reasoning_section_break"
     case sessionConfigured = "session_configured"
+    case threadGoalUpdated = "thread_goal_updated"
     case mcpStartupUpdate = "mcp_startup_update"
     case mcpStartupComplete = "mcp_startup_complete"
     case mcpToolCallBegin = "mcp_tool_call_begin"
@@ -146,6 +147,8 @@ public enum RolloutPolicy {
             return .agentReasoningSectionBreak
         case .sessionConfigured:
             return .sessionConfigured
+        case .threadGoalUpdated:
+            return .threadGoalUpdated
         case .mcpStartupUpdate:
             return .mcpStartupUpdate
         case .mcpStartupComplete:
@@ -400,6 +403,7 @@ public enum RolloutPolicy {
              .agentReasoningSectionBreak,
              .rawResponseItem,
              .sessionConfigured,
+             .threadGoalUpdated,
              .mcpToolCallBegin,
              .webSearchBegin,
              .imageGenerationBegin,
