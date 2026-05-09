@@ -48,6 +48,24 @@ final class EventMappingTests: XCTestCase {
         )))
     }
 
+    func testParsesHookPromptAndHidesContextualFragments() {
+        let item = ResponseItem.message(
+            id: "hook-prompt-1",
+            role: "user",
+            content: [
+                .inputText(text: "<environment_context>ctx</environment_context>"),
+                .inputText(text: #"<hook_prompt hook_run_id="hook-run-1">Retry with care &amp; joy.</hook_prompt>"#)
+            ]
+        )
+
+        XCTAssertEqual(EventMapping.parseTurnItem(item), .hookPrompt(HookPromptItem(
+            id: "hook-prompt-1",
+            fragments: [
+                HookPromptFragment(text: "Retry with care & joy.", hookRunID: "hook-run-1")
+            ]
+        )))
+    }
+
     func testInvalidHookPromptFallsBackToUserMessage() {
         let item = ResponseItem.message(
             id: "user-1",

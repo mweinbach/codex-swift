@@ -278,8 +278,10 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
     case agentReasoningSectionBreak(AgentReasoningSectionBreakEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
+    case viewImageToolCall(ViewImageToolCallEvent)
     case imageGenerationBegin(ImageGenerationBeginEvent)
     case imageGenerationEnd(ImageGenerationEndEvent)
+    case contextCompacted(ContextCompactedEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -296,8 +298,10 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case agentReasoningSectionBreak = "agent_reasoning_section_break"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
+        case viewImageToolCall = "view_image_tool_call"
         case imageGenerationBegin = "image_generation_begin"
         case imageGenerationEnd = "image_generation_end"
+        case contextCompacted = "context_compacted"
     }
 
     public init(from decoder: Decoder) throws {
@@ -323,10 +327,14 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
             self = .webSearchEnd(try WebSearchEndEvent(from: decoder))
+        case .viewImageToolCall:
+            self = .viewImageToolCall(try ViewImageToolCallEvent(from: decoder))
         case .imageGenerationBegin:
             self = .imageGenerationBegin(try ImageGenerationBeginEvent(from: decoder))
         case .imageGenerationEnd:
             self = .imageGenerationEnd(try ImageGenerationEndEvent(from: decoder))
+        case .contextCompacted:
+            self = .contextCompacted(try ContextCompactedEvent(from: decoder))
         }
     }
 
@@ -363,11 +371,17 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case let .webSearchEnd(event):
             try container.encode(EventType.webSearchEnd, forKey: .type)
             try event.encode(to: encoder)
+        case let .viewImageToolCall(event):
+            try container.encode(EventType.viewImageToolCall, forKey: .type)
+            try event.encode(to: encoder)
         case let .imageGenerationBegin(event):
             try container.encode(EventType.imageGenerationBegin, forKey: .type)
             try event.encode(to: encoder)
         case let .imageGenerationEnd(event):
             try container.encode(EventType.imageGenerationEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .contextCompacted(event):
+            try container.encode(EventType.contextCompacted, forKey: .type)
             try event.encode(to: encoder)
         }
     }

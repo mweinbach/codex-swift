@@ -274,6 +274,42 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
     }
 
+    func testImageViewTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.imageView(ImageViewItem(
+            id: "view-1",
+            path: try AbsolutePath(absolutePath: "/tmp/image.png")
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "ImageView",
+            "id": "view-1",
+            "path": "/tmp/image.png"
+        ])
+        XCTAssertEqual(item.id, "view-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .viewImageToolCall(ViewImageToolCallEvent(callID: "view-1", path: "/tmp/image.png"))
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
+    func testContextCompactionTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.contextCompaction(ContextCompactionItem(id: "compact-1"))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "ContextCompaction",
+            "id": "compact-1"
+        ])
+        XCTAssertEqual(item.id, "compact-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .contextCompacted(ContextCompactedEvent())
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
     func testLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
         let event = LegacyEventMessage.webSearchEnd(WebSearchEndEvent(callID: "search-1", query: "docs"))
 
@@ -289,6 +325,32 @@ final class TurnItemTests: XCTestCase {
 
         let data = try JSONEncoder().encode(event)
         XCTAssertEqual(try JSONDecoder().decode(LegacyEventMessage.self, from: data), event)
+    }
+
+    func testImageViewAndContextCompactionLegacyEventWireShapesUseRustTags() throws {
+        let imageView = LegacyEventMessage.viewImageToolCall(ViewImageToolCallEvent(
+            callID: "view-1",
+            path: "/tmp/image.png"
+        ))
+        let contextCompacted = LegacyEventMessage.contextCompacted(ContextCompactedEvent())
+
+        try XCTAssertJSONObjectEqual(imageView, [
+            "type": "view_image_tool_call",
+            "call_id": "view-1",
+            "path": "/tmp/image.png"
+        ])
+        try XCTAssertJSONObjectEqual(contextCompacted, [
+            "type": "context_compacted"
+        ])
+
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(imageView)
+        ), imageView)
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(contextCompacted)
+        ), contextCompacted)
     }
 
     func testImageGenerationLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
@@ -337,6 +399,15 @@ final class TurnItemTests: XCTestCase {
             item: .userMessage(UserMessageItem(id: "user-1", content: [])),
             startedAtMilliseconds: 125
         )
+        let imageView = ItemStartedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .imageView(ImageViewItem(
+                id: "view-1",
+                path: try AbsolutePath(absolutePath: "/tmp/image.png")
+            )),
+            startedAtMilliseconds: 126
+        )
 
         XCTAssertEqual(webSearch.asLegacyEvents(), [
             .webSearchBegin(WebSearchBeginEvent(callID: "search-1"))
@@ -345,6 +416,7 @@ final class TurnItemTests: XCTestCase {
             .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))
         ])
         XCTAssertEqual(userMessage.asLegacyEvents(), [])
+        XCTAssertEqual(imageView.asLegacyEvents(), [])
     }
 
     func testItemLifecycleEventsCarryRustTimingFields() throws {

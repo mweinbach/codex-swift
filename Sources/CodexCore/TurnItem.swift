@@ -7,7 +7,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
     case plan(PlanItem)
     case reasoning(ReasoningItem)
     case webSearch(WebSearchItem)
+    case imageView(ImageViewItem)
     case imageGeneration(ImageGenerationItem)
+    case contextCompaction(ContextCompactionItem)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -20,7 +22,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case plan = "Plan"
         case reasoning = "Reasoning"
         case webSearch = "WebSearch"
+        case imageView = "ImageView"
         case imageGeneration = "ImageGeneration"
+        case contextCompaction = "ContextCompaction"
     }
 
     public var id: String {
@@ -37,7 +41,11 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return item.id
         case let .webSearch(item):
             return item.id
+        case let .imageView(item):
+            return item.id
         case let .imageGeneration(item):
+            return item.id
+        case let .contextCompaction(item):
             return item.id
         }
     }
@@ -57,8 +65,12 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .reasoning(try ReasoningItem(from: decoder))
         case .webSearch:
             self = .webSearch(try WebSearchItem(from: decoder))
+        case .imageView:
+            self = .imageView(try ImageViewItem(from: decoder))
         case .imageGeneration:
             self = .imageGeneration(try ImageGenerationItem(from: decoder))
+        case .contextCompaction:
+            self = .contextCompaction(try ContextCompactionItem(from: decoder))
         }
     }
 
@@ -83,8 +95,14 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .webSearch(item):
             try container.encode(ItemType.webSearch, forKey: .type)
             try item.encode(to: encoder)
+        case let .imageView(item):
+            try container.encode(ItemType.imageView, forKey: .type)
+            try item.encode(to: encoder)
         case let .imageGeneration(item):
             try container.encode(ItemType.imageGeneration, forKey: .type)
+            try item.encode(to: encoder)
+        case let .contextCompaction(item):
+            try container.encode(ItemType.contextCompaction, forKey: .type)
             try item.encode(to: encoder)
         }
     }
@@ -103,7 +121,11 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
         case let .webSearch(item):
             return [item.asLegacyEvent()]
+        case let .imageView(item):
+            return [item.asLegacyEvent()]
         case let .imageGeneration(item):
+            return [item.asLegacyEvent()]
+        case let .contextCompaction(item):
             return [item.asLegacyEvent()]
         }
     }
@@ -123,14 +145,22 @@ public struct HookPromptItem: Equatable, Codable, Sendable {
     }
 
     public static func parseMessage(id: String?, content: [ContentItem]) -> Self? {
-        let fragments = content.compactMap { contentItem -> HookPromptFragment? in
+        var fragments: [HookPromptFragment] = []
+        for contentItem in content {
             guard case let .inputText(text) = contentItem else {
                 return nil
             }
-            return HookPromptFragment.parseXML(text)
+            if let fragment = HookPromptFragment.parseXML(text) {
+                fragments.append(fragment)
+                continue
+            }
+            if isStandardContextualUserText(text) {
+                continue
+            }
+            return nil
         }
 
-        guard fragments.count == content.count, !fragments.isEmpty else {
+        guard !fragments.isEmpty else {
             return nil
         }
         return fromFragments(id: id, fragments: fragments)
@@ -148,6 +178,16 @@ public struct HookPromptItem: Equatable, Codable, Sendable {
             return nil
         }
         return .message(id: UUID().uuidString.lowercased(), role: "user", content: content)
+    }
+
+    private static func isStandardContextualUserText(_ text: String) -> Bool {
+        text.hasPrefix(UserInstructions.prefix)
+            || text.hasPrefix(UserInstructions.legacyOpenTag)
+            || text.hasPrefix(SkillInstructions.prefix)
+            || UserShellCommand.isUserShellCommandText(text)
+            || text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .hasPrefix("<environment_context>")
     }
 }
 
@@ -313,6 +353,20 @@ public struct WebSearchItem: Equatable, Codable, Sendable {
     }
 }
 
+public struct ImageViewItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let path: AbsolutePath
+
+    public init(id: String, path: AbsolutePath) {
+        self.id = id
+        self.path = path
+    }
+
+    public func asLegacyEvent() -> LegacyEventMessage {
+        .viewImageToolCall(ViewImageToolCallEvent(callID: id, path: path.path))
+    }
+}
+
 public struct ImageGenerationItem: Equatable, Codable, Sendable {
     public let id: String
     public let status: String
@@ -353,6 +407,18 @@ public struct ImageGenerationItem: Equatable, Codable, Sendable {
     }
 }
 
+public struct ContextCompactionItem: Equatable, Codable, Sendable {
+    public let id: String
+
+    public init(id: String = UUID().uuidString.lowercased()) {
+        self.id = id
+    }
+
+    public func asLegacyEvent() -> LegacyEventMessage {
+        .contextCompacted(ContextCompactedEvent())
+    }
+}
+
 public struct ItemStartedEvent: Equatable, Codable, Sendable {
     public let threadID: ConversationId
     public let turnID: String
@@ -377,6 +443,8 @@ public struct ItemStartedEvent: Equatable, Codable, Sendable {
         switch item {
         case let .webSearch(item):
             return [.webSearchBegin(WebSearchBeginEvent(callID: item.id))]
+        case .imageView:
+            return []
         case let .imageGeneration(item):
             return [.imageGenerationBegin(ImageGenerationBeginEvent(callID: item.id))]
         default:
