@@ -849,6 +849,8 @@ Source baseline inspected for this scaffold:
 - `codex-rs/state/src/runtime/threads.rs` thread metadata helpers
   - added SQLite rollout-path lookup by thread id with Rust's optional archive filter semantics mapped to an explicit Swift archive-filter enum, including absent-row and archive-mismatch `nil` behavior.
   - added title updates preserving Rust's `UPDATE threads SET title = ? WHERE id = ?` row-count success reporting.
+- `codex-rs/state/src/runtime/threads.rs` thread updated-at touch
+  - added SQLite `updated_at`/`updated_at_ms` touch behavior with Rust's process-local monotonic millisecond allocation: newer timestamps advance directly, same hot one-second bucket writes bump by one millisecond, older backfill timestamps pass through, and missing rows report `false`.
 
 ## Known Gaps
 

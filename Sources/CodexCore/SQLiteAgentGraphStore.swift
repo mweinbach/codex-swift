@@ -7,6 +7,7 @@ import SQLite3
 /// thread-scoped dynamic tools, preserving Rust's ordering, upsert, and status-filter semantics.
 public actor SQLiteAgentGraphStore: AgentGraphStore {
     private let handle: SQLiteDatabaseHandle
+    private var threadUpdatedAtMilliseconds: Int64 = 0
 
     public init(databaseURL: URL) throws {
         var openedDatabase: OpaquePointer?
@@ -286,6 +287,21 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return sqlite3_changes(database) > 0
     }
 
+    public func touchThreadUpdatedAt(threadID: ThreadId, updatedAt: Date) async throws -> Bool {
+        let allocatedMilliseconds = allocateThreadUpdatedAt(updatedAt)
+        let database = handle.database
+        try Self.execute(
+            "UPDATE threads SET updated_at = ?, updated_at_ms = ? WHERE id = ?",
+            bindings: [
+                .int(Self.epochSeconds(fromMilliseconds: allocatedMilliseconds)),
+                .int(allocatedMilliseconds),
+                .text(threadID.description),
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
@@ -389,6 +405,21 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             bindings: [rootThreadID.description, agentPath.description],
             agentPath: agentPath
         )
+    }
+
+    private func allocateThreadUpdatedAt(_ updatedAt: Date) -> Int64 {
+        let candidate = Self.epochMilliseconds(updatedAt)
+        if candidate > threadUpdatedAtMilliseconds {
+            threadUpdatedAtMilliseconds = candidate
+            return candidate
+        }
+
+        if Self.saturatingAdd(candidate, 1_000) <= threadUpdatedAtMilliseconds {
+            return candidate
+        }
+
+        threadUpdatedAtMilliseconds = Self.saturatingAdd(threadUpdatedAtMilliseconds, 1)
+        return threadUpdatedAtMilliseconds
     }
 
     private func execute(_ query: String, _ bindings: String...) throws {
@@ -511,6 +542,19 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             return nil
         }
         return String(cString: rawValue)
+    }
+
+    private static func epochMilliseconds(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded(.down))
+    }
+
+    private static func epochSeconds(fromMilliseconds milliseconds: Int64) -> Int64 {
+        milliseconds / 1_000
+    }
+
+    private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {
+        let result = value.addingReportingOverflow(increment)
+        return result.overflow ? Int64.max : result.partialValue
     }
 
     private static func sqliteError(database: OpaquePointer) -> AgentGraphStoreError {

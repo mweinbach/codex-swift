@@ -666,6 +666,66 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(title, "New title")
     }
 
+    func testSQLiteStoreTouchesThreadUpdatedAtWithRustAllocatorSemantics() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let firstThreadID = try threadID(89)
+        let secondThreadID = try threadID(90)
+        let backfillThreadID = try threadID(91)
+        let missingThreadID = try threadID(92)
+        try insertRawSQLiteThread(
+            id: firstThreadID,
+            agentPath: try AgentPath(validating: "/root/updated_first"),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: secondThreadID,
+            agentPath: try AgentPath(validating: "/root/updated_second"),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: backfillThreadID,
+            agentPath: try AgentPath(validating: "/root/updated_backfill"),
+            databaseURL: databaseURL
+        )
+
+        let hotMilliseconds: Int64 = 1_700_000_000_500
+        let backfillMilliseconds = hotMilliseconds - 2_000
+        let firstUpdated = try await store.touchThreadUpdatedAt(
+            threadID: firstThreadID,
+            updatedAt: date(milliseconds: hotMilliseconds)
+        )
+        let secondUpdated = try await store.touchThreadUpdatedAt(
+            threadID: secondThreadID,
+            updatedAt: date(milliseconds: hotMilliseconds)
+        )
+        let backfillUpdated = try await store.touchThreadUpdatedAt(
+            threadID: backfillThreadID,
+            updatedAt: date(milliseconds: backfillMilliseconds)
+        )
+        let missingUpdated = try await store.touchThreadUpdatedAt(
+            threadID: missingThreadID,
+            updatedAt: date(milliseconds: hotMilliseconds)
+        )
+
+        let firstTimestamps = try readRawSQLiteThreadUpdatedAt(id: firstThreadID, databaseURL: databaseURL)
+        let secondTimestamps = try readRawSQLiteThreadUpdatedAt(id: secondThreadID, databaseURL: databaseURL)
+        let backfillTimestamps = try readRawSQLiteThreadUpdatedAt(id: backfillThreadID, databaseURL: databaseURL)
+
+        XCTAssertTrue(firstUpdated)
+        XCTAssertTrue(secondUpdated)
+        XCTAssertTrue(backfillUpdated)
+        XCTAssertFalse(missingUpdated)
+        XCTAssertEqual(firstTimestamps, ThreadUpdatedAt(seconds: 1_700_000_000, milliseconds: hotMilliseconds))
+        XCTAssertEqual(secondTimestamps, ThreadUpdatedAt(seconds: 1_700_000_000, milliseconds: hotMilliseconds + 1))
+        XCTAssertEqual(
+            backfillTimestamps,
+            ThreadUpdatedAt(seconds: 1_699_999_998, milliseconds: backfillMilliseconds)
+        )
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -677,6 +737,10 @@ final class AgentGraphStoreTests: XCTestCase {
 
     private func persistedSource(_ source: SessionSource) throws -> String {
         try jsonString(source)
+    }
+
+    private func date(milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
     }
 
     private func insertRawSQLiteThreadSpawnEdge(
@@ -724,7 +788,9 @@ final class AgentGraphStoreTests: XCTestCase {
                     memory_mode TEXT,
                     rollout_path TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
-                    title TEXT
+                    title TEXT,
+                    updated_at INTEGER,
+                    updated_at_ms INTEGER
                 )
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
@@ -747,7 +813,7 @@ final class AgentGraphStoreTests: XCTestCase {
     ) throws {
         try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
             var statement: OpaquePointer?
-            let query = "INSERT INTO threads (id, agent_path, memory_mode, rollout_path, archived, title) VALUES (?, ?, ?, ?, ?, ?)"
+            let query = "INSERT INTO threads (id, agent_path, memory_mode, rollout_path, archived, title, updated_at, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
             defer {
@@ -771,6 +837,8 @@ final class AgentGraphStoreTests: XCTestCase {
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 6), SQLITE_OK)
             }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 7, 0), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, 0), SQLITE_OK)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }
@@ -794,6 +862,28 @@ final class AgentGraphStoreTests: XCTestCase {
                 return nil
             }
             return String(cString: rawTitle)
+        }
+    }
+
+    private func readRawSQLiteThreadUpdatedAt(id: ThreadId, databaseURL: URL) throws -> ThreadUpdatedAt? {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT updated_at, updated_at_ms FROM threads WHERE id = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
+            let result = sqlite3_step(preparedStatement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            XCTAssertEqual(result, SQLITE_ROW)
+            return ThreadUpdatedAt(
+                seconds: sqlite3_column_int64(preparedStatement, 0),
+                milliseconds: sqlite3_column_int64(preparedStatement, 1)
+            )
         }
     }
 
@@ -826,3 +916,8 @@ private final class AgentGraphStoreTemporaryDirectory {
 }
 
 private let testSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private struct ThreadUpdatedAt: Equatable {
+    let seconds: Int64
+    let milliseconds: Int64
+}
