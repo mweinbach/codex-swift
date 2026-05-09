@@ -546,6 +546,8 @@ Source baseline inspected for this scaffold:
   - aligned Swift small-formatting detection with Rust `sed_read_path` so `sed -n -e <range> <file>` and `sed -n <range> -- <file>` survive pipeline helper filtering as file reads.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
+- `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
+  - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 
 ## Known Gaps
 

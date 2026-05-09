@@ -59,6 +59,30 @@ final class ShellTests: XCTestCase {
         ])
     }
 
+    func testPowerShellUTF8PrefixMatchesRustHelper() {
+        let prefix = ShellResolver.powerShellUTF8OutputPrefix
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(["pwsh", "-NoProfile", "-Command", "Write-Host hi"]),
+            ["pwsh", "-NoProfile", "-Command", prefix + "Write-Host hi"]
+        )
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(["powershell.exe", "-c", "Write-Host hi"]),
+            ["powershell.exe", "-c", prefix + "Write-Host hi"]
+        )
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(["pwsh", "-Command", "  \(prefix)Write-Host hi"]),
+            ["pwsh", "-Command", "  \(prefix)Write-Host hi"]
+        )
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(["bash", "-lc", "echo hi"]),
+            ["bash", "-lc", "echo hi"]
+        )
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(["pwsh", "-EncodedCommand", "abc"]),
+            ["pwsh", "-EncodedCommand", "abc"]
+        )
+    }
+
     func testShellCodableShapeMatchesRustSerde() throws {
         let shell = Shell(shellType: .powerShell, shellPath: "pwsh.exe")
 

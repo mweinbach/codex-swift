@@ -58,6 +58,8 @@ public struct Shell: Equatable, Codable, Sendable {
 }
 
 public enum ShellResolver {
+    public static let powerShellUTF8OutputPrefix = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n"
+
     public static func detectShellType(_ shellPath: String) -> ShellType? {
         switch shellPath {
         case "zsh":
@@ -76,6 +78,34 @@ public enum ShellResolver {
             }
             return detectShellType(stem)
         }
+    }
+
+    public static func prefixPowerShellScriptWithUTF8(_ command: [String]) -> [String] {
+        guard command.count >= 3,
+              detectShellType(command[0]) == .powerShell
+        else {
+            return command
+        }
+
+        var output = command
+        var index = 1
+        while index + 1 < command.count {
+            let flag = command[index].lowercased()
+            guard ["-nologo", "-noprofile", "-command", "-c"].contains(flag) else {
+                return command
+            }
+            if flag == "-command" || flag == "-c" {
+                let script = command[index + 1]
+                if script.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(powerShellUTF8OutputPrefix) {
+                    return command
+                }
+                output[index + 1] = powerShellUTF8OutputPrefix + script
+                return output
+            }
+            index += 1
+        }
+
+        return command
     }
 
     public static func defaultUserShell() -> Shell {

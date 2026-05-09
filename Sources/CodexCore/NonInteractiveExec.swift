@@ -747,8 +747,11 @@ public enum NonInteractiveExec {
             case "exec_command":
                 let params = try decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8))
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
+                let command = ShellResolver.prefixPowerShellScriptWithUTF8(
+                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: params.login)
+                )
                 return await executeUnifiedExecCommand(
-                    command: requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: params.login),
+                    command: command,
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
                     sandboxPermissions: params.sandboxPermissions,
@@ -762,9 +765,12 @@ public enum NonInteractiveExec {
 
             case "shell_command":
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
+                let command = ShellResolver.prefixPowerShellScriptWithUTF8(
+                    shell.deriveExecArgs(command: params.command, useLoginShell: params.login ?? true)
+                )
                 return await executeShellCommand(
                     toolName: name,
-                    command: shell.deriveExecArgs(command: params.command, useLoginShell: params.login ?? true),
+                    command: command,
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
