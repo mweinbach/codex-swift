@@ -1051,6 +1051,173 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(anchoredCreatedIDs, [firstCreatedThreadID])
     }
 
+    func testSQLiteStoreFindsNewestThreadByExactTitleWithRustFilters() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let olderThreadID = try threadID(107)
+        let newestThreadID = try threadID(108)
+        let archivedThreadID = try threadID(109)
+        let emptyMessageThreadID = try threadID(110)
+        let otherCwdThreadID = try threadID(111)
+        try insertRawSQLiteThread(
+            id: olderThreadID,
+            agentPath: try AgentPath(validating: "/root/title_older"),
+            rolloutPath: "/tmp/older.jsonl",
+            source: "cli",
+            threadSource: "user",
+            agentNickname: "steady",
+            agentRole: "reviewer",
+            modelProvider: "openai",
+            model: "gpt-5.4",
+            reasoningEffort: "high",
+            cwd: "/repo",
+            cliVersion: "0.1.0",
+            firstUserMessage: "hello",
+            sandboxPolicy: "workspace-write",
+            approvalMode: "on-request",
+            tokensUsed: 17,
+            createdAtMilliseconds: 1_700_000_040_000,
+            title: "Ship it",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_041, milliseconds: 1_700_000_041_000),
+            gitInfo: ThreadGitInfo(sha: "old-sha", branch: "main", originURL: "https://example.com/old.git"),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: newestThreadID,
+            agentPath: try AgentPath(validating: "/root/title_newest"),
+            rolloutPath: "/tmp/newest.jsonl",
+            source: "cli",
+            threadSource: "subagent",
+            agentNickname: "quick",
+            agentRole: "worker",
+            modelProvider: "openai",
+            model: "gpt-5.5",
+            reasoningEffort: "future",
+            cwd: "/repo",
+            cliVersion: "0.2.0",
+            firstUserMessage: "hello again",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 29,
+            createdAtMilliseconds: 1_700_000_042_000,
+            archivedAt: nil,
+            title: "Ship it",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_043, milliseconds: 1_700_000_043_000),
+            gitInfo: ThreadGitInfo(sha: "new-sha", branch: "feature", originURL: "https://example.com/new.git"),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: archivedThreadID,
+            agentPath: try AgentPath(validating: "/root/title_archived"),
+            rolloutPath: "/tmp/archived-title.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "hello",
+            archived: true,
+            archivedAt: 1_700_000_044,
+            title: "Ship it",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_044, milliseconds: 1_700_000_044_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: emptyMessageThreadID,
+            agentPath: try AgentPath(validating: "/root/title_empty"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "",
+            title: "Ship it",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_045, milliseconds: 1_700_000_045_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: otherCwdThreadID,
+            agentPath: try AgentPath(validating: "/root/title_other_cwd"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/other",
+            firstUserMessage: "hello",
+            title: "Ship it",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_046, milliseconds: 1_700_000_046_000),
+            databaseURL: databaseURL
+        )
+
+        let metadata = try await store.findThreadByExactTitle(
+            title: "Ship it",
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: false,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true)
+        )
+        let archivedMetadata = try await store.findThreadByExactTitle(
+            title: "Ship it",
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: true,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true)
+        )
+        let missingMetadata = try await store.findThreadByExactTitle(
+            title: "ship it",
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: false,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true)
+        )
+
+        XCTAssertEqual(metadata?.id, newestThreadID)
+        XCTAssertEqual(metadata?.rolloutPath, "/tmp/newest.jsonl")
+        XCTAssertEqual(metadata?.threadSource, .subagent)
+        XCTAssertEqual(metadata?.agentNickname, "quick")
+        XCTAssertEqual(metadata?.agentRole, "worker")
+        XCTAssertEqual(metadata?.agentPath, "/root/title_newest")
+        XCTAssertEqual(metadata?.model, "gpt-5.5")
+        XCTAssertNil(metadata?.reasoningEffort)
+        XCTAssertEqual(metadata?.cwd, "/repo")
+        XCTAssertEqual(metadata?.cliVersion, "0.2.0")
+        XCTAssertEqual(metadata?.sandboxPolicy, "danger-full-access")
+        XCTAssertEqual(metadata?.approvalMode, "never")
+        XCTAssertEqual(metadata?.tokensUsed, 29)
+        XCTAssertEqual(metadata?.firstUserMessage, "hello again")
+        XCTAssertEqual(metadata?.gitSHA, "new-sha")
+        XCTAssertEqual(metadata?.gitBranch, "feature")
+        XCTAssertEqual(metadata?.gitOriginURL, "https://example.com/new.git")
+        XCTAssertEqual(archivedMetadata?.id, archivedThreadID)
+        XCTAssertNil(missingMetadata)
+    }
+
+    func testSQLiteStoreFindThreadByExactTitleRejectsUnknownThreadSourceLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(112)
+        try insertRawSQLiteThread(
+            id: threadID,
+            agentPath: try AgentPath(validating: "/root/title_unknown_source"),
+            threadSource: "future_source",
+            firstUserMessage: "hello",
+            title: "Future",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_050, milliseconds: 1_700_000_050_000),
+            databaseURL: databaseURL
+        )
+
+        do {
+            _ = try await store.findThreadByExactTitle(
+                title: "Future",
+                allowedSources: ["cli"],
+                modelProviders: nil,
+                archivedOnly: false,
+                cwd: nil
+            )
+            XCTFail("unknown thread source should fail")
+        } catch let error as AgentGraphStoreError {
+            XCTAssertEqual(error, .internal(message: "unknown thread source: future_source"))
+        }
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -1116,8 +1283,18 @@ final class AgentGraphStoreTests: XCTestCase {
                     archived INTEGER NOT NULL DEFAULT 0,
                     archived_at INTEGER,
                     source TEXT NOT NULL DEFAULT 'cli',
+                    thread_source TEXT,
+                    agent_nickname TEXT,
+                    agent_role TEXT,
                     model_provider TEXT NOT NULL DEFAULT 'openai',
+                    model TEXT,
+                    reasoning_effort TEXT,
+                    cwd TEXT NOT NULL DEFAULT '',
+                    cli_version TEXT NOT NULL DEFAULT '',
                     first_user_message TEXT NOT NULL DEFAULT '',
+                    sandbox_policy TEXT NOT NULL DEFAULT '',
+                    approval_mode TEXT NOT NULL DEFAULT '',
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
                     title TEXT,
                     updated_at INTEGER,
                     updated_at_ms INTEGER,
@@ -1141,8 +1318,18 @@ final class AgentGraphStoreTests: XCTestCase {
         memoryMode: String? = nil,
         rolloutPath: String? = nil,
         source: String = "cli",
+        threadSource: String? = nil,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
         modelProvider: String = "openai",
+        model: String? = nil,
+        reasoningEffort: String? = nil,
+        cwd: String = "",
+        cliVersion: String = "",
         firstUserMessage: String = "hello",
+        sandboxPolicy: String = "",
+        approvalMode: String = "",
+        tokensUsed: Int64 = 0,
         createdAtMilliseconds: Int64 = 0,
         archived: Bool = false,
         archivedAt: Int64? = nil,
@@ -1164,15 +1351,25 @@ final class AgentGraphStoreTests: XCTestCase {
                     archived,
                     archived_at,
                     source,
+                    thread_source,
+                    agent_nickname,
+                    agent_role,
                     model_provider,
+                    model,
+                    reasoning_effort,
+                    cwd,
+                    cli_version,
                     first_user_message,
+                    sandbox_policy,
+                    approval_mode,
+                    tokens_used,
                     title,
                     updated_at,
                     updated_at_ms,
                     git_sha,
                     git_branch,
                     git_origin_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
@@ -1199,18 +1396,28 @@ final class AgentGraphStoreTests: XCTestCase {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 7), SQLITE_OK)
             }
             XCTAssertEqual(sqlite3_bind_text(preparedStatement, 8, source, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 9, modelProvider, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 10, firstUserMessage, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(threadSource, to: preparedStatement, at: 9)
+            bindOptionalText(agentNickname, to: preparedStatement, at: 10)
+            bindOptionalText(agentRole, to: preparedStatement, at: 11)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 12, modelProvider, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(model, to: preparedStatement, at: 13)
+            bindOptionalText(reasoningEffort, to: preparedStatement, at: 14)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 15, cwd, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 16, cliVersion, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 17, firstUserMessage, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 18, sandboxPolicy, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 19, approvalMode, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 20, tokensUsed), SQLITE_OK)
             if let title {
-                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 11, title, -1, testSQLiteTransient), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 21, title, -1, testSQLiteTransient), SQLITE_OK)
             } else {
-                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 11), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 21), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 12, updatedAt.seconds), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 13, updatedAt.milliseconds), SQLITE_OK)
-            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 14)
-            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 15)
-            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 16)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 22, updatedAt.seconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 23, updatedAt.milliseconds), SQLITE_OK)
+            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 24)
+            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 25)
+            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 26)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }

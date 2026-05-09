@@ -859,6 +859,8 @@ Source baseline inspected for this scaffold:
   - added SQLite archive/unarchive metadata updates that mirror Rust's stored archive flag, `archived_at` seconds, moved rollout path, missing-row no-op behavior, and file-modified-time refresh for `updated_at`/`updated_at_ms` when the rollout file is readable.
 - `codex-rs/state/src/runtime/threads.rs` thread id listing
   - added SQLite thread-id listing with Rust's `archived` partitioning, non-empty `first_user_message` requirement, optional allowed-source/model-provider filters, created/updated timestamp sort keys, timestamp anchor pagination, and limit handling.
+- `codex-rs/state/src/runtime/threads.rs` exact-title thread lookup
+  - added SQLite exact-title metadata lookup with Rust's normal thread filters, optional cwd equality, newest-updated row selection, metadata column mapping, unknown thread-source rejection, and invalid reasoning-effort-to-nil behavior.
 
 ## Known Gaps
 

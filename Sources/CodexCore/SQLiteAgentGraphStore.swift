@@ -393,6 +393,75 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return try threadIDs(query: query, bindings: bindings)
     }
 
+    public func findThreadByExactTitle(
+        title: String,
+        allowedSources: [String],
+        modelProviders: [String]?,
+        archivedOnly: Bool,
+        cwd: URL?
+    ) async throws -> ThreadMetadata? {
+        var query =
+            """
+            SELECT
+                threads.id,
+                threads.rollout_path,
+                threads.created_at_ms AS created_at,
+                threads.updated_at_ms AS updated_at,
+                threads.source,
+                threads.thread_source,
+                threads.agent_nickname,
+                threads.agent_role,
+                threads.agent_path,
+                threads.model_provider,
+                threads.model,
+                threads.reasoning_effort,
+                threads.cwd,
+                threads.cli_version,
+                threads.title,
+                threads.sandbox_policy,
+                threads.approval_mode,
+                threads.tokens_used,
+                threads.first_user_message,
+                threads.archived_at,
+                threads.git_sha,
+                threads.git_branch,
+                threads.git_origin_url
+            FROM threads
+            WHERE 1 = 1
+            """
+        var bindings: [SQLiteBinding] = []
+        query += archivedOnly ? " AND threads.archived = 1" : " AND threads.archived = 0"
+        query += " AND threads.first_user_message <> ''"
+        if !allowedSources.isEmpty {
+            query += " AND threads.source IN (\(Self.placeholders(count: allowedSources.count)))"
+            bindings.append(contentsOf: allowedSources.map(SQLiteBinding.text))
+        }
+        if let modelProviders, !modelProviders.isEmpty {
+            query += " AND threads.model_provider IN (\(Self.placeholders(count: modelProviders.count)))"
+            bindings.append(contentsOf: modelProviders.map(SQLiteBinding.text))
+        }
+        query += " AND threads.title = ?"
+        bindings.append(.text(title))
+        if let cwd {
+            query += " AND threads.cwd = ?"
+            bindings.append(.text(cwd.path))
+        }
+        query += " ORDER BY threads.updated_at_ms DESC LIMIT ?"
+        bindings.append(.int(1))
+
+        let database = handle.database
+        return try Self.withStatement(query: query, bindings: bindings, database: database) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return try Self.threadMetadata(from: statement)
+        }
+    }
+
     public func updateThreadTitle(threadID: ThreadId, title: String) async throws -> Bool {
         let database = handle.database
         try Self.execute(
@@ -707,6 +776,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return String(cString: rawValue)
     }
 
+    private static func optionalIntColumn(_ statement: OpaquePointer, index: Int32) -> Int64? {
+        sqlite3_column_type(statement, index) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, index)
+    }
+
     private static func epochMilliseconds(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1_000).rounded(.down))
     }
@@ -730,6 +803,52 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
 
+    private static func threadMetadata(from statement: OpaquePointer) throws -> ThreadMetadata {
+        let threadSource: ThreadSource?
+        if let rawThreadSource = optionalTextColumn(statement, index: 5) {
+            guard let parsedThreadSource = ThreadSource(rawValue: rawThreadSource) else {
+                throw AgentGraphStoreError.internal(message: "unknown thread source: \(rawThreadSource)")
+            }
+            threadSource = parsedThreadSource
+        } else {
+            threadSource = nil
+        }
+        let firstUserMessage = try requiredTextColumn(statement, index: 18, columnName: "first_user_message")
+        return ThreadMetadata(
+            id: try ThreadId(string: try requiredTextColumn(statement, index: 0, columnName: "id")),
+            rolloutPath: try requiredTextColumn(statement, index: 1, columnName: "rollout_path"),
+            createdAt: date(milliseconds: sqlite3_column_int64(statement, 2)),
+            updatedAt: date(milliseconds: sqlite3_column_int64(statement, 3)),
+            source: try requiredTextColumn(statement, index: 4, columnName: "source"),
+            threadSource: threadSource,
+            agentNickname: optionalTextColumn(statement, index: 6),
+            agentRole: optionalTextColumn(statement, index: 7),
+            agentPath: optionalTextColumn(statement, index: 8),
+            modelProvider: try requiredTextColumn(statement, index: 9, columnName: "model_provider"),
+            model: optionalTextColumn(statement, index: 10),
+            reasoningEffort: optionalTextColumn(statement, index: 11).flatMap(ReasoningEffort.init(rawValue:)),
+            cwd: try requiredTextColumn(statement, index: 12, columnName: "cwd"),
+            cliVersion: try requiredTextColumn(statement, index: 13, columnName: "cli_version"),
+            title: try requiredTextColumn(statement, index: 14, columnName: "title"),
+            sandboxPolicy: try requiredTextColumn(statement, index: 15, columnName: "sandbox_policy"),
+            approvalMode: try requiredTextColumn(statement, index: 16, columnName: "approval_mode"),
+            tokensUsed: sqlite3_column_int64(statement, 17),
+            firstUserMessage: firstUserMessage.isEmpty ? nil : firstUserMessage,
+            archivedAt: optionalIntColumn(statement, index: 19).map(epochSecondsDate),
+            gitSHA: optionalTextColumn(statement, index: 20),
+            gitBranch: optionalTextColumn(statement, index: 21),
+            gitOriginURL: optionalTextColumn(statement, index: 22)
+        )
+    }
+
+    private static func date(milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+    }
+
+    private static func epochSecondsDate(_ seconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(seconds))
+    }
+
     private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {
         let result = value.addingReportingOverflow(increment)
         return result.overflow ? Int64.max : result.partialValue
@@ -751,6 +870,82 @@ public enum ThreadArchiveFilter: Equatable, Sendable {
     case all
     case archivedOnly
     case unarchivedOnly
+}
+
+public struct ThreadMetadata: Equatable, Sendable {
+    public let id: ThreadId
+    public let rolloutPath: String
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let source: String
+    public let threadSource: ThreadSource?
+    public let agentNickname: String?
+    public let agentRole: String?
+    public let agentPath: String?
+    public let modelProvider: String
+    public let model: String?
+    public let reasoningEffort: ReasoningEffort?
+    public let cwd: String
+    public let cliVersion: String
+    public let title: String
+    public let sandboxPolicy: String
+    public let approvalMode: String
+    public let tokensUsed: Int64
+    public let firstUserMessage: String?
+    public let archivedAt: Date?
+    public let gitSHA: String?
+    public let gitBranch: String?
+    public let gitOriginURL: String?
+
+    public init(
+        id: ThreadId,
+        rolloutPath: String,
+        createdAt: Date,
+        updatedAt: Date,
+        source: String,
+        threadSource: ThreadSource? = nil,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
+        agentPath: String? = nil,
+        modelProvider: String,
+        model: String? = nil,
+        reasoningEffort: ReasoningEffort? = nil,
+        cwd: String,
+        cliVersion: String,
+        title: String,
+        sandboxPolicy: String,
+        approvalMode: String,
+        tokensUsed: Int64,
+        firstUserMessage: String? = nil,
+        archivedAt: Date? = nil,
+        gitSHA: String? = nil,
+        gitBranch: String? = nil,
+        gitOriginURL: String? = nil
+    ) {
+        self.id = id
+        self.rolloutPath = rolloutPath
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.source = source
+        self.threadSource = threadSource
+        self.agentNickname = agentNickname
+        self.agentRole = agentRole
+        self.agentPath = agentPath
+        self.modelProvider = modelProvider
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.cwd = cwd
+        self.cliVersion = cliVersion
+        self.title = title
+        self.sandboxPolicy = sandboxPolicy
+        self.approvalMode = approvalMode
+        self.tokensUsed = tokensUsed
+        self.firstUserMessage = firstUserMessage
+        self.archivedAt = archivedAt
+        self.gitSHA = gitSHA
+        self.gitBranch = gitBranch
+        self.gitOriginURL = gitOriginURL
+    }
 }
 
 public struct ThreadListAnchor: Equatable, Sendable {
