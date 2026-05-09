@@ -170,6 +170,66 @@ final class AcceptedLinesTests: XCTestCase {
         XCTAssertTrue(reducer.completeTurn(turnID: "turn-2", completedAt: 457).isEmpty)
     }
 
+    func testAnalyticsClientUploadsAcceptedLineEventsOnCompletion() async {
+        let uploader = RecordingAcceptedLineAnalyticsUploader()
+        let client = AcceptedLineAnalyticsClient(
+            uploader: uploader,
+            nowUnixSeconds: { 123 },
+            repoHashResolver: { _ in "repo-hash" }
+        )
+        await client.trackResolvedTurn(
+            turnID: "turn-1",
+            threadID: "thread-1",
+            modelSlug: "gpt-test",
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true)
+        )
+        await client.trackTurnDiff(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            unifiedDiff: """
+            diff --git a/src/lib.rs b/src/lib.rs
+            --- a/src/lib.rs
+            +++ b/src/lib.rs
+            @@ -1 +1 @@
+            -let old_value = 1;
+            +let new_value = 2;
+            """
+        )
+
+        await client.trackTurnCompleted(turnID: "turn-1")
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        let event = requests[0].events[0]
+        XCTAssertEqual(event.eventParams.turnID, "turn-1")
+        XCTAssertEqual(event.eventParams.threadID, "thread-1")
+        XCTAssertEqual(event.eventParams.modelSlug, "gpt-test")
+        XCTAssertEqual(event.eventParams.completedAt, 123)
+        XCTAssertEqual(event.eventParams.repoHash, "repo-hash")
+        XCTAssertEqual(event.eventParams.acceptedAddedLines, 1)
+        XCTAssertEqual(event.eventParams.acceptedDeletedLines, 1)
+    }
+
+    func testAnalyticsUploadBatchesIsolateAcceptedLineFingerprintEvents() {
+        let requests = AcceptedLines.acceptedLineFingerprintEventRequests(input: AcceptedLineFingerprintEventInput(
+            eventType: "codex.accepted_line_fingerprints",
+            turnID: "turn-1",
+            threadID: "thread-1",
+            completedAt: 123,
+            acceptedAddedLines: 2,
+            acceptedDeletedLines: 0,
+            lineFingerprints: [
+                AcceptedLineFingerprint(pathHash: String(repeating: "a", count: 40), lineHash: String(repeating: "b", count: 40)),
+                AcceptedLineFingerprint(pathHash: String(repeating: "c", count: 40), lineHash: String(repeating: "d", count: 40))
+            ]
+        ))
+
+        let batches = AcceptedLines.acceptedLineAnalyticsUploadBatches(requests)
+
+        XCTAssertEqual(batches.count, requests.count)
+        XCTAssertTrue(batches.allSatisfy { $0.count == 1 })
+    }
+
     func testReducerChunksLargeAcceptedLineFingerprintEventsWithoutRepeatingCounts() throws {
         var reducer = AcceptedLineFingerprintReducer(repoHashResolver: { _ in nil })
         reducer.ingestResolvedTurn(
@@ -210,5 +270,13 @@ final class AcceptedLinesTests: XCTestCase {
             XCTAssertLessThan(try JSONEncoder().encode(event).count, 2_100_000)
         }
         XCTAssertEqual(totalFingerprints, 20_000)
+    }
+}
+
+private actor RecordingAcceptedLineAnalyticsUploader: AcceptedLineAnalyticsUploading {
+    private(set) var requests: [AcceptedLineAnalyticsUploadRequest] = []
+
+    func upload(_ request: AcceptedLineAnalyticsUploadRequest) async throws {
+        requests.append(request)
     }
 }

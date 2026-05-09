@@ -491,6 +491,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["diff"] as? String, unifiedDiff)
     }
 
+    func testAcceptedLineAnalyticsUploadsOnTurnCompletion() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let uploader = AppServerRecordingAcceptedLineAnalyticsUploader()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            cwd: cwd.url,
+            acceptedLineAnalyticsUploader: uploader
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"model":"gpt-analytics","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"edit"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        let unifiedDiff = """
+        diff --git a/Sources/One.swift b/Sources/One.swift
+        --- a/Sources/One.swift
+        +++ b/Sources/One.swift
+        @@ -1 +1 @@
+        -let oldValue = 1
+        +let acceptedValue = 2
+        """
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .turnDiff(TurnDiffEvent(unifiedDiff: unifiedDiff))
+        )
+        _ = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        let events = try XCTUnwrap(requests.first?.events)
+        XCTAssertEqual(events.count, 1)
+        let params = events[0].eventParams
+        XCTAssertEqual(params.turnID, turnID)
+        XCTAssertEqual(params.threadID, threadID)
+        XCTAssertEqual(params.modelSlug, "gpt-analytics")
+        XCTAssertEqual(params.productSurface, "codex")
+        XCTAssertEqual(params.acceptedAddedLines, 1)
+        XCTAssertEqual(params.acceptedDeletedLines, 1)
+        XCTAssertEqual(params.lineFingerprints.count, 1)
+        XCTAssertEqual(
+            params.lineFingerprints[0].lineHash,
+            AcceptedLines.fingerprintHash(domain: "line", value: "let acceptedValue = 2")
+        )
+    }
+
     func testReviewStartInlineRecordsReviewMarkerAndEmitsStartedNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -8717,6 +8768,7 @@ final class CodexAppServerTests: XCTestCase {
         requiresOpenAIAuth: Bool = true,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
@@ -8739,6 +8791,7 @@ final class CodexAppServerTests: XCTestCase {
             environment: mergedEnvironment,
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
+            acceptedLineAnalyticsUploader: acceptedLineAnalyticsUploader,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
             authRefreshTransport: authRefreshTransport,
@@ -9136,6 +9189,14 @@ private actor AppServerRecordingFeedbackUploadTransport: FeedbackUploadTransport
     private(set) var requests: [FeedbackUploadRequest] = []
 
     func upload(_ request: FeedbackUploadRequest) async throws {
+        requests.append(request)
+    }
+}
+
+private actor AppServerRecordingAcceptedLineAnalyticsUploader: AcceptedLineAnalyticsUploading {
+    private(set) var requests: [AcceptedLineAnalyticsUploadRequest] = []
+
+    func upload(_ request: AcceptedLineAnalyticsUploadRequest) async throws {
         requests.append(request)
     }
 }

@@ -114,6 +114,69 @@ public struct AcceptedLineFingerprintsEventRequest: Equatable, Codable, Sendable
     }
 }
 
+public struct AcceptedLineAnalyticsUploadRequest: Equatable, Codable, Sendable {
+    public let events: [AcceptedLineFingerprintsEventRequest]
+
+    public init(events: [AcceptedLineFingerprintsEventRequest]) {
+        self.events = events
+    }
+}
+
+public protocol AcceptedLineAnalyticsUploading: Sendable {
+    func upload(_ request: AcceptedLineAnalyticsUploadRequest) async throws
+}
+
+public struct DisabledAcceptedLineAnalyticsUploader: AcceptedLineAnalyticsUploading {
+    public init() {}
+
+    public func upload(_: AcceptedLineAnalyticsUploadRequest) async throws {}
+}
+
+public actor AcceptedLineAnalyticsClient {
+    private var reducer: AcceptedLineFingerprintReducer
+    private let uploader: any AcceptedLineAnalyticsUploading
+    private let nowUnixSeconds: @Sendable () -> UInt64
+
+    public init(
+        uploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
+        nowUnixSeconds: @escaping @Sendable () -> UInt64 = {
+            UInt64(Date().timeIntervalSince1970)
+        },
+        repoHashResolver: @escaping (URL) -> String? = { AcceptedLines.acceptedLineRepoHash(cwd: $0) }
+    ) {
+        self.reducer = AcceptedLineFingerprintReducer(repoHashResolver: repoHashResolver)
+        self.uploader = uploader
+        self.nowUnixSeconds = nowUnixSeconds
+    }
+
+    public func trackResolvedTurn(turnID: String, threadID: String, modelSlug: String, cwd: URL) {
+        reducer.ingestResolvedTurn(
+            turnID: turnID,
+            threadID: threadID,
+            modelSlug: modelSlug,
+            cwd: cwd
+        )
+    }
+
+    public func trackTurnDiff(threadID: String, turnID: String, unifiedDiff: String) {
+        reducer.ingestTurnDiff(
+            threadID: threadID,
+            turnID: turnID,
+            unifiedDiff: unifiedDiff
+        )
+    }
+
+    public func trackTurnCompleted(turnID: String) async {
+        let events = reducer.completeTurn(
+            turnID: turnID,
+            completedAt: nowUnixSeconds()
+        )
+        for batch in AcceptedLines.acceptedLineAnalyticsUploadBatches(events) {
+            try? await uploader.upload(AcceptedLineAnalyticsUploadRequest(events: batch))
+        }
+    }
+}
+
 public struct AcceptedLineFingerprintReducer {
     private struct TurnState {
         var threadID: String?
@@ -275,6 +338,12 @@ public enum AcceptedLines {
                 lineFingerprints: lineFingerprints
             ))
         }
+    }
+
+    public static func acceptedLineAnalyticsUploadBatches(
+        _ events: [AcceptedLineFingerprintsEventRequest]
+    ) -> [[AcceptedLineFingerprintsEventRequest]] {
+        events.map { [$0] }
     }
 
     public static func acceptedLineRepoHash(cwd: URL) -> String? {

@@ -106,6 +106,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let activeProfile: String?
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
+    public let acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending
     public let authRefreshTransport: AppServerAuthRefreshTransport?
@@ -126,6 +127,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
@@ -145,6 +147,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.activeProfile = activeProfile
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
+        self.acceptedLineAnalyticsUploader = acceptedLineAnalyticsUploader
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.addCreditsNudgeEmailSender = addCreditsNudgeEmailSender
         self.authRefreshTransport = authRefreshTransport
@@ -12972,6 +12975,11 @@ private final class AppServerCancellableLoginRegistry: @unchecked Sendable {
 }
 
 final class CodexAppServerMessageProcessor {
+    private struct ThreadAnalyticsMetadata {
+        let modelSlug: String
+        let cwd: URL
+    }
+
     private let connectionID: AppServerConnectionID = 0
     private var initialized = false
     private var requestAttestation = false
@@ -12979,8 +12987,10 @@ final class CodexAppServerMessageProcessor {
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
+    private let acceptedLineAnalyticsClient: AcceptedLineAnalyticsClient
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
+    private var threadAnalyticsMetadata: [String: ThreadAnalyticsMetadata] = [:]
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
@@ -12996,6 +13006,9 @@ final class CodexAppServerMessageProcessor {
     ) {
         self.configuration = configuration
         self.notificationSink = notificationSink
+        self.acceptedLineAnalyticsClient = AcceptedLineAnalyticsClient(
+            uploader: configuration.acceptedLineAnalyticsUploader
+        )
         self.threadStateManager = threadStateManager
         self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
@@ -13057,6 +13070,42 @@ final class CodexAppServerMessageProcessor {
         }) ?? false
     }
 
+    private func rememberThreadAnalyticsMetadata(threadID: String, result: [String: Any]) {
+        guard let modelSlug = CodexAppServer.stringParam(result["model"]),
+              let cwd = CodexAppServer.stringParam(result["cwd"])
+        else {
+            return
+        }
+        threadAnalyticsMetadata[threadID] = ThreadAnalyticsMetadata(
+            modelSlug: modelSlug,
+            cwd: URL(fileURLWithPath: cwd, isDirectory: true)
+        )
+    }
+
+    private func trackResolvedTurnForAnalytics(threadID: String, turn: [String: Any]) {
+        guard let turnID = CodexAppServer.stringParam(turn["id"]),
+              let metadata = threadAnalyticsMetadata[threadID]
+        else {
+            return
+        }
+        let client = acceptedLineAnalyticsClient
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await client.trackResolvedTurn(
+                turnID: turnID,
+                threadID: threadID,
+                modelSlug: metadata.modelSlug,
+                cwd: metadata.cwd
+            )
+        }
+    }
+
+    private func trackTurnCompletedForAnalytics(turnID: String) {
+        let client = acceptedLineAnalyticsClient
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await client.trackTurnCompleted(turnID: turnID)
+        }
+    }
+
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
         guard let notification = CodexAppServer.runtimeEventNotification(
             threadID: threadID,
@@ -13064,6 +13113,13 @@ final class CodexAppServerMessageProcessor {
             event: event
         ) else {
             return
+        }
+        if case let .turnDiff(turnDiff) = event {
+            await acceptedLineAnalyticsClient.trackTurnDiff(
+                threadID: threadID,
+                turnID: turnID,
+                unifiedDiff: turnDiff.unifiedDiff
+            )
         }
         await sendNotification(notification)
     }
@@ -13514,6 +13570,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
+                            rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
                         notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
@@ -13581,6 +13638,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                         subscribeCurrentConnection(toThreadID: threadID)
                     }
                 case "thread/fork":
@@ -13588,6 +13646,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
+                            rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
                         var notificationThread = thread
@@ -13599,6 +13658,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,
                        let turn = result["turn"] as? [String: Any] {
+                        trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
                     }
                 case "turn/interrupt":
@@ -13613,6 +13673,7 @@ final class CodexAppServerMessageProcessor {
                             turnID: turnID,
                             status: "interrupted"
                         ))
+                        trackTurnCompletedForAnalytics(turnID: turnID)
                     }
                 case "review/start":
                     let outcome = try CodexAppServer.reviewStartResult(params: params, configuration: configuration)
