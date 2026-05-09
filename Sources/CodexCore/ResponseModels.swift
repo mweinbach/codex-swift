@@ -1133,7 +1133,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
 
     private static func shouldSkipReasoningContent(_ content: [ReasoningItemContent]?) -> Bool {
         guard let content else {
-            return true
+            return false
         }
         return !content.contains { item in
             if case .reasoningText = item {

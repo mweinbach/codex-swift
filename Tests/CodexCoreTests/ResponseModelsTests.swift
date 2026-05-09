@@ -852,6 +852,7 @@ final class ResponseModelsTests: XCTestCase {
                     "text": "Step 1"
                 ]
             ],
+            "content": NSNull(),
             "encrypted_content": NSNull()
         ])
     }
@@ -860,6 +861,7 @@ final class ResponseModelsTests: XCTestCase {
         try XCTAssertJSONObjectEqual(ResponseItem.reasoning(id: "rs_1", summary: []), [
             "type": "reasoning",
             "summary": [],
+            "content": NSNull(),
             "encrypted_content": NSNull()
         ])
 

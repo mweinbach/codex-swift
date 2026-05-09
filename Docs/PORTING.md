@@ -497,7 +497,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/models.rs` MCP tool-call output input item
   - `ResponseInputItem.mcpToolCallOutput` now serializes and decodes Rust's raw `output: CallToolResult` field without the legacy Swift `Ok`/`Err` wrapper, preserves `_meta`, and converts into `ResponseItem.functionCallOutput` through Rust's `CallToolResult` payload path.
 - `codex-rs/protocol/src/models.rs` response item null optionals
-  - `ResponseItem` now preserves Rust's non-skipped optional fields by serializing `null` for missing reasoning `encrypted_content` and local-shell/tool-search `call_id` values, while continuing to omit optionals Rust marks with `skip_serializing_if`.
+  - `ResponseItem` now preserves Rust's non-skipped optional fields by serializing `null` for missing reasoning `content`/`encrypted_content` and local-shell/tool-search `call_id` values, while continuing to omit optionals Rust marks with `skip_serializing_if`.
 - `codex-rs/protocol/src/models.rs` function-call output text fallback
   - `FunctionCallOutputPayload.textContent` now matches Rust's lossy `FunctionCallOutputBody::to_text` behavior by returning plain text bodies unchanged and joining nonblank structured `input_text` items while ignoring images.
 - `codex-rs/protocol/src/protocol.rs` token usage context-window refresh
