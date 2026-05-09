@@ -1186,6 +1186,54 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkLoopBreakAndContinue() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = [
+            ("git", "status", "allow"),
+            ("hg", "status", "forbidden"),
+            ("jj", "log", "prompt"),
+            ("pnpm", "install", "forbidden"),
+            ("node", "test", "allow"),
+        ]
+
+        for tool, subcommand, decision in COMMANDS:
+            if tool == "hg":
+                continue
+            if tool == "pnpm":
+                break
+            prefix_rule([tool, subcommand], decision, justification = "loop control " + tool)
+
+        HOSTS = ["skip.example.com", "api.github.com", "stop.example.com", "registry.npmjs.org"]
+        for host in HOSTS:
+            if host.startswith("skip"):
+                continue
+            if host.startswith("stop"):
+                break
+            network_rule(host, "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "loop control git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .prompt,
+                justification: "loop control jj"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [])
+        XCTAssertEqual(policy.rules(for: "node"), [])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkTopLevelConditionals() throws {
         let policy = try parsePolicy("""
         ENABLE_STATUS = True

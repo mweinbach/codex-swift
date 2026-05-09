@@ -635,6 +635,12 @@ public final class PolicyParser {
         let returnExpression: String
     }
 
+    private enum StarlarkStatementFlow: Equatable {
+        case none
+        case continueLoop
+        case breakLoop
+    }
+
     private var policy = ExecPolicy.empty()
     private var pendingExampleValidations: [(rules: [PrefixRule], matches: [[String]], notMatches: [[String]])] = []
 
@@ -645,12 +651,15 @@ public final class PolicyParser {
         let source = Self.stripLineComments(from: policyFileContents)
         var constants: [String: ConfigValue] = [:]
         var functions: [String: StarlarkFunction] = [:]
-        try parseStatements(
+        let flow = try parseStatements(
             Self.topLevelStatements(from: source),
             identifier: policyIdentifier,
             constants: &constants,
             functions: &functions
         )
+        guard flow == .none else {
+            throw ConfigOverrideError.invalidLiteral(policyIdentifier)
+        }
         try validatePendingExamples(from: pendingValidationStartIndex)
     }
 
@@ -659,7 +668,7 @@ public final class PolicyParser {
         identifier: String,
         constants: inout [String: ConfigValue],
         functions: inout [String: StarlarkFunction]
-    ) throws {
+    ) throws -> StarlarkStatementFlow {
         var index = 0
         while index < statements.count {
             let statement = statements[index]
@@ -704,6 +713,7 @@ public final class PolicyParser {
                 let items = try Self.starlarkIterableItems(iterable, expression: forLoop.iterableText)
 
                 var loopConstants = constants
+                var shouldBreakLoop = false
                 for item in items {
                     try Self.bindStarlarkLoopTargets(
                         forLoop.targets,
@@ -711,12 +721,23 @@ public final class PolicyParser {
                         constants: &loopConstants,
                         expression: statement.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
-                    try parseStatements(
+                    let flow = try parseStatements(
                         body,
                         identifier: identifier,
                         constants: &loopConstants,
                         functions: &functions
                     )
+                    switch flow {
+                    case .none:
+                        break
+                    case .continueLoop:
+                        continue
+                    case .breakLoop:
+                        shouldBreakLoop = true
+                    }
+                    if shouldBreakLoop {
+                        break
+                    }
                 }
                 constants = loopConstants
                 index = collected.nextIndex
@@ -768,30 +789,44 @@ public final class PolicyParser {
                     constants: constants,
                     functions: functions
                 ) {
-                    try parseStatements(
+                    let flow = try parseStatements(
                         branch.body,
                         identifier: identifier,
                         constants: &constants,
                         functions: &functions
                     )
+                    if flow != .none {
+                        return flow
+                    }
                     matchedBranch = true
                     break
                 }
                 if !matchedBranch, !elseBody.isEmpty {
-                    try parseStatements(
+                    let flow = try parseStatements(
                         elseBody,
                         identifier: identifier,
                         constants: &constants,
                         functions: &functions
                     )
+                    if flow != .none {
+                        return flow
+                    }
                 }
                 index = nextIndex
                 continue
             }
 
+            if trimmed == "continue" {
+                return .continueLoop
+            }
+            if trimmed == "break" {
+                return .breakLoop
+            }
+
             try parseStatement(statement, identifier: identifier, constants: &constants, functions: functions)
             index += 1
         }
+        return .none
     }
 
     public func build() -> ExecPolicy {
