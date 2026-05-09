@@ -879,7 +879,7 @@ private func isSmallFormattingCommand(_ tokens: [String]) -> Bool {
             return false
         }
     case "sed":
-        return tokens.count < 4 || !(tokens[1] == "-n" && isValidSedNArg(tokens[safe: 2]))
+        return sedReadPath(Array(tokens.dropFirst())) == nil
     default:
         return false
     }

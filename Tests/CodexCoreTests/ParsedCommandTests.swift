@@ -346,6 +346,14 @@ final class ParsedCommandTests: XCTestCase {
             )
         ])
 
+        XCTAssertEqual(parseCommand(["bash", "-lc", "sed -n -e 10p file.txt | nl -ba"]), [
+            .read(cmd: "sed -n -e 10p file.txt | nl -ba", name: "file.txt", path: "file.txt")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "sed -n 10p -- file.txt | nl -ba"]), [
+            .read(cmd: "sed -n 10p -- file.txt | nl -ba", name: "file.txt", path: "file.txt")
+        ])
+
         let inner = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'"
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
             .read(

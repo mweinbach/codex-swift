@@ -542,6 +542,8 @@ Source baseline inspected for this scaffold:
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, and absolute-`cd` path joining for read summaries.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
   - added Swift Rust-style `--` operand handling for read/list summaries so dash-leading paths remain valid operands after the option terminator.
+- `codex-rs/shell-command/src/parse_command.rs` sed pipeline filtering parity
+  - aligned Swift small-formatting detection with Rust `sed_read_path` so `sed -n -e <range> <file>` and `sed -n <range> -- <file>` survive pipeline helper filtering as file reads.
 
 ## Known Gaps
 
