@@ -258,6 +258,8 @@ private struct AppServerJSONObject: @unchecked Sendable {
     let object: [String: Any]
 }
 
+private let appServerDefaultExecCommandTimeoutMs = 10_000
+
 private final class AppServerStdioResponseCapture: @unchecked Sendable {
     private let id: Int
     private let lock = NSLock()
@@ -7800,7 +7802,7 @@ public enum CodexAppServer {
         if disableOutputCap && params?["outputBytesCap"] != nil && !(params?["outputBytesCap"] is NSNull) {
             throw AppServerError.invalidParams("command/exec cannot set both outputBytesCap and disableOutputCap")
         }
-        if disableTimeout && params?["timeoutMs"] != nil {
+        if disableTimeout && params?["timeoutMs"] != nil && !(params?["timeoutMs"] is NSNull) {
             throw AppServerError.invalidParams("command/exec cannot set both timeoutMs and disableTimeout")
         }
         let size = try commandExecSize(params?["size"])
@@ -7814,7 +7816,7 @@ public enum CodexAppServer {
             tty: tty,
             streamStdin: streamStdin,
             streamStdoutStderr: streamStdoutStderr,
-            timeoutMs: disableTimeout ? nil : optionalIntParam(params?["timeoutMs"]),
+            timeoutMs: disableTimeout ? nil : commandExecTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: disableOutputCap ? nil : commandExecOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
@@ -7995,7 +7997,7 @@ public enum CodexAppServer {
             tty: tty,
             streamStdin: boolParam(params?["streamStdin"], defaultValue: false),
             streamStdoutStderr: boolParam(params?["streamStdoutStderr"], defaultValue: false),
-            timeoutMs: optionalIntParam(params?["timeoutMs"]),
+            timeoutMs: processSpawnTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
@@ -8055,11 +8057,21 @@ public enum CodexAppServer {
         return processHandle
     }
 
-    private static func optionalIntParam(_ value: Any?) -> Int? {
+    private static func commandExecTimeoutMs(_ value: Any?) -> Int {
         guard let value, !(value is NSNull) else {
+            return appServerDefaultExecCommandTimeoutMs
+        }
+        return intParam(value, defaultValue: appServerDefaultExecCommandTimeoutMs)
+    }
+
+    private static func processSpawnTimeoutMs(_ value: Any?) -> Int? {
+        guard let value else {
+            return appServerDefaultExecCommandTimeoutMs
+        }
+        if value is NSNull {
             return nil
         }
-        return intParam(value, defaultValue: 0)
+        return intParam(value, defaultValue: appServerDefaultExecCommandTimeoutMs)
     }
 
     private static func processOutputBytesCap(_ value: Any?) -> Int? {

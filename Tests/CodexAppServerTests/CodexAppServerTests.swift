@@ -7240,8 +7240,16 @@ final class CodexAppServerTests: XCTestCase {
             "command/exec cannot set both timeoutMs and disableTimeout"
         )
 
+        let nullTimeoutWithDisable = try appServerResponse(
+            #"{"id":4,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","timeoutMs":null,"disableTimeout":true}}"#,
+            codexHome: codexHome.url
+        )
+        let nullTimeoutResult = try XCTUnwrap(nullTimeoutWithDisable["result"] as? [String: Any])
+        XCTAssertEqual(nullTimeoutResult["exitCode"] as? Int, 0)
+        XCTAssertEqual(nullTimeoutResult["stdout"] as? String, "hi\n")
+
         let nullOutputCapWithDisable = try appServerResponse(
-            #"{"id":4,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":null,"disableOutputCap":true}}"#,
+            #"{"id":5,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":null,"disableOutputCap":true}}"#,
             codexHome: codexHome.url
         )
         let nullOutputCapResult = try XCTUnwrap(nullOutputCapWithDisable["result"] as? [String: Any])
@@ -7728,6 +7736,18 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["stderr"] as? String, "err")
         XCTAssertEqual(params["stdoutCapReached"] as? Bool, false)
         XCTAssertEqual(params["stderrCapReached"] as? Bool, false)
+
+        let nullTimeoutMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"process/spawn","params":{"command":["/bin/echo","hi"],"processHandle":"proc-null-timeout","cwd":"\#(cwd.url.path)","timeoutMs":null}}"#.utf8
+        )))
+        XCTAssertEqual((nullTimeoutMessages[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let nullTimeoutNotificationData = try await nextNotificationPayload(notificationCapture)
+        let nullTimeoutNotification = try XCTUnwrap(decodeMessages(nullTimeoutNotificationData).first)
+        let nullTimeoutParams = try XCTUnwrap(nullTimeoutNotification["params"] as? [String: Any])
+        XCTAssertEqual(nullTimeoutParams["processHandle"] as? String, "proc-null-timeout")
+        XCTAssertEqual(nullTimeoutParams["exitCode"] as? Int, 0)
+        XCTAssertEqual(nullTimeoutParams["stdout"] as? String, "hi\n")
     }
 
     func testProcessSpawnInheritsServerEnvironmentAndAppliesOverrides() async throws {
