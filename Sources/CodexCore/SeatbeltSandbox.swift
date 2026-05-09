@@ -132,11 +132,16 @@ public enum SeatbeltSandbox {
             let rootParam = "WRITABLE_ROOT_\(index)"
             params.append((rootParam, canonicalPath(writableRoot.root.path)))
 
-            if writableRoot.readOnlySubpaths.isEmpty {
+            let protectedMetadataSubpaths = writableRoot.protectedMetadataNames.compactMap {
+                try? writableRoot.root.join($0)
+            }
+            let readOnlySubpaths = writableRoot.readOnlySubpaths + protectedMetadataSubpaths
+
+            if readOnlySubpaths.isEmpty {
                 folderPolicies.append(#"(subpath (param "\#(rootParam)"))"#)
             } else {
                 var requireParts = [#"(subpath (param "\#(rootParam)"))"#]
-                for (subpathIndex, readOnlyPath) in writableRoot.readOnlySubpaths.enumerated() {
+                for (subpathIndex, readOnlyPath) in readOnlySubpaths.enumerated() {
                     let readOnlyParam = "WRITABLE_ROOT_\(index)_RO_\(subpathIndex)"
                     requireParts.append(#"(require-not (subpath (param "\#(readOnlyParam)")))"#)
                     params.append((readOnlyParam, canonicalPath(readOnlyPath.path)))

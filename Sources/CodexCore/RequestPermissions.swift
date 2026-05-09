@@ -723,6 +723,11 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             let rawWritableRoots = writableEntries.filter {
                 Self.normalizeEffectiveAbsolutePath($0) == root
             }
+            let protectedMetadataNames = protectedMetadataNamesForWritableRoot(
+                root: root,
+                rawWritableRoots: rawWritableRoots,
+                cwd: cwd
+            )
             let protectMissingDotCodex = Self.absolutePathForLegacyCwd(cwd)
                 .map(Self.normalizeEffectiveAbsolutePath) == root
             var readOnlySubpaths = Self.defaultReadOnlySubpathsForWritableRoot(
@@ -767,7 +772,8 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
 
             return WritableRoot(
                 root: root,
-                readOnlySubpaths: Self.deduplicated(readOnlySubpaths)
+                readOnlySubpaths: Self.deduplicated(readOnlySubpaths),
+                protectedMetadataNames: protectedMetadataNames
             )
         }
     }
@@ -1123,6 +1129,17 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
 
         return deduplicated(subpaths)
+    }
+
+    private func protectedMetadataNamesForWritableRoot(
+        root: AbsolutePath,
+        rawWritableRoots: [AbsolutePath],
+        cwd: String
+    ) -> [String] {
+        Self.protectedMetadataPathNames.filter { metadataName in
+            let metadataPaths = ([root] + rawWritableRoots).compactMap { try? $0.join(metadataName) }
+            return metadataPaths.allSatisfy { !canWritePathWithCwd($0.path, cwd: cwd) }
+        }
     }
 
     private static func appendDefaultReadOnlyPathIfNoExplicitRule(
@@ -1580,7 +1597,11 @@ private extension Array where Element == AbsolutePath {
 private extension Array where Element == WritableRoot {
     func sortedForSemanticSignature() -> [WritableRoot] {
         map { root in
-            WritableRoot(root: root.root, readOnlySubpaths: root.readOnlySubpaths.sortedByPath())
+            WritableRoot(
+                root: root.root,
+                readOnlySubpaths: root.readOnlySubpaths.sortedByPath(),
+                protectedMetadataNames: Swift.Array(Set(root.protectedMetadataNames)).sorted()
+            )
         }.sorted { $0.root.path < $1.root.path }
     }
 }

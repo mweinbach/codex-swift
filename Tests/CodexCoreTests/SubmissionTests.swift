@@ -976,7 +976,7 @@ final class SubmissionTests: XCTestCase {
             WritableRoot(root: effectiveRoot, readOnlySubpaths: [
                 try effectiveRoot.join(".codex"),
                 effectivePrivate
-            ])
+            ], protectedMetadataNames: [".git", ".agents", ".codex"])
         ])
     }
 
@@ -1007,7 +1007,7 @@ final class SubmissionTests: XCTestCase {
                 try linkRoot.join(".agents"),
                 try linkRoot.join(".codex"),
                 linkBlocked
-            ])
+            ], protectedMetadataNames: [".git", ".agents", ".codex"])
         ])
     }
 
@@ -1027,7 +1027,7 @@ final class SubmissionTests: XCTestCase {
             WritableRoot(root: effectiveCwd, readOnlySubpaths: [
                 try effectiveCwd.join(".codex"),
                 effectiveDocsPrivate
-            ])
+            ], protectedMetadataNames: [".git", ".agents", ".codex"])
         ])
         XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getWritableRootsWithCwd(cwd.path), [])
         XCTAssertEqual(
@@ -1056,8 +1056,32 @@ final class SubmissionTests: XCTestCase {
                 try effectiveCwd.join(".git"),
                 try effectiveCwd.join(".agents"),
                 try effectiveCwd.join(".codex")
-            ])
+            ], protectedMetadataNames: [".git", ".agents", ".codex"])
         ])
+
+        let writableRoot = try XCTUnwrap(policy.getWritableRootsWithCwd(cwd.path).first)
+        XCTAssertFalse(writableRoot.isPathWritable(try effectiveCwd.join(".git/config")))
+        XCTAssertFalse(writableRoot.isPathWritable(try effectiveCwd.join(".agents/settings.json")))
+        XCTAssertFalse(writableRoot.isPathWritable(try effectiveCwd.join(".codex/config.toml")))
+        XCTAssertTrue(writableRoot.isPathWritable(try effectiveCwd.join("src/main.swift")))
+    }
+
+    func testFileSystemSandboxPolicyWritableRootsSkipExplicitMetadataRuleLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let effectiveCwd = try rustEffectiveTopLevelAliasPath(cwd)
+        let explicitDotCodex = try effectiveCwd.join(".codex")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(explicitDotCodex.path), access: .write)
+        ])
+
+        let writableRoot = try XCTUnwrap(policy.getWritableRootsWithCwd(cwd.path).first { $0.root == effectiveCwd })
+        XCTAssertEqual(writableRoot.protectedMetadataNames, [".git", ".agents"])
+        XCTAssertFalse(writableRoot.readOnlySubpaths.contains(explicitDotCodex))
+        XCTAssertTrue(policy.canWritePathWithCwd(try explicitDotCodex.join("config.toml").path, cwd: cwd.path))
+        XCTAssertTrue(writableRoot.isPathWritable(try explicitDotCodex.join("config.toml")))
+        XCTAssertFalse(writableRoot.isPathWritable(try effectiveCwd.join(".git/config")))
     }
 
     func testFileSystemSandboxPolicyUnreadableGlobsResolveSortAndDedupLikeRust() throws {

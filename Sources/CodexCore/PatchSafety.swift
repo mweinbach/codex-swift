@@ -17,10 +17,16 @@ public enum SafetyCheck: Equatable, Sendable {
 public struct WritableRoot: Equatable, Sendable {
     public let root: AbsolutePath
     public let readOnlySubpaths: [AbsolutePath]
+    public let protectedMetadataNames: [String]
 
-    public init(root: AbsolutePath, readOnlySubpaths: [AbsolutePath] = []) {
+    public init(
+        root: AbsolutePath,
+        readOnlySubpaths: [AbsolutePath] = [],
+        protectedMetadataNames: [String] = []
+    ) {
         self.root = root
         self.readOnlySubpaths = readOnlySubpaths
+        self.protectedMetadataNames = protectedMetadataNames
     }
 
     public func isPathWritable(_ path: AbsolutePath) -> Bool {
@@ -28,7 +34,20 @@ public struct WritableRoot: Equatable, Sendable {
             return false
         }
 
-        return !readOnlySubpaths.contains { path.isUnderOrEqual($0) }
+        guard !readOnlySubpaths.contains(where: { path.isUnderOrEqual($0) }) else {
+            return false
+        }
+
+        return !pathContainsProtectedMetadataName(path)
+    }
+
+    private func pathContainsProtectedMetadataName(_ path: AbsolutePath) -> Bool {
+        guard let relativePath = path.path.pathSuffix(after: root.path),
+              let firstComponent = relativePath.split(separator: "/", omittingEmptySubsequences: true).first
+        else {
+            return false
+        }
+        return protectedMetadataNames.contains(String(firstComponent))
     }
 }
 
@@ -215,5 +234,16 @@ private extension AbsolutePath {
 private extension String {
     var withTrailingSlash: String {
         hasSuffix("/") ? self : self + "/"
+    }
+
+    func pathSuffix(after ancestor: String) -> String? {
+        if self == ancestor {
+            return ""
+        }
+        let prefix = ancestor.withTrailingSlash
+        guard hasPrefix(prefix) else {
+            return nil
+        }
+        return String(dropFirst(prefix.count))
     }
 }
