@@ -8008,6 +8008,17 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func realtimeListVoicesResult() -> [String: Any] {
+        [
+            "voices": [
+                "v1": ["juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"],
+                "v2": ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"],
+                "defaultV1": "cove",
+                "defaultV2": "marin"
+            ]
+        ]
+    }
+
     fileprivate static func configReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -14317,6 +14328,24 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: CodexAppServer.collaborationModeListResult()
                     )
+                case "thread/realtime/listVoices":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "thread/realtime/listVoices",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: CodexAppServer.realtimeListVoicesResult()
+                    )
+                case "thread/realtime/start",
+                     "thread/realtime/appendAudio",
+                     "thread/realtime/appendText",
+                     "thread/realtime/stop":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: method,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    throw AppServerError.methodNotFound("\(method) is not supported yet")
                 case "config/read":
                     response = CodexAppServer.responseObject(
                         id: id,

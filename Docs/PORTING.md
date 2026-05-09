@@ -618,6 +618,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's method-level experimental API guard for `collaborationMode/list`, preserving the existing preset response after opt-in.
 - `codex-rs/app-server` fuzzy file-search sessions
   - added v2 `fuzzyFileSearch/sessionStart`, `fuzzyFileSearch/sessionUpdate`, and `fuzzyFileSearch/sessionStop` routes with Rust's experimental API guard, per-session roots, missing-session errors, update/completed notification shapes, blank snapshots for empty queries, and stop removal behavior.
+- `codex-rs/app-server` realtime route surface
+  - added Rust's experimental API guards for `thread/realtime/start`, `thread/realtime/appendAudio`, `thread/realtime/appendText`, `thread/realtime/stop`, and `thread/realtime/listVoices`; ported the deterministic `thread/realtime/listVoices` response with the built-in v1/v2 voice lists and defaults.
 
 ## Known Gaps
 

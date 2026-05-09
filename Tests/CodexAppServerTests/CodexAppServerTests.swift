@@ -6595,6 +6595,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "collaborationMode/list requires experimentalApi capability")
     }
 
+    func testRealtimeRoutesRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        for (index, method) in [
+            "thread/realtime/start",
+            "thread/realtime/appendAudio",
+            "thread/realtime/appendText",
+            "thread/realtime/stop",
+            "thread/realtime/listVoices"
+        ].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(method)","params":{}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(method) requires experimentalApi capability")
+        }
+    }
+
+    func testRealtimeListVoicesReturnsRustBuiltinVoices() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/realtime/listVoices","params":{}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let voices = try XCTUnwrap(result["voices"] as? [String: Any])
+        XCTAssertEqual(
+            voices["v1"] as? [String],
+            ["juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"]
+        )
+        XCTAssertEqual(
+            voices["v2"] as? [String],
+            ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
+        )
+        XCTAssertEqual(voices["defaultV1"] as? String, "cove")
+        XCTAssertEqual(voices["defaultV2"] as? String, "marin")
+    }
+
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """
