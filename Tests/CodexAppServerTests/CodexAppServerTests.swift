@@ -6741,6 +6741,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(voices["defaultV2"] as? String, "marin")
     }
 
+    func testRealtimeConversationRoutesReturnRustDisabledThreadError() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        for (index, method) in [
+            "thread/realtime/start",
+            "thread/realtime/appendAudio",
+            "thread/realtime/appendText",
+            "thread/realtime/stop"
+        ].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 2),"method":"\#(method)","params":{"threadId":"\#(threadID)"}}"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "thread \(threadID) does not support realtime conversation")
+        }
+    }
+
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """

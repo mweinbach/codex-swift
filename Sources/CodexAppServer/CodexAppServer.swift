@@ -8073,6 +8073,23 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func realtimeUnsupportedResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        _ = try rolloutPathForConversation(conversationID, configuration: configuration)
+        throw AppServerError.invalidRequest("thread \(threadID) does not support realtime conversation")
+    }
+
     fileprivate static func mockExperimentalMethodResult(params: [String: Any]?) -> [String: Any] {
         [
             "echoed": stringParam(params?["value"]) as Any? ?? NSNull()
@@ -14424,7 +14441,13 @@ final class CodexAppServerMessageProcessor {
                         method: method,
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
-                    throw AppServerError.methodNotFound("\(method) is not supported yet")
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.realtimeUnsupportedResult(
+                            params: params,
+                            configuration: configuration
+                        )
+                    )
                 case "mock/experimentalMethod":
                     try CodexAppServer.requireExperimentalAPI(
                         method: "mock/experimentalMethod",
