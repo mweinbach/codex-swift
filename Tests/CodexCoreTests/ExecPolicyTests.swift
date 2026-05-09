@@ -1453,6 +1453,56 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkHelperControlFlow() throws {
+        let policy = try parsePolicy("""
+        def filtered_pattern(command):
+            result = []
+            for part in command:
+                if part == "skip":
+                    continue
+                if part == "stop":
+                    break
+                result.append(part)
+            if len(result) == 1:
+                return result + ["status"]
+            elif len(result) > 1:
+                return result
+            else:
+                pass
+            return ["git", "status"]
+
+        def decision(tool):
+            if tool == "git":
+                return "allow"
+            elif tool == "jj":
+                return "prompt"
+            return "forbid"
+
+        def host(parts):
+            value = ""
+            for part in parts:
+                if value == "":
+                    value = part
+                else:
+                    value += "." + part
+            return value
+
+        prefix_rule(filtered_pattern(["git", "skip", "status", "stop", "ignored"]), decision("git"))
+        prefix_rule(filtered_pattern(["jj"]), decision("jj"))
+        network_rule(host(["api", "github", "com"]), "https", decision("git"))
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(pattern: PrefixPattern(first: "git", rest: [.single("status")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(pattern: PrefixPattern(first: "jj", rest: [.single("status")]), decision: .prompt)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserTreatsHelperArgumentComparisonsAsExpressions() throws {
         let policy = try parsePolicy("""
         COMMAND = ["git", "status"]

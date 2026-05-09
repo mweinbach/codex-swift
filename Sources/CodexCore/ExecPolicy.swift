@@ -646,6 +646,13 @@ public final class PolicyParser {
         case breakLoop
     }
 
+    private enum StarlarkFunctionFlow {
+        case none
+        case continueLoop
+        case breakLoop
+        case returnValue(ConfigValue)
+    }
+
     private var policy = ExecPolicy.empty()
     private var pendingExampleValidations: [(rules: [PrefixRule], matches: [[String]], notMatches: [[String]])] = []
 
@@ -1859,10 +1866,10 @@ public final class PolicyParser {
         body: [String]
     ) throws -> StarlarkFunction {
         let nonEmpty = body
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard nonEmpty.contains(where: { statement in
-            topLevelKeywordRange("return", in: statement)?.lowerBound == statement.startIndex
+            let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+            return topLevelKeywordRange("return", in: trimmed)?.lowerBound == trimmed.startIndex
         })
         else {
             throw ConfigOverrideError.invalidLiteral(body.joined(separator: "\n"))
@@ -3160,23 +3167,180 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction],
         expression: String
     ) throws -> ConfigValue {
-        for statement in function.body {
-            if let returnRange = topLevelKeywordRange("return", in: statement),
-               returnRange.lowerBound == statement.startIndex {
-                let returnExpression = String(statement[returnRange.upperBound...])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !returnExpression.isEmpty else {
-                    throw ConfigOverrideError.invalidLiteral(statement)
-                }
-                return try parsePolicyLiteral(returnExpression, constants: constants, functions: functions)
+        let flow = try executeStarlarkFunctionStatements(
+            function.body,
+            constants: &constants,
+            functions: functions,
+            expression: expression
+        )
+        guard case let .returnValue(value) = flow else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return value
+    }
+
+    private static func executeStarlarkFunctionStatements(
+        _ statements: [String],
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> StarlarkFunctionFlow {
+        var index = 0
+        while index < statements.count {
+            let statement = statements[index]
+            let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed != "pass" else {
+                index += 1
+                continue
             }
 
-            if try parseStarlarkLocalStatement(statement, constants: &constants, functions: functions) {
+            if let returnRange = topLevelKeywordRange("return", in: trimmed),
+               returnRange.lowerBound == trimmed.startIndex {
+                let returnExpression = String(trimmed[returnRange.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !returnExpression.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(trimmed)
+                }
+                return .returnValue(try parsePolicyLiteral(returnExpression, constants: constants, functions: functions))
+            }
+
+            if let forLoop = try parseTopLevelForHeader(statement) {
+                let collected = try collectIndentedBlock(
+                    after: index,
+                    in: statements,
+                    parentIndent: indentationCount(statement),
+                    identifier: expression,
+                    blockName: "for loop"
+                )
+                let iterable = try parsePolicyLiteral(
+                    forLoop.iterableText,
+                    constants: constants,
+                    functions: functions
+                )
+                let items = try starlarkIterableItems(iterable, expression: forLoop.iterableText)
+                var loopConstants = constants
+                var shouldBreakLoop = false
+                for item in items {
+                    try bindStarlarkLoopTargets(
+                        forLoop.targets,
+                        to: item,
+                        constants: &loopConstants,
+                        expression: trimmed
+                    )
+                    let flow = try executeStarlarkFunctionStatements(
+                        collected.body,
+                        constants: &loopConstants,
+                        functions: functions,
+                        expression: expression
+                    )
+                    switch flow {
+                    case .none:
+                        break
+                    case .continueLoop:
+                        continue
+                    case .breakLoop:
+                        shouldBreakLoop = true
+                    case .returnValue:
+                        constants = loopConstants
+                        return flow
+                    }
+                    if shouldBreakLoop {
+                        break
+                    }
+                }
+                constants = loopConstants
+                index = collected.nextIndex
+                continue
+            }
+
+            if let condition = try parseTopLevelIfHeader(statement) {
+                let headerIndent = indentationCount(statement)
+                let thenBlock = try collectIndentedBlock(
+                    after: index,
+                    in: statements,
+                    parentIndent: headerIndent,
+                    identifier: expression,
+                    blockName: "if block"
+                )
+                var nextIndex = thenBlock.nextIndex
+                var branches = [(condition: condition, body: thenBlock.body)]
+                var elseBody: [String] = []
+                while nextIndex < statements.count,
+                      indentationCount(statements[nextIndex]) == headerIndent,
+                      let elifCondition = try parseTopLevelElifHeader(statements[nextIndex]) {
+                    let elifBlock = try collectIndentedBlock(
+                        after: nextIndex,
+                        in: statements,
+                        parentIndent: headerIndent,
+                        identifier: expression,
+                        blockName: "elif block"
+                    )
+                    branches.append((condition: elifCondition, body: elifBlock.body))
+                    nextIndex = elifBlock.nextIndex
+                }
+                if nextIndex < statements.count,
+                   indentationCount(statements[nextIndex]) == headerIndent,
+                   isTopLevelElseHeader(statements[nextIndex]) {
+                    let elseBlock = try collectIndentedBlock(
+                        after: nextIndex,
+                        in: statements,
+                        parentIndent: headerIndent,
+                        identifier: expression,
+                        blockName: "else block"
+                    )
+                    elseBody = elseBlock.body
+                    nextIndex = elseBlock.nextIndex
+                }
+
+                var matchedBranch = false
+                for branch in branches where try evaluateStarlarkCondition(
+                    branch.condition,
+                    constants: constants,
+                    functions: functions
+                ) {
+                    let flow = try executeStarlarkFunctionStatements(
+                        branch.body,
+                        constants: &constants,
+                        functions: functions,
+                        expression: expression
+                    )
+                    if case .none = flow {
+                        matchedBranch = true
+                        break
+                    }
+                    return flow
+                }
+                if !matchedBranch, !elseBody.isEmpty {
+                    let flow = try executeStarlarkFunctionStatements(
+                        elseBody,
+                        constants: &constants,
+                        functions: functions,
+                        expression: expression
+                    )
+                    if case .none = flow {
+                        index = nextIndex
+                        continue
+                    }
+                    return flow
+                }
+                index = nextIndex
+                continue
+            }
+
+            if trimmed == "continue" {
+                return .continueLoop
+            }
+            if trimmed == "break" {
+                return .breakLoop
+            }
+
+            if try parseStarlarkLocalStatement(trimmed, constants: &constants, functions: functions) {
+                index += 1
                 continue
             }
             throw ConfigOverrideError.invalidLiteral(expression)
         }
-        throw ConfigOverrideError.invalidLiteral(expression)
+        return .none
     }
 
     private static func parseStarlarkLocalStatement(
