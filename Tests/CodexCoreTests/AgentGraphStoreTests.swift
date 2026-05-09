@@ -1212,6 +1212,154 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(anchoredPage.numScannedRows, 1)
     }
 
+    func testSQLiteStoreUpsertsThreadMetadataWithRustConflictSemantics() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(120)
+        let createdAt = date(milliseconds: 1_700_000_100_000)
+        let initialMetadata = try threadMetadata(
+            id: threadID,
+            rolloutPath: "/tmp/upsert-initial.jsonl",
+            createdAt: createdAt,
+            updatedAt: date(milliseconds: 1_700_000_101_000),
+            title: "Initial title",
+            tokensUsed: 10,
+            gitInfo: ThreadGitInfo(
+                sha: "sqlite-sha",
+                branch: "sqlite-branch",
+                originURL: "git@example.com:openai/codex.git"
+            )
+        )
+
+        try await store.upsertThread(initialMetadata)
+        let initialMemoryMode = try await store.getThreadMemoryMode(threadID: threadID)
+        let loadedInitial = try await store.getThread(threadID: threadID)
+        let memoryModeChanged = try await store.setThreadMemoryMode(threadID: threadID, memoryMode: "disabled")
+        var rolloutMetadata = try threadMetadata(
+            id: threadID,
+            rolloutPath: "/tmp/upsert-rollout.jsonl",
+            createdAt: createdAt,
+            updatedAt: date(milliseconds: 1_700_000_102_000),
+            title: "Rollout title",
+            tokensUsed: 99,
+            gitInfo: ThreadGitInfo(
+                sha: "rollout-sha",
+                branch: "rollout-branch",
+                originURL: "https://example.com/repo.git"
+            )
+        )
+        rolloutMetadata = ThreadMetadata(
+            id: rolloutMetadata.id,
+            rolloutPath: rolloutMetadata.rolloutPath,
+            createdAt: rolloutMetadata.createdAt,
+            updatedAt: rolloutMetadata.updatedAt,
+            source: rolloutMetadata.source,
+            threadSource: .user,
+            agentNickname: "helper",
+            agentRole: "reviewer",
+            agentPath: rolloutMetadata.agentPath,
+            modelProvider: rolloutMetadata.modelProvider,
+            model: "gpt-5.4",
+            reasoningEffort: .high,
+            cwd: rolloutMetadata.cwd,
+            cliVersion: rolloutMetadata.cliVersion,
+            title: rolloutMetadata.title,
+            sandboxPolicy: rolloutMetadata.sandboxPolicy,
+            approvalMode: rolloutMetadata.approvalMode,
+            tokensUsed: rolloutMetadata.tokensUsed,
+            firstUserMessage: rolloutMetadata.firstUserMessage,
+            archivedAt: rolloutMetadata.archivedAt,
+            gitSHA: rolloutMetadata.gitSHA,
+            gitBranch: rolloutMetadata.gitBranch,
+            gitOriginURL: rolloutMetadata.gitOriginURL
+        )
+        try await store.upsertThread(rolloutMetadata)
+
+        let loadedPersisted = try await store.getThread(threadID: threadID)
+        let persisted = try XCTUnwrap(loadedPersisted)
+        let updatedMemoryMode = try await store.getThreadMemoryMode(threadID: threadID)
+        XCTAssertEqual(initialMemoryMode, "enabled")
+        XCTAssertNotNil(loadedInitial)
+        XCTAssertTrue(memoryModeChanged)
+        XCTAssertEqual(updatedMemoryMode, "disabled")
+        XCTAssertEqual(persisted.rolloutPath, "/tmp/upsert-rollout.jsonl")
+        XCTAssertEqual(persisted.title, "Rollout title")
+        XCTAssertEqual(persisted.tokensUsed, 99)
+        XCTAssertEqual(persisted.threadSource, .user)
+        XCTAssertEqual(persisted.agentNickname, "helper")
+        XCTAssertEqual(persisted.agentRole, "reviewer")
+        XCTAssertEqual(persisted.model, "gpt-5.4")
+        XCTAssertEqual(persisted.reasoningEffort, .high)
+        XCTAssertEqual(persisted.gitSHA, "sqlite-sha")
+        XCTAssertEqual(persisted.gitBranch, "sqlite-branch")
+        XCTAssertEqual(persisted.gitOriginURL, "git@example.com:openai/codex.git")
+    }
+
+    func testSQLiteStoreInsertThreadIfAbsentPreservesExistingMetadataAndAddsSpawnEdge() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let parentThreadID = try threadID(121)
+        let existingThreadID = try threadID(122)
+        let newThreadID = try threadID(123)
+        let spawnSource = try persistedSource(
+            .subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 1))
+        )
+        let existingMetadata = try threadMetadata(
+            id: existingThreadID,
+            rolloutPath: "/tmp/existing.jsonl",
+            updatedAt: date(milliseconds: 1_700_000_111_000),
+            source: "cli",
+            title: "Existing",
+            tokensUsed: 123,
+            firstUserMessage: "newer preview"
+        )
+        let fallbackMetadata = try threadMetadata(
+            id: existingThreadID,
+            rolloutPath: "/tmp/fallback.jsonl",
+            updatedAt: date(milliseconds: 1_700_000_001_000),
+            source: spawnSource,
+            title: "Fallback",
+            tokensUsed: 0,
+            firstUserMessage: nil
+        )
+        let newMetadata = try threadMetadata(
+            id: newThreadID,
+            rolloutPath: "/tmp/new.jsonl",
+            updatedAt: date(milliseconds: 1_700_000_112_000),
+            source: spawnSource,
+            title: "New",
+            tokensUsed: 7
+        )
+
+        try await store.upsertThread(existingMetadata)
+        let existingInserted = try await store.insertThreadIfAbsent(fallbackMetadata)
+        let newInserted = try await store.insertThreadIfAbsent(newMetadata)
+
+        let loadedExisting = try await store.getThread(threadID: existingThreadID)
+        let loadedNew = try await store.getThread(threadID: newThreadID)
+        let persistedExisting = try XCTUnwrap(loadedExisting)
+        let persistedNew = try XCTUnwrap(loadedNew)
+        let newMemoryMode = try await store.getThreadMemoryMode(threadID: newThreadID)
+        let inferredChildren = try await store.listThreadSpawnChildren(
+            parentThreadID: parentThreadID,
+            statusFilter: .open
+        )
+        XCTAssertFalse(existingInserted)
+        XCTAssertTrue(newInserted)
+        XCTAssertEqual(persistedExisting.rolloutPath, "/tmp/existing.jsonl")
+        XCTAssertEqual(persistedExisting.title, "Existing")
+        XCTAssertEqual(persistedExisting.tokensUsed, 123)
+        XCTAssertEqual(persistedExisting.firstUserMessage, "newer preview")
+        XCTAssertEqual(persistedNew.rolloutPath, "/tmp/new.jsonl")
+        XCTAssertEqual(persistedNew.firstUserMessage, "hello")
+        XCTAssertEqual(newMemoryMode, "enabled")
+        XCTAssertEqual(inferredChildren, [existingThreadID, newThreadID])
+    }
+
     func testSQLiteStoreFindsNewestThreadByExactTitleWithRustFilters() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -1396,6 +1544,38 @@ final class AgentGraphStoreTests: XCTestCase {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
     }
 
+    private func threadMetadata(
+        id: ThreadId,
+        rolloutPath: String,
+        createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        updatedAt: Date,
+        source: String = "cli",
+        title: String,
+        tokensUsed: Int64 = 0,
+        firstUserMessage: String? = "hello",
+        gitInfo: ThreadGitInfo = ThreadGitInfo()
+    ) throws -> ThreadMetadata {
+        ThreadMetadata(
+            id: id,
+            rolloutPath: rolloutPath,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            source: source,
+            agentPath: try AgentPath(validating: "/root/thread_\(id.description.suffix(12))").description,
+            modelProvider: "openai",
+            cwd: "/repo",
+            cliVersion: "0.0.0-test",
+            title: title,
+            sandboxPolicy: "workspace-write",
+            approvalMode: "on-request",
+            tokensUsed: tokensUsed,
+            firstUserMessage: firstUserMessage,
+            gitSHA: gitInfo.sha,
+            gitBranch: gitInfo.branch,
+            gitOriginURL: gitInfo.originURL
+        )
+    }
+
     private func insertRawSQLiteThreadSpawnEdge(
         databaseURL: URL,
         parentThreadID: ThreadId,
@@ -1440,6 +1620,7 @@ final class AgentGraphStoreTests: XCTestCase {
                     agent_path TEXT,
                     memory_mode TEXT,
                     rollout_path TEXT,
+                    created_at INTEGER,
                     created_at_ms INTEGER,
                     archived INTEGER NOT NULL DEFAULT 0,
                     archived_at INTEGER,
@@ -1508,6 +1689,7 @@ final class AgentGraphStoreTests: XCTestCase {
                     agent_path,
                     memory_mode,
                     rollout_path,
+                    created_at,
                     created_at_ms,
                     archived,
                     archived_at,
@@ -1530,7 +1712,7 @@ final class AgentGraphStoreTests: XCTestCase {
                     git_sha,
                     git_branch,
                     git_origin_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
@@ -1549,36 +1731,37 @@ final class AgentGraphStoreTests: XCTestCase {
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 4), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 5, createdAtMilliseconds), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int(preparedStatement, 6, archived ? 1 : 0), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 5, createdAtMilliseconds / 1_000), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 6, createdAtMilliseconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int(preparedStatement, 7, archived ? 1 : 0), SQLITE_OK)
             if let archivedAt {
-                XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 7, archivedAt), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, archivedAt), SQLITE_OK)
             } else {
-                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 7), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 8), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 8, source, -1, testSQLiteTransient), SQLITE_OK)
-            bindOptionalText(threadSource, to: preparedStatement, at: 9)
-            bindOptionalText(agentNickname, to: preparedStatement, at: 10)
-            bindOptionalText(agentRole, to: preparedStatement, at: 11)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 12, modelProvider, -1, testSQLiteTransient), SQLITE_OK)
-            bindOptionalText(model, to: preparedStatement, at: 13)
-            bindOptionalText(reasoningEffort, to: preparedStatement, at: 14)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 15, cwd, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 16, cliVersion, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 17, firstUserMessage, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 18, sandboxPolicy, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 19, approvalMode, -1, testSQLiteTransient), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 20, tokensUsed), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 9, source, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(threadSource, to: preparedStatement, at: 10)
+            bindOptionalText(agentNickname, to: preparedStatement, at: 11)
+            bindOptionalText(agentRole, to: preparedStatement, at: 12)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 13, modelProvider, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(model, to: preparedStatement, at: 14)
+            bindOptionalText(reasoningEffort, to: preparedStatement, at: 15)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 16, cwd, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 17, cliVersion, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 18, firstUserMessage, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 19, sandboxPolicy, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 20, approvalMode, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 21, tokensUsed), SQLITE_OK)
             if let title {
-                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 21, title, -1, testSQLiteTransient), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 22, title, -1, testSQLiteTransient), SQLITE_OK)
             } else {
-                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 21), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 22), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 22, updatedAt.seconds), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 23, updatedAt.milliseconds), SQLITE_OK)
-            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 24)
-            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 25)
-            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 26)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 23, updatedAt.seconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 24, updatedAt.milliseconds), SQLITE_OK)
+            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 25)
+            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 26)
+            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 27)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }

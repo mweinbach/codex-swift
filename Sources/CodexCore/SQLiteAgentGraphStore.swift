@@ -230,6 +230,79 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func getThread(threadID: ThreadId) async throws -> ThreadMetadata? {
+        let database = handle.database
+        return try Self.withStatement(
+            query: Self.threadSelectColumns + " FROM threads WHERE threads.id = ?",
+            bindings: [.text(threadID.description)],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return try Self.threadMetadata(from: statement)
+        }
+    }
+
+    public func upsertThread(_ metadata: ThreadMetadata) async throws {
+        try await upsertThread(metadata, creationMemoryMode: nil)
+    }
+
+    public func insertThreadIfAbsent(_ metadata: ThreadMetadata) async throws -> Bool {
+        let updatedAtMilliseconds = allocateThreadUpdatedAt(metadata.updatedAt)
+        let database = handle.database
+        try Self.execute(
+            """
+            INSERT INTO threads (
+                id,
+                rollout_path,
+                created_at,
+                updated_at,
+                created_at_ms,
+                updated_at_ms,
+                source,
+                thread_source,
+                agent_nickname,
+                agent_role,
+                agent_path,
+                model_provider,
+                model,
+                reasoning_effort,
+                cwd,
+                cli_version,
+                title,
+                sandbox_policy,
+                approval_mode,
+                tokens_used,
+                first_user_message,
+                archived,
+                archived_at,
+                git_sha,
+                git_branch,
+                git_origin_url,
+                memory_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+            """,
+            bindings: Self.threadMetadataBindings(
+                metadata,
+                updatedAtMilliseconds: updatedAtMilliseconds,
+                memoryMode: "enabled"
+            ),
+            database: database
+        )
+        let inserted = sqlite3_changes(database) > 0
+        try await insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: metadata.id,
+            source: metadata.source
+        )
+        return inserted
+    }
+
     public func setThreadMemoryMode(threadID: ThreadId, memoryMode: String) async throws -> Bool {
         let database = handle.database
         try Self.execute(
@@ -678,6 +751,79 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
+    private func upsertThread(_ metadata: ThreadMetadata, creationMemoryMode: String?) async throws {
+        let updatedAtMilliseconds = allocateThreadUpdatedAt(metadata.updatedAt)
+        try Self.execute(
+            """
+            INSERT INTO threads (
+                id,
+                rollout_path,
+                created_at,
+                updated_at,
+                created_at_ms,
+                updated_at_ms,
+                source,
+                thread_source,
+                agent_nickname,
+                agent_role,
+                agent_path,
+                model_provider,
+                model,
+                reasoning_effort,
+                cwd,
+                cli_version,
+                title,
+                sandbox_policy,
+                approval_mode,
+                tokens_used,
+                first_user_message,
+                archived,
+                archived_at,
+                git_sha,
+                git_branch,
+                git_origin_url,
+                memory_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                rollout_path = excluded.rollout_path,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                created_at_ms = excluded.created_at_ms,
+                updated_at_ms = excluded.updated_at_ms,
+                source = excluded.source,
+                thread_source = excluded.thread_source,
+                agent_nickname = excluded.agent_nickname,
+                agent_role = excluded.agent_role,
+                agent_path = excluded.agent_path,
+                model_provider = excluded.model_provider,
+                model = excluded.model,
+                reasoning_effort = excluded.reasoning_effort,
+                cwd = excluded.cwd,
+                cli_version = excluded.cli_version,
+                title = excluded.title,
+                sandbox_policy = excluded.sandbox_policy,
+                approval_mode = excluded.approval_mode,
+                tokens_used = excluded.tokens_used,
+                first_user_message = excluded.first_user_message,
+                archived = excluded.archived,
+                archived_at = excluded.archived_at,
+                git_sha = COALESCE(threads.git_sha, excluded.git_sha),
+                git_branch = COALESCE(threads.git_branch, excluded.git_branch),
+                git_origin_url = COALESCE(threads.git_origin_url, excluded.git_origin_url)
+            """,
+            bindings: Self.threadMetadataBindings(
+                metadata,
+                updatedAtMilliseconds: updatedAtMilliseconds,
+                memoryMode: creationMemoryMode ?? "enabled"
+            ),
+            database: handle.database
+        )
+        try await insertThreadSpawnEdgeFromSourceIfAbsent(
+            childThreadID: metadata.id,
+            source: metadata.source
+        )
+    }
+
     private func allocateThreadUpdatedAt(_ updatedAt: Date) -> Int64 {
         let candidate = Self.epochMilliseconds(updatedAt)
         if candidate > threadUpdatedAtMilliseconds {
@@ -790,6 +936,12 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 }
             case let .int(number):
                 bindResult = sqlite3_bind_int64(statement, bindIndex, number)
+            case let .optionalInt(number):
+                if let number {
+                    bindResult = sqlite3_bind_int64(statement, bindIndex, number)
+                } else {
+                    bindResult = sqlite3_bind_null(statement, bindIndex)
+                }
             case let .bool(flag):
                 bindResult = sqlite3_bind_int(statement, bindIndex, flag ? 1 : 0)
             }
@@ -844,6 +996,42 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
 
     private static func placeholders(count: Int) -> String {
         Array(repeating: "?", count: count).joined(separator: ", ")
+    }
+
+    private static func threadMetadataBindings(
+        _ metadata: ThreadMetadata,
+        updatedAtMilliseconds: Int64,
+        memoryMode: String
+    ) -> [SQLiteBinding] {
+        [
+            .text(metadata.id.description),
+            .text(metadata.rolloutPath),
+            .int(epochSeconds(metadata.createdAt)),
+            .int(epochSeconds(fromMilliseconds: updatedAtMilliseconds)),
+            .int(epochMilliseconds(metadata.createdAt)),
+            .int(updatedAtMilliseconds),
+            .text(metadata.source),
+            .optionalText(metadata.threadSource?.rawValue),
+            .optionalText(metadata.agentNickname),
+            .optionalText(metadata.agentRole),
+            .optionalText(metadata.agentPath),
+            .text(metadata.modelProvider),
+            .optionalText(metadata.model),
+            .optionalText(metadata.reasoningEffort?.rawValue),
+            .text(metadata.cwd),
+            .text(metadata.cliVersion),
+            .text(metadata.title),
+            .text(metadata.sandboxPolicy),
+            .text(metadata.approvalMode),
+            .int(metadata.tokensUsed),
+            .text(metadata.firstUserMessage ?? ""),
+            .bool(metadata.archivedAt != nil),
+            .optionalInt(metadata.archivedAt.map(epochSeconds)),
+            .optionalText(metadata.gitSHA),
+            .optionalText(metadata.gitBranch),
+            .optionalText(metadata.gitOriginURL),
+            .text(memoryMode),
+        ]
     }
 
     private static let threadSelectColumns =
@@ -1191,6 +1379,7 @@ private enum SQLiteBinding {
     case text(String)
     case optionalText(String?)
     case int(Int64)
+    case optionalInt(Int64?)
     case bool(Bool)
 }
 

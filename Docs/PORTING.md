@@ -863,6 +863,8 @@ Source baseline inspected for this scaffold:
   - added SQLite exact-title metadata lookup with Rust's normal thread filters, optional cwd equality, newest-updated row selection, metadata column mapping, unknown thread-source rejection, and invalid reasoning-effort-to-nil behavior.
 - `codex-rs/state/src/runtime/threads.rs` thread metadata paging
   - added SQLite metadata page listing with Rust's page-size-plus-one scan, `num_scanned_rows`, next-anchor derivation from the last returned item, created/updated sort keys, ascending/descending anchor operators, cwd filter handling including empty-filter no-match behavior, source/provider filters, title substring search, and non-empty first-user-message filtering.
+- `codex-rs/state/src/runtime/threads.rs` thread metadata upsert/insert/get helpers
+  - added SQLite `get_thread`, `upsert_thread`, and `insert_thread_if_absent` equivalents with Rust's full metadata column bindings, created/updated second-plus-millisecond persistence, first-message empty-string fallback, default `"enabled"` memory mode on insert, conflict upsert preservation for existing git fields and memory mode, no-overwrite insert semantics, and thread-spawn edge materialization from persisted session source strings.
 
 ## Known Gaps
 
