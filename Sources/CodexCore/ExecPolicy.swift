@@ -7345,6 +7345,12 @@ public enum ExecApprovalRequirement: Equatable, Sendable {
 private struct ExecPolicyCommands {
     let commands: [[String]]
     let allowsAutoAmendment: Bool
+    let origin: ExecPolicyCommandOrigin
+}
+
+private enum ExecPolicyCommandOrigin {
+    case generic
+    case powerShell
 }
 
 public final class ExecPolicyManager: @unchecked Sendable {
@@ -7463,14 +7469,23 @@ public final class ExecPolicyManager: @unchecked Sendable {
         _ = features
         let policyCommands = Self.commandsForExecPolicy(command)
         let evaluation = policy.checkMultiple(policyCommands.commands) { commandSlice in
-            CommandSafety.requiresInitialApproval(
-                policy: approvalPolicy,
-                sandboxPolicy: sandboxPolicy,
-                command: Array(commandSlice),
-                sandboxPermissions: sandboxPermissions
-            )
-            ? .prompt
-            : .allow
+            let command = Array(commandSlice)
+            switch policyCommands.origin {
+            case .generic:
+                return CommandSafety.requiresInitialApproval(
+                    policy: approvalPolicy,
+                    sandboxPolicy: sandboxPolicy,
+                    command: command,
+                    sandboxPermissions: sandboxPermissions
+                ) ? .prompt : .allow
+            case .powerShell:
+                return CommandSafety.requiresInitialApprovalForPowerShellWords(
+                    policy: approvalPolicy,
+                    sandboxPolicy: sandboxPolicy,
+                    command: command,
+                    sandboxPermissions: sandboxPermissions
+                ) ? .prompt : .allow
+            }
         }
 
         switch evaluation.decision {
@@ -7506,12 +7521,15 @@ public final class ExecPolicyManager: @unchecked Sendable {
 
     private static func commandsForExecPolicy(_ command: [String]) -> ExecPolicyCommands {
         if let commands = BashPlainCommandParser.parseShellLcPlainCommands(command) {
-            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true)
+            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true, origin: .generic)
+        }
+        if let commands = CommandSafety.parsePowerShellCommandIntoPlainCommands(command) {
+            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true, origin: .powerShell)
         }
         if let command = BashPlainCommandParser.parseShellLcSingleCommandPrefix(command) {
-            return ExecPolicyCommands(commands: [command], allowsAutoAmendment: false)
+            return ExecPolicyCommands(commands: [command], allowsAutoAmendment: false, origin: .generic)
         }
-        return ExecPolicyCommands(commands: [command], allowsAutoAmendment: true)
+        return ExecPolicyCommands(commands: [command], allowsAutoAmendment: true, origin: .generic)
     }
 
     public func appendAmendmentAndUpdate(

@@ -137,6 +137,48 @@ public enum CommandSafety {
         }
     }
 
+    static func parsePowerShellCommandIntoPlainCommands(_ command: [String]) -> [[String]]? {
+        guard let executable = command.first,
+              isPowerShellExecutable(executable),
+              let commands = parseSafePowerShellInvocation(
+                executable: executable,
+                arguments: Array(command.dropFirst())
+              ),
+              !commands.isEmpty
+        else {
+            return nil
+        }
+        return commands
+    }
+
+    static func requiresInitialApprovalForPowerShellWords(
+        policy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        command: [String],
+        sandboxPermissions: SandboxPermissions
+    ) -> Bool {
+        if isSafePowerShellCommand(command) {
+            return false
+        }
+
+        switch policy {
+        case .never, .onFailure:
+            return false
+        case .onRequest, .granular:
+            switch sandboxPolicy {
+            case .dangerFullAccess, .externalSandbox:
+                return isDangerousPowerShellWords(command)
+            case .readOnly, .workspaceWrite:
+                if sandboxPermissions.requiresEscalatedPermissions {
+                    return true
+                }
+                return isDangerousPowerShellWords(command)
+            }
+        case .unlessTrusted:
+            return true
+        }
+    }
+
     public static func commandMightBeDangerous(_ command: [String]) -> Bool {
         if isDangerousCommandWindows(command) {
             return true
@@ -158,10 +200,6 @@ public enum CommandSafety {
     public static func isDangerousToCallWithExec(_ command: [String]) -> Bool {
         guard let commandName = command.first else {
             return false
-        }
-
-        if commandName.hasSuffix("git") || commandName.hasSuffix("/git") {
-            return command.dropFirst().first == "reset" || command.dropFirst().first == "rm"
         }
 
         if commandName == "rm" {
@@ -862,10 +900,14 @@ public enum CommandSafety {
             return false
         }
 
-        let normalizedTokens = parsed.map {
+        return isDangerousPowerShellWords(parsed)
+    }
+
+    private static func isDangerousPowerShellWords(_ command: [String]) -> Bool {
+        let normalizedTokens = command.map {
             $0.trimmingCharacters(in: CharacterSet(charactersIn: "'\"")).lowercased()
         }
-        let hasURL = argsHaveURL(parsed)
+        let hasURL = argsHaveURL(command)
 
         if hasURL,
            normalizedTokens.contains(where: { token in
@@ -910,7 +952,51 @@ public enum CommandSafety {
             return true
         }
 
-        return false
+        return hasForceDeletePowerShellCmdlet(normalizedTokens)
+    }
+
+    private static func hasForceDeletePowerShellCmdlet(_ tokens: [String]) -> Bool {
+        let deleteCmdlets: Set<String> = ["remove-item", "ri", "rm", "del", "erase", "rd", "rmdir"]
+        let hardSeparators: Set<Character> = [";", "|", "&", "\n", "\r", "\t"]
+        let softSeparators: Set<Character> = ["{", "}", "(", ")", "[", "]", ",", ";"]
+        var segments: [[String]] = [[]]
+
+        for token in tokens {
+            var current = ""
+            for character in token {
+                if hardSeparators.contains(character) {
+                    let atom = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !atom.isEmpty {
+                        segments[segments.count - 1].append(atom)
+                    }
+                    current.removeAll(keepingCapacity: true)
+                    if segments.last?.isEmpty == false {
+                        segments.append([])
+                    }
+                } else {
+                    current.append(character)
+                }
+            }
+            let atom = current.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !atom.isEmpty {
+                segments[segments.count - 1].append(atom)
+            }
+        }
+
+        return segments.contains { segment in
+            var hasDelete = false
+            var hasForce = false
+            for atom in segment.flatMap({ $0.split(whereSeparator: { softSeparators.contains($0) }) }) {
+                let value = String(atom).trimmingCharacters(in: .whitespacesAndNewlines)
+                if deleteCmdlets.contains(value) {
+                    hasDelete = true
+                }
+                if value == "-force" || value.hasPrefix("-force:") {
+                    hasForce = true
+                }
+            }
+            return hasDelete && hasForce
+        }
     }
 
     private static func isDangerousCmd(_ command: [String]) -> Bool {

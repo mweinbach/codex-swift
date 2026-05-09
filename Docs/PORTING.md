@@ -756,10 +756,16 @@ Source baseline inspected for this scaffold:
   - `shlexJoin` now returns Rust's `<command included NUL byte>` fallback when a token contains a NUL byte instead of attempting to quote an unrepresentable shell word.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
+- `codex-rs/shell-command/src/command_safety/is_dangerous_command.rs` dangerous-command heuristic
+  - aligned Swift `commandMightBeDangerous` with Rust's narrow generic-shell heuristic: only direct `rm -f`/`rm -rf` and `sudo` wrapping those commands are treated as dangerous here; git subcommands continue to be handled by the safe-command and execpolicy paths rather than this dangerous-command classifier.
 - `codex-rs/shell-command/src/bash.rs` word-only shell parser rejection
   - tightened Swift bash-script fallback detection so expansion and subshell constructs collapse to a whole-script unknown instead of being simplified as word-only command sequences, while preserving Rust's literal handling for escaped `$` and backtick characters inside double-quoted words.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
+- `codex-rs/core/src/exec_policy.rs` PowerShell command-origin lowering
+  - routed Swift exec-policy checks through the Rust-style PowerShell `-Command`/`-c` body parser so prefix rules, heuristics, and proposed amendments evaluate inner PowerShell words such as `Get-Content Cargo.toml` instead of the wrapper argv.
+- `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` PowerShell force-delete heuristic
+  - matched Rust's detection of `Remove-Item`/alias commands paired with `-Force`, including chained or punctuation-adjacent forms, so Windows PowerShell delete operations are classified as dangerous while non-force deletes remain unflagged.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/core/src/thread_rollout_truncation.rs`

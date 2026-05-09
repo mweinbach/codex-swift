@@ -136,14 +136,14 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls > out.txt"]))
     }
 
-    func testDangerousCommands() {
-        XCTAssertTrue(CommandSafety.commandMightBeDangerous(["git", "reset"]))
-        XCTAssertTrue(CommandSafety.commandMightBeDangerous(["bash", "-lc", "git reset --hard"]))
-        XCTAssertTrue(CommandSafety.commandMightBeDangerous(["zsh", "-lc", "git reset --hard"]))
+    func testDangerousCommandsMatchRustShellCommandHeuristics() {
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous(["git", "reset"]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous(["bash", "-lc", "git reset --hard"]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous(["zsh", "-lc", "git reset --hard"]))
         XCTAssertFalse(CommandSafety.commandMightBeDangerous(["git", "status"]))
         XCTAssertFalse(CommandSafety.commandMightBeDangerous(["bash", "-lc", "git status"]))
-        XCTAssertTrue(CommandSafety.commandMightBeDangerous(["sudo", "git", "reset", "--hard"]))
-        XCTAssertTrue(CommandSafety.commandMightBeDangerous(["/usr/bin/git", "reset", "--hard"]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous(["sudo", "git", "reset", "--hard"]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous(["/usr/bin/git", "reset", "--hard"]))
         XCTAssertTrue(CommandSafety.commandMightBeDangerous(["rm", "-rf", "/"]))
         XCTAssertTrue(CommandSafety.commandMightBeDangerous(["rm", "-f", "/"]))
     }
@@ -184,6 +184,29 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.commandMightBeDangerous([
             "msedge.exe",
             "https://example.com"
+        ]))
+    }
+
+    func testWindowsPowerShellForceDeleteMatchesRustDangerHeuristic() {
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Remove-Item test -Force"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "pwsh",
+            "-Command",
+            "ri test -Force"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Write-Host hi;Remove-Item -Force C:\\tmp"
+        ]))
+        XCTAssertFalse(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Remove-Item test"
         ]))
     }
 

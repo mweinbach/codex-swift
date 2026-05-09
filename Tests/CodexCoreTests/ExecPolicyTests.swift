@@ -3880,6 +3880,49 @@ final class ExecPolicyTests: XCTestCase {
             .skip(bypassSandbox: true, proposedExecPolicyAmendment: nil)
         )
     }
+
+    func testPowerShellExecPolicyMatchesInnerCommandWordsLikeRust() throws {
+        let command = tokens("powershell.exe", "-Command", "Get-Content Cargo.toml")
+
+        XCTAssertEqual(
+            ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["Get-Content"], decision="forbidden")"#))
+                .createExecApprovalRequirementForCommand(
+                    features: .withDefaults(),
+                    command: command,
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .readOnly,
+                    sandboxPermissions: .useDefault
+                ),
+            .forbidden(reason: ExecPolicyManager.forbiddenReason)
+        )
+
+        XCTAssertEqual(
+            ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["Get-Content"], decision="allow")"#))
+                .createExecApprovalRequirementForCommand(
+                    features: .withDefaults(),
+                    command: command,
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .readOnly,
+                    sandboxPermissions: .useDefault
+                ),
+            .skip(bypassSandbox: true, proposedExecPolicyAmendment: nil)
+        )
+
+        XCTAssertEqual(
+            ExecPolicyManager()
+                .createExecApprovalRequirementForCommand(
+                    features: .withDefaults(),
+                    command: command,
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .readOnly,
+                    sandboxPermissions: .useDefault
+                ),
+            .skip(
+                bypassSandbox: false,
+                proposedExecPolicyAmendment: ExecPolicyAmendment(command: tokens("Get-Content", "Cargo.toml"))
+            )
+        )
+    }
 }
 
 private func parsePolicy(_ source: String) throws -> ExecPolicy {
