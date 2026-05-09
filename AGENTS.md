@@ -53,6 +53,10 @@ explicitly records an intentional Swift limitation.
 - Do not use detached tasks as a shortcut around ownership or lifetime problems.
   Prefer structured tasks, explicit cancellation paths, and injected clocks or
   transports in tests.
+- For protocol requirements that cross concurrency domains, spell the async
+  contract directly with `async`/`throws`, return `Sendable` values where
+  relevant, and keep implementations actor-safe instead of bypassing checking
+  with broad annotations.
 
 ## Codable And Wire Shapes
 
@@ -67,6 +71,9 @@ explicitly records an intentional Swift limitation.
 - When adding app-server v2 request/response/notification models, keep method
   names in `<resource>/<method>` form and use singular resource names.
 - Config RPC payloads may use snake_case when mirroring `config.toml` keys.
+- Swift optionals must preserve the Rust wire contract. Use `encodeIfPresent`
+  only for fields Rust omits when absent; explicitly encode `null` for fields
+  Rust serializes as `null`.
 
 ## Module Boundaries
 
@@ -110,8 +117,6 @@ git diff --check
 - `Docs/PORTING.md` is the checkpoint ledger for completed and pending parity.
 - `Docs/SwiftPort/` contains Swift-rewritten copies of relevant upstream Codex
   docs. Keep them practical for this Swift package, not merely pasted Rust docs.
-- When refreshing from `/Users/mweinbach/Projects/codex`, translate Rust-specific
-  guidance into Swift equivalents. For example, translate Cargo/Clippy/Bazel
-  instructions into SwiftPM/test guidance, Rust trait guidance into Swift
-  protocol/concurrency guidance, and serde/ts-rs rules into Swift `Codable`
-  wire-shape rules.
+- When refreshing from `/Users/mweinbach/Projects/codex`, replace Rust-specific
+  guidance with the Swift equivalents above: SwiftPM/test commands, Swift
+  argument-label and protocol/concurrency rules, and `Codable` wire-shape rules.

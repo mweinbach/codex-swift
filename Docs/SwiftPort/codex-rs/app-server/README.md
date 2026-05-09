@@ -1916,40 +1916,39 @@ Use this checklist when introducing a field/method that should only be available
 
 At runtime, clients must send `initialize` with `capabilities.experimentalApi = true` to use experimental methods or fields.
 
-1. Annotate the field in the protocol type (usually `app-server-protocol/src/protocol/v2.rs`) with:
-   ```rust
-   #[experimental("thread/start.myField")]
-   pub my_field: Option<String>,
+1. Add the Swift `Codable` field or method case using the exact Rust wire name.
+   For field-level gates, keep decoding broad enough to detect the field before
+   constructing the typed request model. A present `null` value still counts as
+   "the client set this field" when Rust treats it that way.
+
+2. Add or update the explicit guard in `CodexAppServer`. Field-level gates live
+   beside helpers such as `requireThreadStartExperimentalFieldsAPI`, while
+   method-level gates should call `requireExperimentalAPI(method:experimentalAPIEnabled:)`.
+   Keep the descriptor string exact:
+
+   ```swift
+   if let value = params?["myField"], !(value is NSNull) {
+       throw AppServerError.invalidRequest(
+           "thread/start.myField requires experimentalApi capability"
+       )
+   }
    ```
-2. Ensure the params type derives `ExperimentalApi` so field-level gating can be detected at runtime.
 
-3. In `app-server-protocol/src/protocol/common.rs`, keep the method stable and use `inspect_params: true` when only some fields are experimental (like `thread/start`). If the entire method is experimental, annotate the method variant with `#[experimental("method/name")]`.
+3. Gate nested enum-like payloads by inspecting the decoded JSON object before
+   normal request handling. For example, `approvalPolicy: { "granular": ... }`
+   must reject with `askForApproval.granular requires experimentalApi capability`
+   before the request is allowed to proceed without opt-in.
 
-Enum variants can be gated too:
+4. For server-initiated request payloads, add a redaction path on the Swift model
+   when non-experimental clients must not see the field. Keep this close to
+   existing helpers such as `redactingExperimentalFields(experimentalAPIEnabled:)`.
 
-```rust
-#[derive(ExperimentalApi)]
-enum AskForApproval {
-    #[experimental("askForApproval.granular")]
-    Granular { /* ... */ },
-}
-```
+5. Add protocol fixtures that cover all three important cases: omitted field is
+   allowed, field present without opt-in is rejected with the exact Rust message,
+   and the same field is accepted when `initialize.capabilities.experimentalApi`
+   is `true`.
 
-If a stable field contains a nested type that may itself be experimental, mark
-the field with `#[experimental(nested)]` so `ExperimentalApi` bubbles the nested
-reason up through the containing type:
-
-```rust
-#[derive(ExperimentalApi)]
-struct ProfileV2 {
-    #[experimental(nested)]
-    approval_policy: Option<AskForApproval>,
-}
-```
-
-For server-initiated request payloads, annotate the field the same way so schema generation treats it as experimental, and make sure app-server omits that field when the client did not opt into `experimentalApi`.
-
-4. Regenerate protocol fixtures through the Swift CLI wrapper. The Swift wrapper
+6. Regenerate protocol fixtures through the Swift CLI wrapper. The Swift wrapper
    delegates to the Rust generator when `CODEX_RUST_BINARY` is configured or a
    sibling Rust checkout is available:
 
@@ -1959,7 +1958,7 @@ For server-initiated request payloads, annotate the field the same way so schema
    swift run codex app-server generate-json-schema --experimental --out /tmp/codex-app-server-schema
    ```
 
-5. Verify the Swift app-server and protocol model tests:
+7. Verify the Swift app-server and protocol model tests:
 
    ```bash
    swift test --filter CodexAppServerTests

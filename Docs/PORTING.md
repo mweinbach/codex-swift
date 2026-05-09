@@ -658,6 +658,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread-resume response shape
   - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile.
+- `AGENTS.md` and `Docs/SwiftPort` Swift guidance
+  - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` optional/null semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
 
 ## Known Gaps
 
