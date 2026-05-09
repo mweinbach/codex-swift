@@ -2494,7 +2494,7 @@ public enum CodexAppServer {
     fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
         _ = try absolutePathParam(params?["pluginPath"], name: "pluginPath")
         let remotePluginID = stringParam(params?["remotePluginId"])
-        let discoverability = stringParam(params?["discoverability"])
+        let discoverability = try pluginShareSaveDiscoverability(params?["discoverability"])
         let shareTargets = params?["shareTargets"]
         if let remotePluginID, (remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID)) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
@@ -2519,7 +2519,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
         _ = try pluginShareUpdateDiscoverability(params?["discoverability"])
-        try validatePluginShareTargets(params?["shareTargets"])
+        try validatePluginShareTargets(params?["shareTargets"], required: true)
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
     }
 
@@ -2538,14 +2538,39 @@ public enum CodexAppServer {
     private static func pluginShareUpdateDiscoverability(_ value: Any?) throws -> String {
         let discoverability = stringParam(value) ?? ""
         guard discoverability == "UNLISTED" || discoverability == "PRIVATE" else {
-            throw AppServerError.invalidRequest("unknown variant `\(discoverability)`, expected `UNLISTED` or `PRIVATE`")
+            throw AppServerError.invalidParams("unknown variant `\(discoverability)`, expected `UNLISTED` or `PRIVATE`")
         }
         return discoverability
     }
 
-    private static func validatePluginShareTargets(_ value: Any?) throws {
+    private static func pluginShareSaveDiscoverability(_ value: Any?) throws -> String? {
+        guard let discoverability = stringParam(value) else {
+            return nil
+        }
+        let validDiscoverability: Set<String> = ["LISTED", "UNLISTED", "PRIVATE"]
+        guard validDiscoverability.contains(discoverability) else {
+            throw AppServerError.invalidParams(
+                "unknown variant `\(discoverability)`, expected one of `LISTED`, `UNLISTED`, `PRIVATE`"
+            )
+        }
+        return discoverability
+    }
+
+    private static func validatePluginShareTargets(_ value: Any?, required: Bool = false) throws {
+        if value == nil, required {
+            throw AppServerError.invalidParams("missing field `shareTargets`")
+        }
         guard let targets = value as? [[String: Any]] else {
             return
+        }
+        let validPrincipalTypes: Set<String> = ["user", "group", "workspace"]
+        for target in targets {
+            let principalType = stringParam(target["principalType"]) ?? ""
+            guard validPrincipalTypes.contains(principalType) else {
+                throw AppServerError.invalidParams(
+                    "unknown variant `\(principalType)`, expected one of `user`, `group`, `workspace`"
+                )
+            }
         }
         if targets.contains(where: { $0["principalType"] as? String == "workspace" }) {
             throw AppServerError.invalidRequest(

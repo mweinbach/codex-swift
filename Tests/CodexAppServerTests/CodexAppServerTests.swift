@@ -2210,7 +2210,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let saveWorkspaceTarget = try appServerResponse(
-            #"{"id":4,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            #"{"id":5,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
             codexHome: temp.url
         )
         let saveWorkspaceTargetError = try XCTUnwrap(saveWorkspaceTarget["error"] as? [String: Any])
@@ -2221,7 +2221,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let invalidUpdateID = try appServerResponse(
-            #"{"id":5,"method":"plugin/share/updateTargets","params":{"remotePluginId":"bad id","discoverability":"UNLISTED","shareTargets":[]}}"#,
+            #"{"id":7,"method":"plugin/share/updateTargets","params":{"remotePluginId":"bad id","discoverability":"UNLISTED","shareTargets":[]}}"#,
             codexHome: temp.url
         )
         let invalidUpdateIDError = try XCTUnwrap(invalidUpdateID["error"] as? [String: Any])
@@ -2229,7 +2229,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidUpdateIDError["message"] as? String, "invalid remote plugin id")
 
         let updateWorkspaceTarget = try appServerResponse(
-            #"{"id":6,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            #"{"id":8,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
             codexHome: temp.url
         )
         let updateWorkspaceTargetError = try XCTUnwrap(updateWorkspaceTarget["error"] as? [String: Any])
@@ -2240,12 +2240,42 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let invalidDeleteID = try appServerResponse(
-            #"{"id":7,"method":"plugin/share/delete","params":{"remotePluginId":"bad id"}}"#,
+            #"{"id":9,"method":"plugin/share/delete","params":{"remotePluginId":"bad id"}}"#,
             codexHome: temp.url
         )
         let invalidDeleteIDError = try XCTUnwrap(invalidDeleteID["error"] as? [String: Any])
         XCTAssertEqual(invalidDeleteIDError["code"] as? Int, -32600)
         XCTAssertEqual(invalidDeleteIDError["message"] as? String, "invalid remote plugin id")
+
+        let unknownSaveDiscoverability = try appServerResponse(
+            #"{"id":10,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"PUBLIC"}}"#,
+            codexHome: temp.url
+        )
+        let unknownSaveDiscoverabilityError = try XCTUnwrap(unknownSaveDiscoverability["error"] as? [String: Any])
+        XCTAssertEqual(unknownSaveDiscoverabilityError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            unknownSaveDiscoverabilityError["message"] as? String,
+            "unknown variant `PUBLIC`, expected one of `LISTED`, `UNLISTED`, `PRIVATE`"
+        )
+
+        let unknownUpdateDiscoverability = try appServerResponse(
+            #"{"id":11,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"LISTED","shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let unknownUpdateDiscoverabilityError = try XCTUnwrap(unknownUpdateDiscoverability["error"] as? [String: Any])
+        XCTAssertEqual(unknownUpdateDiscoverabilityError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            unknownUpdateDiscoverabilityError["message"] as? String,
+            "unknown variant `LISTED`, expected `UNLISTED` or `PRIVATE`"
+        )
+
+        let missingUpdateTargets = try appServerResponse(
+            #"{"id":12,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED"}}"#,
+            codexHome: temp.url
+        )
+        let missingUpdateTargetsError = try XCTUnwrap(missingUpdateTargets["error"] as? [String: Any])
+        XCTAssertEqual(missingUpdateTargetsError["code"] as? Int, -32602)
+        XCTAssertEqual(missingUpdateTargetsError["message"] as? String, "missing field `shareTargets`")
     }
 
     func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {
