@@ -607,6 +607,7 @@ Source baseline inspected for this scaffold:
   - covered Rust-style filtering for `tail -c <count>` and `tail -c +<offset>` pipeline helpers so upstream list/search/read summaries are preserved.
 - `codex-rs/shell-command/src/parse_command.rs` parser edge-case coverage
   - added Swift parity fixtures for plain `git grep`/`git ls-files`, grep files-with/without-matches flags, dash-leading and multi-operand `cd`, `exa -I`, Python file-walk detection, `tail -n +<offset>`, bash `-c` pipeline parsing, ignored-glob `ls`, and flag-bearing `cat` reads.
+  - expanded Swift parity fixtures for direct `rg`/`rga` files-with/without-match flags, direct `rg --files | nl -ba` helper dropping, direct mutating `xargs` pipeline collapse, and direct pipelines whose later stage remains unknown.
 - `codex-rs/shell-command/src/parse_command.rs` shell command joining
   - `shlexJoin` now returns Rust's `<command included NUL byte>` fallback when a token contains a NUL byte instead of attempting to quote an unrepresentable shell word.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection

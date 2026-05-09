@@ -324,6 +324,21 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["ag", "-l", "TODO", "src"]), [
             .search(cmd: "ag -l TODO src", query: "TODO", path: "src")
         ])
+        XCTAssertEqual(parseCommand(["rg", "-l", "TODO", "src"]), [
+            .search(cmd: "rg -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rg", "--files-with-matches", "TODO", "src"]), [
+            .search(cmd: "rg --files-with-matches TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rg", "-L", "TODO", "src"]), [
+            .search(cmd: "rg -L TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rg", "--files-without-match", "TODO", "src"]), [
+            .search(cmd: "rg --files-without-match TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rga", "-l", "TODO", "src"]), [
+            .search(cmd: "rga -l TODO src", query: "TODO", path: "src")
+        ])
         XCTAssertEqual(parseCommand(["rga", "--files", "docs"]), [
             .listFiles(cmd: "rga --files docs", path: "docs")
         ])
@@ -367,6 +382,15 @@ final class ParsedCommandTests: XCTestCase {
         let mutatingPipeline = #"rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'"#
         XCTAssertEqual(parseCommand(["bash", "-lc", mutatingPipeline]), [
             .unknown(cmd: mutatingPipeline)
+        ])
+        XCTAssertEqual(parseCommand(["rg", "-l", "QkBindingController", "presentation/src/main/java", "|", "xargs", "perl", "-pi", "-e", "s/QkBindingController/QkController/g"]), [
+            .unknown(cmd: #"rg -l QkBindingController presentation/src/main/java '|' xargs perl -pi -e s/QkBindingController/QkController/g"#)
+        ])
+        XCTAssertEqual(parseCommand(["rg", "--files", "|", "nl", "-ba"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+        XCTAssertEqual(parseCommand(["rg", "--files", "|", "nl", "-ba", "|", "foo"]), [
+            .unknown(cmd: "rg --files '|' nl -ba '|' foo")
         ])
     }
 
