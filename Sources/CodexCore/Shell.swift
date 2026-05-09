@@ -262,7 +262,11 @@ public enum ShellResolver {
     }
 
     private static func fileStem(_ path: String) -> String? {
+        #if os(Windows)
         let normalized = path.replacingOccurrences(of: "\\", with: "/")
+        #else
+        let normalized = path
+        #endif
         let lastComponent = normalized.split(separator: "/", omittingEmptySubsequences: true).last.map(String.init)
             ?? normalized
         let stem = (lastComponent as NSString).deletingPathExtension

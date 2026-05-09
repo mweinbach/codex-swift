@@ -14,6 +14,11 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(ShellResolver.detectShellType("powershell.exe"), .powerShell)
         XCTAssertEqual(ShellResolver.detectShellType("/usr/local/bin/pwsh"), .powerShell)
         XCTAssertEqual(ShellResolver.detectShellType("pwsh.exe"), .powerShell)
+        #if os(Windows)
+        XCTAssertEqual(ShellResolver.detectShellType(#"C:\Program Files\PowerShell\7\pwsh.exe"#), .powerShell)
+        #else
+        XCTAssertEqual(ShellResolver.detectShellType(#"C:\Program Files\PowerShell\7\pwsh.exe"#), nil)
+        #endif
         XCTAssertEqual(ShellResolver.detectShellType("/bin/sh"), .sh)
         XCTAssertEqual(ShellResolver.detectShellType("sh"), .sh)
         XCTAssertEqual(ShellResolver.detectShellType("cmd"), .cmd)
@@ -69,6 +74,15 @@ final class ShellTests: XCTestCase {
             ShellResolver.prefixPowerShellScriptWithUTF8(["powershell.exe", "-c", "Write-Host hi"]),
             ["powershell.exe", "-c", prefix + "Write-Host hi"]
         )
+        let windowsStylePath = [#"C:\Program Files\PowerShell\7\pwsh.exe"#, "-c", "Write-Host hi"]
+        #if os(Windows)
+        XCTAssertEqual(
+            ShellResolver.prefixPowerShellScriptWithUTF8(windowsStylePath),
+            [#"C:\Program Files\PowerShell\7\pwsh.exe"#, "-c", prefix + "Write-Host hi"]
+        )
+        #else
+        XCTAssertEqual(ShellResolver.prefixPowerShellScriptWithUTF8(windowsStylePath), windowsStylePath)
+        #endif
         XCTAssertEqual(
             ShellResolver.prefixPowerShellScriptWithUTF8(["pwsh", "-Command", "  \(prefix)Write-Host hi"]),
             ["pwsh", "-Command", "  \(prefix)Write-Host hi"]
