@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2749,6 +2749,12 @@ public final class PolicyParser {
         case "upper":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .string(receiver.uppercased())
+        case "capitalize":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .string(capitalizingStarlarkString(receiver))
+        case "title":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .string(titlecasingStarlarkString(receiver))
         case "strip":
             let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .string(trimmingStarlarkString(receiver, characters: characters, edges: [.leading, .trailing]))
@@ -3001,6 +3007,35 @@ public final class PolicyParser {
             remaining -= 1
         }
         result += string[cursor..<string.endIndex]
+        return result
+    }
+
+    private static func capitalizingStarlarkString(_ string: String) -> String {
+        var result = ""
+        var isFirstScalar = true
+        for scalar in string.unicodeScalars {
+            let scalarString = String(scalar)
+            result += isFirstScalar ? scalarString.uppercased() : scalarString.lowercased()
+            isFirstScalar = false
+        }
+        return result
+    }
+
+    private static func titlecasingStarlarkString(_ string: String) -> String {
+        var lastNonAlphabetic = true
+        var result = ""
+        for scalar in string.unicodeScalars {
+            let scalarString = String(scalar)
+            if !scalar.properties.isAlphabetic {
+                lastNonAlphabetic = true
+                result += scalarString.lowercased()
+            } else if lastNonAlphabetic {
+                result += scalarString.uppercased()
+                lastNonAlphabetic = false
+            } else {
+                result += scalarString.lowercased()
+            }
+        }
         return result
     }
 

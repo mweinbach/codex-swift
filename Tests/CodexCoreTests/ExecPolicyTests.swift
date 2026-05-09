@@ -2170,6 +2170,34 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkStringCaseConversionMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "status"
+        LABEL = "hElLo, WoRlD!"
+        TITLE = LABEL.title()
+        CAPITALIZED = "Hello, WORLD!".capitalize()
+
+        prefix_rule([TOOL, COMMAND], "allow", justification = CAPITALIZED + " / " + TITLE)
+
+        if TITLE == "Hello, World!" and CAPITALIZED == "Hello, world!":
+            network_rule("case.example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + "codex helper".title() + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "Hello, world! / Hello, World!"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "case.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/Codex Helper/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "
