@@ -6504,6 +6504,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(errors[0]["message"] as? String, "missing field `description`")
     }
 
+    func testSkillsListDefaultsToConfiguredCwd() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{}}"#,
+            configuration: testConfiguration(codexHome: codexHome.url, cwd: cwd.url)
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.standardizedFileURL.path)
+    }
+
     func testSkillsConfigWriteTogglesPathSelectorAndAffectsSkillsList() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -6658,6 +6672,20 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
         XCTAssertEqual((data[0]["hooks"] as? [Any])?.count, 0)
+    }
+
+    func testHooksListDefaultsToConfiguredCwd() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{}}"#,
+            configuration: testConfiguration(codexHome: codexHome.url, cwd: cwd.url)
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.standardizedFileURL.path)
     }
 
     func testConfigReadReturnsEffectiveConfigOriginsAndLayers() throws {

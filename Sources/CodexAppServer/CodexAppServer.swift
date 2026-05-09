@@ -7427,7 +7427,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
-        let cwds = rawCwds.isEmpty ? [FileManager.default.currentDirectoryPath] : rawCwds
+        let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let configRules = (try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             overrides: configuration.configLayerOverrides,
@@ -7479,7 +7479,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
-        let cwds = rawCwds.isEmpty ? [FileManager.default.currentDirectoryPath] : rawCwds
+        let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let hooks = userHookObjects(configFile: configFile)
         return [
