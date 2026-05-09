@@ -139,6 +139,16 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testShellWrappedSearchPreservesEscapedExpansionsLikeRustBashParser() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"rg "\$HOME" -S"#]), [
+            .search(cmd: #"rg "\\$HOME" -S"#, query: #"\$HOME"#, path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"rg "\`literal\`" -S"#]), [
+            .search(cmd: #"rg "\\`literal\\`" -S"#, query: #"\`literal\`"#, path: nil)
+        ])
+    }
+
     func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
             .unknown(cmd: "cd foo && bar")

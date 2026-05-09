@@ -662,6 +662,8 @@ Source baseline inspected for this scaffold:
   - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` optional/null semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
 - `codex-rs/shell-command` command parser
   - matched Rust's tree-sitter Bash rejection for malformed connector layouts, including leading operators, trailing operators, doubled semicolons, and empty pipeline segments, so Swift now collapses these shell scripts to a whole-script `unknown` instead of salvaging known commands.
+- `codex-rs/shell-command` Bash word-only parser integration
+  - routed shell-wrapped command summaries through Swift's Rust-shaped Bash word-only parser so escaped expansion characters inside double-quoted search arguments preserve their backslashes in summaries and query text, matching Rust tree-sitter parsing.
 
 ## Known Gaps
 

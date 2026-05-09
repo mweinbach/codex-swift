@@ -143,15 +143,13 @@ private func parseShellWrappedCommand(_ command: [String]) -> [ParsedCommand]? {
         return nil
     }
 
-    guard !containsUnsupportedShellSyntax(script),
-          let scriptTokens = shellSplit(script),
-          hasValidConnectorLayout(scriptTokens)
-    else {
+    guard let allCommands = BashPlainCommandParser.parseWordOnlyCommandsSequence(script) else {
         return [.unknown(cmd: script)]
     }
 
-    let hadConnectors = containsConnectors(scriptTokens)
-    let parts = splitOnConnectors(scriptTokens).filter { !isSmallFormattingCommand($0) }
+    let scriptTokens = allCommands.flatMap { $0 }
+    let hadConnectors = allCommands.count > 1
+    let parts = allCommands.filter { !isSmallFormattingCommand($0) }
     guard !parts.isEmpty else {
         return [.unknown(cmd: script)]
     }
@@ -162,7 +160,7 @@ private func parseShellWrappedCommand(_ command: [String]) -> [ParsedCommand]? {
             switch parsed {
             case let .read(_, name, path):
                 if hadConnectors {
-                    if scriptTokens.contains("|"), containsSedN(scriptTokens) {
+                    if script.contains("|"), containsSedN(scriptTokens) {
                         return .read(cmd: script, name: name, path: path)
                     }
                     return parsed
@@ -538,25 +536,6 @@ private func splitOnConnectors(_ tokens: [String]) -> [[String]] {
         output.append(current)
     }
     return output
-}
-
-private func hasValidConnectorLayout(_ tokens: [String]) -> Bool {
-    guard !tokens.isEmpty else {
-        return false
-    }
-
-    var previousWasConnector = true
-    for token in tokens {
-        if token == "&&" || token == "||" || token == "|" || token == ";" {
-            if previousWasConnector {
-                return false
-            }
-            previousWasConnector = true
-        } else {
-            previousWasConnector = false
-        }
-    }
-    return !previousWasConnector
 }
 
 private func trimAtConnector(_ tokens: [String]) -> [String] {
