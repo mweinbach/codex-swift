@@ -521,6 +521,62 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         self = .restricted(entries: entries, globScanMaxDepth: effectiveGlobScanMaxDepth)
     }
 
+    public static func fromLegacySandboxPolicyForCwd(
+        _ sandboxPolicy: SandboxPolicy,
+        cwd: String
+    ) -> FileSystemSandboxPolicy {
+        switch sandboxPolicy {
+        case .dangerFullAccess:
+            return .unrestricted
+        case .externalSandbox:
+            return .externalSandbox
+        case .readOnly:
+            return .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+            ])
+        case let .workspaceWrite(writableRoots, _, excludeTmpdirEnvVar, excludeSlashTmp):
+            var entries: [FileSystemSandboxEntry] = [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+            ]
+
+            if !excludeSlashTmp {
+                entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .write))
+            }
+            if !excludeTmpdirEnvVar {
+                entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.tmpdir.jsonValue), access: .write))
+            }
+
+            entries.append(contentsOf: writableRoots.map {
+                FileSystemSandboxEntry(path: .path($0.path), access: .write)
+            })
+
+            appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(".git", to: &entries)
+            appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(".agents", to: &entries)
+            appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(".codex", to: &entries)
+
+            for writableRoot in writableRoots {
+                for protectedPath in defaultReadOnlySubpathsForWritableRoot(writableRoot, protectMissingDotCodex: false) {
+                    appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+                }
+            }
+
+            if let cwdRoot = absolutePathForLegacyCwd(cwd) {
+                for protectedPath in defaultReadOnlySubpathsForWritableRoot(cwdRoot, protectMissingDotCodex: true) {
+                    appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+                }
+            }
+
+            for writableRoot in writableRoots {
+                for protectedPath in defaultReadOnlySubpathsForWritableRoot(writableRoot, protectMissingDotCodex: false) {
+                    appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+                }
+            }
+
+            return .restricted(entries: entries)
+        }
+    }
+
     public func withAdditionalLegacyWorkspaceWritableRoots(_ additionalWritableRoots: [AbsolutePath]) -> FileSystemSandboxPolicy {
         guard case let .restricted(currentEntries, globScanMaxDepth) = self else {
             return self
@@ -539,6 +595,17 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
 
         return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    private static func appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(
+        _ subpath: String,
+        to entries: inout [FileSystemSandboxEntry]
+    ) {
+        let path = FileSystemPath.special(FileSystemSpecialPath.projectRoots(subpath: subpath).jsonValue)
+        guard !entries.contains(where: { $0.path == path }) else {
+            return
+        }
+        entries.append(FileSystemSandboxEntry(path: path, access: .read))
     }
 
     private static func defaultReadOnlySubpathsForWritableRoot(
@@ -617,6 +684,13 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
 
         return gitDir
+    }
+
+    private static func absolutePathForLegacyCwd(_ cwd: String) -> AbsolutePath? {
+        if cwd.hasPrefix("/") {
+            return try? AbsolutePath(absolutePath: cwd)
+        }
+        return try? AbsolutePath.resolve(cwd, against: FileManager.default.currentDirectoryPath)
     }
 
     private static func deduplicated(_ paths: [AbsolutePath]) -> [AbsolutePath] {
@@ -833,6 +907,17 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
                 excludeSlashTmp: excludeSlashTmp
             )
         }
+    }
+
+    public static func fromLegacySandboxPolicyForCwd(
+        _ sandboxPolicy: SandboxPolicy,
+        cwd: String
+    ) -> PermissionProfile {
+        fromRuntimePermissionsWithEnforcement(
+            SandboxEnforcement.fromLegacySandboxPolicy(sandboxPolicy),
+            fileSystem: FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd),
+            network: NetworkSandboxPolicy.fromLegacySandboxPolicy(sandboxPolicy)
+        )
     }
 
     public static func fromRuntimePermissions(

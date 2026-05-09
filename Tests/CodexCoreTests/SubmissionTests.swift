@@ -438,6 +438,68 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemSandboxPolicyFromLegacySandboxPolicyForCwdMatchesRustMetadataProjection() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = temp.url.appendingPathComponent("cwd", isDirectory: true)
+        let writableRoot = temp.url.appendingPathComponent("extra", isDirectory: true)
+        let cwdGit = cwd.appendingPathComponent(".git", isDirectory: true)
+        let writableAgents = writableRoot.appendingPathComponent(".agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwdGit, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: writableAgents, withIntermediateDirectories: true)
+        let cwdPath = try AbsolutePath(absolutePath: cwd.path)
+        let writableRootPath = try AbsolutePath(absolutePath: writableRoot.path)
+
+        let sandboxPolicy = SandboxPolicy.workspaceWrite(
+            writableRoots: [writableRootPath],
+            networkAccess: false,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true
+        )
+
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwdPath.path),
+            .restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                FileSystemSandboxEntry(path: .path(writableRootPath.path), access: .write),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".git").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".agents").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".codex").jsonValue), access: .read),
+                FileSystemSandboxEntry(path: .path(writableAgents.path), access: .read),
+                FileSystemSandboxEntry(path: .path(cwdGit.path), access: .read),
+                FileSystemSandboxEntry(path: .path(cwd.appendingPathComponent(".codex").path), access: .read)
+            ])
+        )
+    }
+
+    func testPermissionProfileFromLegacySandboxPolicyForCwdUsesProjectedRuntimePolicyLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = temp.url.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let cwdPath = try AbsolutePath(absolutePath: cwd.path)
+        let sandboxPolicy = SandboxPolicy.workspaceWrite(
+            writableRoots: [],
+            networkAccess: true,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true
+        )
+
+        XCTAssertEqual(
+            PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwdPath.path),
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".git").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".agents").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".codex").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .path(cwd.appendingPathComponent(".codex").path), access: .read)
+                ]),
+                network: .enabled
+            )
+        )
+    }
+
     func testPermissionProfileRuntimePermissionsMatchRust() throws {
         let readOnly = PermissionProfile.readOnly()
         XCTAssertEqual(readOnly.fileSystemSandboxPolicy, .restricted(entries: [
