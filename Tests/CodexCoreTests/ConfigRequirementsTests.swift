@@ -100,6 +100,107 @@ final class ConfigRequirementsTests: XCTestCase {
         )
     }
 
+    func testDeserializeRemoteSandboxConfigRequiresHostnamePatternsList() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [[remote_sandbox_config]]
+        hostname_patterns = ["*.org", "runner-??.ci"]
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+        """)
+
+        XCTAssertEqual(config.remoteSandboxConfig, [
+            RemoteSandboxConfigToml(
+                hostnamePatterns: ["*.org", "runner-??.ci"],
+                allowedSandboxModes: [.readOnly, .workspaceWrite]
+            )
+        ])
+
+        XCTAssertThrowsError(try ConfigRequirementsToml.parse("""
+        [[remote_sandbox_config]]
+        hostname_patterns = "*.org"
+        allowed_sandbox_modes = ["read-only"]
+        """)) { error in
+            XCTAssertEqual(
+                error as? ConfigRequirementsParseError,
+                .invalidArray("remote_sandbox_config.hostname_patterns")
+            )
+        }
+    }
+
+    func testRemoteSandboxConfigFirstMatchOverridesTopLevel() throws {
+        var config = try ConfigRequirementsToml.parse("""
+        allowed_sandbox_modes = ["read-only"]
+
+        [[remote_sandbox_config]]
+        hostname_patterns = ["build-*.example.com"]
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+        [[remote_sandbox_config]]
+        hostname_patterns = ["build-01.example.com"]
+        allowed_sandbox_modes = ["read-only", "danger-full-access"]
+        """)
+
+        config.applyRemoteSandboxConfig(hostname: "BUILD-01.EXAMPLE.COM..")
+        XCTAssertEqual(config.allowedSandboxModes, [.readOnly, .workspaceWrite])
+
+        let requirements = try config.requirements()
+        XCTAssertNoThrow(try requirements.sandboxPolicy.canSet(.workspaceWrite(
+            writableRoots: [try AbsolutePath(absolutePath: "/repo")],
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false
+        )).get())
+        XCTAssertConstraintFailure(
+            requirements.sandboxPolicy.canSet(.dangerFullAccess),
+            .invalidValue(candidate: "DangerFullAccess", allowed: "[ReadOnly, WorkspaceWrite]")
+        )
+    }
+
+    func testRemoteSandboxConfigNonMatchPreservesTopLevel() throws {
+        var config = try ConfigRequirementsToml.parse("""
+        allowed_sandbox_modes = ["read-only"]
+
+        [[remote_sandbox_config]]
+        hostname_patterns = ["build-*.example.com"]
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+        """)
+
+        config.applyRemoteSandboxConfig(hostname: "laptop.example.com")
+        XCTAssertEqual(config.allowedSandboxModes, [.readOnly])
+    }
+
+    func testRemoteSandboxConfigDoesNotOverrideHigherPrecedenceSandboxModes() throws {
+        var highPrecedence = try ConfigRequirementsToml.parse("""
+        allowed_sandbox_modes = ["read-only"]
+        """)
+        highPrecedence.applyRemoteSandboxConfig(hostname: "runner-01.ci.example.com")
+
+        var lowPrecedence = try ConfigRequirementsToml.parse("""
+        [[remote_sandbox_config]]
+        hostname_patterns = ["runner-*.ci.example.com"]
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+        """)
+        lowPrecedence.applyRemoteSandboxConfig(hostname: "runner-01.ci.example.com")
+
+        var merged = ConfigRequirementsToml()
+        merged.mergeUnsetFields(from: highPrecedence)
+        merged.mergeUnsetFields(from: lowPrecedence)
+        XCTAssertEqual(merged.allowedSandboxModes, [.readOnly])
+
+        let requirements = try merged.requirements()
+        XCTAssertConstraintFailure(
+            requirements.sandboxPolicy.canSet(.workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false
+            )),
+            .invalidValue(
+                candidate: "WorkspaceWrite { writable_roots: [], network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false }",
+                allowed: "[ReadOnly]"
+            )
+        )
+    }
+
     func testDeserializeAllowedWebSearchModesAndAppServerNormalization() throws {
         let config = try ConfigRequirementsToml.parse("""
         allowed_web_search_modes = ["cached"]

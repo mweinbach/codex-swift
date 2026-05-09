@@ -470,6 +470,8 @@ Source baseline inspected for this scaffold:
   - `configRequirements/read` now parses `experimental_network`, including canonical `domains`/`unix_sockets`, legacy `allowed_domains`/`denied_domains`/`allow_unix_sockets`, Rust's legacy/canonical conflict checks, and the camelCase API object with legacy compatibility views.
 - `codex-rs/config/src/config_requirements.rs` filesystem permissions requirements
   - Requirements TOML now parses `[permissions.filesystem].deny_read` into normalized filesystem constraints, including Rust's absolute-path handling and relative glob prefix normalization.
+- `codex-rs/config/src/config_requirements.rs` remote sandbox requirements
+  - Requirements TOML now parses `[[remote_sandbox_config]]`, applies Rust's normalized hostname wildcard matching, preserves first-match behavior, and keeps higher-precedence sandbox requirements authoritative after merging.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` model-provider capabilities
   - `modelProvider/capabilities/read` now reloads the active config and returns Rust-shaped provider capability booleans, including the Amazon Bedrock built-in provider's disabled namespace-tools, image-generation, and web-search capabilities.
 - `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox readiness

@@ -12,6 +12,7 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
     case invalidNetworkDomainPermission(String)
     case invalidNetworkUnixSocketPermission(String)
     case invalidFilesystemRequirement(String)
+    case invalidRemoteSandboxConfig(String)
     case invalidArray(String)
 
     public var description: String {
@@ -38,6 +39,8 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
             return "Invalid network unix socket permission: \(value)"
         case let .invalidFilesystemRequirement(value):
             return "Invalid filesystem requirement: \(value)"
+        case let .invalidRemoteSandboxConfig(value):
+            return "Invalid remote sandbox config: \(value)"
         case let .invalidArray(key):
             return "Invalid array for \(key)"
         }
@@ -253,6 +256,16 @@ public struct PermissionsRequirementsToml: Equatable, Sendable {
     }
 }
 
+public struct RemoteSandboxConfigToml: Equatable, Sendable {
+    public var hostnamePatterns: [String]
+    public var allowedSandboxModes: [SandboxModeRequirement]
+
+    public init(hostnamePatterns: [String], allowedSandboxModes: [SandboxModeRequirement]) {
+        self.hostnamePatterns = hostnamePatterns
+        self.allowedSandboxModes = allowedSandboxModes
+    }
+}
+
 public struct FilesystemConstraints: Equatable, Sendable {
     public var denyRead: [FilesystemDenyReadPattern]
 
@@ -265,6 +278,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedApprovalPolicies: [AskForApproval]?
     public var allowedApprovalsReviewers: [ApprovalsReviewer]?
     public var allowedSandboxModes: [SandboxModeRequirement]?
+    public var remoteSandboxConfig: [RemoteSandboxConfigToml]?
     public var allowedWebSearchModes: [WebSearchModeRequirement]?
     public var featureRequirements: [String: Bool]?
     public var hooks: ManagedHooksRequirementsToml?
@@ -278,6 +292,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         allowedApprovalPolicies: [AskForApproval]? = nil,
         allowedApprovalsReviewers: [ApprovalsReviewer]? = nil,
         allowedSandboxModes: [SandboxModeRequirement]? = nil,
+        remoteSandboxConfig: [RemoteSandboxConfigToml]? = nil,
         allowedWebSearchModes: [WebSearchModeRequirement]? = nil,
         featureRequirements: [String: Bool]? = nil,
         hooks: ManagedHooksRequirementsToml? = nil,
@@ -290,6 +305,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.allowedApprovalPolicies = allowedApprovalPolicies
         self.allowedApprovalsReviewers = allowedApprovalsReviewers
         self.allowedSandboxModes = allowedSandboxModes
+        self.remoteSandboxConfig = remoteSandboxConfig
         self.allowedWebSearchModes = allowedWebSearchModes
         self.featureRequirements = featureRequirements
         self.hooks = hooks
@@ -304,6 +320,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         allowedApprovalPolicies == nil &&
             allowedApprovalsReviewers == nil &&
             allowedSandboxModes == nil &&
+            remoteSandboxConfig == nil &&
             allowedWebSearchModes == nil &&
             featureRequirements == nil &&
             hooks == nil &&
@@ -321,6 +338,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if allowedSandboxModes == nil, let value = other.allowedSandboxModes {
             allowedSandboxModes = value
+        }
+        if remoteSandboxConfig == nil, let value = other.remoteSandboxConfig {
+            remoteSandboxConfig = value
         }
         if allowedWebSearchModes == nil, let value = other.allowedWebSearchModes {
             allowedWebSearchModes = value
@@ -417,6 +437,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if let sandboxValue = table["allowed_sandbox_modes"] {
             result.allowedSandboxModes = try parseSandboxModes(sandboxValue)
         }
+        if let remoteSandboxValue = table["remote_sandbox_config"] {
+            result.remoteSandboxConfig = try parseRemoteSandboxConfig(remoteSandboxValue)
+        }
         if let webSearchValue = table["allowed_web_search_modes"] {
             result.allowedWebSearchModes = try parseWebSearchModes(webSearchValue)
         }
@@ -437,6 +460,24 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
 
         return result
+    }
+
+    public mutating func applyRemoteSandboxConfig(hostname: String?) {
+        guard let remoteSandboxConfig,
+              let hostname = Self.normalizedHostname(hostname),
+              let matchedConfig = remoteSandboxConfig.first(where: { config in
+                  config.hostnamePatterns.contains { pattern in
+                      guard let pattern = Self.normalizedHostname(pattern) else {
+                          return false
+                      }
+                      return Self.wildcardMatch(pattern: pattern, text: hostname)
+                  }
+              })
+        else {
+            return
+        }
+
+        allowedSandboxModes = matchedConfig.allowedSandboxModes
     }
 
     private static func parseApprovalPolicies(_ value: ConfigValue) throws -> [AskForApproval] {
@@ -467,6 +508,27 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
                 throw ConfigRequirementsParseError.invalidSandboxMode(value)
             }
             return mode
+        }
+    }
+
+    private static func parseRemoteSandboxConfig(_ value: ConfigValue) throws -> [RemoteSandboxConfigToml] {
+        guard case let .array(entries) = value else {
+            throw ConfigRequirementsParseError.invalidRemoteSandboxConfig("remote_sandbox_config")
+        }
+        return try entries.enumerated().map { index, entry in
+            guard case let .table(table) = entry else {
+                throw ConfigRequirementsParseError.invalidRemoteSandboxConfig("remote_sandbox_config[\(index)]")
+            }
+            guard let hostnamePatternsValue = table["hostname_patterns"] else {
+                throw ConfigRequirementsParseError.invalidRemoteSandboxConfig("remote_sandbox_config.hostname_patterns")
+            }
+            guard let allowedSandboxModesValue = table["allowed_sandbox_modes"] else {
+                throw ConfigRequirementsParseError.invalidRemoteSandboxConfig("remote_sandbox_config.allowed_sandbox_modes")
+            }
+            return RemoteSandboxConfigToml(
+                hostnamePatterns: try stringArray(hostnamePatternsValue, key: "remote_sandbox_config.hostname_patterns"),
+                allowedSandboxModes: try parseSandboxModes(allowedSandboxModesValue)
+            )
         }
     }
 
@@ -682,6 +744,68 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         return string
     }
 
+    private static func normalizedHostname(_ value: String?) -> String? {
+        guard let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingSuffix(".")
+            .lowercased(),
+              !normalized.isEmpty
+        else {
+            return nil
+        }
+        return normalized
+    }
+
+    private static func wildcardMatch(pattern: String, text: String) -> Bool {
+        let pattern = Array(pattern)
+        let text = Array(text)
+        var memo: [WildcardMemoKey: Bool] = [:]
+
+        func matches(_ patternIndex: Int, _ textIndex: Int) -> Bool {
+            let key = WildcardMemoKey(patternIndex: patternIndex, textIndex: textIndex)
+            if let cached = memo[key] {
+                return cached
+            }
+
+            let result: Bool
+            if patternIndex == pattern.count {
+                result = textIndex == text.count
+            } else {
+                switch pattern[patternIndex] {
+                case "*":
+                    result = matches(patternIndex + 1, textIndex) ||
+                        (textIndex < text.count && matches(patternIndex, textIndex + 1))
+                case "?":
+                    result = textIndex < text.count && matches(patternIndex + 1, textIndex + 1)
+                default:
+                    result = textIndex < text.count &&
+                        pattern[patternIndex] == text[textIndex] &&
+                        matches(patternIndex + 1, textIndex + 1)
+                }
+            }
+
+            memo[key] = result
+            return result
+        }
+
+        return matches(0, 0)
+    }
+
+}
+
+private struct WildcardMemoKey: Hashable {
+    var patternIndex: Int
+    var textIndex: Int
+}
+
+private extension String {
+    func trimmingSuffix(_ suffix: String) -> String {
+        var result = self
+        while result.hasSuffix(suffix) {
+            result = String(result.dropLast(suffix.count))
+        }
+        return result
+    }
 }
 
 extension ConfigRequirementsToml {

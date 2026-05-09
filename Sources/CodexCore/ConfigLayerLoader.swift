@@ -267,6 +267,7 @@ public enum CodexConfigLayerLoader {
 
         do {
             var parsed = try ConfigRequirementsToml.parse(contents)
+            parsed.applyRemoteSandboxConfig(hostname: ProcessInfo.processInfo.hostName)
             if parsed.hooks != nil {
                 parsed.hooksSource = .system
                 parsed.hooksSourceDescription = url.standardizedFileURL.path
