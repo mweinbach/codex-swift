@@ -83,7 +83,7 @@ public enum ResumeCommandResolver {
                 path: resumed.rolloutPath,
                 historyItemCount: resumed.history.count
             )
-        case .new:
+        case .new, .cleared:
             throw ResumeCommandError.noSavedSessions
         case .forked:
             throw ResumeCommandError.noSavedSessions

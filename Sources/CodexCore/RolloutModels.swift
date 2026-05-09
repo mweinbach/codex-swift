@@ -498,6 +498,7 @@ public struct ResumedHistory: Equatable, Codable, Sendable {
 
 public enum InitialHistory: Equatable, Sendable {
     case new
+    case cleared
     case resumed(ResumedHistory)
     case forked([RolloutRecordItem])
 
@@ -508,7 +509,7 @@ public enum InitialHistory: Equatable, Sendable {
 
     public var rolloutItems: [RolloutRecordItem] {
         switch self {
-        case .new:
+        case .new, .cleared:
             return []
         case let .resumed(resumed):
             return resumed.history
@@ -519,7 +520,7 @@ public enum InitialHistory: Equatable, Sendable {
 
     public var eventMessages: [EventMessage]? {
         switch self {
-        case .new:
+        case .new, .cleared:
             return nil
         case let .resumed(resumed):
             return resumed.history.compactMap(\.eventMessage)
@@ -531,9 +532,17 @@ public enum InitialHistory: Equatable, Sendable {
 
 extension InitialHistory: Codable {
     public init(from decoder: Decoder) throws {
-        if let value = try? decoder.singleValueContainer().decode(String.self), value == "New" {
-            self = .new
-            return
+        if let value = try? decoder.singleValueContainer().decode(String.self) {
+            switch value {
+            case "New":
+                self = .new
+                return
+            case "Cleared":
+                self = .cleared
+                return
+            default:
+                break
+            }
         }
 
         let container = try decoder.container(keyedBy: VariantKey.self)
@@ -556,6 +565,9 @@ extension InitialHistory: Codable {
         case .new:
             var container = encoder.singleValueContainer()
             try container.encode("New")
+        case .cleared:
+            var container = encoder.singleValueContainer()
+            try container.encode("Cleared")
         case let .resumed(history):
             var container = encoder.container(keyedBy: VariantKey.self)
             try container.encode(history, forKey: .resumed)

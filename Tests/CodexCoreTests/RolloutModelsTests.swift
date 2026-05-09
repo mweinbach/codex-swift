@@ -404,6 +404,12 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertEqual(InitialHistory.new.rolloutItems, [])
         XCTAssertNil(InitialHistory.new.eventMessages)
 
+        let clearedData = try JSONEncoder().encode(InitialHistory.cleared)
+        XCTAssertEqual(String(data: clearedData, encoding: .utf8), #""Cleared""#)
+        XCTAssertEqual(try JSONDecoder().decode(InitialHistory.self, from: clearedData), .cleared)
+        XCTAssertEqual(InitialHistory.cleared.rolloutItems, [])
+        XCTAssertNil(InitialHistory.cleared.eventMessages)
+
         try XCTAssertJSONObjectEqual(InitialHistory.resumed(resumed), [
             "Resumed": [
                 "conversation_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
