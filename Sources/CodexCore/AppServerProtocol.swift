@@ -6,6 +6,7 @@ public enum AppServerProtocol {
         case chatGPTAuthTokensRefresh(requestID: RequestID, params: ChatGPTAuthTokensRefreshParams)
         case execCommandApproval(requestID: RequestID, params: ExecCommandApprovalParams)
         case applyPatchApproval(requestID: RequestID, params: ApplyPatchApprovalParams)
+        case fileChangeRequestApproval(requestID: RequestID, params: FileChangeRequestApprovalParams)
 
         public var id: RequestID {
             switch self {
@@ -16,6 +17,8 @@ public enum AppServerProtocol {
             case let .execCommandApproval(requestID, _):
                 requestID
             case let .applyPatchApproval(requestID, _):
+                requestID
+            case let .fileChangeRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -30,6 +33,8 @@ public enum AppServerProtocol {
                 ExecCommandApprovalParams.method
             case .applyPatchApproval:
                 ApplyPatchApprovalParams.method
+            case .fileChangeRequestApproval:
+                FileChangeRequestApprovalParams.method
             }
         }
 
@@ -63,6 +68,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(ApplyPatchApprovalParams.self, forKey: .params)
                 )
+            case FileChangeRequestApprovalParams.method:
+                self = .fileChangeRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(FileChangeRequestApprovalParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -85,6 +95,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .applyPatchApproval(_, params):
                 try container.encode(params, forKey: .params)
+            case let .fileChangeRequestApproval(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -94,6 +106,7 @@ public enum AppServerProtocol {
         case chatGPTAuthTokensRefresh(ChatGPTAuthTokensRefreshParams)
         case execCommandApproval(ExecCommandApprovalParams)
         case applyPatchApproval(ApplyPatchApprovalParams)
+        case fileChangeRequestApproval(FileChangeRequestApprovalParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -109,6 +122,8 @@ public enum AppServerProtocol {
                 .execCommandApproval(requestID: id, params: params)
             case let .applyPatchApproval(params):
                 .applyPatchApproval(requestID: id, params: params)
+            case let .fileChangeRequestApproval(params):
+                .fileChangeRequestApproval(requestID: id, params: params)
             }
         }
     }
@@ -118,6 +133,7 @@ public enum AppServerProtocol {
         case chatGPTAuthTokensRefresh(requestID: RequestID, response: ChatGPTAuthTokensRefreshResponse)
         case execCommandApproval(requestID: RequestID, response: ExecCommandApprovalResponse)
         case applyPatchApproval(requestID: RequestID, response: ApplyPatchApprovalResponse)
+        case fileChangeRequestApproval(requestID: RequestID, response: FileChangeRequestApprovalResponse)
 
         public var id: RequestID {
             switch self {
@@ -128,6 +144,8 @@ public enum AppServerProtocol {
             case let .execCommandApproval(requestID, _):
                 requestID
             case let .applyPatchApproval(requestID, _):
+                requestID
+            case let .fileChangeRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -142,6 +160,8 @@ public enum AppServerProtocol {
                 ExecCommandApprovalParams.method
             case .applyPatchApproval:
                 ApplyPatchApprovalParams.method
+            case .fileChangeRequestApproval:
+                FileChangeRequestApprovalParams.method
             }
         }
 
@@ -175,6 +195,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(ApplyPatchApprovalResponse.self, forKey: .response)
                 )
+            case FileChangeRequestApprovalParams.method:
+                self = .fileChangeRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(FileChangeRequestApprovalResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -197,7 +222,70 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .applyPatchApproval(_, response):
                 try container.encode(response, forKey: .response)
+            case let .fileChangeRequestApproval(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public enum FileChangeApprovalDecision: String, Codable, Equatable, Sendable {
+        case accept
+        case acceptForSession
+        case decline
+        case cancel
+    }
+
+    public struct FileChangeRequestApprovalParams: Equatable, Codable, Sendable {
+        public static let method = "item/fileChange/requestApproval"
+
+        public let threadID: String
+        public let turnID: String
+        public let itemID: String
+        public let startedAtMilliseconds: Int64
+        public let reason: String?
+        public let grantRoot: String?
+
+        public init(
+            threadID: String,
+            turnID: String,
+            itemID: String,
+            startedAtMilliseconds: Int64,
+            reason: String?,
+            grantRoot: String?
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.itemID = itemID
+            self.startedAtMilliseconds = startedAtMilliseconds
+            self.reason = reason
+            self.grantRoot = grantRoot
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case itemID = "itemId"
+            case startedAtMilliseconds = "startedAtMs"
+            case reason
+            case grantRoot
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(threadID, forKey: .threadID)
+            try container.encode(turnID, forKey: .turnID)
+            try container.encode(itemID, forKey: .itemID)
+            try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
+            try container.encodeNilOrValue(reason, forKey: .reason)
+            try container.encodeNilOrValue(grantRoot, forKey: .grantRoot)
+        }
+    }
+
+    public struct FileChangeRequestApprovalResponse: Equatable, Codable, Sendable {
+        public let decision: FileChangeApprovalDecision
+
+        public init(decision: FileChangeApprovalDecision) {
+            self.decision = decision
         }
     }
 

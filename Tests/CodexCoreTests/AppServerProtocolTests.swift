@@ -279,6 +279,69 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testFileChangeRequestApprovalServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.FileChangeRequestApprovalParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "item_123",
+            startedAtMilliseconds: 42,
+            reason: nil,
+            grantRoot: nil
+        )
+        let request = AppServerProtocol.ServerRequest.fileChangeRequestApproval(
+            requestID: .integer(5),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(5))
+        XCTAssertEqual(request.method, "item/fileChange/requestApproval")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/fileChange/requestApproval",
+            "id": 5,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "item_123",
+                "startedAtMs": 42,
+                "reason": NSNull(),
+                "grantRoot": NSNull()
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.fileChangeRequestApproval(params).request(withID: .integer(5)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"item/fileChange/requestApproval","id":5,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":42,"reason":null,"grantRoot":null}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testFileChangeRequestApprovalServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.fileChangeRequestApproval(
+            requestID: .integer(5),
+            response: AppServerProtocol.FileChangeRequestApprovalResponse(decision: .acceptForSession)
+        )
+
+        XCTAssertEqual(response.id, .integer(5))
+        XCTAssertEqual(response.method, "item/fileChange/requestApproval")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/fileChange/requestApproval",
+            "id": 5,
+            "response": [
+                "decision": "acceptForSession"
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"item/fileChange/requestApproval","id":5,"response":{"decision":"acceptForSession"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
