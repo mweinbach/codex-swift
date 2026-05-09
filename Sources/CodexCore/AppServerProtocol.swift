@@ -7,6 +7,7 @@ public enum AppServerProtocol {
         case execCommandApproval(requestID: RequestID, params: ExecCommandApprovalParams)
         case applyPatchApproval(requestID: RequestID, params: ApplyPatchApprovalParams)
         case fileChangeRequestApproval(requestID: RequestID, params: FileChangeRequestApprovalParams)
+        case commandExecutionRequestApproval(requestID: RequestID, params: CommandExecutionRequestApprovalParams)
 
         public var id: RequestID {
             switch self {
@@ -19,6 +20,8 @@ public enum AppServerProtocol {
             case let .applyPatchApproval(requestID, _):
                 requestID
             case let .fileChangeRequestApproval(requestID, _):
+                requestID
+            case let .commandExecutionRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -35,6 +38,8 @@ public enum AppServerProtocol {
                 ApplyPatchApprovalParams.method
             case .fileChangeRequestApproval:
                 FileChangeRequestApprovalParams.method
+            case .commandExecutionRequestApproval:
+                CommandExecutionRequestApprovalParams.method
             }
         }
 
@@ -73,6 +78,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(FileChangeRequestApprovalParams.self, forKey: .params)
                 )
+            case CommandExecutionRequestApprovalParams.method:
+                self = .commandExecutionRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(CommandExecutionRequestApprovalParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -97,6 +107,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .fileChangeRequestApproval(_, params):
                 try container.encode(params, forKey: .params)
+            case let .commandExecutionRequestApproval(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -107,6 +119,7 @@ public enum AppServerProtocol {
         case execCommandApproval(ExecCommandApprovalParams)
         case applyPatchApproval(ApplyPatchApprovalParams)
         case fileChangeRequestApproval(FileChangeRequestApprovalParams)
+        case commandExecutionRequestApproval(CommandExecutionRequestApprovalParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -124,6 +137,8 @@ public enum AppServerProtocol {
                 .applyPatchApproval(requestID: id, params: params)
             case let .fileChangeRequestApproval(params):
                 .fileChangeRequestApproval(requestID: id, params: params)
+            case let .commandExecutionRequestApproval(params):
+                .commandExecutionRequestApproval(requestID: id, params: params)
             }
         }
     }
@@ -134,6 +149,10 @@ public enum AppServerProtocol {
         case execCommandApproval(requestID: RequestID, response: ExecCommandApprovalResponse)
         case applyPatchApproval(requestID: RequestID, response: ApplyPatchApprovalResponse)
         case fileChangeRequestApproval(requestID: RequestID, response: FileChangeRequestApprovalResponse)
+        case commandExecutionRequestApproval(
+            requestID: RequestID,
+            response: CommandExecutionRequestApprovalResponse
+        )
 
         public var id: RequestID {
             switch self {
@@ -146,6 +165,8 @@ public enum AppServerProtocol {
             case let .applyPatchApproval(requestID, _):
                 requestID
             case let .fileChangeRequestApproval(requestID, _):
+                requestID
+            case let .commandExecutionRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -162,6 +183,8 @@ public enum AppServerProtocol {
                 ApplyPatchApprovalParams.method
             case .fileChangeRequestApproval:
                 FileChangeRequestApprovalParams.method
+            case .commandExecutionRequestApproval:
+                CommandExecutionRequestApprovalParams.method
             }
         }
 
@@ -200,6 +223,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(FileChangeRequestApprovalResponse.self, forKey: .response)
                 )
+            case CommandExecutionRequestApprovalParams.method:
+                self = .commandExecutionRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(CommandExecutionRequestApprovalResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -224,7 +252,290 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .fileChangeRequestApproval(_, response):
                 try container.encode(response, forKey: .response)
+            case let .commandExecutionRequestApproval(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public enum CommandExecutionApprovalDecision: Equatable, Codable, Sendable {
+        case accept
+        case acceptForSession
+        case acceptWithExecpolicyAmendment(execpolicyAmendment: ExecPolicyAmendment)
+        case applyNetworkPolicyAmendment(networkPolicyAmendment: NetworkPolicyAmendment)
+        case decline
+        case cancel
+
+        private enum UnitDecision: String, Codable {
+            case accept
+            case acceptForSession
+            case decline
+            case cancel
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case acceptWithExecpolicyAmendment
+            case applyNetworkPolicyAmendment
+        }
+
+        private enum AmendmentKeys: String, CodingKey {
+            case execpolicyAmendment = "execpolicy_amendment"
+            case networkPolicyAmendment = "network_policy_amendment"
+        }
+
+        public init(from decoder: Decoder) throws {
+            if let unit = try? UnitDecision(from: decoder) {
+                switch unit {
+                case .accept:
+                    self = .accept
+                case .acceptForSession:
+                    self = .acceptForSession
+                case .decline:
+                    self = .decline
+                case .cancel:
+                    self = .cancel
+                }
+                return
+            }
+
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.acceptWithExecpolicyAmendment) {
+                let nested = try container.nestedContainer(
+                    keyedBy: AmendmentKeys.self,
+                    forKey: .acceptWithExecpolicyAmendment
+                )
+                self = .acceptWithExecpolicyAmendment(
+                    execpolicyAmendment: try nested.decode(ExecPolicyAmendment.self, forKey: .execpolicyAmendment)
+                )
+                return
+            }
+
+            if container.contains(.applyNetworkPolicyAmendment) {
+                let nested = try container.nestedContainer(
+                    keyedBy: AmendmentKeys.self,
+                    forKey: .applyNetworkPolicyAmendment
+                )
+                self = .applyNetworkPolicyAmendment(
+                    networkPolicyAmendment: try nested.decode(
+                        NetworkPolicyAmendment.self,
+                        forKey: .networkPolicyAmendment
+                    )
+                )
+                return
+            }
+
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Unsupported command execution approval decision"
+                )
+            )
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case .accept:
+                try UnitDecision.accept.encode(to: encoder)
+            case .acceptForSession:
+                try UnitDecision.acceptForSession.encode(to: encoder)
+            case let .acceptWithExecpolicyAmendment(amendment):
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                var nested = container.nestedContainer(
+                    keyedBy: AmendmentKeys.self,
+                    forKey: .acceptWithExecpolicyAmendment
+                )
+                try nested.encode(amendment, forKey: .execpolicyAmendment)
+            case let .applyNetworkPolicyAmendment(amendment):
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                var nested = container.nestedContainer(
+                    keyedBy: AmendmentKeys.self,
+                    forKey: .applyNetworkPolicyAmendment
+                )
+                try nested.encode(amendment, forKey: .networkPolicyAmendment)
+            case .decline:
+                try UnitDecision.decline.encode(to: encoder)
+            case .cancel:
+                try UnitDecision.cancel.encode(to: encoder)
+            }
+        }
+    }
+
+    public enum CommandAction: Equatable, Codable, Sendable {
+        case read(command: String, name: String, path: String)
+        case listFiles(command: String, path: String?)
+        case search(command: String, query: String?, path: String?)
+        case unknown(command: String)
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case command
+            case name
+            case path
+            case query
+        }
+
+        private enum CommandType: String, Codable {
+            case read
+            case listFiles
+            case search
+            case unknown
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(CommandType.self, forKey: .type) {
+            case .read:
+                self = .read(
+                    command: try container.decode(String.self, forKey: .command),
+                    name: try container.decode(String.self, forKey: .name),
+                    path: try container.decode(String.self, forKey: .path)
+                )
+            case .listFiles:
+                self = .listFiles(
+                    command: try container.decode(String.self, forKey: .command),
+                    path: try container.decodeIfPresent(String.self, forKey: .path)
+                )
+            case .search:
+                self = .search(
+                    command: try container.decode(String.self, forKey: .command),
+                    query: try container.decodeIfPresent(String.self, forKey: .query),
+                    path: try container.decodeIfPresent(String.self, forKey: .path)
+                )
+            case .unknown:
+                self = .unknown(command: try container.decode(String.self, forKey: .command))
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case let .read(command, name, path):
+                try container.encode(CommandType.read, forKey: .type)
+                try container.encode(command, forKey: .command)
+                try container.encode(name, forKey: .name)
+                try container.encode(path, forKey: .path)
+            case let .listFiles(command, path):
+                try container.encode(CommandType.listFiles, forKey: .type)
+                try container.encode(command, forKey: .command)
+                try container.encodeIfPresent(path, forKey: .path)
+            case let .search(command, query, path):
+                try container.encode(CommandType.search, forKey: .type)
+                try container.encode(command, forKey: .command)
+                try container.encodeIfPresent(query, forKey: .query)
+                try container.encodeIfPresent(path, forKey: .path)
+            case let .unknown(command):
+                try container.encode(CommandType.unknown, forKey: .type)
+                try container.encode(command, forKey: .command)
+            }
+        }
+    }
+
+    public struct AdditionalPermissionProfile: Equatable, Codable, Sendable {
+        public let network: RequestPermissionNetworkPermissions?
+        public let fileSystem: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case network
+            case fileSystem
+        }
+
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+            self.network = network
+            self.fileSystem = fileSystem
+        }
+    }
+
+    public struct CommandExecutionRequestApprovalParams: Equatable, Codable, Sendable {
+        public static let method = "item/commandExecution/requestApproval"
+
+        public let threadID: String
+        public let turnID: String
+        public let itemID: String
+        public let startedAtMilliseconds: Int64
+        public let approvalID: String?
+        public let reason: String?
+        public let networkApprovalContext: NetworkApprovalContext?
+        public let command: String?
+        public let cwd: String?
+        public let commandActions: [CommandAction]?
+        public let additionalPermissions: AdditionalPermissionProfile?
+        public let proposedExecPolicyAmendment: ExecPolicyAmendment?
+        public let proposedNetworkPolicyAmendments: [NetworkPolicyAmendment]?
+        public let availableDecisions: [CommandExecutionApprovalDecision]?
+
+        public init(
+            threadID: String,
+            turnID: String,
+            itemID: String,
+            startedAtMilliseconds: Int64,
+            approvalID: String? = nil,
+            reason: String? = nil,
+            networkApprovalContext: NetworkApprovalContext? = nil,
+            command: String? = nil,
+            cwd: String? = nil,
+            commandActions: [CommandAction]? = nil,
+            additionalPermissions: AdditionalPermissionProfile? = nil,
+            proposedExecPolicyAmendment: ExecPolicyAmendment? = nil,
+            proposedNetworkPolicyAmendments: [NetworkPolicyAmendment]? = nil,
+            availableDecisions: [CommandExecutionApprovalDecision]? = nil
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.itemID = itemID
+            self.startedAtMilliseconds = startedAtMilliseconds
+            self.approvalID = approvalID
+            self.reason = reason
+            self.networkApprovalContext = networkApprovalContext
+            self.command = command
+            self.cwd = cwd
+            self.commandActions = commandActions
+            self.additionalPermissions = additionalPermissions
+            self.proposedExecPolicyAmendment = proposedExecPolicyAmendment
+            self.proposedNetworkPolicyAmendments = proposedNetworkPolicyAmendments
+            self.availableDecisions = availableDecisions
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case itemID = "itemId"
+            case startedAtMilliseconds = "startedAtMs"
+            case approvalID = "approvalId"
+            case reason
+            case networkApprovalContext
+            case command
+            case cwd
+            case commandActions
+            case additionalPermissions
+            case proposedExecPolicyAmendment = "proposedExecpolicyAmendment"
+            case proposedNetworkPolicyAmendments
+            case availableDecisions
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(threadID, forKey: .threadID)
+            try container.encode(turnID, forKey: .turnID)
+            try container.encode(itemID, forKey: .itemID)
+            try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
+            try container.encodeIfPresent(approvalID, forKey: .approvalID)
+            try container.encodeIfPresent(reason, forKey: .reason)
+            try container.encodeIfPresent(networkApprovalContext, forKey: .networkApprovalContext)
+            try container.encodeIfPresent(command, forKey: .command)
+            try container.encodeIfPresent(cwd, forKey: .cwd)
+            try container.encodeIfPresent(commandActions, forKey: .commandActions)
+            try container.encodeIfPresent(additionalPermissions, forKey: .additionalPermissions)
+            try container.encodeIfPresent(proposedExecPolicyAmendment, forKey: .proposedExecPolicyAmendment)
+            try container.encodeIfPresent(proposedNetworkPolicyAmendments, forKey: .proposedNetworkPolicyAmendments)
+            try container.encodeIfPresent(availableDecisions, forKey: .availableDecisions)
+        }
+    }
+
+    public struct CommandExecutionRequestApprovalResponse: Equatable, Codable, Sendable {
+        public let decision: CommandExecutionApprovalDecision
+
+        public init(decision: CommandExecutionApprovalDecision) {
+            self.decision = decision
         }
     }
 

@@ -342,6 +342,162 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testCommandExecutionRequestApprovalServerRequestMatchesRustWireShape() throws {
+        let execAmendment = ExecPolicyAmendment(command: ["git", "status"])
+        let networkAmendment = NetworkPolicyAmendment(host: "example.com", action: .allow)
+        let params = AppServerProtocol.CommandExecutionRequestApprovalParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "item_123",
+            startedAtMilliseconds: 43,
+            reason: "needs network",
+            networkApprovalContext: NetworkApprovalContext(host: "example.com", protocol: .https),
+            command: "git status",
+            cwd: "/tmp/project",
+            commandActions: [
+                .read(command: "cat Package.swift", name: "Package.swift", path: "/tmp/project/Package.swift"),
+                .listFiles(command: "ls Sources", path: "Sources")
+            ],
+            additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
+                network: RequestPermissionNetworkPermissions(enabled: true),
+                fileSystem: .object(["read": .array([.string("/tmp/project")])])
+            ),
+            proposedExecPolicyAmendment: execAmendment,
+            proposedNetworkPolicyAmendments: [networkAmendment],
+            availableDecisions: [
+                .accept,
+                .acceptWithExecpolicyAmendment(execpolicyAmendment: execAmendment),
+                .applyNetworkPolicyAmendment(networkPolicyAmendment: networkAmendment),
+                .cancel
+            ]
+        )
+        let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
+            requestID: .integer(4),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(4))
+        XCTAssertEqual(request.method, "item/commandExecution/requestApproval")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/commandExecution/requestApproval",
+            "id": 4,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "item_123",
+                "startedAtMs": 43,
+                "reason": "needs network",
+                "networkApprovalContext": [
+                    "host": "example.com",
+                    "protocol": "https"
+                ],
+                "command": "git status",
+                "cwd": "/tmp/project",
+                "commandActions": [
+                    [
+                        "type": "read",
+                        "command": "cat Package.swift",
+                        "name": "Package.swift",
+                        "path": "/tmp/project/Package.swift"
+                    ],
+                    [
+                        "type": "listFiles",
+                        "command": "ls Sources",
+                        "path": "Sources"
+                    ]
+                ],
+                "additionalPermissions": [
+                    "network": [
+                        "enabled": true
+                    ],
+                    "fileSystem": [
+                        "read": ["/tmp/project"]
+                    ]
+                ],
+                "proposedExecpolicyAmendment": ["git", "status"],
+                "proposedNetworkPolicyAmendments": [
+                    [
+                        "host": "example.com",
+                        "action": "allow"
+                    ]
+                ],
+                "availableDecisions": [
+                    "accept",
+                    [
+                        "acceptWithExecpolicyAmendment": [
+                            "execpolicy_amendment": ["git", "status"]
+                        ]
+                    ],
+                    [
+                        "applyNetworkPolicyAmendment": [
+                            "network_policy_amendment": [
+                                "host": "example.com",
+                                "action": "allow"
+                            ]
+                        ]
+                    ],
+                    "cancel"
+                ]
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.commandExecutionRequestApproval(params).request(withID: .integer(4)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"item/commandExecution/requestApproval","id":4,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":43,"reason":"needs network","networkApprovalContext":{"host":"example.com","protocol":"https"},"command":"git status","cwd":"/tmp/project","commandActions":[{"type":"read","command":"cat Package.swift","name":"Package.swift","path":"/tmp/project/Package.swift"},{"type":"listFiles","command":"ls Sources","path":"Sources"}],"additionalPermissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"]}},"proposedExecpolicyAmendment":["git","status"],"proposedNetworkPolicyAmendments":[{"host":"example.com","action":"allow"}],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git","status"]}},{"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.com","action":"allow"}}},"cancel"]}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testCommandExecutionRequestApprovalSkipsNilOptionalsLikeRust() throws {
+        let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
+            requestID: .integer(4),
+            params: AppServerProtocol.CommandExecutionRequestApprovalParams(
+                threadID: "thr_123",
+                turnID: "turn_123",
+                itemID: "item_123",
+                startedAtMilliseconds: 43
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/commandExecution/requestApproval",
+            "id": 4,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "item_123",
+                "startedAtMs": 43
+            ]
+        ])
+    }
+
+    func testCommandExecutionRequestApprovalServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.commandExecutionRequestApproval(
+            requestID: .integer(8),
+            response: AppServerProtocol.CommandExecutionRequestApprovalResponse(decision: .acceptForSession)
+        )
+
+        XCTAssertEqual(response.id, .integer(8))
+        XCTAssertEqual(response.method, "item/commandExecution/requestApproval")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/commandExecution/requestApproval",
+            "id": 8,
+            "response": [
+                "decision": "acceptForSession"
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"item/commandExecution/requestApproval","id":8,"response":{"decision":"acceptForSession"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
