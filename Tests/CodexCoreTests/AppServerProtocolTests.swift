@@ -588,6 +588,91 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testDynamicToolCallServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.DynamicToolCallParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            callID: "call_123",
+            namespace: nil,
+            tool: "summarize",
+            arguments: .object([
+                "topic": .string("protocol"),
+                "limit": .integer(3)
+            ])
+        )
+        let request = AppServerProtocol.ServerRequest.dynamicToolCall(
+            requestID: .integer(2),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(2))
+        XCTAssertEqual(request.method, "item/tool/call")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/tool/call",
+            "id": 2,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "callId": "call_123",
+                "namespace": NSNull(),
+                "tool": "summarize",
+                "arguments": [
+                    "topic": "protocol",
+                    "limit": 3
+                ]
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.dynamicToolCall(params).request(withID: .integer(2)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"item/tool/call","id":2,"params":{"threadId":"thr_123","turnId":"turn_123","callId":"call_123","namespace":null,"tool":"summarize","arguments":{"topic":"protocol","limit":3}}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testDynamicToolCallServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.dynamicToolCall(
+            requestID: .integer(2),
+            response: AppServerProtocol.DynamicToolCallResponse(
+                contentItems: [
+                    .text("done"),
+                    .imageURL("file:///tmp/image.png")
+                ],
+                success: true
+            )
+        )
+
+        XCTAssertEqual(response.id, .integer(2))
+        XCTAssertEqual(response.method, "item/tool/call")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/tool/call",
+            "id": 2,
+            "response": [
+                "contentItems": [
+                    [
+                        "type": "inputText",
+                        "text": "done"
+                    ],
+                    [
+                        "type": "inputImage",
+                        "imageUrl": "file:///tmp/image.png"
+                    ]
+                ],
+                "success": true
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"item/tool/call","id":2,"response":{"contentItems":[{"type":"inputText","text":"done"},{"type":"inputImage","imageUrl":"file:///tmp/image.png"}],"success":true}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,

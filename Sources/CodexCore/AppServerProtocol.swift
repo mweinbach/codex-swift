@@ -9,6 +9,7 @@ public enum AppServerProtocol {
         case fileChangeRequestApproval(requestID: RequestID, params: FileChangeRequestApprovalParams)
         case commandExecutionRequestApproval(requestID: RequestID, params: CommandExecutionRequestApprovalParams)
         case toolRequestUserInput(requestID: RequestID, params: ToolRequestUserInputParams)
+        case dynamicToolCall(requestID: RequestID, params: DynamicToolCallParams)
 
         public var id: RequestID {
             switch self {
@@ -25,6 +26,8 @@ public enum AppServerProtocol {
             case let .commandExecutionRequestApproval(requestID, _):
                 requestID
             case let .toolRequestUserInput(requestID, _):
+                requestID
+            case let .dynamicToolCall(requestID, _):
                 requestID
             }
         }
@@ -45,6 +48,8 @@ public enum AppServerProtocol {
                 CommandExecutionRequestApprovalParams.method
             case .toolRequestUserInput:
                 ToolRequestUserInputParams.method
+            case .dynamicToolCall:
+                DynamicToolCallParams.method
             }
         }
 
@@ -93,6 +98,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(ToolRequestUserInputParams.self, forKey: .params)
                 )
+            case DynamicToolCallParams.method:
+                self = .dynamicToolCall(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(DynamicToolCallParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -121,6 +131,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .toolRequestUserInput(_, params):
                 try container.encode(params, forKey: .params)
+            case let .dynamicToolCall(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -133,6 +145,7 @@ public enum AppServerProtocol {
         case fileChangeRequestApproval(FileChangeRequestApprovalParams)
         case commandExecutionRequestApproval(CommandExecutionRequestApprovalParams)
         case toolRequestUserInput(ToolRequestUserInputParams)
+        case dynamicToolCall(DynamicToolCallParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -154,6 +167,8 @@ public enum AppServerProtocol {
                 .commandExecutionRequestApproval(requestID: id, params: params)
             case let .toolRequestUserInput(params):
                 .toolRequestUserInput(requestID: id, params: params)
+            case let .dynamicToolCall(params):
+                .dynamicToolCall(requestID: id, params: params)
             }
         }
     }
@@ -169,6 +184,7 @@ public enum AppServerProtocol {
             response: CommandExecutionRequestApprovalResponse
         )
         case toolRequestUserInput(requestID: RequestID, response: ToolRequestUserInputResponse)
+        case dynamicToolCall(requestID: RequestID, response: DynamicToolCallResponse)
 
         public var id: RequestID {
             switch self {
@@ -185,6 +201,8 @@ public enum AppServerProtocol {
             case let .commandExecutionRequestApproval(requestID, _):
                 requestID
             case let .toolRequestUserInput(requestID, _):
+                requestID
+            case let .dynamicToolCall(requestID, _):
                 requestID
             }
         }
@@ -205,6 +223,8 @@ public enum AppServerProtocol {
                 CommandExecutionRequestApprovalParams.method
             case .toolRequestUserInput:
                 ToolRequestUserInputParams.method
+            case .dynamicToolCall:
+                DynamicToolCallParams.method
             }
         }
 
@@ -253,6 +273,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(ToolRequestUserInputResponse.self, forKey: .response)
                 )
+            case DynamicToolCallParams.method:
+                self = .dynamicToolCall(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(DynamicToolCallResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -281,7 +306,65 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .toolRequestUserInput(_, response):
                 try container.encode(response, forKey: .response)
+            case let .dynamicToolCall(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public struct DynamicToolCallParams: Equatable, Codable, Sendable {
+        public static let method = "item/tool/call"
+
+        public let threadID: String
+        public let turnID: String
+        public let callID: String
+        public let namespace: String?
+        public let tool: String
+        public let arguments: JSONValue
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case callID = "callId"
+            case namespace
+            case tool
+            case arguments
+        }
+
+        public init(
+            threadID: String,
+            turnID: String,
+            callID: String,
+            namespace: String?,
+            tool: String,
+            arguments: JSONValue
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.callID = callID
+            self.namespace = namespace
+            self.tool = tool
+            self.arguments = arguments
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(threadID, forKey: .threadID)
+            try container.encode(turnID, forKey: .turnID)
+            try container.encode(callID, forKey: .callID)
+            try container.encodeNilOrValue(namespace, forKey: .namespace)
+            try container.encode(tool, forKey: .tool)
+            try container.encode(arguments, forKey: .arguments)
+        }
+    }
+
+    public struct DynamicToolCallResponse: Equatable, Codable, Sendable {
+        public let contentItems: [DynamicToolCallOutputContentItem]
+        public let success: Bool
+
+        public init(contentItems: [DynamicToolCallOutputContentItem], success: Bool) {
+            self.contentItems = contentItems
+            self.success = success
         }
     }
 
