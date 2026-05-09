@@ -1884,6 +1884,174 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadDescribesUninstalledGitSourceWithoutCloning() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = temp.url.appendingPathComponent("marketplace", isDirectory: true)
+        let manifestDirectory = sourceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        let missingRemote = temp.url.appendingPathComponent("missing-remote-plugin-repo", isDirectory: true)
+        let missingRemoteURL = URL(fileURLWithPath: missingRemote.path, isDirectory: true).absoluteString
+        try """
+        {
+          "name": "debug",
+          "plugins": [
+            {
+              "name": "toolkit",
+              "source": {
+                "source": "git-subdir",
+                "url": "\(missingRemoteURL)",
+                "path": "plugins/toolkit",
+                "ref": "main",
+                "sha": "abc123"
+              },
+              "category": "Developer Tools"
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let marketplacePath = manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false).path
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"toolkit"}}"#,
+            codexHome: temp.url
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        XCTAssertEqual(
+            plugin["description"] as? String,
+            "This is a cross-repo plugin. Install it to view more detailed information. The source of the plugin is \(missingRemoteURL), path `plugins/toolkit`, ref `main`, sha `abc123`."
+        )
+        XCTAssertEqual((plugin["skills"] as? [Any])?.count, 0)
+        XCTAssertEqual((plugin["apps"] as? [Any])?.count, 0)
+        XCTAssertEqual(plugin["mcpServers"] as? [String], [])
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        XCTAssertEqual(summary["installed"] as? Bool, false)
+        let source = try XCTUnwrap(summary["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "git")
+        XCTAssertEqual(source["url"] as? String, missingRemoteURL)
+        XCTAssertEqual(source["path"] as? String, "plugins/toolkit")
+        let interface = try XCTUnwrap(summary["interface"] as? [String: Any])
+        XCTAssertEqual(interface["category"] as? String, "Developer Tools")
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: temp.url.appendingPathComponent("plugins/.marketplace-plugin-source-staging", isDirectory: true).path
+            )
+        )
+    }
+
+    func testPluginReadUsesInstalledGitSourceCacheWithoutCloning() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = temp.url.appendingPathComponent("marketplace", isDirectory: true)
+        let manifestDirectory = sourceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        let missingRemote = temp.url.appendingPathComponent("missing-remote-plugin-repo", isDirectory: true)
+        let missingRemoteURL = URL(fileURLWithPath: missingRemote.path, isDirectory: true).absoluteString
+        try """
+        {
+          "name": "debug",
+          "plugins": [
+            {
+              "name": "toolkit",
+              "source": {
+                "source": "git-subdir",
+                "url": "\(missingRemoteURL)",
+                "path": "plugins/toolkit"
+              },
+              "category": "Developer Tools"
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [features]
+        plugin_hooks = true
+
+        [plugins."toolkit@debug"]
+        enabled = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let cachedRoot = temp.url.appendingPathComponent("plugins/cache/debug/toolkit/local", isDirectory: true)
+        let manifestRoot = cachedRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestRoot, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "toolkit",
+          "description": "Cached toolkit plugin",
+          "interface": {
+            "displayName": "Toolkit"
+          }
+        }
+        """.write(
+            to: manifestRoot.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let skillRoot = cachedRoot.appendingPathComponent("skills/search", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillRoot, withIntermediateDirectories: true)
+        try """
+        ---
+        name: search
+        description: search cached data
+        ---
+        """.write(to: skillRoot.appendingPathComponent("SKILL.md", isDirectory: false), atomically: true, encoding: .utf8)
+        try """
+        {"apps":{"calendar":{"id":"connector_calendar","name":"Calendar"}}}
+        """.write(to: cachedRoot.appendingPathComponent(".app.json", isDirectory: false), atomically: true, encoding: .utf8)
+        try """
+        {"mcpServers":{"toolkit":{"command":"toolkit-mcp"}}}
+        """.write(to: cachedRoot.appendingPathComponent(".mcp.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let hooksRoot = cachedRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try """
+        {
+          "hooks": {
+            "SessionStart": [
+              {
+                "hooks": [
+                  { "type": "command", "command": "echo startup" }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+
+        let marketplacePath = manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false).path
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"toolkit"}}"#,
+            codexHome: temp.url
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["description"] as? String, "Cached toolkit plugin")
+        XCTAssertEqual((plugin["skills"] as? [[String: Any]])?.map { $0["name"] as? String }, ["toolkit:search"])
+        XCTAssertEqual((plugin["apps"] as? [[String: Any]])?.map { $0["id"] as? String }, ["connector_calendar"])
+        XCTAssertEqual(plugin["mcpServers"] as? [String], ["toolkit"])
+        XCTAssertEqual(
+            (plugin["hooks"] as? [[String: Any]])?.map { $0["key"] as? String },
+            ["toolkit@debug:hooks/hooks.json:session_start:0:0"]
+        )
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        XCTAssertEqual(summary["installed"] as? Bool, true)
+        XCTAssertEqual(summary["enabled"] as? Bool, true)
+        let interface = try XCTUnwrap(summary["interface"] as? [String: Any])
+        XCTAssertEqual(interface["displayName"] as? String, "Toolkit")
+        XCTAssertEqual(interface["category"] as? String, "Developer Tools")
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: temp.url.appendingPathComponent("plugins/.marketplace-plugin-source-staging", isDirectory: true).path
+            )
+        )
+    }
+
     func testPluginReadUsesManifestDeclaredLocalCapabilityPaths() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)

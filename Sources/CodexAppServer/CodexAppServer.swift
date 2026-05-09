@@ -2118,7 +2118,7 @@ public enum CodexAppServer {
         var seen: Set<String> = []
         return plugins.compactMap { plugin in
             guard let pluginName = plugin["name"] as? String,
-                  let source = localPluginSourcePath(plugin["source"], marketplaceRoot: marketplaceRoot)
+                  let source = marketplacePluginSource(plugin["source"], marketplaceRoot: marketplaceRoot)
             else {
                 return nil
             }
@@ -2126,22 +2126,27 @@ public enum CodexAppServer {
             guard seen.insert(id).inserted else {
                 return nil
             }
-            let manifest = localPluginManifest(root: source)
+            let manifest: LocalPluginManifest
+            if case .local(let sourcePath) = source {
+                manifest = localPluginManifest(root: sourcePath)
+            } else {
+                manifest = .empty
+            }
             let policy = plugin["policy"] as? [String: Any] ?? [:]
             return [
                 "id": id,
                 "name": pluginName,
                 "shareContext": NSNull(),
-                "source": [
-                    "type": "local",
-                    "path": source.path
-                ],
+                "source": pluginSourceObject(source),
                 "installed": codexHome.map { localPluginInstalled(id: id, codexHome: $0) } ?? false,
                 "enabled": configuredPluginEnabled(id: id, in: config),
                 "installPolicy": policy["installation"] as? String ?? "AVAILABLE",
                 "authPolicy": policy["authentication"] as? String ?? "ON_INSTALL",
                 "availability": "AVAILABLE",
-                "interface": manifest.interface,
+                "interface": pluginInterfaceWithMarketplaceCategory(
+                    manifest.interface,
+                    category: plugin["category"] as? String
+                ),
                 "keywords": manifest.keywords
             ].nullStripped()
         }
@@ -2162,32 +2167,55 @@ public enum CodexAppServer {
         )
         let marketplaceName = marketplace["name"] as? String ?? ""
         let summaries = marketplace["plugins"] as? [[String: Any]] ?? []
-        guard let summary = summaries.first(where: { $0["name"] as? String == pluginName }) else {
+        guard var summary = summaries.first(where: { $0["name"] as? String == pluginName }) else {
             throw AppServerError.invalidRequest(
                 "plugin `\(pluginName)` was not found in marketplace `\(marketplaceName)`"
             )
         }
+        let pluginID = "\(pluginName)@\(marketplaceName)"
         let source = summary["source"] as? [String: Any]
-        let sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let sourceType = source?["type"] as? String
+        let sourcePath: URL?
+        if sourceType == "local" {
+            sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        } else if sourceType == "git", summary["installed"] as? Bool == true {
+            sourcePath = activeLocalPluginRoot(id: pluginID, codexHome: configuration.codexHome)
+        } else {
+            sourcePath = nil
+        }
         let manifest = sourcePath.map(localPluginManifest(root:)) ?? LocalPluginManifest.empty
+        if sourcePath != nil {
+            let marketplaceCategory = (summary["interface"] as? [String: Any])?["category"] as? String
+            summary["interface"] = pluginInterfaceWithMarketplaceCategory(
+                manifest.interface,
+                category: marketplaceCategory
+            )
+            summary["keywords"] = manifest.keywords
+        }
         let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config, manifest: manifest) } ?? []
         let hooks = sourcePath.map {
             localPluginHooks(
                 root: $0,
-                pluginID: "\(pluginName)@\(marketplaceName)",
+                pluginID: pluginID,
                 enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: false),
                 manifest: manifest
             )
         } ?? []
         let apps = sourcePath.map { localPluginApps(root: $0, manifest: manifest) } ?? []
         let mcpServers = sourcePath.map { localPluginMcpServerNames(root: $0, manifest: manifest) } ?? []
+        let description: Any
+        if sourceType == "git", sourcePath == nil {
+            description = remotePluginInstallRequiredDescription(source)
+        } else {
+            description = manifest.description ?? NSNull()
+        }
 
         return [
             "plugin": [
                 "marketplaceName": marketplaceName,
                 "marketplacePath": marketplacePath,
                 "summary": summary,
-                "description": manifest.description ?? NSNull(),
+                "description": description,
                 "skills": skills,
                 "hooks": hooks,
                 "apps": apps,
@@ -2206,6 +2234,53 @@ public enum CodexAppServer {
     private enum MarketplacePluginSource {
         case local(URL)
         case git(url: String, path: String?, refName: String?, sha: String?)
+    }
+
+    private static func pluginSourceObject(_ source: MarketplacePluginSource) -> [String: Any] {
+        switch source {
+        case .local(let path):
+            return [
+                "type": "local",
+                "path": path.path
+            ]
+        case .git(let url, let path, let refName, let sha):
+            return [
+                "type": "git",
+                "url": url,
+                "path": nullable(path),
+                "refName": nullable(refName),
+                "sha": nullable(sha)
+            ].nullStripped(keepNulls: true)
+        }
+    }
+
+    private static func pluginInterfaceWithMarketplaceCategory(_ interface: Any, category: String?) -> Any {
+        guard let category else {
+            return interface
+        }
+        var object = interface as? [String: Any] ?? [:]
+        object["category"] = category
+        return object
+    }
+
+    private static func remotePluginInstallRequiredDescription(_ source: [String: Any]?) -> String {
+        guard source?["type"] as? String == "git" else {
+            return "This is a cross-repo plugin. Install it to view more detailed information."
+        }
+        var parts: [String] = []
+        if let url = source?["url"] as? String {
+            parts.append(url)
+        }
+        if let path = source?["path"] as? String {
+            parts.append("path `\(path)`")
+        }
+        if let refName = source?["refName"] as? String {
+            parts.append("ref `\(refName)`")
+        }
+        if let sha = source?["sha"] as? String {
+            parts.append("sha `\(sha)`")
+        }
+        return "This is a cross-repo plugin. Install it to view more detailed information. The source of the plugin is \(parts.joined(separator: ", "))."
     }
 
     private static func marketplacePluginSource(_ value: Any?, marketplaceRoot: URL) -> MarketplacePluginSource? {
@@ -2566,6 +2641,21 @@ public enum CodexAppServer {
 
     private static func localPluginInstalled(id: String, codexHome: URL) -> Bool {
         activeLocalPluginVersion(id: id, codexHome: codexHome) != nil
+    }
+
+    private static func activeLocalPluginRoot(id: String, codexHome: URL) -> URL? {
+        guard let version = activeLocalPluginVersion(id: id, codexHome: codexHome) else {
+            return nil
+        }
+        let parts = id.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            return nil
+        }
+        return codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(parts[1], isDirectory: true)
+            .appendingPathComponent(parts[0], isDirectory: true)
+            .appendingPathComponent(version, isDirectory: true)
     }
 
     private static func activeLocalPluginVersion(id: String, codexHome: URL) -> String? {
