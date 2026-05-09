@@ -14241,6 +14241,10 @@ final class CodexAppServerMessageProcessor {
                         )
                     )
                 case "collaborationMode/list":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "collaborationMode/list",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: CodexAppServer.collaborationModeListResult()

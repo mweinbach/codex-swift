@@ -6565,7 +6565,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let response = try appServerResponse(
             #"{"id":1,"method":"collaborationMode/list","params":{}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -6579,6 +6580,19 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data[1]["mode"] as? String, "default")
         XCTAssertTrue(data[1]["model"] is NSNull)
         XCTAssertTrue(data[1]["reasoning_effort"] is NSNull)
+    }
+
+    func testCollaborationModeListRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"collaborationMode/list","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "collaborationMode/list requires experimentalApi capability")
     }
 
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {

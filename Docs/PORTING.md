@@ -614,6 +614,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's method-level experimental API guard for `thread/memoryMode/set` and `memory/reset`, while preserving memory-mode validation and memory-root reset behavior after opt-in.
 - `codex-rs/app-server-protocol` experimental process-route gating
   - matched Rust's method-level experimental API guard for `process/spawn`, `process/writeStdin`, `process/resizePty`, and `process/kill`, preserving live process lifecycle behavior after opt-in.
+- `codex-rs/app-server-protocol` experimental collaboration-mode gating
+  - matched Rust's method-level experimental API guard for `collaborationMode/list`, preserving the existing preset response after opt-in.
 
 ## Known Gaps
 
