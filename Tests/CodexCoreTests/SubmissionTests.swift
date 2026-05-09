@@ -951,6 +951,68 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(FileSystemSandboxPolicy.externalSandbox.getUnreadableGlobsWithCwd(cwd.path), [])
     }
 
+    func testFileSystemSandboxPolicyToLegacySandboxPolicyMatchesRustBridgeableCases() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let cache = try cwd.join("cache")
+        let fullWrite = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write)
+        ])
+        let workspaceWrite = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: "cache").jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .write)
+        ])
+        let readOnly = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ])
+
+        XCTAssertEqual(
+            try FileSystemSandboxPolicy.externalSandbox.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
+            .externalSandbox(networkAccess: .enabled)
+        )
+        XCTAssertEqual(
+            try FileSystemSandboxPolicy.unrestricted.toLegacySandboxPolicy(networkPolicy: .restricted, cwd: cwd.path),
+            .externalSandbox(networkAccess: .restricted)
+        )
+        XCTAssertEqual(
+            try fullWrite.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
+            .dangerFullAccess
+        )
+        XCTAssertEqual(try readOnly.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path), .readOnly)
+        XCTAssertEqual(
+            try workspaceWrite.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
+            .workspaceWrite(
+                writableRoots: [cache],
+                networkAccess: true,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: false
+            )
+        )
+    }
+
+    func testFileSystemSandboxPolicyToLegacySandboxPolicyRejectsUnbridgeableWritesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let outside = try AbsolutePath(absolutePath: "/outside")
+        let outsideWrite = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .path(outside.path), access: .write)
+        ])
+        let tmpOnlyWrite = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.tmpdir.jsonValue), access: .write)
+        ])
+
+        XCTAssertThrowsError(try outsideWrite.toLegacySandboxPolicy(networkPolicy: .restricted, cwd: cwd.path)) { error in
+            XCTAssertEqual(error as? FileSystemSandboxPolicyError, .unbridgeableWritesOutsideWorkspace)
+        }
+        XCTAssertThrowsError(try tmpOnlyWrite.toLegacySandboxPolicy(networkPolicy: .restricted, cwd: cwd.path)) { error in
+            XCTAssertEqual(error as? FileSystemSandboxPolicyError, .unbridgeableWritesOutsideWorkspace)
+        }
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

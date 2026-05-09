@@ -38,6 +38,17 @@ public enum FileSystemAccessMode: String, Codable, Equatable, Sendable {
     }
 }
 
+public enum FileSystemSandboxPolicyError: Error, Equatable, CustomStringConvertible, Sendable {
+    case unbridgeableWritesOutsideWorkspace
+
+    public var description: String {
+        switch self {
+        case .unbridgeableWritesOutsideWorkspace:
+            return "permissions profile requests filesystem writes outside the workspace root, which is not supported until the runtime enforces FileSystemSandboxPolicy directly"
+        }
+    }
+}
+
 public enum FileSystemPath: Equatable, Codable, Sendable {
     case path(String)
     case globPattern(String)
@@ -727,6 +738,94 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             if result.last != pattern {
                 result.append(pattern)
             }
+        }
+    }
+
+    public func toLegacySandboxPolicy(
+        networkPolicy: NetworkSandboxPolicy,
+        cwd: String
+    ) throws -> SandboxPolicy {
+        switch self {
+        case .externalSandbox:
+            return .externalSandbox(networkAccess: networkPolicy.isEnabled ? .enabled : .restricted)
+        case .unrestricted:
+            if networkPolicy.isEnabled {
+                return .dangerFullAccess
+            }
+            return .externalSandbox(networkAccess: .restricted)
+        case let .restricted(entries, _):
+            let cwdPath = Self.absolutePathForLegacyCwd(cwd)
+            let fullDiskWrite = hasFullDiskWriteAccess
+            var workspaceRootWritable = false
+            var writableRoots: [AbsolutePath] = []
+            var tmpdirWritable = false
+            var slashTmpWritable = false
+            var unbridgeableRootWrite = false
+
+            for entry in entries {
+                switch entry.path {
+                case .globPattern:
+                    continue
+                case let .path(path):
+                    guard entry.access.canWrite,
+                          let absolutePath = try? AbsolutePath(absolutePath: path)
+                    else {
+                        continue
+                    }
+                    if cwdPath == absolutePath {
+                        workspaceRootWritable = true
+                    } else {
+                        writableRoots.append(absolutePath)
+                    }
+                case let .special(value):
+                    switch FileSystemSpecialPath(jsonValue: value) {
+                    case .root:
+                        if entry.access.canWrite {
+                            unbridgeableRootWrite = true
+                        }
+                    case .minimal, .unknown:
+                        continue
+                    case let .projectRoots(subpath):
+                        if subpath == nil && entry.access.canWrite {
+                            workspaceRootWritable = true
+                        } else if entry.access.canWrite,
+                                  let resolvedPath = Self.resolveFileSystemPath(entry.path, cwd: cwdPath)
+                        {
+                            writableRoots.append(resolvedPath)
+                        }
+                    case .tmpdir:
+                        if entry.access.canWrite {
+                            tmpdirWritable = true
+                        }
+                    case .slashTmp:
+                        if entry.access.canWrite {
+                            slashTmpWritable = true
+                        }
+                    }
+                }
+            }
+
+            if fullDiskWrite {
+                if networkPolicy.isEnabled {
+                    return .dangerFullAccess
+                }
+                return .externalSandbox(networkAccess: .restricted)
+            }
+
+            if workspaceRootWritable {
+                return .workspaceWrite(
+                    writableRoots: Self.deduplicated(writableRoots),
+                    networkAccess: networkPolicy.isEnabled,
+                    excludeTmpdirEnvVar: !tmpdirWritable,
+                    excludeSlashTmp: !slashTmpWritable
+                )
+            }
+
+            if unbridgeableRootWrite || !writableRoots.isEmpty || tmpdirWritable || slashTmpWritable {
+                throw FileSystemSandboxPolicyError.unbridgeableWritesOutsideWorkspace
+            }
+
+            return .readOnly
         }
     }
 
