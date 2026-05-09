@@ -181,6 +181,32 @@ public struct CompactedItem: Equatable, Codable, Sendable {
         self.message = message
         self.replacementHistory = replacementHistory
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.message = try container.decode(String.self, forKey: .message)
+
+        guard let rawHistory = try container.decodeIfPresent([JSONValue].self, forKey: .replacementHistory) else {
+            self.replacementHistory = nil
+            return
+        }
+
+        self.replacementHistory = try rawHistory
+            .filter { !Self.isLegacyGhostSnapshot($0) }
+            .map { rawItem in
+                let data = try JSONEncoder().encode(rawItem)
+                return try JSONDecoder().decode(ResponseItem.self, from: data)
+            }
+    }
+
+    private static func isLegacyGhostSnapshot(_ value: JSONValue) -> Bool {
+        guard case let .object(fields) = value,
+              fields["type"] == .string("ghost_snapshot")
+        else {
+            return false
+        }
+        return true
+    }
 }
 
 public struct ConversationPathResponseEvent: Equatable, Codable, Sendable {

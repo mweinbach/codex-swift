@@ -177,9 +177,14 @@ public final class RolloutRecorder {
         for line in text.split(whereSeparator: \.isNewline) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty,
-                  let data = trimmed.data(using: .utf8),
-                  let rolloutLine = try? JSONDecoder().decode(RolloutLine.self, from: data)
+                  let data = trimmed.data(using: .utf8)
             else {
+                continue
+            }
+            if isLegacyGhostSnapshotResponseLine(data) {
+                continue
+            }
+            guard let rolloutLine = try? JSONDecoder().decode(RolloutLine.self, from: data) else {
                 continue
             }
 
@@ -309,6 +314,18 @@ public final class RolloutRecorder {
              .eventMsg:
             return item
         }
+    }
+
+    private static func isLegacyGhostSnapshotResponseLine(_ data: Data) -> Bool {
+        guard let rawLine = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case let .object(lineFields) = rawLine,
+              lineFields["type"] == .string("response_item"),
+              case let .object(payloadFields)? = lineFields["payload"],
+              payloadFields["type"] == .string("ghost_snapshot")
+        else {
+            return false
+        }
+        return true
     }
 
     private static func createLogFile(

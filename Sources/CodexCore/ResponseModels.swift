@@ -1048,11 +1048,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case "context_compaction":
             self = .contextCompaction(encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent))
         case "ghost_snapshot":
-            if let ghostCommit = try? container.decode(GhostCommit.self, forKey: .ghostCommit) {
-                self = .ghostSnapshot(ghostCommit: ghostCommit)
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .other
         default:
             self = .other
         }

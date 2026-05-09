@@ -502,6 +502,8 @@ Source baseline inspected for this scaffold:
   - `FunctionCallOutputPayload.textContent` now matches Rust's lossy `FunctionCallOutputBody::to_text` behavior by returning plain text bodies unchanged and joining nonblank structured `input_text` items while ignoring images.
 - `codex-rs/protocol/src/models.rs` reasoning item ID default
   - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
+- `codex-rs/protocol/src/models.rs` legacy ghost snapshot response item
+  - `ResponseItem` now decodes legacy `ghost_snapshot` payloads as Rust's `Other` variant while rollout loading still recognizes and drops old snapshot records before they pollute reconstructed history.
 - `codex-rs/protocol/src/models.rs` shell tool approval hints
   - `ShellToolCallParams` and `ShellCommandToolCallParams` now decode Rust's `prefix_rule` and `additional_permissions` fields alongside timeout aliases, sandbox permissions, and justifications, preserving model-provided approval hints for later approval/runtime plumbing.
 - `codex-rs/protocol/src/models.rs` tool-search call params

@@ -32,13 +32,19 @@ final class RolloutPolicyTests: XCTestCase {
             "tool_search_output",
             "custom_tool_call",
             "custom_tool_call_output",
-            "image_generation_call",
-            "ghost_snapshot"
+            "image_generation_call"
         ] {
             let item = try JSONDecoder().decode(ResponseItem.self, from: Data(#"{"type":"\#(type)"}"#.utf8))
             XCTAssertEqual(item, .knownPersisted(type: type))
             XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(item), type)
         }
+
+        let legacyGhost = try JSONDecoder().decode(
+            ResponseItem.self,
+            from: Data(#"{"type":"ghost_snapshot","ghost_commit":{"id":"ghost-1","preexisting_untracked_files":[],"preexisting_untracked_dirs":[]}}"#.utf8)
+        )
+        XCTAssertEqual(legacyGhost, .other)
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(legacyGhost))
     }
 
     func testResponseItemMemoriesPersistenceMatchesRustBuckets() {
