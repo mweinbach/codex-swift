@@ -459,7 +459,9 @@ private func extractShellCommand(_ command: [String]) -> (String, String)? {
     guard flag == "-c" || flag == "-lc" else {
         return nil
     }
-    guard ["bash", "zsh", "sh"].contains(shellStem(shell)) else {
+    guard let shellType = detectParsedShellKind(shell),
+          [.bash, .zsh, .sh].contains(shellType)
+    else {
         return nil
     }
     return (shell, command[2])
@@ -469,7 +471,7 @@ private func extractPowerShellCommand(_ command: [String]) -> (String, String)? 
     guard command.count >= 3 else {
         return nil
     }
-    guard ["powershell", "powershell.exe", "pwsh", "pwsh.exe"].contains(executableName(command[0]).lowercased()) else {
+    guard detectParsedShellKind(command[0]) == .powerShell else {
         return nil
     }
 
@@ -491,9 +493,40 @@ private func executableName(_ path: String) -> String {
     path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? path
 }
 
-private func shellStem(_ path: String) -> String {
-    let name = executableName(path).lowercased()
-    return name.hasSuffix(".exe") ? String(name.dropLast(4)) : name
+private enum ParsedShellKind {
+    case zsh
+    case bash
+    case powerShell
+    case sh
+    case cmd
+}
+
+private func detectParsedShellKind(_ path: String) -> ParsedShellKind? {
+    let name = executableName(path)
+    switch name {
+    case "zsh":
+        return .zsh
+    case "sh":
+        return .sh
+    case "cmd":
+        return .cmd
+    case "bash":
+        return .bash
+    case "pwsh", "powershell":
+        return .powerShell
+    default:
+        if let stem = fileStem(name), stem != name {
+            return detectParsedShellKind(stem)
+        }
+        return nil
+    }
+}
+
+private func fileStem(_ name: String) -> String? {
+    guard let dotIndex = name.lastIndex(of: "."), dotIndex != name.startIndex else {
+        return nil
+    }
+    return String(name[..<dotIndex])
 }
 
 private func normalizeTokens(_ tokens: [String]) -> [String] {

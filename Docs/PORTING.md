@@ -676,6 +676,8 @@ Source baseline inspected for this scaffold:
   - routed shell-wrapped command summaries through Swift's Rust-shaped Bash word-only parser so escaped expansion characters inside double-quoted search arguments preserve their backslashes in summaries and query text, matching Rust tree-sitter parsing.
 - `codex-rs/shell-command` Bash escaped plain words
   - matched Rust tree-sitter handling for backslash-escaped special characters and spaces in unquoted Bash words so shell-wrapped searches like `rg \$HOME` and `rg foo\ bar` summarize as searches instead of whole-script unknown commands.
+- `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
+  - matched Rust's case-sensitive shell executable stem detection while preserving recursive extension stripping for wrappers such as `powershell.EXE`, so uppercase wrapper names now fall back to whole-command unknown summaries.
 
 ## Known Gaps
 

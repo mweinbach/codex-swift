@@ -645,5 +645,19 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["/usr/local/bin/powershell.exe", "-NoProfile", "-c", "Write-Host hi"]), [
             .unknown(cmd: "Write-Host hi")
         ])
+
+        XCTAssertEqual(parseCommand(["/usr/local/bin/powershell.EXE", "-NoProfile", "-c", "Write-Host hi"]), [
+            .unknown(cmd: "Write-Host hi")
+        ])
+    }
+
+    func testShellExecutableDetectionIsCaseSensitiveLikeRust() {
+        XCTAssertEqual(parseCommand(["PowerShell", "-Command", "Get-ChildItem"]), [
+            .unknown(cmd: "PowerShell -Command Get-ChildItem")
+        ])
+
+        XCTAssertEqual(parseCommand(["BASH", "-lc", "cat README.md"]), [
+            .unknown(cmd: "BASH -lc 'cat README.md'")
+        ])
     }
 }
