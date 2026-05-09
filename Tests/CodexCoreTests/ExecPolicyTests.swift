@@ -1633,6 +1633,48 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkListOrderingMethods() throws {
+        let policy = try parsePolicy("""
+        TOOLS = ["pnpm", "git", "node"]
+        TOOLS.sort()
+        TOOLS.reverse()
+
+        PATHS = ["/opt/homebrew/bin/git", "/usr/bin/git"]
+        PATHS.sort()
+        PATHS.reverse()
+
+        for tool in TOOLS:
+            prefix_rule([tool, "check"], "allow", justification = "ordered " + tool)
+
+        host_executable("git", PATHS)
+        """)
+
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("check")]),
+                decision: .allow,
+                justification: "ordered pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "node"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "node", rest: [.single("check")]),
+                decision: .allow,
+                justification: "ordered node"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("check")]),
+                decision: .allow,
+                justification: "ordered git"
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git", "/opt/homebrew/bin/git"]
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
         let policy = try parsePolicy("""
         COMMANDS = [("git", "status")]
