@@ -3588,6 +3588,26 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for UNKNOWN is not implemented")
     }
 
+    func testExternalAgentConfigImportSessionsWithoutDetailsIsNoopLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null}]}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let list = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/list","params":{}}"#.utf8
+        )))
+        let threads = try XCTUnwrap((list["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertTrue(threads.isEmpty)
+    }
+
     func testExternalAgentConfigDetectAndImportSessionsCreatesRolloutAndLedger() throws {
         let temp = try TemporaryDirectory()
         let codexHome = temp.url.appendingPathComponent("codex-home", isDirectory: true)
@@ -3989,6 +4009,76 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: codexHome.url
         )
         XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
+    func testExternalAgentConfigDetectPluginsReportsRemoteMarketplaceSources() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claude = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
+        try """
+        {
+          "enabledPlugins": {
+            "formatter@acme-tools": true
+          },
+          "extraKnownMarketplaces": {
+            "acme-tools": {
+              "source": "acme-corp/external-agent-plugins"
+            }
+          }
+        }
+        """.write(
+            to: claude.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["PLUGINS"])
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        let plugins = try XCTUnwrap(details["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["marketplaceName"] as? String, "acme-tools")
+        XCTAssertEqual(plugins[0]["pluginNames"] as? [String], ["formatter"])
+    }
+
+    func testExternalAgentConfigDetectPluginsInfersExternalOfficialMarketplace() throws {
+        let temp = try TemporaryDirectory()
+        let codexHome = temp.url.appendingPathComponent("codex-home", isDirectory: true)
+        let home = temp.url.appendingPathComponent("home", isDirectory: true)
+        let claude = home.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
+        try """
+        {
+          "enabledPlugins": {
+            "sample@claude-plugins-official": true
+          }
+        }
+        """.write(
+            to: claude.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"includeHome":true}}"#,
+            configuration: testConfiguration(codexHome: codexHome, environment: ["HOME": home.path])
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["PLUGINS"])
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        let plugins = try XCTUnwrap(details["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["marketplaceName"] as? String, "claude-plugins-official")
+        XCTAssertEqual(plugins[0]["pluginNames"] as? [String], ["sample"])
     }
 
     func testExternalAgentConfigDetectAndImportHooksWritesHooksJsonAndCopiesScripts() throws {

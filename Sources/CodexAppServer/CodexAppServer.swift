@@ -4669,9 +4669,13 @@ public enum CodexAppServer {
         }
         let importSources = externalAgentMarketplaceImportSources(settings: settings, sourceRoot: paths.sourceRoot)
         for group in details {
-            guard let source = importSources[group.marketplaceName],
-                  let marketplacePath = try addExternalAgentLocalMarketplace(source: source, configuration: configuration)
-            else {
+            guard let source = importSources[group.marketplaceName] else {
+                continue
+            }
+            let marketplacePath: URL
+            do {
+                marketplacePath = try addExternalAgentMarketplace(source: source, configuration: configuration)
+            } catch {
                 continue
             }
             for pluginName in group.pluginNames {
@@ -6023,18 +6027,24 @@ public enum CodexAppServer {
     }
 
     private static func externalAgentSessionMigrationDetails(from value: Any?) throws -> [ExternalAgentSessionMigration] {
-        guard let details = value as? [String: Any],
-              let sessions = details["sessions"] as? [[String: Any]]
-        else {
-            throw AppServerError.invalidRequest("sessions migration item is missing details")
+        guard let value else {
+            return []
         }
-        return sessions.compactMap { session in
-            guard let path = session["path"] as? String,
-                  let cwd = session["cwd"] as? String,
-                  !path.isEmpty,
-                  !cwd.isEmpty
-            else {
-                return nil
+        guard let details = value as? [String: Any] else {
+            throw AppServerError.invalidParams("externalAgentConfig/import sessions details must be an object")
+        }
+        guard let rawSessions = details["sessions"] else {
+            return []
+        }
+        guard let sessions = rawSessions as? [[String: Any]] else {
+            throw AppServerError.invalidParams("externalAgentConfig/import sessions must be an array")
+        }
+        return try sessions.map { session in
+            guard let path = session["path"] as? String, !path.isEmpty else {
+                throw AppServerError.invalidParams("externalAgentConfig/import session path must be a non-empty string")
+            }
+            guard let cwd = session["cwd"] as? String, !cwd.isEmpty else {
+                throw AppServerError.invalidParams("externalAgentConfig/import session cwd must be a non-empty string")
             }
             return ExternalAgentSessionMigration(
                 path: URL(fileURLWithPath: path, isDirectory: false),
@@ -6309,15 +6319,16 @@ public enum CodexAppServer {
         var refName: String?
     }
 
+    private static let externalAgentOfficialMarketplaceName = "claude-plugins-official"
+    private static let externalAgentOfficialMarketplaceSource = "anthropics/claude-plugins-official"
+
     private static func externalAgentPluginMigrationDetails(
         settings: [String: Any],
         sourceRoot: URL,
         configuration: CodexAppServerConfiguration
     ) throws -> [ExternalAgentPluginMigration] {
         let importSources = externalAgentMarketplaceImportSources(settings: settings, sourceRoot: sourceRoot)
-        let loadableMarketplaces = Set(importSources.compactMap { name, source in
-            (try? externalAgentLocalMarketplaceURL(source)) == nil ? nil : name
-        })
+        let loadableMarketplaces = Set(importSources.keys)
         let configuredPluginIDs = try configuredExternalAgentPluginIDs(configuration: configuration)
         let configuredMarketplacePlugins = try configuredExternalAgentMarketplacePlugins(configuration: configuration)
         var groups: [String: Set<String>] = [:]
@@ -6413,6 +6424,13 @@ public enum CodexAppServer {
                 refName: refName?.isEmpty == true ? nil : refName
             )
         }
+        if externalAgentEnabledPluginIDs(settings).contains(where: { $0.marketplaceName == externalAgentOfficialMarketplaceName }),
+           sources[externalAgentOfficialMarketplaceName] == nil {
+            sources[externalAgentOfficialMarketplaceName] = ExternalAgentMarketplaceImportSource(
+                source: externalAgentOfficialMarketplaceSource,
+                refName: nil
+            )
+        }
         return sources
     }
 
@@ -6478,18 +6496,63 @@ public enum CodexAppServer {
         return pluginsByMarketplace
     }
 
-    private static func addExternalAgentLocalMarketplace(
+    private static func addExternalAgentMarketplace(
         source: ExternalAgentMarketplaceImportSource,
         configuration: CodexAppServerConfiguration
-    ) throws -> URL? {
-        guard let sourcePath = try externalAgentLocalMarketplaceURL(source) else {
-            return nil
+    ) throws -> URL {
+        if let sourcePath = try externalAgentLocalMarketplaceURL(source) {
+            _ = try marketplaceAddResult(
+                params: ["source": sourcePath.path],
+                configuration: configuration
+            )
+            return try unwrapLocalMarketplaceManifestPath(in: sourcePath)
+        }
+        var params: [String: Any] = ["source": source.source]
+        if let refName = source.refName {
+            params["refName"] = refName
         }
         _ = try marketplaceAddResult(
-            params: ["source": sourcePath.path],
+            params: params,
             configuration: configuration
         )
-        return localMarketplaceManifestPath(in: sourcePath)
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        guard let marketplaceRoot = configuredMarketplaceRootForSource(source, codexHome: configuration.codexHome, in: config),
+              let manifestPath = localMarketplaceManifestPath(in: URL(fileURLWithPath: marketplaceRoot, isDirectory: true))
+        else {
+            throw AppServerError.internalError("failed to locate imported external agent marketplace")
+        }
+        return manifestPath
+    }
+
+    private static func unwrapLocalMarketplaceManifestPath(in sourcePath: URL) throws -> URL {
+        guard let manifestPath = localMarketplaceManifestPath(in: sourcePath) else {
+            throw AppServerError.internalError("failed to locate local external agent marketplace manifest")
+        }
+        return manifestPath
+    }
+
+    private static func configuredMarketplaceRootForSource(
+        _ source: ExternalAgentMarketplaceImportSource,
+        codexHome: URL,
+        in config: ConfigValue
+    ) -> String? {
+        if let localPath = try? externalAgentLocalMarketplaceURL(source) {
+            return configuredMarketplaceRootForLocalSource(localPath.path, in: config)
+        }
+        let parsed = try? parseMarketplaceSource(source.source, explicitRef: source.refName)
+        guard parsed?.kind == .git,
+              let gitURL = parsed?.gitURL
+        else {
+            return nil
+        }
+        return configuredMarketplaceRootForGitSource(
+            source: gitURL,
+            refName: parsed?.refName,
+            sparsePaths: [],
+            codexHome: codexHome,
+            in: config
+        )
     }
 
     private static func externalAgentMcpConfigValue(
