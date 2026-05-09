@@ -460,6 +460,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
     }
 
+    func testRuntimeTurnDiffEventEmitsUpdatedNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let unifiedDiff = """
+        diff --git a/Sources/One.swift b/Sources/One.swift
+        --- a/Sources/One.swift
+        +++ b/Sources/One.swift
+        @@ -1 +1 @@
+        -old
+        +new
+        """
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .turnDiff(TurnDiffEvent(unifiedDiff: unifiedDiff))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["method"] as? String, "turn/diff/updated")
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, "thread-1")
+        XCTAssertEqual(params["turnId"] as? String, "turn-1")
+        XCTAssertEqual(params["diff"] as? String, unifiedDiff)
+    }
+
     func testReviewStartInlineRecordsReviewMarkerAndEmitsStartedNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

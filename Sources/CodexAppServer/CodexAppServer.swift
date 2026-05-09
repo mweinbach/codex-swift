@@ -7515,6 +7515,34 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func turnDiffUpdatedNotification(threadID: String, turnID: String, diff: String) -> [String: Any] {
+        [
+            "method": "turn/diff/updated",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "diff": diff
+            ]
+        ]
+    }
+
+    fileprivate static func runtimeEventNotification(
+        threadID: String,
+        turnID: String,
+        event: EventMessage
+    ) -> [String: Any]? {
+        switch event {
+        case let .turnDiff(turnDiff):
+            return turnDiffUpdatedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                diff: turnDiff.unifiedDiff
+            )
+        default:
+            return nil
+        }
+    }
+
     private static func reviewTurn(id: String, displayText: String) -> [String: Any] {
         let items: [[String: Any]]
         if displayText.isEmpty {
@@ -13027,6 +13055,26 @@ final class CodexAppServerMessageProcessor {
         return (try? CodexAppServer.runAsyncBlocking {
             await manager.isThreadLoaded(threadID)
         }) ?? false
+    }
+
+    func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
+        guard let notification = CodexAppServer.runtimeEventNotification(
+            threadID: threadID,
+            turnID: turnID,
+            event: event
+        ) else {
+            return
+        }
+        await sendNotification(notification)
+    }
+
+    private func sendNotification(_ notification: [String: Any]) async {
+        guard let notificationSink,
+              let data = CodexAppServer.encodeMessages([notification])
+        else {
+            return
+        }
+        await notificationSink(data)
     }
 
     private func incrementOutOfBandElicitationCount(threadID: String) throws -> AppServerElicitationCounterResult {

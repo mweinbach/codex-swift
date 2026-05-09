@@ -272,6 +272,8 @@ Source baseline inspected for this scaffold:
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
 - `codex-rs/analytics/src/accepted_lines.rs` plus `codex-rs/git-utils/src/info.rs` remote URL helpers
   - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, canonical repository URL normalization, isolated-request marking, and latest-turn-diff reducer emission on turn completion
+- `codex-rs/app-server/src/bespoke_event_handling.rs` turn diff notification projection
+  - runtime `TurnDiff` events now emit Rust-shaped `turn/diff/updated` app-server notifications with `threadId`, `turnId`, and the latest unified diff
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
   - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`
@@ -561,5 +563,5 @@ The executable is not functionally equivalent yet. Some commands have native run
 - persistent SQLite-backed local agent graph store adapter
 - live hook command integration of event runtimes into session/tool execution
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
-- accepted-line analytics uploader/app-server integration with live notification routing
+- accepted-line analytics uploader integration beyond turn-diff app-server notification projection
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
