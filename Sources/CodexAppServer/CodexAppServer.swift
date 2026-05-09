@@ -2866,8 +2866,24 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func externalAgentConfigDetectResult(params _: [String: Any]?) -> [String: Any] {
-        ["items": []]
+    fileprivate static func externalAgentConfigDetectResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        var items: [[String: Any]] = []
+        if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentConfig(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        for cwd in params?["cwds"] as? [String] ?? [] {
+            guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)),
+                  let item = try detectExternalAgentConfig(cwd: repoRoot.path, configuration: configuration)
+            else {
+                continue
+            }
+            items.append(item)
+        }
+        return ["items": items]
     }
 
     fileprivate static func externalAgentConfigImportResult(
@@ -2903,33 +2919,58 @@ public enum CodexAppServer {
         )
     }
 
-    private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
-        let sourceSettings: URL
-        let targetConfig: URL
-        if let cwd, !cwd.isEmpty {
-            guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
-                return
-            }
-            sourceSettings = repoRoot
-                .appendingPathComponent(".claude", isDirectory: true)
-                .appendingPathComponent("settings.json", isDirectory: false)
-            targetConfig = repoRoot
-                .appendingPathComponent(".codex", isDirectory: true)
-                .appendingPathComponent("config.toml", isDirectory: false)
-        } else {
-            let home = configuration.environment["HOME"].flatMap { value in
-                value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
-            } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            sourceSettings = home
-                .appendingPathComponent(".claude", isDirectory: true)
-                .appendingPathComponent("settings.json", isDirectory: false)
-            targetConfig = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+    private static func detectExternalAgentConfig(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = externalAgentConfigPaths(cwd: cwd, configuration: configuration)
+        guard var settings = try externalAgentSettings(at: paths.sourceSettings) else {
+            return nil
+        }
+        let localSettingsPath = paths.sourceSettings
+            .deletingLastPathComponent()
+            .appendingPathComponent("settings.local.json", isDirectory: false)
+        if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
+            mergeJSONSettings(into: &settings, incoming: localSettings)
         }
 
-        guard var settings = try externalAgentSettings(at: sourceSettings) else {
+        let migrated = try externalAgentConfigValue(from: settings)
+        guard case let .table(migratedTable) = migrated, !migratedTable.isEmpty else {
+            return nil
+        }
+
+        var existing: ConfigValue = .table([:])
+        if FileManager.default.fileExists(atPath: paths.targetConfig.path) {
+            let raw = try String(contentsOf: paths.targetConfig, encoding: .utf8)
+            existing = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .table([:])
+                : try parseExternalAgentTargetConfig(raw)
+        }
+        guard try mergeMissingConfigValues(into: &existing, incoming: migrated) else {
+            return nil
+        }
+
+        var item: [String: Any] = [
+            "itemType": "CONFIG",
+            "description": "Migrate \(paths.sourceSettings.path) into \(paths.targetConfig.path)",
+            "details": NSNull()
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
+    private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        let paths: (sourceSettings: URL, targetConfig: URL, cwd: String?)
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
             return
         }
-        let localSettingsPath = sourceSettings
+        paths = externalAgentConfigPaths(cwd: cwd, configuration: configuration)
+
+        guard var settings = try externalAgentSettings(at: paths.sourceSettings) else {
+            return
+        }
+        let localSettingsPath = paths.sourceSettings
             .deletingLastPathComponent()
             .appendingPathComponent("settings.local.json", isDirectory: false)
         if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
@@ -2942,8 +2983,8 @@ public enum CodexAppServer {
         }
 
         let existing: ConfigValue
-        if FileManager.default.fileExists(atPath: targetConfig.path) {
-            let raw = try String(contentsOf: targetConfig, encoding: .utf8)
+        if FileManager.default.fileExists(atPath: paths.targetConfig.path) {
+            let raw = try String(contentsOf: paths.targetConfig, encoding: .utf8)
             existing = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? .table([:])
                 : try parseExternalAgentTargetConfig(raw)
@@ -2955,10 +2996,38 @@ public enum CodexAppServer {
             return
         }
         try FileManager.default.createDirectory(
-            at: targetConfig.deletingLastPathComponent(),
+            at: paths.targetConfig.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try renderConfigToml(next).write(to: targetConfig, atomically: true, encoding: .utf8)
+        try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
+    }
+
+    private static func externalAgentConfigPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) -> (sourceSettings: URL, targetConfig: URL, cwd: String?) {
+        if let cwd, !cwd.isEmpty,
+           let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) {
+            return (
+                sourceSettings: repoRoot
+                    .appendingPathComponent(".claude", isDirectory: true)
+                    .appendingPathComponent("settings.json", isDirectory: false),
+                targetConfig: repoRoot
+                    .appendingPathComponent(".codex", isDirectory: true)
+                    .appendingPathComponent("config.toml", isDirectory: false),
+                cwd: repoRoot.path
+            )
+        }
+        let home = configuration.environment["HOME"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+        } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return (
+            sourceSettings: home
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("settings.json", isDirectory: false),
+            targetConfig: configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false),
+            cwd: nil
+        )
     }
 
     private static func externalAgentSettings(at path: URL) throws -> [String: Any]? {
@@ -8595,7 +8664,10 @@ final class CodexAppServerMessageProcessor {
                 case "externalAgentConfig/detect":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.externalAgentConfigDetectResult(params: params)
+                        result: try CodexAppServer.externalAgentConfigDetectResult(
+                            params: params,
+                            configuration: configuration
+                        )
                     )
                 case "externalAgentConfig/import":
                     let result = try CodexAppServer.externalAgentConfigImportResult(

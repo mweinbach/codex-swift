@@ -2678,6 +2678,68 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for SKILLS is not implemented")
     }
 
+    func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        let nested = repo.url.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let claudeSettings = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeSettings, withIntermediateDirectories: true)
+        try """
+        {
+          "env": { "ALPHA": "one" },
+          "sandbox": { "enabled": true }
+        }
+        """.write(
+            to: claudeSettings.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(nested.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.count, 1)
+        let item = items[0]
+        XCTAssertEqual(item["itemType"] as? String, "CONFIG")
+        XCTAssertEqual(item["cwd"] as? String, repo.url.path)
+        XCTAssertEqual(item["details"] as? NSNull, NSNull())
+        XCTAssertEqual(
+            item["description"] as? String,
+            "Migrate \(repo.url.path)/.claude/settings.json into \(repo.url.path)/.codex/config.toml"
+        )
+
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try """
+        sandbox_mode = "workspace-write"
+
+        [shell_environment_policy]
+        inherit = "core"
+
+        [shell_environment_policy.set]
+        ALPHA = "one"
+        """.write(
+            to: repo.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let alreadyMigrated = try appServerResponse(
+            #"{"id":2,"method":"externalAgentConfig/detect","params":{"cwds":["\#(nested.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((alreadyMigrated["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
     func testExternalAgentConfigImportConfigMigratesRepoSettingsAndCompletes() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()
