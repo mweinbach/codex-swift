@@ -14,6 +14,9 @@ final class ConfigRequirementsTests: XCTestCase {
 
         [experimental_network]
         enabled = true
+
+        [permissions.filesystem]
+        deny_read = ["/private/keys"]
         """)
 
         var emptyTarget = try ConfigRequirementsToml.parse("""
@@ -26,6 +29,9 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(emptyTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(emptyTarget.enforceResidency, .us)
         XCTAssertEqual(emptyTarget.network?.enabled, true)
+        XCTAssertEqual(emptyTarget.permissions?.filesystem?.denyRead, [
+            FilesystemDenyReadPattern("/private/keys")
+        ])
 
         var populatedTarget = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
@@ -38,6 +44,9 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(populatedTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(populatedTarget.enforceResidency, .us)
         XCTAssertEqual(populatedTarget.network?.enabled, true)
+        XCTAssertEqual(populatedTarget.permissions?.filesystem?.denyRead, [
+            FilesystemDenyReadPattern("/private/keys")
+        ])
     }
 
     func testDeserializeAllowedApprovalPolicies() throws {
@@ -274,6 +283,42 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual((hooksObject["PermissionRequest"] as? [[String: Any]])?.count, 0)
     }
 
+    func testDeserializeFilesystemDenyReadRequirements() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [permissions.filesystem]
+        deny_read = ["/home/alice/.gitconfig", "/home/alice/.ssh"]
+        """)
+
+        XCTAssertEqual(config.permissions?.filesystem?.denyRead, [
+            FilesystemDenyReadPattern("/home/alice/.gitconfig"),
+            FilesystemDenyReadPattern("/home/alice/.ssh")
+        ])
+
+        let requirements = try config.requirements()
+        XCTAssertEqual(
+            requirements.filesystem,
+            FilesystemConstraints(denyRead: [
+                FilesystemDenyReadPattern("/home/alice/.gitconfig"),
+                FilesystemDenyReadPattern("/home/alice/.ssh")
+            ])
+        )
+    }
+
+    func testDeserializeFilesystemDenyReadGlobRequirements() throws {
+        let cwd = FileManager.default.currentDirectoryPath
+        let config = try ConfigRequirementsToml.parse("""
+        [permissions.filesystem]
+        deny_read = ["./private/**/*.txt"]
+        """)
+
+        XCTAssertEqual(config.permissions?.filesystem?.denyRead, [
+            FilesystemDenyReadPattern("\(cwd)/private/**/*.txt")
+        ])
+        XCTAssertEqual(try config.requirements().filesystem?.denyRead, [
+            FilesystemDenyReadPattern("\(cwd)/private/**/*.txt")
+        ])
+    }
+
     func testEmptyAllowedApprovalPoliciesMatchesRustConstraintError() {
         let config = ConfigRequirementsToml(allowedApprovalPolicies: [])
         XCTAssertThrowsError(try config.requirements()) { error in
@@ -314,6 +359,9 @@ final class ConfigRequirementsTests: XCTestCase {
 
         [experimental_network]
         enabled = true
+
+        [permissions.filesystem]
+        deny_read = ["/private/keys"]
         """)
 
         XCTAssertFalse(config.isEmpty)
@@ -325,7 +373,9 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(object["featureRequirements"] as? [String: Bool], ["remote_control": true])
         XCTAssertEqual(object["enforceResidency"] as? String, "us")
         XCTAssertEqual((object["network"] as? [String: Any])?["enabled"] as? Bool, true)
+        XCTAssertEqual(config.permissions?.filesystem?.denyRead, [FilesystemDenyReadPattern("/private/keys")])
         XCTAssertTrue(ConfigRequirementsToml().isEmpty)
+        XCTAssertTrue(ConfigRequirementsToml(permissions: PermissionsRequirementsToml()).isEmpty)
     }
 }
 

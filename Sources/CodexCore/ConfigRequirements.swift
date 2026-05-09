@@ -11,6 +11,7 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
     case invalidNetworkRequirements(String)
     case invalidNetworkDomainPermission(String)
     case invalidNetworkUnixSocketPermission(String)
+    case invalidFilesystemRequirement(String)
     case invalidArray(String)
 
     public var description: String {
@@ -35,6 +36,8 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
             return "Invalid network domain permission: \(value)"
         case let .invalidNetworkUnixSocketPermission(value):
             return "Invalid network unix socket permission: \(value)"
+        case let .invalidFilesystemRequirement(value):
+            return "Invalid filesystem requirement: \(value)"
         case let .invalidArray(key):
             return "Invalid array for \(key)"
         }
@@ -45,15 +48,18 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var approvalPolicy: Constrained<AskForApproval>
     public var sandboxPolicy: Constrained<SandboxPolicy>
     public var managedHooks: ManagedHooksRequirement?
+    public var filesystem: FilesystemConstraints?
 
     public init(
         approvalPolicy: Constrained<AskForApproval> = .allowAnyFromDefault(),
         sandboxPolicy: Constrained<SandboxPolicy> = .allowAny(.readOnly),
-        managedHooks: ManagedHooksRequirement? = nil
+        managedHooks: ManagedHooksRequirement? = nil,
+        filesystem: FilesystemConstraints? = nil
     ) {
         self.approvalPolicy = approvalPolicy
         self.sandboxPolicy = sandboxPolicy
         self.managedHooks = managedHooks
+        self.filesystem = filesystem
     }
 
     public static let `default` = ConfigRequirements()
@@ -181,6 +187,80 @@ public struct NetworkRequirementsToml: Equatable, Sendable {
     }
 }
 
+public struct FilesystemDenyReadPattern: Equatable, Hashable, Sendable {
+    public var value: String
+
+    public init(_ value: String) {
+        self.value = value
+    }
+
+    public static func fromInput(_ input: String, basePath: String = FileManager.default.currentDirectoryPath) throws -> Self {
+        guard input.contains(where: Self.isGlobMetacharacter) else {
+            return try Self(AbsolutePath.resolve(input, against: basePath).path)
+        }
+
+        let (directoryPrefix, suffix) = splitGlobPattern(input)
+        let normalizedPrefix = try AbsolutePath.resolve(
+            directoryPrefix.isEmpty ? "." : directoryPrefix,
+            against: basePath
+        ).path
+        if suffix.isEmpty {
+            return Self(normalizedPrefix)
+        }
+        return Self(normalizedPrefix == "/" ? "/\(suffix)" : "\(normalizedPrefix)/\(suffix)")
+    }
+
+    private static func splitGlobPattern(_ input: String) -> (String, String) {
+        guard let globIndex = input.firstIndex(where: isGlobMetacharacter) else {
+            return ("", input)
+        }
+        let prefix = input[..<globIndex]
+        if let separatorIndex = prefix.indices.reversed().first(where: { prefix[$0] == "/" }) {
+            if separatorIndex == prefix.startIndex {
+                return ("/", String(input[input.index(after: separatorIndex)...]))
+            }
+            return (String(input[..<separatorIndex]), String(input[input.index(after: separatorIndex)...]))
+        }
+        return ("", input)
+    }
+
+    private static func isGlobMetacharacter(_ character: Character) -> Bool {
+        character == "*" || character == "?" || character == "["
+    }
+}
+
+public struct FilesystemRequirementsToml: Equatable, Sendable {
+    public var denyRead: [FilesystemDenyReadPattern]?
+
+    public init(denyRead: [FilesystemDenyReadPattern]? = nil) {
+        self.denyRead = denyRead
+    }
+
+    public var isEmpty: Bool {
+        denyRead?.isEmpty ?? true
+    }
+}
+
+public struct PermissionsRequirementsToml: Equatable, Sendable {
+    public var filesystem: FilesystemRequirementsToml?
+
+    public init(filesystem: FilesystemRequirementsToml? = nil) {
+        self.filesystem = filesystem
+    }
+
+    public var isEmpty: Bool {
+        filesystem?.isEmpty ?? true
+    }
+}
+
+public struct FilesystemConstraints: Equatable, Sendable {
+    public var denyRead: [FilesystemDenyReadPattern]
+
+    public init(denyRead: [FilesystemDenyReadPattern] = []) {
+        self.denyRead = denyRead
+    }
+}
+
 public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedApprovalPolicies: [AskForApproval]?
     public var allowedApprovalsReviewers: [ApprovalsReviewer]?
@@ -192,6 +272,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var hooksSourceDescription: String
     public var enforceResidency: ResidencyRequirement?
     public var network: NetworkRequirementsToml?
+    public var permissions: PermissionsRequirementsToml?
 
     public init(
         allowedApprovalPolicies: [AskForApproval]? = nil,
@@ -203,7 +284,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements",
         enforceResidency: ResidencyRequirement? = nil,
-        network: NetworkRequirementsToml? = nil
+        network: NetworkRequirementsToml? = nil,
+        permissions: PermissionsRequirementsToml? = nil
     ) {
         self.allowedApprovalPolicies = allowedApprovalPolicies
         self.allowedApprovalsReviewers = allowedApprovalsReviewers
@@ -215,6 +297,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.hooksSourceDescription = hooksSourceDescription
         self.enforceResidency = enforceResidency
         self.network = network
+        self.permissions = permissions
     }
 
     public var isEmpty: Bool {
@@ -225,7 +308,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             featureRequirements == nil &&
             hooks == nil &&
             enforceResidency == nil &&
-            network == nil
+            network == nil &&
+            (permissions?.isEmpty ?? true)
     }
 
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
@@ -254,6 +338,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if network == nil, let value = other.network {
             network = value
+        }
+        if permissions == nil, let value = other.permissions {
+            permissions = value
         }
     }
 
@@ -310,7 +397,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         return ConfigRequirements(
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            managedHooks: managedHooks
+            managedHooks: managedHooks,
+            filesystem: permissions?.filesystem.map { FilesystemConstraints(denyRead: $0.denyRead ?? []) }
         )
     }
 
@@ -343,6 +431,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let networkValue = table["experimental_network"] {
             result.network = try parseNetworkRequirements(networkValue)
+        }
+        if let permissionsValue = table["permissions"] {
+            result.permissions = try parsePermissionsRequirements(permissionsValue)
         }
 
         return result
@@ -454,6 +545,26 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
                 key: "experimental_network.allow_local_binding"
             )
         )
+    }
+
+    private static func parsePermissionsRequirements(_ value: ConfigValue) throws -> PermissionsRequirementsToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidFilesystemRequirement("permissions")
+        }
+        let filesystem = try table["filesystem"].map(parseFilesystemRequirements)
+        return PermissionsRequirementsToml(filesystem: filesystem)
+    }
+
+    private static func parseFilesystemRequirements(_ value: ConfigValue) throws -> FilesystemRequirementsToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidFilesystemRequirement("permissions.filesystem")
+        }
+        let denyRead = try table["deny_read"].map { value in
+            try stringArray(value, key: "permissions.filesystem.deny_read").map {
+                try FilesystemDenyReadPattern.fromInput($0)
+            }
+        }
+        return FilesystemRequirementsToml(denyRead: denyRead)
     }
 
     private static func parseNetworkDomains(_ table: [String: ConfigValue]) throws
