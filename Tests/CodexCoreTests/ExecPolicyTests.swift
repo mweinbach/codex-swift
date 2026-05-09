@@ -1880,6 +1880,85 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkDictUnionExpressions() throws {
+        let policy = try parsePolicy("""
+        BASE = {
+            "git": {"command": "status", "decision": "prompt"},
+            "hg": {"command": "status", "decision": "forbidden"},
+        }
+        OVERRIDES = {
+            "git": {"command": "diff", "decision": "allow"},
+            "pnpm": {"command": "install", "decision": "allow"},
+        }
+
+        def extra_rules():
+            return {"node": {"command": "test", "decision": "prompt"}} | {"deno": {"command": "fmt", "decision": "allow"}}
+
+        SETTINGS = BASE | OVERRIDES | extra_rules()
+        HOSTS = {"git": "github.com"} | {"pnpm": "registry.npmjs.org"}
+        PATHS = {"git": "/usr/bin/git"} | {"pnpm": "/usr/local/bin/pnpm"}
+
+        for tool in sorted(SETTINGS.keys()):
+            config = SETTINGS[tool]
+            prefix_rule([tool, config["command"]], config["decision"], justification = "dict union " + tool)
+
+        for tool in sorted(HOSTS.keys()):
+            network_rule(HOSTS[tool], "https", "allow")
+
+        for tool in sorted(PATHS.keys()):
+            host_executable(tool, [PATHS[tool]])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .allow,
+                justification: "dict union git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.single("status")]),
+                decision: .forbidden,
+                justification: "dict union hg"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .allow,
+                justification: "dict union pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "node"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "node", rest: [.single("test")]),
+                decision: .prompt,
+                justification: "dict union node"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "deno"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "deno", rest: [.single("fmt")]),
+                decision: .allow,
+                justification: "dict union deno"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "github.com", protocol: .https, decision: .allow),
+            NetworkRule(host: "registry.npmjs.org", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "pnpm": ["/usr/local/bin/pnpm"]
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {"git": "status"} | ["bad"]
+        prefix_rule(["git", SETTINGS["git"]], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkCollectionRemovalMethods() throws {
         let policy = try parsePolicy("""
         COMMANDS = [

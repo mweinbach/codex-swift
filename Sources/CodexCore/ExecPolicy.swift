@@ -2531,6 +2531,13 @@ public final class PolicyParser {
         ) {
             return boolean
         }
+        if let dictionaryUnion = try parseStarlarkDictionaryUnionExpression(
+            trimmed,
+            constants: constants,
+            functions: functions
+        ) {
+            return dictionaryUnion
+        }
         if let additive = try parseStarlarkAdditiveExpression(trimmed, constants: constants, functions: functions) {
             return additive
         }
@@ -6126,6 +6133,35 @@ public final class PolicyParser {
         return result
     }
 
+    private static func parseStarlarkDictionaryUnionExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelDictionaryUnionExpression(text)
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
+        for piece in pieces.dropFirst() {
+            guard piece.operator == "|",
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            result = try evaluateStarlarkDictionaryUnion(result, next, expression: text)
+        }
+        return result
+    }
+
     private static func parseStarlarkUnaryNumericExpression(
         _ text: String,
         constants: [String: ConfigValue],
@@ -6233,6 +6269,22 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func evaluateStarlarkDictionaryUnion(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        guard case var .table(lhsItems) = lhs,
+              case let .table(rhsItems) = rhs
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        for (key, value) in rhsItems {
+            lhsItems[key] = value
+        }
+        return .table(lhsItems)
     }
 
     private static func evaluateStarlarkMultiplication(
@@ -6612,6 +6664,64 @@ public final class PolicyParser {
             return false
         }
         return !["+", "-", "*", "/", "%", "(", "[", "{", ",", ":", "<", ">", "=", "!"].contains(previous)
+    }
+
+    private static func splitTopLevelDictionaryUnionExpression(_ text: String) -> [(operator: Character?, text: String)] {
+        var pieces: [(operator: Character?, text: String)] = []
+        var current = ""
+        var currentOperator: Character?
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+
+        for character in text {
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "[":
+                squareDepth += 1
+                current.append(character)
+            case "]":
+                squareDepth -= 1
+                current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth -= 1
+                current.append(character)
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+            case "|" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = character
+            default:
+                current.append(character)
+            }
+        }
+
+        pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+        return pieces
     }
 
     private static func splitTopLevelMultiplicativeExpression(_ text: String) -> [(operator: String?, text: String)] {
