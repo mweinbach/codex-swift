@@ -2276,6 +2276,38 @@ final class CodexAppServerTests: XCTestCase {
         let missingUpdateTargetsError = try XCTUnwrap(missingUpdateTargets["error"] as? [String: Any])
         XCTAssertEqual(missingUpdateTargetsError["code"] as? Int, -32602)
         XCTAssertEqual(missingUpdateTargetsError["message"] as? String, "missing field `shareTargets`")
+
+        let missingSavePath = try appServerResponse(
+            #"{"id":13,"method":"plugin/share/save","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingSavePathError = try XCTUnwrap(missingSavePath["error"] as? [String: Any])
+        XCTAssertEqual(missingSavePathError["code"] as? Int, -32602)
+        XCTAssertEqual(missingSavePathError["message"] as? String, "missing field `pluginPath`")
+
+        let missingUpdateID = try appServerResponse(
+            #"{"id":14,"method":"plugin/share/updateTargets","params":{"discoverability":"UNLISTED","shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let missingUpdateIDError = try XCTUnwrap(missingUpdateID["error"] as? [String: Any])
+        XCTAssertEqual(missingUpdateIDError["code"] as? Int, -32602)
+        XCTAssertEqual(missingUpdateIDError["message"] as? String, "missing field `remotePluginId`")
+
+        let missingUpdateDiscoverability = try appServerResponse(
+            #"{"id":15,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let missingUpdateDiscoverabilityError = try XCTUnwrap(missingUpdateDiscoverability["error"] as? [String: Any])
+        XCTAssertEqual(missingUpdateDiscoverabilityError["code"] as? Int, -32602)
+        XCTAssertEqual(missingUpdateDiscoverabilityError["message"] as? String, "missing field `discoverability`")
+
+        let missingDeleteID = try appServerResponse(
+            #"{"id":16,"method":"plugin/share/delete","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingDeleteIDError = try XCTUnwrap(missingDeleteID["error"] as? [String: Any])
+        XCTAssertEqual(missingDeleteIDError["code"] as? Int, -32602)
+        XCTAssertEqual(missingDeleteIDError["message"] as? String, "missing field `remotePluginId`")
     }
 
     func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {
@@ -5042,6 +5074,104 @@ final class CodexAppServerTests: XCTestCase {
         let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
         XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)
         XCTAssertEqual(zeroSizeError["message"] as? String, "process size rows and cols must be greater than 0")
+    }
+
+    func testProcessSpawnRunsProcessAndEmitsExitNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf out; printf err >&2"],"processHandle":"proc-live","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-live")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        XCTAssertEqual(params["stdout"] as? String, "out")
+        XCTAssertEqual(params["stderr"] as? String, "err")
+        XCTAssertEqual(params["stdoutCapReached"] as? Bool, false)
+        XCTAssertEqual(params["stderrCapReached"] as? Bool, false)
+    }
+
+    func testProcessSpawnCanStreamOutputDeltas() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf streamed"],"processHandle":"proc-stream","cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#.utf8
+        )))
+
+        let firstNotificationData = try await nextNotificationPayload(notificationCapture)
+        let secondNotificationData = try await nextNotificationPayload(notificationCapture)
+        let firstNotification = try XCTUnwrap(decodeMessages(firstNotificationData).first)
+        let secondNotification = try XCTUnwrap(decodeMessages(secondNotificationData).first)
+        let notifications = [firstNotification, secondNotification]
+        let output = try XCTUnwrap(notifications.first { $0["method"] as? String == "process/outputDelta" })
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processHandle"] as? String, "proc-stream")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "streamed"
+        )
+
+        let exited = try XCTUnwrap(notifications.first { $0["method"] as? String == "process/exited" })
+        let exitedParams = try XCTUnwrap(exited["params"] as? [String: Any])
+        XCTAssertEqual(exitedParams["stdout"] as? String, "")
+        XCTAssertEqual(exitedParams["stderr"] as? String, "")
+    }
+
+    func testProcessSpawnRejectsDuplicateHandleAndKillTerminatesActiveProcess() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((spawn[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let duplicate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        let duplicateError = try XCTUnwrap(duplicate["error"] as? [String: Any])
+        XCTAssertEqual(duplicateError["code"] as? Int, -32600)
+        XCTAssertEqual(duplicateError["message"] as? String, #"duplicate active process handle: "proc-kill""#)
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-kill"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-kill")
     }
 
     func testProcessFollowUpsValidateWriteAndResizeParams() throws {

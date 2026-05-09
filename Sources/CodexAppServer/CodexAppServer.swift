@@ -167,6 +167,18 @@ public struct AccountRateLimitsHTTPResponse: Sendable {
     }
 }
 
+private struct AppServerProcessSpawnParams {
+    let command: [String]
+    let processHandle: String
+    let cwd: String
+    let tty: Bool
+    let streamStdin: Bool
+    let streamStdoutStderr: Bool
+    let timeoutMs: Int?
+    let outputBytesCap: Int?
+    let environmentOverrides: [String: String?]
+}
+
 public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
     public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
 
@@ -2492,6 +2504,9 @@ public enum CodexAppServer {
     }
 
     fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
+        guard params?["pluginPath"] != nil else {
+            throw AppServerError.invalidParams("missing field `pluginPath`")
+        }
         _ = try absolutePathParam(params?["pluginPath"], name: "pluginPath")
         let remotePluginID = stringParam(params?["remotePluginId"])
         let discoverability = try pluginShareSaveDiscoverability(params?["discoverability"])
@@ -2514,6 +2529,12 @@ public enum CodexAppServer {
     }
 
     fileprivate static func pluginShareUpdateTargetsResult(params: [String: Any]?) throws -> [String: Any] {
+        guard params?["remotePluginId"] != nil else {
+            throw AppServerError.invalidParams("missing field `remotePluginId`")
+        }
+        guard params?["discoverability"] != nil else {
+            throw AppServerError.invalidParams("missing field `discoverability`")
+        }
         let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
         if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
@@ -2528,6 +2549,9 @@ public enum CodexAppServer {
     }
 
     fileprivate static func pluginShareDeleteResult(params: [String: Any]?) throws -> [String: Any] {
+        guard params?["remotePluginId"] != nil else {
+            throw AppServerError.invalidParams("missing field `remotePluginId`")
+        }
         let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
         if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
@@ -3561,7 +3585,7 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
     }
 
-    fileprivate static func processSpawnResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func processSpawnParams(params: [String: Any]?) throws -> AppServerProcessSpawnParams {
         guard let command = stringArrayParam(params?["command"]) else {
             throw AppServerError.invalidRequest("missing command")
         }
@@ -3574,7 +3598,7 @@ public enum CodexAppServer {
         guard !processHandle.isEmpty else {
             throw AppServerError.invalidRequest("processHandle must not be empty")
         }
-        _ = try absolutePathParam(params?["cwd"], name: "cwd")
+        let cwd = try absolutePathParam(params?["cwd"], name: "cwd")
         let tty = boolParam(params?["tty"], defaultValue: false)
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
@@ -3585,7 +3609,17 @@ public enum CodexAppServer {
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("process/spawn timeoutMs must be non-negative, got \(timeoutMs)")
         }
-        throw AppServerError.invalidRequest("process/spawn live process lifecycle is not implemented")
+        return AppServerProcessSpawnParams(
+            command: command,
+            processHandle: processHandle,
+            cwd: cwd,
+            tty: tty,
+            streamStdin: boolParam(params?["streamStdin"], defaultValue: false),
+            streamStdoutStderr: boolParam(params?["streamStdoutStderr"], defaultValue: false),
+            timeoutMs: optionalIntParam(params?["timeoutMs"]),
+            outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
+            environmentOverrides: processEnvironmentOverrides(params?["env"])
+        )
     }
 
     fileprivate static func processKillResult(params: [String: Any]?) throws -> [String: Any] {
@@ -3618,11 +3652,43 @@ public enum CodexAppServer {
         }
     }
 
-    private static func processHandle(params: [String: Any]?) throws -> String {
+    fileprivate static func processHandle(params: [String: Any]?) throws -> String {
         guard let processHandle = stringParam(params?["processHandle"]), !processHandle.isEmpty else {
             throw AppServerError.invalidRequest("missing processHandle")
         }
         return processHandle
+    }
+
+    private static func optionalIntParam(_ value: Any?) -> Int? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        return intParam(value, defaultValue: 0)
+    }
+
+    private static func processOutputBytesCap(_ value: Any?) -> Int? {
+        guard let value else {
+            return 1_048_576
+        }
+        if value is NSNull {
+            return nil
+        }
+        return max(intParam(value, defaultValue: 1_048_576), 0)
+    }
+
+    private static func processEnvironmentOverrides(_ value: Any?) -> [String: String?] {
+        guard let object = value as? [String: Any] else {
+            return [:]
+        }
+        var overrides: [String: String?] = [:]
+        for (key, value) in object {
+            if value is NSNull {
+                overrides[key] = nil
+            } else if let value = stringParam(value) {
+                overrides[key] = value
+            }
+        }
+        return overrides
     }
 
     fileprivate static func loginApiKeyResult(
@@ -6810,6 +6876,186 @@ private final class AppServerFSWatch: @unchecked Sendable {
     }
 }
 
+private struct AppServerProcessOutputCapture {
+    let text: String
+    let capReached: Bool
+}
+
+private final class AppServerSpawnedProcess: @unchecked Sendable {
+    private let params: AppServerProcessSpawnParams
+    private let notificationSink: AppServerNotificationSink?
+    private let onExit: @Sendable (String) -> Void
+    private let lock = NSLock()
+    private let process = Process()
+    private var terminated = false
+
+    init(
+        params: AppServerProcessSpawnParams,
+        environment: [String: String],
+        notificationSink: AppServerNotificationSink?,
+        onExit: @escaping @Sendable (String) -> Void
+    ) {
+        self.params = params
+        self.notificationSink = notificationSink
+        self.onExit = onExit
+        if params.command[0].contains("/") {
+            process.executableURL = URL(fileURLWithPath: params.command[0])
+            process.arguments = Array(params.command.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = params.command
+        }
+        process.currentDirectoryURL = URL(fileURLWithPath: params.cwd, isDirectory: true)
+        var mergedEnvironment = environment
+        for (key, value) in params.environmentOverrides {
+            if let value {
+                mergedEnvironment[key] = value
+            } else {
+                mergedEnvironment.removeValue(forKey: key)
+            }
+        }
+        process.environment = mergedEnvironment
+    }
+
+    deinit {
+        terminate()
+    }
+
+    func start() throws {
+        let stdout = Pipe()
+        let stderr = Pipe()
+        if params.streamStdin || params.tty {
+            process.standardInput = Pipe()
+        }
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        Task.detached { [weak self] in
+            await self?.finish(stdout: stdout, stderr: stderr)
+        }
+    }
+
+    func terminate() {
+        let shouldTerminate = lock.withLock {
+            guard !terminated else {
+                return false
+            }
+            terminated = true
+            return process.isRunning
+        }
+        if shouldTerminate {
+            process.terminate()
+        }
+    }
+
+    private func finish(stdout: Pipe, stderr: Pipe) async {
+        if let timeoutMs = params.timeoutMs {
+            let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
+            while process.isRunning && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            if process.isRunning {
+                terminate()
+            }
+        }
+        process.waitUntilExit()
+        let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        if params.streamStdoutStderr {
+            await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
+            await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
+        }
+        await sendExited(stdout: stdoutCapture, stderr: stderrCapture)
+        onExit(params.processHandle)
+    }
+
+    private func sendOutputDelta(stream: String, data: Data, capReached: Bool) async {
+        guard !data.isEmpty || capReached else {
+            return
+        }
+        await sendNotification([
+            "method": "process/outputDelta",
+            "params": [
+                "processHandle": params.processHandle,
+                "stream": stream,
+                "deltaBase64": data.base64EncodedString(),
+                "capReached": capReached
+            ]
+        ])
+    }
+
+    private func sendExited(stdout: AppServerProcessOutputCapture, stderr: AppServerProcessOutputCapture) async {
+        await sendNotification([
+            "method": "process/exited",
+            "params": [
+                "processHandle": params.processHandle,
+                "exitCode": Int(process.terminationStatus),
+                "stdout": params.streamStdoutStderr ? "" : stdout.text,
+                "stdoutCapReached": stdout.capReached,
+                "stderr": params.streamStdoutStderr ? "" : stderr.text,
+                "stderrCapReached": stderr.capReached
+            ]
+        ])
+    }
+
+    private func sendNotification(_ notification: [String: Any]) async {
+        guard let notificationSink,
+              let data = CodexAppServer.encodeMessages([notification])
+        else {
+            return
+        }
+        await notificationSink(data)
+    }
+
+    private static func capture(_ data: Data, cap: Int?) -> AppServerProcessOutputCapture {
+        let capReached: Bool
+        let capped: Data
+        if let cap, data.count > cap {
+            capped = data.prefix(cap)
+            capReached = true
+        } else {
+            capped = data
+            capReached = false
+        }
+        return AppServerProcessOutputCapture(
+            text: TextEncoding.bytesToStringSmart(capped),
+            capReached: capReached
+        )
+    }
+}
+
+private final class AppServerProcessRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var activeProcesses: [String: AppServerSpawnedProcess] = [:]
+
+    func contains(_ processHandle: String) -> Bool {
+        lock.withLock { activeProcesses[processHandle] != nil }
+    }
+
+    func insert(_ process: AppServerSpawnedProcess, processHandle: String) {
+        lock.withLock {
+            activeProcesses[processHandle] = process
+        }
+    }
+
+    func remove(_ processHandle: String) -> AppServerSpawnedProcess? {
+        lock.withLock {
+            activeProcesses.removeValue(forKey: processHandle)
+        }
+    }
+
+    func terminateAll() {
+        let processes = lock.withLock {
+            let processes = Array(activeProcesses.values)
+            activeProcesses.removeAll()
+            return processes
+        }
+        for process in processes {
+            process.terminate()
+        }
+    }
+}
+
 final class CodexAppServerMessageProcessor {
     private let connectionID: AppServerConnectionID = 0
     private var initialized = false
@@ -6823,6 +7069,7 @@ final class CodexAppServerMessageProcessor {
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
+    private let activeProcesses = AppServerProcessRegistry()
 
     init(
         configuration: CodexAppServerConfiguration,
@@ -6844,6 +7091,7 @@ final class CodexAppServerMessageProcessor {
         for watch in fsWatches.values {
             watch.cancel()
         }
+        activeProcesses.terminateAll()
     }
 
     func attestationProvider(
@@ -7050,6 +7298,39 @@ final class CodexAppServerMessageProcessor {
         if let watch = fsWatches.removeValue(forKey: watchID) {
             watch.cancel()
         }
+        return [:]
+    }
+
+    private func processSpawnResult(params: [String: Any]?) throws -> [String: Any] {
+        let parsed = try CodexAppServer.processSpawnParams(params: params)
+        if activeProcesses.contains(parsed.processHandle) {
+            throw AppServerError.invalidRequest("duplicate active process handle: \"\(parsed.processHandle)\"")
+        }
+        let registry = activeProcesses
+        let session = AppServerSpawnedProcess(
+            params: parsed,
+            environment: configuration.environment,
+            notificationSink: notificationSink,
+            onExit: { processHandle in
+                _ = registry.remove(processHandle)
+            }
+        )
+        activeProcesses.insert(session, processHandle: parsed.processHandle)
+        do {
+            try session.start()
+        } catch {
+            _ = activeProcesses.remove(parsed.processHandle)
+            throw AppServerError.internalError("process/spawn failed: \(error)")
+        }
+        return [:]
+    }
+
+    private func processKillResult(params: [String: Any]?) throws -> [String: Any] {
+        let processHandle = try CodexAppServer.processHandle(params: params)
+        guard let session = activeProcesses.remove(processHandle) else {
+            throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
+        }
+        session.terminate()
         return [:]
     }
 
@@ -7637,7 +7918,7 @@ final class CodexAppServerMessageProcessor {
                 case "process/spawn":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.processSpawnResult(params: params)
+                        result: try processSpawnResult(params: params)
                     )
                 case "process/writeStdin":
                     response = CodexAppServer.responseObject(
@@ -7652,7 +7933,7 @@ final class CodexAppServerMessageProcessor {
                 case "process/kill":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.processKillResult(params: params)
+                        result: try processKillResult(params: params)
                     )
                 case "loginApiKey":
                     response = CodexAppServer.responseObject(
