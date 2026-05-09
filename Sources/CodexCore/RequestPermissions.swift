@@ -1022,7 +1022,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         to entries: inout [FileSystemSandboxEntry]
     ) {
         let path = FileSystemPath.special(FileSystemSpecialPath.projectRoots(subpath: subpath).jsonValue)
-        guard !entries.contains(where: { $0.path == path }) else {
+        guard !entries.contains(where: { $0.path.sharesTarget(with: path) }) else {
             return
         }
         entries.append(FileSystemSandboxEntry(path: path, access: .read))
@@ -1103,7 +1103,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         to entries: inout [FileSystemSandboxEntry]
     ) {
         let fileSystemPath = FileSystemPath.path(path.path)
-        guard !entries.contains(where: { $0.path == fileSystemPath }) else {
+        guard !entries.contains(where: { $0.path.sharesTarget(with: fileSystemPath) }) else {
             return
         }
         entries.append(FileSystemSandboxEntry(path: fileSystemPath, access: .read))
@@ -1304,9 +1304,25 @@ private extension FileSystemPath {
             return left == right
         case let (.special(left), .special(right)):
             return FileSystemSpecialPath(jsonValue: left) == FileSystemSpecialPath(jsonValue: right)
+        case let (.path(path), .special(value)),
+             let (.special(value), .path(path)):
+            return FileSystemSpecialPath(jsonValue: value).matchesStableAbsolutePath(path)
         case let (.globPattern(left), .globPattern(right)):
             return left == right
         default:
+            return false
+        }
+    }
+}
+
+private extension FileSystemSpecialPath {
+    func matchesStableAbsolutePath(_ path: String) -> Bool {
+        switch self {
+        case .root:
+            return path == "/"
+        case .slashTmp:
+            return path == "/tmp"
+        case .minimal, .projectRoots, .tmpdir, .unknown:
             return false
         }
     }

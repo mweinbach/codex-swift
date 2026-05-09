@@ -895,6 +895,21 @@ final class SubmissionTests: XCTestCase {
         XCTAssertFalse(deniedRead.hasFullDiskReadAccess)
     }
 
+    func testFileSystemSandboxPolicyStableSpecialPathsShareAbsoluteTargetsLikeRust() {
+        let rootPathOverride = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path("/"), access: .read)
+        ])
+        let slashTmpOverride = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .path("/tmp"), access: .write)
+        ])
+
+        XCTAssertTrue(rootPathOverride.hasFullDiskWriteAccess)
+        XCTAssertTrue(slashTmpOverride.hasFullDiskWriteAccess)
+    }
+
     func testFileSystemSandboxPolicyIncludePlatformDefaultsMatchesRust() {
         let minimalRead = FileSystemSandboxPolicy.restricted(entries: [
             FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
