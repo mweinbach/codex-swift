@@ -302,6 +302,36 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return sqlite3_changes(database) > 0
     }
 
+    public func updateThreadGitInfo(
+        threadID: ThreadId,
+        sha: ThreadGitInfoPatchValue,
+        branch: ThreadGitInfoPatchValue,
+        originURL: ThreadGitInfoPatchValue
+    ) async throws -> Bool {
+        let database = handle.database
+        try Self.execute(
+            """
+            UPDATE threads
+            SET
+                git_sha = CASE WHEN ? THEN ? ELSE git_sha END,
+                git_branch = CASE WHEN ? THEN ? ELSE git_branch END,
+                git_origin_url = CASE WHEN ? THEN ? ELSE git_origin_url END
+            WHERE id = ?
+            """,
+            bindings: [
+                .bool(sha.shouldUpdate),
+                .optionalText(sha.replacement),
+                .bool(branch.shouldUpdate),
+                .optionalText(branch.replacement),
+                .bool(originURL.shouldUpdate),
+                .optionalText(originURL.replacement),
+                .text(threadID.description),
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
@@ -573,6 +603,30 @@ public enum ThreadArchiveFilter: Equatable, Sendable {
     case all
     case archivedOnly
     case unarchivedOnly
+}
+
+public enum ThreadGitInfoPatchValue: Equatable, Sendable {
+    case preserve
+    case clear
+    case set(String)
+
+    fileprivate var shouldUpdate: Bool {
+        switch self {
+        case .preserve:
+            return false
+        case .clear, .set:
+            return true
+        }
+    }
+
+    fileprivate var replacement: String? {
+        switch self {
+        case .preserve, .clear:
+            return nil
+        case let .set(value):
+            return value
+        }
+    }
 }
 
 private enum SQLiteBinding {

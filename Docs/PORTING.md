@@ -851,6 +851,8 @@ Source baseline inspected for this scaffold:
   - added title updates preserving Rust's `UPDATE threads SET title = ? WHERE id = ?` row-count success reporting.
 - `codex-rs/state/src/runtime/threads.rs` thread updated-at touch
   - added SQLite `updated_at`/`updated_at_ms` touch behavior with Rust's process-local monotonic millisecond allocation: newer timestamps advance directly, same hot one-second bucket writes bump by one millisecond, older backfill timestamps pass through, and missing rows report `false`.
+- `codex-rs/state/src/runtime/threads.rs` thread git-info update
+  - added SQLite git SHA, branch, and origin URL patching with Rust's double-option semantics mapped to an explicit Swift patch enum: preserve leaves existing columns unchanged, clear writes SQL `NULL`, set writes the replacement string, and missing rows report `false`.
 
 ## Known Gaps
 

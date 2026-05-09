@@ -726,6 +726,54 @@ final class AgentGraphStoreTests: XCTestCase {
         )
     }
 
+    func testSQLiteStoreUpdatesThreadGitInfoWithRustDoubleOptionSemantics() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let gitThreadID = try threadID(93)
+        let missingThreadID = try threadID(94)
+        try insertRawSQLiteThread(
+            id: gitThreadID,
+            agentPath: try AgentPath(validating: "/root/git"),
+            gitInfo: ThreadGitInfo(sha: "old-sha", branch: "main", originURL: "git@example.com:repo.git"),
+            databaseURL: databaseURL
+        )
+
+        let firstUpdated = try await store.updateThreadGitInfo(
+            threadID: gitThreadID,
+            sha: .preserve,
+            branch: .set("feature/sidebar"),
+            originURL: .clear
+        )
+        let firstGitInfo = try readRawSQLiteThreadGitInfo(id: gitThreadID, databaseURL: databaseURL)
+        let secondUpdated = try await store.updateThreadGitInfo(
+            threadID: gitThreadID,
+            sha: .clear,
+            branch: .preserve,
+            originURL: .set("https://example.com/repo.git")
+        )
+        let secondGitInfo = try readRawSQLiteThreadGitInfo(id: gitThreadID, databaseURL: databaseURL)
+        let missingUpdated = try await store.updateThreadGitInfo(
+            threadID: missingThreadID,
+            sha: .set("missing-sha"),
+            branch: .set("missing-branch"),
+            originURL: .set("missing-origin")
+        )
+
+        XCTAssertTrue(firstUpdated)
+        XCTAssertEqual(
+            firstGitInfo,
+            ThreadGitInfo(sha: "old-sha", branch: "feature/sidebar", originURL: nil)
+        )
+        XCTAssertTrue(secondUpdated)
+        XCTAssertEqual(
+            secondGitInfo,
+            ThreadGitInfo(sha: nil, branch: "feature/sidebar", originURL: "https://example.com/repo.git")
+        )
+        XCTAssertFalse(missingUpdated)
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -790,7 +838,10 @@ final class AgentGraphStoreTests: XCTestCase {
                     archived INTEGER NOT NULL DEFAULT 0,
                     title TEXT,
                     updated_at INTEGER,
-                    updated_at_ms INTEGER
+                    updated_at_ms INTEGER,
+                    git_sha TEXT,
+                    git_branch TEXT,
+                    git_origin_url TEXT
                 )
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
@@ -809,11 +860,27 @@ final class AgentGraphStoreTests: XCTestCase {
         rolloutPath: String? = nil,
         archived: Bool = false,
         title: String? = nil,
+        gitInfo: ThreadGitInfo = ThreadGitInfo(),
         databaseURL: URL
     ) throws {
         try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
             var statement: OpaquePointer?
-            let query = "INSERT INTO threads (id, agent_path, memory_mode, rollout_path, archived, title, updated_at, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            let query =
+                """
+                INSERT INTO threads (
+                    id,
+                    agent_path,
+                    memory_mode,
+                    rollout_path,
+                    archived,
+                    title,
+                    updated_at,
+                    updated_at_ms,
+                    git_sha,
+                    git_branch,
+                    git_origin_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
             defer {
@@ -839,6 +906,9 @@ final class AgentGraphStoreTests: XCTestCase {
             }
             XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 7, 0), SQLITE_OK)
             XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, 0), SQLITE_OK)
+            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 9)
+            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 10)
+            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 11)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }
@@ -887,6 +957,44 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    private func readRawSQLiteThreadGitInfo(id: ThreadId, databaseURL: URL) throws -> ThreadGitInfo? {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT git_sha, git_branch, git_origin_url FROM threads WHERE id = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
+            let result = sqlite3_step(preparedStatement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            XCTAssertEqual(result, SQLITE_ROW)
+            return ThreadGitInfo(
+                sha: optionalTextColumn(preparedStatement, index: 0),
+                branch: optionalTextColumn(preparedStatement, index: 1),
+                originURL: optionalTextColumn(preparedStatement, index: 2)
+            )
+        }
+    }
+
+    private func bindOptionalText(_ value: String?, to statement: OpaquePointer, at index: Int32) {
+        if let value {
+            XCTAssertEqual(sqlite3_bind_text(statement, index, value, -1, testSQLiteTransient), SQLITE_OK)
+        } else {
+            XCTAssertEqual(sqlite3_bind_null(statement, index), SQLITE_OK)
+        }
+    }
+
+    private func optionalTextColumn(_ statement: OpaquePointer, index: Int32) -> String? {
+        guard let rawValue = sqlite3_column_text(statement, index) else {
+            return nil
+        }
+        return String(cString: rawValue)
+    }
+
     private func withRawSQLiteDatabase<T>(
         databaseURL: URL,
         body: (OpaquePointer) throws -> T
@@ -920,4 +1028,16 @@ private let testSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.
 private struct ThreadUpdatedAt: Equatable {
     let seconds: Int64
     let milliseconds: Int64
+}
+
+private struct ThreadGitInfo: Equatable {
+    var sha: String?
+    var branch: String?
+    var originURL: String?
+
+    init(sha: String? = nil, branch: String? = nil, originURL: String? = nil) {
+        self.sha = sha
+        self.branch = branch
+        self.originURL = originURL
+    }
 }
