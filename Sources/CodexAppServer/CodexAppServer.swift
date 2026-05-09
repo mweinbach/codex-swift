@@ -2534,6 +2534,11 @@ public enum CodexAppServer {
         let hooks: [String: Any]
     }
 
+    private struct LocalPluginHookConfigLoadOutcome {
+        var configs: [LocalPluginInlineHooks] = []
+        var warnings: [String] = []
+    }
+
     private struct LocalPluginManifest {
         let name: String?
         let interface: Any
@@ -2652,9 +2657,23 @@ public enum CodexAppServer {
     }
 
     private static func localPluginHookMetadata(root: URL, pluginID: String, manifest: LocalPluginManifest) -> [[String: Any]] {
+        localPluginHookMetadata(
+            root: root,
+            pluginID: pluginID,
+            manifest: manifest,
+            configs: localPluginHookConfigs(root: root, manifest: manifest)
+        )
+    }
+
+    private static func localPluginHookMetadata(
+        root: URL,
+        pluginID: String,
+        manifest _: LocalPluginManifest,
+        configs: [LocalPluginInlineHooks]
+    ) -> [[String: Any]] {
         var metadata: [[String: Any]] = []
         var displayOrder = 0
-        for config in localPluginHookConfigs(root: root, manifest: manifest) {
+        for config in configs {
             for (eventKey, value) in config.hooks {
                 guard let eventName = localPluginHookEventName(eventKey),
                       let groups = value as? [[String: Any]]
@@ -2708,22 +2727,36 @@ public enum CodexAppServer {
     }
 
     private static func localPluginHookConfigs(root: URL, manifest: LocalPluginManifest) -> [LocalPluginInlineHooks] {
+        localPluginHookConfigLoadOutcome(root: root, manifest: manifest).configs
+    }
+
+    private static func localPluginHookConfigLoadOutcome(root: URL, manifest: LocalPluginManifest) -> LocalPluginHookConfigLoadOutcome {
         if !manifest.inlineHooks.isEmpty {
-            return manifest.inlineHooks
+            return LocalPluginHookConfigLoadOutcome(configs: manifest.inlineHooks)
         }
         let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
-        return hookPaths.compactMap { hooksPath -> LocalPluginInlineHooks? in
-            guard let data = try? Data(contentsOf: hooksPath),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let hooks = object["hooks"] as? [String: Any]
-            else {
-                return nil
+        var outcome = LocalPluginHookConfigLoadOutcome()
+        for hooksPath in hookPaths {
+            guard FileManager.default.fileExists(atPath: hooksPath.path) else {
+                continue
             }
-            return LocalPluginInlineHooks(
-                sourcePath: localPluginRelativePath(root: root, path: hooksPath),
-                hooks: hooks
-            )
+            do {
+                let data = try Data(contentsOf: hooksPath)
+                guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let hooks = object["hooks"] as? [String: Any]
+                else {
+                    outcome.warnings.append("failed to parse plugin hooks config at \(hooksPath.standardizedFileURL.path)")
+                    continue
+                }
+                outcome.configs.append(LocalPluginInlineHooks(
+                    sourcePath: localPluginRelativePath(root: root, path: hooksPath),
+                    hooks: hooks
+                ))
+            } catch {
+                outcome.warnings.append("failed to parse plugin hooks config at \(hooksPath.standardizedFileURL.path): \(error.localizedDescription)")
+            }
         }
+        return outcome
     }
 
     private static func hookTimeoutSec(_ value: Any?) -> UInt64? {
@@ -7555,40 +7588,53 @@ public enum CodexAppServer {
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let config = (try? CodexConfigLayerLoader.readConfig(from: configFile)) ?? .table([:])
-        let hooks = catalogHookObjects(config: config, configFile: configFile, codexHome: configuration.codexHome)
+        let projection = catalogHookProjection(config: config, configFile: configFile, codexHome: configuration.codexHome)
         return [
             "data": cwds.map { cwd in
                 [
                     "cwd": cwd,
-                    "hooks": hooks,
-                    "warnings": [],
+                    "hooks": projection.hooks,
+                    "warnings": projection.warnings,
                     "errors": []
                 ]
             }
         ]
     }
 
+    private struct CatalogHookProjection {
+        var hooks: [[String: Any]] = []
+        var warnings: [String] = []
+    }
+
     private static func catalogHookObjects(config: ConfigValue, configFile: URL, codexHome: URL) -> [[String: Any]] {
+        catalogHookProjection(config: config, configFile: configFile, codexHome: codexHome).hooks
+    }
+
+    private static func catalogHookProjection(config: ConfigValue, configFile: URL, codexHome: URL) -> CatalogHookProjection {
         guard configFeatureEnabled("hooks", in: config, defaultValue: true) else {
-            return []
+            return CatalogHookProjection()
         }
-        var hooks = userHookObjects(configFile: configFile)
+        var projection = CatalogHookProjection(hooks: userHookObjects(configFile: configFile))
         guard configFeatureEnabled("plugins", in: config, defaultValue: false),
               configFeatureEnabled("plugin_hooks", in: config, defaultValue: false)
         else {
-            return hooks
+            return projection
         }
         for pluginID in enabledLocalPluginIDs(config: config) {
             guard let root = activeLocalPluginRoot(id: pluginID, codexHome: codexHome) else {
                 continue
             }
-            hooks.append(contentsOf: localPluginHookMetadata(
+            let manifest = localPluginManifest(root: root)
+            let hookOutcome = localPluginHookConfigLoadOutcome(root: root, manifest: manifest)
+            projection.warnings.append(contentsOf: hookOutcome.warnings)
+            projection.hooks.append(contentsOf: localPluginHookMetadata(
                 root: root,
                 pluginID: pluginID,
-                manifest: localPluginManifest(root: root)
+                manifest: manifest,
+                configs: hookOutcome.configs
             ))
         }
-        return hooks
+        return projection
     }
 
     private static func enabledLocalPluginIDs(config: ConfigValue) -> [String] {

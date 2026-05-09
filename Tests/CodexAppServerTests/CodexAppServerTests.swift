@@ -6714,6 +6714,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
     }
 
+    func testHooksListReportsPluginHookLoadWarnings() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let manifestRoot = pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try #"{"name":"demo"}"#.write(
+            to: manifestRoot.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "{ not-json".write(
+            to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [features]
+        plugins = true
+        plugin_hooks = true
+        hooks = true
+
+        [plugins."demo@test"]
+        enabled = true
+        """.write(to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.path)
+        XCTAssertEqual((data[0]["hooks"] as? [Any])?.count, 0)
+        let warnings = try XCTUnwrap(data[0]["warnings"] as? [String])
+        XCTAssertEqual(warnings.count, 1)
+        XCTAssertTrue(warnings[0].contains("failed to parse plugin hooks config"))
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """
