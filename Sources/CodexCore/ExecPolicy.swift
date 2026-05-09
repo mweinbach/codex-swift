@@ -4852,7 +4852,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "dir", "enumerate", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -4876,8 +4876,22 @@ public final class PolicyParser {
                 constants: constants,
                 functions: functions
             )
+        case "dir":
+            return try parseStarlarkDirCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
         case "enumerate":
             return try parseStarlarkEnumerateCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "hasattr":
+            return try parseStarlarkHasAttributeCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -5043,6 +5057,22 @@ public final class PolicyParser {
         return .bool(items.contains(where: truthy))
     }
 
+    private static func parseStarlarkDirCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        return .array(starlarkAttributeNames(for: value).map(ConfigValue.string))
+    }
+
     private static func parseStarlarkEnumerateCall(
         _ rawArguments: [String],
         expression: String,
@@ -5071,6 +5101,24 @@ public final class PolicyParser {
         return .array(items.enumerated().map { offset, item in
             .array([.integer(start + Int64(offset)), item])
         })
+    }
+
+    private static func parseStarlarkHasAttributeCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 2 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+        let attribute = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+        guard case let .string(attributeName) = attribute else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .bool(starlarkAttributeNames(for: value).contains(attributeName))
     }
 
     private static func parseStarlarkZipCall(
@@ -5536,6 +5584,55 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func starlarkAttributeNames(for value: ConfigValue) -> [String] {
+        let names: [String]
+        switch value {
+        case .string:
+            names = [
+                "capitalize",
+                "codepoints",
+                "count",
+                "elems",
+                "endswith",
+                "find",
+                "format",
+                "index",
+                "isalnum",
+                "isalpha",
+                "isdigit",
+                "islower",
+                "isspace",
+                "istitle",
+                "isupper",
+                "join",
+                "lower",
+                "lstrip",
+                "partition",
+                "removeprefix",
+                "removesuffix",
+                "replace",
+                "rfind",
+                "rindex",
+                "rpartition",
+                "rsplit",
+                "rstrip",
+                "split",
+                "splitlines",
+                "startswith",
+                "strip",
+                "title",
+                "upper"
+            ]
+        case .array:
+            names = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
+        case .table:
+            names = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
+        default:
+            names = []
+        }
+        return names.sorted()
     }
 
     private static func starlarkTypeName(_ value: ConfigValue) -> String {

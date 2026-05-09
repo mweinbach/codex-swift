@@ -3376,6 +3376,38 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/list/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkAttributeIntrospectionBuiltins() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff"]
+        METADATA = {"tool": TOOL}
+        STRING_ATTRS = dir(TOOL)
+        LIST_ATTRS = dir(COMMANDS)
+        DICT_ATTRS = dir(METADATA)
+
+        if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
+            prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
+
+        if "append" in LIST_ATTRS and not hasattr(COMMANDS, "keys"):
+            network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
+
+        if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
+            host_executable(TOOL, ["/opt/dict-" + str(len(DICT_ATTRS)) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("string-33")]),
+                decision: .allow,
+                justification: "split,startswith"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "list-7.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
