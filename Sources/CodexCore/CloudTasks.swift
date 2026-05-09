@@ -520,8 +520,8 @@ public struct CloudMockClient: CloudBackend {
     }
 }
 
-private enum CloudDateCoding {
-    static func decodeDate<K: CodingKey>(
+public enum CloudDateCoding {
+    public static func decodeDate<K: CodingKey>(
         from container: KeyedDecodingContainer<K>,
         forKey key: K
     ) throws -> Date {
@@ -537,12 +537,16 @@ private enum CloudDateCoding {
         )
     }
 
-    static func encode<K: CodingKey>(
+    public static func encode<K: CodingKey>(
         _ date: Date,
         into container: inout KeyedEncodingContainer<K>,
         forKey key: K
     ) throws {
-        try container.encode(makeFormatter(fractionalSeconds: false).string(from: date), forKey: key)
+        try container.encode(encodeString(date), forKey: key)
+    }
+
+    public static func encodeString(_ date: Date) -> String {
+        makeFormatter(fractionalSeconds: false).string(from: date)
     }
 
     private static func makeFormatter(fractionalSeconds: Bool) -> ISO8601DateFormatter {

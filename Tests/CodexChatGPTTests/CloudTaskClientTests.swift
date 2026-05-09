@@ -276,6 +276,7 @@ final class CloudTaskClientTests: XCTestCase {
         let tasks = try XCTUnwrap(object["tasks"] as? [[String: Any]])
         XCTAssertEqual(tasks[0]["id"] as? String, "task_123")
         XCTAssertEqual(tasks[0]["url"] as? String, "https://chatgpt.com/codex/tasks/task_123")
+        XCTAssertEqual(tasks[0]["updated_at"] as? String, "2023-11-14T22:11:15Z")
         XCTAssertTrue(tasks[0]["environment_id"] is NSNull)
         XCTAssertTrue(tasks[0]["attempt_total"] is NSNull)
     }

@@ -399,7 +399,6 @@ public enum CloudTaskCommandFormatter {
             cursor: cursor
         )
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return String(decoding: try encoder.encode(payload), as: UTF8.self)
     }
@@ -487,7 +486,7 @@ private struct CloudTaskListJSONTask: Encodable {
     let url: String
     let title: String
     let status: CloudTaskStatus
-    let updatedAt: Date
+    let updatedAt: String
     let environmentID: String?
     let environmentLabel: String?
     let summary: CloudDiffSummary
@@ -499,7 +498,7 @@ private struct CloudTaskListJSONTask: Encodable {
         self.url = url
         self.title = task.title
         self.status = task.status
-        self.updatedAt = task.updatedAt
+        self.updatedAt = CloudDateCoding.encodeString(task.updatedAt)
         self.environmentID = task.environmentID
         self.environmentLabel = task.environmentLabel
         self.summary = task.summary
