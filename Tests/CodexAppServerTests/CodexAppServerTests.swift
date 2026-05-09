@@ -2143,7 +2143,7 @@ final class CodexAppServerTests: XCTestCase {
         let pluginPath = temp.url.appendingPathComponent("plugin").path
 
         let save = try appServerResponse(
-            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","remotePluginId":"bad id"}}"#,
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)"}}"#,
             codexHome: temp.url
         )
         let saveError = try XCTUnwrap(save["error"] as? [String: Any])
@@ -2151,7 +2151,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(saveError["message"] as? String, "plugin sharing is not enabled")
 
         let update = try appServerResponse(
-            #"{"id":2,"method":"plugin/share/updateTargets","params":{"remotePluginId":"bad id","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            #"{"id":2,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalType":"user","principalId":"user-1"}]}}"#,
             codexHome: temp.url
         )
         let updateError = try XCTUnwrap(update["error"] as? [String: Any])
@@ -2167,12 +2167,85 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(listError["message"] as? String, "plugin sharing is not enabled")
 
         let delete = try appServerResponse(
-            #"{"id":4,"method":"plugin/share/delete","params":{"remotePluginId":"bad id"}}"#,
+            #"{"id":4,"method":"plugin/share/delete","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
             codexHome: temp.url
         )
         let deleteError = try XCTUnwrap(delete["error"] as? [String: Any])
         XCTAssertEqual(deleteError["code"] as? Int, -32600)
         XCTAssertEqual(deleteError["message"] as? String, "plugin sharing is not enabled")
+    }
+
+    func testPluginShareRoutesValidateRustRequestRulesBeforeDisabledRemoteFallback() throws {
+        let temp = try TemporaryDirectory()
+        let pluginPath = temp.url.appendingPathComponent("plugin").path
+
+        let invalidSaveID = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","remotePluginId":"bad id"}}"#,
+            codexHome: temp.url
+        )
+        let invalidSaveIDError = try XCTUnwrap(invalidSaveID["error"] as? [String: Any])
+        XCTAssertEqual(invalidSaveIDError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidSaveIDError["message"] as? String, "invalid remote plugin id")
+
+        let saveUpdateFields = try appServerResponse(
+            #"{"id":2,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","remotePluginId":"plugins~Plugin_gmail","discoverability":"PRIVATE"}}"#,
+            codexHome: temp.url
+        )
+        let saveUpdateFieldsError = try XCTUnwrap(saveUpdateFields["error"] as? [String: Any])
+        XCTAssertEqual(saveUpdateFieldsError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            saveUpdateFieldsError["message"] as? String,
+            "discoverability and shareTargets are only supported when creating a plugin share; use plugin/share/updateTargets to update share settings"
+        )
+
+        let listedSave = try appServerResponse(
+            #"{"id":3,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"LISTED"}}"#,
+            codexHome: temp.url
+        )
+        let listedSaveError = try XCTUnwrap(listedSave["error"] as? [String: Any])
+        XCTAssertEqual(listedSaveError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            listedSaveError["message"] as? String,
+            "discoverability LISTED is not supported for plugin/share/save; use UNLISTED or PRIVATE"
+        )
+
+        let saveWorkspaceTarget = try appServerResponse(
+            #"{"id":4,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            codexHome: temp.url
+        )
+        let saveWorkspaceTargetError = try XCTUnwrap(saveWorkspaceTarget["error"] as? [String: Any])
+        XCTAssertEqual(saveWorkspaceTargetError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            saveWorkspaceTargetError["message"] as? String,
+            "shareTargets cannot include workspace principals; use discoverability UNLISTED for workspace link access"
+        )
+
+        let invalidUpdateID = try appServerResponse(
+            #"{"id":5,"method":"plugin/share/updateTargets","params":{"remotePluginId":"bad id","discoverability":"UNLISTED","shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let invalidUpdateIDError = try XCTUnwrap(invalidUpdateID["error"] as? [String: Any])
+        XCTAssertEqual(invalidUpdateIDError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidUpdateIDError["message"] as? String, "invalid remote plugin id")
+
+        let updateWorkspaceTarget = try appServerResponse(
+            #"{"id":6,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalType":"workspace","principalId":"workspace-1"}]}}"#,
+            codexHome: temp.url
+        )
+        let updateWorkspaceTargetError = try XCTUnwrap(updateWorkspaceTarget["error"] as? [String: Any])
+        XCTAssertEqual(updateWorkspaceTargetError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            updateWorkspaceTargetError["message"] as? String,
+            "shareTargets cannot include workspace principals; use discoverability UNLISTED for workspace link access"
+        )
+
+        let invalidDeleteID = try appServerResponse(
+            #"{"id":7,"method":"plugin/share/delete","params":{"remotePluginId":"bad id"}}"#,
+            codexHome: temp.url
+        )
+        let invalidDeleteIDError = try XCTUnwrap(invalidDeleteID["error"] as? [String: Any])
+        XCTAssertEqual(invalidDeleteIDError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidDeleteIDError["message"] as? String, "invalid remote plugin id")
     }
 
     func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {

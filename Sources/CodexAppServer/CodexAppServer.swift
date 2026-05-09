@@ -2493,10 +2493,33 @@ public enum CodexAppServer {
 
     fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
         _ = try absolutePathParam(params?["pluginPath"], name: "pluginPath")
+        let remotePluginID = stringParam(params?["remotePluginId"])
+        let discoverability = stringParam(params?["discoverability"])
+        let shareTargets = params?["shareTargets"]
+        if let remotePluginID, (remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID)) {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        if remotePluginID != nil && (discoverability != nil || shareTargets != nil) {
+            throw AppServerError.invalidRequest(
+                "discoverability and shareTargets are only supported when creating a plugin share; use plugin/share/updateTargets to update share settings"
+            )
+        }
+        if discoverability == "LISTED" {
+            throw AppServerError.invalidRequest(
+                "discoverability LISTED is not supported for plugin/share/save; use UNLISTED or PRIVATE"
+            )
+        }
+        try validatePluginShareTargets(shareTargets)
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
     }
 
-    fileprivate static func pluginShareUpdateTargetsResult(params _: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginShareUpdateTargetsResult(params: [String: Any]?) throws -> [String: Any] {
+        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
+        if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        _ = try pluginShareUpdateDiscoverability(params?["discoverability"])
+        try validatePluginShareTargets(params?["shareTargets"])
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
     }
 
@@ -2504,8 +2527,31 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
     }
 
-    fileprivate static func pluginShareDeleteResult(params _: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginShareDeleteResult(params: [String: Any]?) throws -> [String: Any] {
+        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
+        if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
         throw AppServerError.invalidRequest("plugin sharing is not enabled")
+    }
+
+    private static func pluginShareUpdateDiscoverability(_ value: Any?) throws -> String {
+        let discoverability = stringParam(value) ?? ""
+        guard discoverability == "UNLISTED" || discoverability == "PRIVATE" else {
+            throw AppServerError.invalidRequest("unknown variant `\(discoverability)`, expected `UNLISTED` or `PRIVATE`")
+        }
+        return discoverability
+    }
+
+    private static func validatePluginShareTargets(_ value: Any?) throws {
+        guard let targets = value as? [[String: Any]] else {
+            return
+        }
+        if targets.contains(where: { $0["principalType"] as? String == "workspace" }) {
+            throw AppServerError.invalidRequest(
+                "shareTargets cannot include workspace principals; use discoverability UNLISTED for workspace link access"
+            )
+        }
     }
 
     fileprivate static func pluginInstallResult(
