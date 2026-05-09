@@ -13,6 +13,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelProviders: [String: ModelProviderInfo]
     public var approvalPolicy: AskForApproval?
     public var sandboxMode: SandboxMode?
+    public var sandboxPolicy: SandboxPolicy?
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
@@ -49,6 +50,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         modelProviders: [String: ModelProviderInfo] = [:],
         approvalPolicy: AskForApproval? = nil,
         sandboxMode: SandboxMode? = nil,
+        sandboxPolicy: SandboxPolicy? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
@@ -84,6 +86,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelProviders = modelProviders
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxMode
+        self.sandboxPolicy = sandboxPolicy
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
@@ -121,6 +124,10 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public var selectedModelProvider: ModelProviderInfo? {
         modelProviders[selectedModelProviderID]
+    }
+
+    public func legacySandboxPolicy(defaultMode: SandboxMode = .readOnly) -> SandboxPolicy {
+        sandboxPolicy ?? SandboxPolicy.fromSandboxMode(sandboxMode ?? defaultMode)
     }
 }
 
@@ -237,6 +244,11 @@ public enum CodexConfigLoader {
 
         var config = try parsed.resolvedConfig(environment: environment)
         try applyRequirements(try requirementsToml.requirements(), to: &config)
+        config.sandboxPolicy = try parsed.resolvedSandboxPolicy(
+            codexHome: codexHome,
+            fileManager: fileManager,
+            sandboxMode: config.sandboxMode
+        )
         return config
     }
 
@@ -256,19 +268,8 @@ public enum CodexConfigLoader {
         let approvalPolicy = config.approvalPolicy ?? AskForApproval.defaultValue
         try requirements.approvalPolicy.canSet(approvalPolicy).get()
 
-        let sandboxPolicy = sandboxPolicy(for: config.sandboxMode ?? .readOnly)
+        let sandboxPolicy = config.legacySandboxPolicy()
         try requirements.sandboxPolicy.canSet(sandboxPolicy).get()
-    }
-
-    private static func sandboxPolicy(for mode: SandboxMode) -> SandboxPolicy {
-        switch mode {
-        case .readOnly:
-            return .readOnly
-        case .workspaceWrite:
-            return .newWorkspaceWritePolicy()
-        case .dangerFullAccess:
-            return .dangerFullAccess
-        }
     }
 
     private static func baseConfigLayerFiles(
@@ -343,6 +344,7 @@ private struct ParsedCodexConfigToml {
     var profileFeatures: [String: [String: Bool]] = [:]
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
+    var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -414,6 +416,8 @@ private struct ParsedCodexConfigToml {
                     ConfigValueParser.parseTomlLiteral(valueText),
                     key: "features.\(key)"
                 )
+            case .sandboxWorkspaceWrite:
+                parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .profileFeatures(name):
                 parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -452,6 +456,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "features" {
                 features[parts[1]] = try Self.boolValue(value, key: path)
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "sandbox_workspace_write" {
+                sandboxWorkspaceWrite[parts[1]] = value
                 continue
             }
 
@@ -511,6 +520,10 @@ private struct ParsedCodexConfigToml {
             mergeModelProvider(name: key, overlay: value)
         }
 
+        for (key, value) in overlay.sandboxWorkspaceWrite {
+            sandboxWorkspaceWrite[key] = value
+        }
+
         for (profileName, profileValues) in overlay.profileFeatures {
             var mergedProfile = profileFeatures[profileName] ?? [:]
             for (key, value) in profileValues {
@@ -546,6 +559,12 @@ private struct ParsedCodexConfigToml {
 
         if let modelProvidersValue = table["model_providers"] {
             try mergeModelProviders(from: modelProvidersValue, key: "model_providers")
+        }
+
+        if case let .table(workspaceWrite) = table["sandbox_workspace_write"] {
+            for (key, value) in workspaceWrite {
+                sandboxWorkspaceWrite[key] = value
+            }
         }
 
         if case let .table(featureTable) = table["features"] {
@@ -708,6 +727,52 @@ private struct ParsedCodexConfigToml {
         }
 
         return config
+    }
+
+    func resolvedSandboxPolicy(
+        codexHome: URL,
+        fileManager: FileManager,
+        sandboxMode: SandboxMode?
+    ) throws -> SandboxPolicy? {
+        let memoriesRoot = codexHome
+            .appendingPathComponent("memories", isDirectory: true)
+            .standardizedFileURL
+        try fileManager.createDirectory(at: memoriesRoot, withIntermediateDirectories: true)
+
+        guard sandboxMode == .workspaceWrite else {
+            return sandboxMode.map(SandboxPolicy.fromSandboxMode)
+        }
+
+        var workspaceWrite = try sandboxWorkspaceWriteConfig()
+        let memoriesPath = try AbsolutePath(absolutePath: memoriesRoot.path)
+        if !workspaceWrite.writableRoots.contains(memoriesPath) {
+            workspaceWrite.writableRoots.append(memoriesPath)
+        }
+
+        return .workspaceWrite(
+            writableRoots: workspaceWrite.writableRoots,
+            networkAccess: workspaceWrite.networkAccess,
+            excludeTmpdirEnvVar: workspaceWrite.excludeTmpdirEnvVar,
+            excludeSlashTmp: workspaceWrite.excludeSlashTmp
+        )
+    }
+
+    private func sandboxWorkspaceWriteConfig() throws -> SandboxWorkspaceWriteConfig {
+        SandboxWorkspaceWriteConfig(
+            writableRoots: try Self.absolutePathArrayValue(
+                sandboxWorkspaceWrite["writable_roots"],
+                key: "sandbox_workspace_write.writable_roots"
+            ),
+            networkAccess: try sandboxWorkspaceWrite["network_access"].map {
+                try Self.boolValue($0, key: "sandbox_workspace_write.network_access")
+            } ?? false,
+            excludeTmpdirEnvVar: try sandboxWorkspaceWrite["exclude_tmpdir_env_var"].map {
+                try Self.boolValue($0, key: "sandbox_workspace_write.exclude_tmpdir_env_var")
+            } ?? false,
+            excludeSlashTmp: try sandboxWorkspaceWrite["exclude_slash_tmp"].map {
+                try Self.boolValue($0, key: "sandbox_workspace_write.exclude_slash_tmp")
+            } ?? false
+        )
     }
 
     func projectRootMarkersForDiscovery() throws -> [String] {
@@ -1005,6 +1070,13 @@ private struct ParsedCodexConfigToml {
         return strings
     }
 
+    private static func absolutePathArrayValue(_ value: ConfigValue?, key: String) throws -> [AbsolutePath] {
+        guard let value else {
+            return []
+        }
+        return try stringArrayValue(value, key: key).map { try AbsolutePath(absolutePath: $0) }
+    }
+
     private static func nonNegativeIntValue(_ value: ConfigValue, key: String) throws -> Int {
         guard case let .integer(integer) = value, integer >= 0 else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -1030,6 +1102,9 @@ private struct ParsedCodexConfigToml {
         let parts = try parseDottedKey(body)
         if parts.count == 1, parts[0] == "features" {
             return .features
+        }
+        if parts.count == 1, parts[0] == "sandbox_workspace_write" {
+            return .sandboxWorkspaceWrite
         }
         if parts.count == 2, parts[0] == "model_providers" {
             return .modelProvider(parts[1])
@@ -1185,12 +1260,20 @@ private extension ConfigValue {
     }
 }
 
+private struct SandboxWorkspaceWriteConfig {
+    var writableRoots: [AbsolutePath]
+    var networkAccess: Bool
+    var excludeTmpdirEnvVar: Bool
+    var excludeSlashTmp: Bool
+}
+
 private enum ConfigSection {
     case topLevel
     case profile(String)
     case modelProvider(String)
     case modelProviderMap(String, String)
     case features
+    case sandboxWorkspaceWrite
     case profileFeatures(String)
     case ignored
 }

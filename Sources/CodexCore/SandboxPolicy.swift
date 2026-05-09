@@ -33,6 +33,17 @@ public enum SandboxPolicy: Equatable, Sendable {
         )
     }
 
+    public static func fromSandboxMode(_ mode: SandboxMode) -> SandboxPolicy {
+        switch mode {
+        case .dangerFullAccess:
+            return .dangerFullAccess
+        case .readOnly:
+            return .readOnly
+        case .workspaceWrite:
+            return .newWorkspaceWritePolicy()
+        }
+    }
+
     public var hasFullDiskReadAccess: Bool {
         true
     }

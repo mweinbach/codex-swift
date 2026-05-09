@@ -1098,20 +1098,11 @@ private func resolveExecSandboxPolicy(
     let mode = execOptionValue(short: "-s", long: "--sandbox", in: arguments)
         .flatMap(SandboxModeCLIArgument.init(rawValue:))?
         .sandboxMode
-        ?? settings.sandboxMode
-        ?? .readOnly
-    return sandboxPolicy(from: mode)
+    return mode.map(sandboxPolicy(from:)) ?? settings.legacySandboxPolicy()
 }
 
 private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
-    switch mode {
-    case .readOnly:
-        return .readOnly
-    case .workspaceWrite:
-        return SandboxPolicy.newWorkspaceWritePolicy()
-    case .dangerFullAccess:
-        return .dangerFullAccess
-    }
+    SandboxPolicy.fromSandboxMode(mode)
 }
 
 private func readExperimentalInstructionsFile(_ path: String?, cwd: URL) throws -> String? {

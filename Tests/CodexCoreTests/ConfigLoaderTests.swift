@@ -114,6 +114,57 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.ossProvider, "ollama")
     }
 
+    func testWorkspaceWriteIncludesMemoriesRootOnceLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let memoriesRoot = dir.url.appendingPathComponent("memories", isDirectory: true)
+        try """
+        sandbox_mode = "workspace-write"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(memoriesRoot.path)"]
+        exclude_tmpdir_env_var = true
+        exclude_slash_tmp = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: memoriesRoot.path))
+        guard case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp) = config.sandboxPolicy else {
+            return XCTFail("expected workspace-write sandbox policy")
+        }
+        XCTAssertFalse(networkAccess)
+        XCTAssertTrue(excludeTmpdirEnvVar)
+        XCTAssertTrue(excludeSlashTmp)
+        let expectedRoot = try AbsolutePath(absolutePath: memoriesRoot.path)
+        XCTAssertEqual(writableRoots.filter { $0 == expectedRoot }.count, 1)
+    }
+
+    func testWorkspaceWriteAppendsMemoriesRootToConfiguredWritableRootsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let extraRoot = dir.url.appendingPathComponent("extra", isDirectory: true)
+        let memoriesRoot = dir.url.appendingPathComponent("memories", isDirectory: true)
+        try """
+        sandbox_mode = "workspace-write"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(extraRoot.path)"]
+        network_access = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        guard case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp) = config.sandboxPolicy else {
+            return XCTFail("expected workspace-write sandbox policy")
+        }
+        XCTAssertTrue(networkAccess)
+        XCTAssertFalse(excludeTmpdirEnvVar)
+        XCTAssertFalse(excludeSlashTmp)
+        XCTAssertEqual(writableRoots, [
+            try AbsolutePath(absolutePath: extraRoot.path),
+            try AbsolutePath(absolutePath: memoriesRoot.path),
+        ])
+    }
+
     func testLoadsMcpServersIntoRuntimeConfig() throws {
         let dir = try CoreTemporaryDirectory()
         try """

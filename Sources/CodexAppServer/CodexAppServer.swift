@@ -784,10 +784,9 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
-        let sandboxMode = sandboxModeParam(params?["sandbox"])
-            ?? runtimeConfig.sandboxMode
-            ?? .readOnly
-        let sandbox = sandboxPolicy(for: sandboxMode)
+        let sandbox = sandboxModeParam(params?["sandbox"])
+            .map(sandboxPolicy(for:))
+            ?? runtimeConfig.legacySandboxPolicy()
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let conversationID = ConversationId()
@@ -860,7 +859,7 @@ public enum CodexAppServer {
         let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
         let modelProvider = runtimeConfig.selectedModelProviderID
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
-        let sandbox = sandboxPolicy(for: runtimeConfig.sandboxMode ?? .readOnly)
+        let sandbox = runtimeConfig.legacySandboxPolicy()
 
         return [
             "thread": thread,
@@ -935,10 +934,9 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
-        let sandboxMode = sandboxModeParam(params?["sandbox"])
-            ?? runtimeConfig.sandboxMode
-            ?? .readOnly
-        let sandbox = sandboxPolicy(for: sandboxMode)
+        let sandbox = sandboxModeParam(params?["sandbox"])
+            .map(sandboxPolicy(for:))
+            ?? runtimeConfig.legacySandboxPolicy()
         let cwd = URL(
             fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
             isDirectory: true
@@ -9549,14 +9547,7 @@ public enum CodexAppServer {
     }
 
     private static func sandboxPolicy(for mode: SandboxMode) -> SandboxPolicy {
-        switch mode {
-        case .dangerFullAccess:
-            return .dangerFullAccess
-        case .readOnly:
-            return .readOnly
-        case .workspaceWrite:
-            return .newWorkspaceWritePolicy()
-        }
+        SandboxPolicy.fromSandboxMode(mode)
     }
 
     private static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
