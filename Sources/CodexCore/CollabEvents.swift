@@ -80,6 +80,117 @@ public enum AgentStatus: Equatable, Codable, Sendable {
     }
 }
 
+public extension AgentStatus {
+    static func from(eventMessage: EventMessage) -> AgentStatus? {
+        switch eventMessage {
+        case .taskStarted:
+            return .running
+        case let .taskComplete(event):
+            return .completed(event.lastAgentMessage)
+        case let .turnAborted(event):
+            switch event.reason {
+            case .interrupted, .budgetLimited:
+                return .interrupted
+            case .replaced, .reviewEnded:
+                return .errored(event.reason.rustDebugDescription)
+            }
+        case let .error(event):
+            return .errored(event.message)
+        case .shutdownComplete:
+            return .shutdown
+        case .warning,
+             .guardianWarning,
+             .realtimeConversationStarted,
+             .realtimeConversationRealtime,
+             .realtimeConversationClosed,
+             .realtimeConversationSdp,
+             .modelReroute,
+             .modelVerification,
+             .contextCompacted,
+             .tokenCount,
+             .agentMessage,
+             .userMessage,
+             .agentMessageDelta,
+             .agentReasoning,
+             .agentReasoningDelta,
+             .agentReasoningRawContent,
+             .agentReasoningRawContentDelta,
+             .agentReasoningSectionBreak,
+             .sessionConfigured,
+             .threadGoalUpdated,
+             .mcpStartupUpdate,
+             .mcpStartupComplete,
+             .mcpToolCallBegin,
+             .mcpToolCallEnd,
+             .mcpListToolsResponse,
+             .webSearchBegin,
+             .webSearchEnd,
+             .imageGenerationBegin,
+             .imageGenerationEnd,
+             .execCommandBegin,
+             .execCommandOutputDelta,
+             .terminalInteraction,
+             .execCommandEnd,
+             .viewImageToolCall,
+             .execApprovalRequest,
+             .requestPermissions,
+             .requestUserInput,
+             .dynamicToolCallRequest,
+             .dynamicToolCallResponse,
+             .elicitationRequest,
+             .applyPatchApprovalRequest,
+             .deprecationNotice,
+             .backgroundEvent,
+             .undoStarted,
+             .undoCompleted,
+             .streamError,
+             .patchApplyBegin,
+             .patchApplyUpdated,
+             .patchApplyEnd,
+             .turnDiff,
+             .guardianAssessment,
+             .getHistoryEntryResponse,
+             .listSkillsResponse,
+             .listCustomPromptsResponse,
+             .skillsUpdateAvailable,
+             .planUpdate,
+             .threadRolledBack,
+             .enteredReviewMode,
+             .exitedReviewMode,
+             .rawResponseItem,
+             .itemStarted,
+             .itemCompleted,
+             .hookStarted,
+             .hookCompleted,
+             .agentMessageContentDelta,
+             .planDelta,
+             .reasoningContentDelta,
+             .reasoningRawContentDelta,
+             .realtimeConversationListVoicesResponse,
+             .collabAgentSpawnBegin,
+             .collabAgentSpawnEnd,
+             .collabAgentInteractionBegin,
+             .collabAgentInteractionEnd,
+             .collabWaitingBegin,
+             .collabWaitingEnd,
+             .collabCloseBegin,
+             .collabCloseEnd,
+             .collabResumeBegin,
+             .collabResumeEnd:
+            return nil
+        }
+    }
+
+    var isFinal: Bool {
+        switch self {
+        case .pendingInit, .running, .interrupted:
+            return false
+        case .completed, .errored, .shutdown, .notFound:
+            return true
+        }
+    }
+}
+
 private extension AgentStatus.UnitVariant {
     var agentStatus: AgentStatus {
         switch self {

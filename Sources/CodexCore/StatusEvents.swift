@@ -475,6 +475,19 @@ public enum TurnAbortReason: String, Codable, Equatable, Sendable {
     case replaced
     case reviewEnded = "review_ended"
     case budgetLimited = "budget_limited"
+
+    var rustDebugDescription: String {
+        switch self {
+        case .interrupted:
+            return "Interrupted"
+        case .replaced:
+            return "Replaced"
+        case .reviewEnded:
+            return "ReviewEnded"
+        case .budgetLimited:
+            return "BudgetLimited"
+        }
+    }
 }
 
 private extension KeyedEncodingContainer {

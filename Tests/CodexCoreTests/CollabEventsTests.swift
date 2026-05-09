@@ -24,6 +24,60 @@ final class CollabEventsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(AgentStatus.self, from: Data(#"{"completed":"done"}"#.utf8)), .completed("done"))
     }
 
+    func testAgentStatusDerivesFromStatusChangingEventsLikeRust() {
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .taskStarted(TaskStartedEvent(modelContextWindow: nil))),
+            .running
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(lastAgentMessage: "done"))),
+            .completed("done")
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(lastAgentMessage: nil))),
+            .completed(nil)
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .error(ErrorEvent(message: "boom"))),
+            .errored("boom")
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .shutdownComplete),
+            .shutdown
+        )
+    }
+
+    func testAgentStatusDerivesAbortReasonsLikeRust() {
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .turnAborted(TurnAbortedEvent(reason: .interrupted))),
+            .interrupted
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .turnAborted(TurnAbortedEvent(reason: .budgetLimited))),
+            .interrupted
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .turnAborted(TurnAbortedEvent(reason: .replaced))),
+            .errored("Replaced")
+        )
+        XCTAssertEqual(
+            AgentStatus.from(eventMessage: .turnAborted(TurnAbortedEvent(reason: .reviewEnded))),
+            .errored("ReviewEnded")
+        )
+    }
+
+    func testAgentStatusIgnoresNonStatusEventsAndFinalityMatchesRust() {
+        XCTAssertNil(AgentStatus.from(eventMessage: .warning(WarningEvent(message: "heads up"))))
+
+        XCTAssertFalse(AgentStatus.pendingInit.isFinal)
+        XCTAssertFalse(AgentStatus.running.isFinal)
+        XCTAssertFalse(AgentStatus.interrupted.isFinal)
+        XCTAssertTrue(AgentStatus.completed(nil).isFinal)
+        XCTAssertTrue(AgentStatus.errored("boom").isFinal)
+        XCTAssertTrue(AgentStatus.shutdown.isFinal)
+        XCTAssertTrue(AgentStatus.notFound.isFinal)
+    }
+
     func testCollabSpawnEventsUseRustWireShapeAndDefaults() throws {
         let begin = CollabAgentSpawnBeginEvent(
             callID: "spawn-1",
