@@ -877,6 +877,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkDictPopAssignment(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if try Self.parseStarlarkDictMutationStatement(
             statement,
             constants: &constants,
@@ -1283,7 +1291,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["update", "clear", "pop"].contains(methodName) else {
+        guard ["update", "clear", "pop", "popitem"].contains(methodName) else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
@@ -1292,7 +1300,7 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
         guard case var .table(items) = receiver else {
-            if methodName == "clear" || methodName == "pop" {
+            if methodName == "clear" || methodName == "pop" || methodName == "popitem" {
                 return false
             }
             throw ConfigOverrideError.invalidLiteral(trimmed)
@@ -1323,26 +1331,125 @@ public final class PolicyParser {
             }
             items.removeAll()
         case "pop":
-            guard rawArguments.count == 1 || rawArguments.count == 2,
-                  let rawKey = rawArguments.first
-            else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
-            guard case let .string(key) = key else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            if items.removeValue(forKey: key) == nil {
-                guard rawArguments.count == 2 else {
-                    throw ConfigOverrideError.invalidLiteral(trimmed)
-                }
-                _ = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
-            }
+            _ = try popStarlarkDictValue(
+                from: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
+        case "popitem":
+            _ = try popFirstStarlarkDictItem(from: &items, rawArguments: rawArguments, expression: trimmed)
         default:
             return false
         }
         constants[receiverText] = .table(items)
         return true
+    }
+
+    private static func parseStarlarkDictPopAssignment(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let equalsIndex = topLevelEqualsIndex(in: trimmed) else {
+            return false
+        }
+
+        let target = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(target) else {
+            return false
+        }
+
+        let valueStart = trimmed.index(after: equalsIndex)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard valueText.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: valueText)
+        else {
+            return false
+        }
+
+        let callee = String(valueText[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return false
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard methodName == "pop" || methodName == "popitem" else {
+            return false
+        }
+        guard isStarlarkIdentifier(receiverText),
+              case var .table(items) = constants[receiverText]
+        else {
+            return false
+        }
+
+        let bodyStart = valueText.index(after: openIndex)
+        let body = String(valueText[bodyStart..<valueText.index(before: valueText.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let item: ConfigValue
+        switch methodName {
+        case "pop":
+            item = try popStarlarkDictValue(
+                from: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
+        case "popitem":
+            item = try popFirstStarlarkDictItem(from: &items, rawArguments: rawArguments, expression: trimmed)
+        default:
+            return false
+        }
+        constants[receiverText] = .table(items)
+        constants[target] = item
+        return true
+    }
+
+    private static func popStarlarkDictValue(
+        from items: inout [String: ConfigValue],
+        rawArguments: [String],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1 || rawArguments.count == 2,
+              let rawKey = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
+        guard case let .string(key) = key else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        if let removed = items.removeValue(forKey: key) {
+            return removed
+        }
+        guard rawArguments.count == 2 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+    }
+
+    private static func popFirstStarlarkDictItem(
+        from items: inout [String: ConfigValue],
+        rawArguments: [String],
+        expression: String
+    ) throws -> ConfigValue {
+        guard rawArguments.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        guard let (key, value) = items.first else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        items.removeValue(forKey: key)
+        return .array([.string(key), value])
     }
 
     private static func parseStarlarkListMutationStatement(
@@ -1525,7 +1632,7 @@ public final class PolicyParser {
         guard isStarlarkIdentifier(receiverText),
               case var .array(items) = constants[receiverText]
         else {
-            throw ConfigOverrideError.invalidLiteral(trimmed)
+            return false
         }
 
         let bodyStart = valueText.index(after: openIndex)
@@ -4285,6 +4392,9 @@ public final class PolicyParser {
             return true
         }
         if try parseStarlarkListPopAssignment(statement, constants: &constants, functions: functions) {
+            return true
+        }
+        if try parseStarlarkDictPopAssignment(statement, constants: &constants, functions: functions) {
             return true
         }
         if try parseStarlarkDictMutationStatement(statement, constants: &constants, functions: functions) {

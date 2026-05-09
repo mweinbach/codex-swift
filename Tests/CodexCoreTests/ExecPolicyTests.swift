@@ -1862,6 +1862,68 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkDictPopReturnValues() throws {
+        let policy = try parsePolicy("""
+        SETTINGS = {
+            "git": "/usr/bin/git",
+            "pnpm": "registry.npmjs.org",
+        }
+        GIT_PATH = SETTINGS.pop("git")
+        FALLBACK_PATH = SETTINGS.pop("hg", "/usr/bin/hg")
+
+        ONLY = {"first": "status"}
+        PAIR = ONLY.popitem()
+
+        SCRATCH = {"temporary": "value"}
+        SCRATCH.popitem()
+
+        def take_host(settings):
+            host = settings.pop("pnpm")
+            return host
+
+        PNPM_HOST = take_host(SETTINGS)
+
+        host_executable("git", [GIT_PATH])
+        host_executable("hg", [FALLBACK_PATH])
+        network_rule(PNPM_HOST, "https", "allow")
+
+        if PAIR[0] == "first" and PAIR[1] == "status":
+            prefix_rule(["git", PAIR[1]], "allow", justification = "popped item")
+
+        if len(SCRATCH) == 0:
+            prefix_rule(["scratch", "empty"], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "popped item"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "scratch"), [
+            PrefixRule(pattern: PrefixPattern(first: "scratch", rest: [.single("empty")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "registry.npmjs.org", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "hg": ["/usr/bin/hg"]
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        VALUE = SETTINGS.pop("missing")
+        prefix_rule(["git", VALUE], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        VALUE = SETTINGS.popitem()
+        prefix_rule(["git", VALUE[0]], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkListPopReturnValues() throws {
         let policy = try parsePolicy("""
         COMMANDS = ["status", "diff", "log", "show"]

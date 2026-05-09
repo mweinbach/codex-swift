@@ -645,6 +645,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for named list constant `.insert(index, value)` statements with Starlark/Python-style clamped insertion indexes, plus named dictionary constant `.update({...})` statements for supported table values used by generated rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark collection removal methods
   - Added Swift execpolicy parser support for named list constant `.clear()`, `.pop([index])`, and `.remove(value)` statements plus named dictionary constant `.clear()` and `.pop(key[, default])` statements before generated rules, network hosts, and host executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark dict pop return values
+  - Added Swift execpolicy parser support for assigning returned dictionary `.pop(key[, default])` values and `.popitem()` key/value pairs while mutating the source table in top-level and helper-function local scopes, including default fallback values, missing-key rejection, and empty-dictionary `popitem` rejection.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list pop return values
   - Added Swift execpolicy parser support for assigning the return value of list `.pop([index])`, including mutation of the source list in top-level and helper-function scopes, default last-item removal, and Rust's rejection of explicit negative or out-of-range pop indexes.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list ordering methods
