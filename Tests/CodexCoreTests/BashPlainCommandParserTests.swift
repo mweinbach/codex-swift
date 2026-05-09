@@ -41,6 +41,17 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
     }
 
+    func testAcceptsEscapedSpecialsInPlainWordsLikeRust() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg \$HOME foo\ bar"#),
+            [["rg", #"\$HOME"#, #"foo\ bar"#]]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo \`literal\`"#),
+            [["echo", #"\`literal\`"#]]
+        )
+    }
+
     func testAcceptsNumbersAsWords() {
         XCTAssertEqual(
             BashPlainCommandParser.parseWordOnlyCommandsSequence("echo 123 456"),

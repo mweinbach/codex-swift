@@ -117,6 +117,20 @@ public enum BashPlainCommandParser {
                 continue
             }
 
+            if character == "\\" {
+                let nextIndex = source.index(after: index)
+                guard nextIndex < source.endIndex else { return nil }
+                let nextCharacter = source[nextIndex]
+                guard nextCharacter != "\n" else { return nil }
+                currentWord.append(character)
+                currentWord.append(nextCharacter)
+                justClosedQuote = false
+                expectingCommand = false
+                endedWithOperator = false
+                index = source.index(after: nextIndex)
+                continue
+            }
+
             switch character {
             case " ", "\t", "\r":
                 guard finishWord() else { return nil }
