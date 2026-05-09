@@ -7771,11 +7771,22 @@ public enum CodexAppServer {
         let tty = boolParam(params?["tty"], defaultValue: false)
         let streamStdin = boolParam(params?["streamStdin"], defaultValue: false)
         let streamStdoutStderr = boolParam(params?["streamStdoutStderr"], defaultValue: false)
+        let disableOutputCap = boolParam(params?["disableOutputCap"], defaultValue: false)
+        let disableTimeout = boolParam(params?["disableTimeout"], defaultValue: false)
+        if params?["sandboxPolicy"] != nil && params?["permissionProfile"] != nil {
+            throw AppServerError.invalidRequest("`permissionProfile` cannot be combined with `sandboxPolicy`")
+        }
         if processID == nil && (tty || streamStdin || streamStdoutStderr) {
             throw AppServerError.invalidRequest("command/exec tty or streaming requires a client-supplied processId")
         }
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("command/exec size requires tty: true")
+        }
+        if disableOutputCap && params?["outputBytesCap"] != nil {
+            throw AppServerError.invalidParams("command/exec cannot set both outputBytesCap and disableOutputCap")
+        }
+        if disableTimeout && params?["timeoutMs"] != nil {
+            throw AppServerError.invalidParams("command/exec cannot set both timeoutMs and disableTimeout")
         }
         let size = try commandExecSize(params?["size"])
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
@@ -7788,8 +7799,8 @@ public enum CodexAppServer {
             tty: tty,
             streamStdin: streamStdin,
             streamStdoutStderr: streamStdoutStderr,
-            timeoutMs: optionalIntParam(params?["timeoutMs"] ?? params?["timeout_ms"]),
-            outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
+            timeoutMs: disableTimeout ? nil : optionalIntParam(params?["timeoutMs"] ?? params?["timeout_ms"]),
+            outputBytesCap: disableOutputCap ? nil : processOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
         )

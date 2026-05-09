@@ -7143,6 +7143,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecValidatesRustOptionConflicts() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let outputCap = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":10,"disableOutputCap":true}}"#,
+            codexHome: codexHome.url
+        )
+        let outputCapError = try XCTUnwrap(outputCap["error"] as? [String: Any])
+        XCTAssertEqual(outputCapError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            outputCapError["message"] as? String,
+            "command/exec cannot set both outputBytesCap and disableOutputCap"
+        )
+
+        let timeout = try appServerResponse(
+            #"{"id":2,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","timeoutMs":10,"disableTimeout":true}}"#,
+            codexHome: codexHome.url
+        )
+        let timeoutError = try XCTUnwrap(timeout["error"] as? [String: Any])
+        XCTAssertEqual(timeoutError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            timeoutError["message"] as? String,
+            "command/exec cannot set both timeoutMs and disableTimeout"
+        )
+
+        let sandboxAndProfile = try appServerResponse(
+            #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{},"permissionProfile":"on-request"}}"#,
+            codexHome: codexHome.url
+        )
+        let sandboxAndProfileError = try XCTUnwrap(sandboxAndProfile["error"] as? [String: Any])
+        XCTAssertEqual(sandboxAndProfileError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            sandboxAndProfileError["message"] as? String,
+            "`permissionProfile` cannot be combined with `sandboxPolicy`"
+        )
+    }
+
     func testExecOneOffCommandResolvesExecutableThroughEnvironmentPath() throws {
         let codexHome = try TemporaryDirectory()
         let configuration = CodexAppServerConfiguration(
