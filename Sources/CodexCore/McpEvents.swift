@@ -552,21 +552,25 @@ public struct McpCallToolResult: Equatable, Codable, Sendable {
     public let content: [McpContentBlock]
     public let isError: Bool?
     public let structuredContent: JSONValue?
+    public let meta: JSONValue?
 
     private enum CodingKeys: String, CodingKey {
         case content
         case isError = "isError"
         case structuredContent = "structuredContent"
+        case meta = "_meta"
     }
 
     public init(
         content: [McpContentBlock],
         isError: Bool? = nil,
-        structuredContent: JSONValue? = nil
+        structuredContent: JSONValue? = nil,
+        meta: JSONValue? = nil
     ) {
         self.content = content
         self.isError = isError
         self.structuredContent = structuredContent
+        self.meta = meta
     }
 }
 

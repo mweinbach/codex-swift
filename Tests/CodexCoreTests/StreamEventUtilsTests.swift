@@ -174,12 +174,12 @@ final class StreamEventUtilsTests: XCTestCase {
     func testResponseInputToResponseItemConvertsMcpResults() {
         let input = ResponseInputItem.mcpToolCallOutput(
             callID: "mcp1",
-            result: .ok(McpCallToolResult(
+            output: McpCallToolResult(
                 content: [
                     .text(McpTextContent(text: "caption")),
                     .image(McpImageContent(data: "data:image/jpeg;base64,ABC", mimeType: "image/jpeg"))
                 ]
-            ))
+            )
         )
 
         guard case let .functionCallOutput(callID, output) = StreamEventUtils.responseInputToResponseItem(input) else {
@@ -195,24 +195,35 @@ final class StreamEventUtilsTests: XCTestCase {
     }
 
     func testResponseInputToResponseItemUsesRawMcpErrorString() {
+        let result = McpCallToolResult(
+            content: [.text(McpTextContent(text: "failed"))],
+            isError: true
+        )
         XCTAssertEqual(
             StreamEventUtils.responseInputToResponseItem(.mcpToolCallOutput(
                 callID: "mcp1",
-                result: .err("failed")
+                output: result
             )),
             .functionCallOutput(
                 callID: "mcp1",
-                output: FunctionCallOutputPayload(content: "failed", success: false)
+                output: FunctionCallOutputPayload(callToolResult: result)
             )
         )
     }
 
     func testResponseInputItemResponseItemConversionMatchesProtocolFromImpl() {
+        let result = McpCallToolResult(
+            content: [.text(McpTextContent(text: "failed"))],
+            isError: true
+        )
         XCTAssertEqual(
-            ResponseInputItem.mcpToolCallOutput(callID: "mcp1", result: .err("failed")).responseItem(),
+            ResponseInputItem.mcpToolCallOutput(
+                callID: "mcp1",
+                output: result
+            ).responseItem(),
             .functionCallOutput(
                 callID: "mcp1",
-                output: FunctionCallOutputPayload(content: #"err: "failed""#, success: false)
+                output: FunctionCallOutputPayload(callToolResult: result)
             )
         )
     }

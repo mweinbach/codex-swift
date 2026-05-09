@@ -86,13 +86,7 @@ public enum StreamEventUtils {
         case let .toolSearchOutput(callID, status, execution, tools):
             return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
-            let output: FunctionCallOutputPayload
-            switch result {
-            case let .ok(callToolResult):
-                output = FunctionCallOutputPayload(callToolResult: callToolResult)
-            case let .err(error):
-                output = FunctionCallOutputPayload(content: error, success: false)
-            }
+            let output = FunctionCallOutputPayload(callToolResult: result)
             return .functionCallOutput(callID: callID, output: output)
         case .message:
             return nil
@@ -159,13 +153,7 @@ public extension ResponseInputItem {
         case let .toolSearchOutput(callID, status, execution, tools):
             return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
-            let output: FunctionCallOutputPayload
-            switch result {
-            case let .ok(callToolResult):
-                output = FunctionCallOutputPayload(callToolResult: callToolResult)
-            case let .err(error):
-                output = FunctionCallOutputPayload(content: "err: \(String(reflecting: error))", success: false)
-            }
+            let output = FunctionCallOutputPayload(callToolResult: result)
             return .functionCallOutput(callID: callID, output: output)
         }
     }

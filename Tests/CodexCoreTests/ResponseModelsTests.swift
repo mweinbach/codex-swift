@@ -188,7 +188,7 @@ final class ResponseModelsTests: XCTestCase {
     func testResponseInputItemRoundTripsMcpToolCallOutput() throws {
         let item = ResponseInputItem.mcpToolCallOutput(
             callID: "call-mcp",
-            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "hello"))]))
+            output: McpCallToolResult(content: [.text(McpTextContent(text: "hello"))])
         )
 
         let data = try JSONEncoder().encode(item)
@@ -196,8 +196,13 @@ final class ResponseModelsTests: XCTestCase {
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "mcp_tool_call_output")
         XCTAssertEqual(object["call_id"] as? String, "call-mcp")
-        XCTAssertNotNil(object["output"])
+        let output = try XCTUnwrap(object["output"] as? [String: Any])
+        let content = try XCTUnwrap(output["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 1)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "hello")
         XCTAssertNil(object["result"])
+        XCTAssertNil(output["Ok"])
     }
 
     func testResponseInputItemDecodesMcpToolCallOutputLikeRust() throws {
@@ -206,13 +211,14 @@ final class ResponseModelsTests: XCTestCase {
             "type": "mcp_tool_call_output",
             "call_id": "call-mcp",
             "output": {
-                "Ok": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "hello"
-                        }
-                    ]
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "hello"
+                    }
+                ],
+                "_meta": {
+                    "trace": "kept"
                 }
             }
         }
@@ -221,7 +227,10 @@ final class ResponseModelsTests: XCTestCase {
         let item = try JSONDecoder().decode(ResponseInputItem.self, from: Data(json.utf8))
         XCTAssertEqual(item, .mcpToolCallOutput(
             callID: "call-mcp",
-            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "hello"))]))
+            output: McpCallToolResult(
+                content: [.text(McpTextContent(text: "hello"))],
+                meta: .object(["trace": .string("kept")])
+            )
         ))
     }
 

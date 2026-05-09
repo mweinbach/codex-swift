@@ -296,7 +296,7 @@ public enum MessagePhase: String, Codable, Equatable, Sendable {
 public enum ResponseInputItem: Equatable, Codable, Sendable {
     case message(role: String, content: [ContentItem], phase: MessagePhase? = nil)
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
-    case mcpToolCallOutput(callID: String, result: McpToolCallResult)
+    case mcpToolCallOutput(callID: String, output: McpCallToolResult)
     case customToolCallOutput(callID: String, name: String? = nil, output: FunctionCallOutputPayload)
     case toolSearchOutput(callID: String, status: String, execution: String, tools: [JSONValue])
 
@@ -308,7 +308,6 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case callID = "call_id"
         case name
         case output
-        case legacyResult = "result"
         case status
         case execution
         case tools
@@ -339,8 +338,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case .mcpToolCallOutput:
             self = .mcpToolCallOutput(
                 callID: try container.decode(String.self, forKey: .callID),
-                result: try container.decodeIfPresent(McpToolCallResult.self, forKey: .output)
-                    ?? container.decode(McpToolCallResult.self, forKey: .legacyResult)
+                output: try container.decode(McpCallToolResult.self, forKey: .output)
             )
         case .customToolCallOutput:
             self = .customToolCallOutput(
@@ -370,10 +368,10 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
             try container.encode(ItemType.functionCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(output, forKey: .output)
-        case let .mcpToolCallOutput(callID, result):
+        case let .mcpToolCallOutput(callID, output):
             try container.encode(ItemType.mcpToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
-            try container.encode(result, forKey: .output)
+            try container.encode(output, forKey: .output)
         case let .customToolCallOutput(callID, name, output):
             try container.encode(ItemType.customToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
