@@ -237,7 +237,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNotNil(config.modelProviders["openai"])
     }
 
-    func testModelProvidersFromConfigDoNotReplaceBuiltIns() throws {
+    func testModelProvidersFromConfigRejectReservedBuiltInsLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
         [model_providers.openai]
@@ -246,10 +246,12 @@ final class ConfigLoaderTests: XCTestCase {
         wire_api = "chat"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
-
-        XCTAssertEqual(config.modelProviders["openai"]?.name, "OpenAI")
-        XCTAssertEqual(config.modelProviders["openai"]?.wireAPI, .responses)
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers contains reserved built-in provider IDs: `openai`. Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`)."
+            )
+        }
     }
 
     func testMcpServersMergeAcrossConfigLayersByName() throws {

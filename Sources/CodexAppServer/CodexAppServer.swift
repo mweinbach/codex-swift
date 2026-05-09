@@ -11727,6 +11727,7 @@ public enum CodexAppServer {
 
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
         let userConfig = stack.getUserLayer()?.config ?? .table([:])
@@ -11741,6 +11742,26 @@ public enum CodexAppServer {
         var nextConfig = userConfig
         for edit in edits {
             try applyConfigWriteEdit(edit, to: &nextConfig)
+        }
+
+        do {
+            try CodexConfigLoader.validateForConfigWrite(
+                nextConfig,
+                environment: configuration.environment
+            )
+            let updatedStack = stack.withUserConfig(
+                configToml: try AbsolutePath(absolutePath: allowedPath),
+                userConfig: nextConfig
+            )
+            try CodexConfigLoader.validateForConfigWrite(
+                updatedStack.effectiveConfig(),
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.invalidRequestWithData(
+                "Invalid configuration: \(error)",
+                data: ["config_write_error_code": "configValidationError"]
+            )
         }
 
         try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)

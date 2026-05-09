@@ -132,6 +132,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidForcedLoginMethod
     case invalidProjectRootMarkers
     case modelProviderNotFound(String)
+    case reservedModelProviderOverride([String])
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -152,6 +153,9 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "project_root_markers must be an array of strings"
         case let .modelProviderNotFound(providerID):
             return "Model provider `\(providerID)` not found"
+        case let .reservedModelProviderOverride(providerIDs):
+            let conflicts = providerIDs.map { "`\($0)`" }.joined(separator: ", ")
+            return "model_providers contains reserved built-in provider IDs: \(conflicts). Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`)."
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -234,6 +238,15 @@ public enum CodexConfigLoader {
         var config = try parsed.resolvedConfig(environment: environment)
         try applyRequirements(try requirementsToml.requirements(), to: &config)
         return config
+    }
+
+    public static func validateForConfigWrite(
+        _ config: ConfigValue,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws {
+        var parsed = ParsedCodexConfigToml()
+        try parsed.merge(config.removingConfigWriteRuntimeOnlyTables())
+        try parsed.validateForConfigWrite(environment: environment)
     }
 
     private static func applyRequirements(
@@ -704,6 +717,12 @@ private struct ParsedCodexConfigToml {
         return try Self.stringArrayValue(value, key: "project_root_markers")
     }
 
+    func validateForConfigWrite(environment: [String: String]) throws {
+        var parsed = self
+        parsed.mcpServers = [:]
+        _ = try parsed.resolvedConfig(environment: environment)
+    }
+
     private mutating func mergeModelProviders(from value: ConfigValue, key: String) throws {
         guard case let .table(providers) = value else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -726,11 +745,15 @@ private struct ParsedCodexConfigToml {
         environment: [String: String]
     ) throws -> [String: ModelProviderInfo] {
         var providers = ModelProviderInfo.builtInModelProviders(environment: environment)
+        let reservedConflicts = configuredProviders.keys
+            .filter { $0 != ModelProviderInfo.amazonBedrockProviderID && providers[$0] != nil }
+            .sorted()
+        if !reservedConflicts.isEmpty {
+            throw CodexConfigLoadError.reservedModelProviderOverride(reservedConflicts)
+        }
         for (name, value) in configuredProviders {
             let provider = try modelProviderInfoValue(value, key: "model_providers.\(name)")
-            if providers[name] == nil {
-                providers[name] = provider
-            }
+            providers[name] = provider
         }
         return providers
     }
@@ -1149,6 +1172,16 @@ private struct ParsedCodexConfigToml {
         }
 
         return nil
+    }
+}
+
+private extension ConfigValue {
+    func removingConfigWriteRuntimeOnlyTables() -> ConfigValue {
+        guard case var .table(table) = self else {
+            return self
+        }
+        table.removeValue(forKey: "mcp_servers")
+        return .table(table)
     }
 }
 

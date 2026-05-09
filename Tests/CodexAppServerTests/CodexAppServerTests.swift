@@ -8259,6 +8259,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
     }
 
+    func testConfigValueWriteRejectsInvalidUserValueEvenWhenManagedOverridesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try #"model = "user""#.write(to: configFile, atomically: true, encoding: .utf8)
+        try #"approval_policy = "never""#.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"approval_policy","value":"bogus","mergeStrategy":"replace"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+            )
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("Invalid configuration:") == true)
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "user""#)
+    }
+
+    func testConfigValueWriteRejectsReservedBuiltinProviderOverrideLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "user""#.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"model_providers.openai.name","value":"OpenAI Override","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        let message = try XCTUnwrap(error["message"] as? String)
+        XCTAssertTrue(message.contains("Invalid configuration:"))
+        XCTAssertTrue(message.contains("reserved built-in provider IDs"))
+        XCTAssertTrue(message.contains("`openai`"))
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "user""#)
+    }
+
     func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
