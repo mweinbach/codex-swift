@@ -3408,6 +3408,34 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkFloatPercentFormats() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        STATUS = "status-%d-%d" % (2.9, -2.9)
+        SCIENTIFIC = "%e/%E" % (123, -123.0)
+        DECIMAL = "%f/%F" % (1.5, -2)
+        COMPACT = "%g/%G/%g/%g" % (1000000, -1000000, 100.0, 1.5)
+
+        prefix_rule([TOOL, STATUS], "allow", justification = SCIENTIFIC + " " + COMPACT)
+
+        if SCIENTIFIC == "1.230000e+02/-1.230000E+02" and DECIMAL == "1.500000/-2.000000":
+            network_rule("api-" + COMPACT.replace(".", "-").replace("+", "p").replace("/", "-") + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + DECIMAL.replace(".", "-").replace("/", "-") + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status-2--2")]),
+                decision: .allow,
+                justification: "1.230000e+02/-1.230000E+02 1e+06/-1E+06/100.0/1.5"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api-1ep06--1ep06-100-0-1-5.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/1-500000--2-000000/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

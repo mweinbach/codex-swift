@@ -4209,10 +4209,17 @@ public final class PolicyParser {
         case "r":
             return starlarkRepresentation(value)
         case "d", "i":
-            guard case let .integer(value) = value else {
+            switch value {
+            case let .integer(value):
+                return String(value)
+            case let .double(value):
+                guard let truncated = Int64(exactly: value.rounded(.towardZero)) else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                return String(truncated)
+            default:
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
-            return String(value)
         case "o":
             guard case let .integer(value) = value else {
                 throw ConfigOverrideError.invalidLiteral(expression)
@@ -4228,9 +4235,123 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             return String(value, radix: 16).uppercased()
+        case "e":
+            return try starlarkPercentFormatScientific(
+                value,
+                exponent: "e",
+                stripTrailingZeros: false,
+                expression: expression
+            )
+        case "E":
+            return try starlarkPercentFormatScientific(
+                value,
+                exponent: "E",
+                stripTrailingZeros: false,
+                expression: expression
+            )
+        case "f", "F":
+            return String(
+                format: "%.6f",
+                locale: Locale(identifier: "en_US_POSIX"),
+                try starlarkPercentFloatingPoint(value, expression: expression)
+            )
+        case "g":
+            return try starlarkPercentFormatCompact(value, exponent: "e", expression: expression)
+        case "G":
+            return try starlarkPercentFormatCompact(value, exponent: "E", expression: expression)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func starlarkPercentFloatingPoint(_ value: ConfigValue, expression: String) throws -> Double {
+        switch value {
+        case let .integer(value):
+            return Double(value)
+        case let .double(value):
+            return value
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkPercentFormatCompact(
+        _ value: ConfigValue,
+        exponent: Character,
+        expression: String
+    ) throws -> String {
+        let double = try starlarkPercentFloatingPoint(value, expression: expression)
+        guard double.isFinite else {
+            return starlarkPercentFormatNonFinite(double)
+        }
+        let absolute = abs(double)
+        let exponentValue = double == 0 ? 0 : Int(floor(log10(absolute)))
+        if abs(exponentValue) >= 6 {
+            return try starlarkPercentFormatScientific(
+                value,
+                exponent: exponent,
+                stripTrailingZeros: true,
+                expression: expression
+            )
+        }
+        if double.rounded(.towardZero) == double {
+            return String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), double)
+        }
+        return String(double)
+    }
+
+    private static func starlarkPercentFormatScientific(
+        _ value: ConfigValue,
+        exponent exponentCharacter: Character,
+        stripTrailingZeros: Bool,
+        expression: String
+    ) throws -> String {
+        let double = try starlarkPercentFloatingPoint(value, expression: expression)
+        guard double.isFinite else {
+            return starlarkPercentFormatNonFinite(double)
+        }
+        let absolute = abs(double)
+        let exponent = double == 0 ? 0 : Int(floor(log10(absolute)))
+        let normalized = double == 0 ? 0 : absolute / pow(10, Double(exponent))
+
+        var result = double.sign == .minus ? "-" : ""
+        result += String(Int(normalized.rounded(.towardZero)))
+        var tail = UInt64((normalized.truncatingRemainder(dividingBy: 1) * 1_000_000).rounded())
+        var digits: [UInt8] = []
+        var removingTrailingZeros = stripTrailingZeros
+        for _ in 0..<6 {
+            let digit = UInt8(tail % 10)
+            if digit != 0 || !removingTrailingZeros {
+                removingTrailingZeros = false
+                digits.append(digit)
+            }
+            tail /= 10
+        }
+        if !digits.isEmpty {
+            result += "."
+            for digit in digits.reversed() {
+                result.append(Character(String(UnicodeScalar(UInt8(ascii: "0") + digit))))
+            }
+        }
+        result.append(exponentCharacter)
+        result += starlarkPercentFormatExponent(exponent)
+        return result
+    }
+
+    private static func starlarkPercentFormatExponent(_ exponent: Int) -> String {
+        let sign = exponent < 0 ? "-" : "+"
+        let magnitude = abs(exponent)
+        if magnitude < 10 {
+            return "\(sign)0\(magnitude)"
+        }
+        return "\(sign)\(magnitude)"
+    }
+
+    private static func starlarkPercentFormatNonFinite(_ value: Double) -> String {
+        if value.isNaN {
+            return "nan"
+        }
+        return value.sign == .minus ? "-inf" : "+inf"
     }
 
     private static func parseStarlarkFormatCapture(
