@@ -393,6 +393,49 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return try threadIDs(query: query, bindings: bindings)
     }
 
+    public func listThreads(
+        pageSize: Int,
+        filters: ThreadListFilterOptions
+    ) async throws -> ThreadsPage {
+        let limit = pageSize == Int.max ? Int.max : pageSize + 1
+        var query = Self.threadSelectColumns + " FROM threads"
+        var bindings: [SQLiteBinding] = []
+        Self.appendThreadFilters(query: &query, bindings: &bindings, filters: filters)
+        query += " ORDER BY \(filters.sortKey.sqlColumn) \(filters.sortDirection.sqlKeyword) LIMIT ?"
+        bindings.append(.int(Int64(limit)))
+
+        let database = handle.database
+        var items = try Self.withStatement(query: query, bindings: bindings, database: database) { statement in
+            var items: [ThreadMetadata] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return items
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                items.append(try Self.threadMetadata(from: statement))
+            }
+        }
+        let numScannedRows = items.count
+        let nextAnchor: ThreadListAnchor?
+        if items.count > pageSize {
+            items.removeLast()
+            nextAnchor = items.last.map { item in
+                ThreadListAnchor(timestamp: item.timestamp(for: filters.sortKey))
+            }
+        } else {
+            nextAnchor = nil
+        }
+
+        return ThreadsPage(
+            items: items,
+            nextAnchor: nextAnchor,
+            numScannedRows: numScannedRows
+        )
+    }
+
     public func findThreadByExactTitle(
         title: String,
         allowedSources: [String],
@@ -803,6 +846,68 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
 
+    private static let threadSelectColumns =
+        """
+        SELECT
+            threads.id,
+            threads.rollout_path,
+            threads.created_at_ms AS created_at,
+            threads.updated_at_ms AS updated_at,
+            threads.source,
+            threads.thread_source,
+            threads.agent_nickname,
+            threads.agent_role,
+            threads.agent_path,
+            threads.model_provider,
+            threads.model,
+            threads.reasoning_effort,
+            threads.cwd,
+            threads.cli_version,
+            threads.title,
+            threads.sandbox_policy,
+            threads.approval_mode,
+            threads.tokens_used,
+            threads.first_user_message,
+            threads.archived_at,
+            threads.git_sha,
+            threads.git_branch,
+            threads.git_origin_url
+        """
+
+    private static func appendThreadFilters(
+        query: inout String,
+        bindings: inout [SQLiteBinding],
+        filters: ThreadListFilterOptions
+    ) {
+        query += " WHERE 1 = 1"
+        query += filters.archivedOnly ? " AND threads.archived = 1" : " AND threads.archived = 0"
+        query += " AND threads.first_user_message <> ''"
+        if !filters.allowedSources.isEmpty {
+            query += " AND threads.source IN (\(placeholders(count: filters.allowedSources.count)))"
+            bindings.append(contentsOf: filters.allowedSources.map(SQLiteBinding.text))
+        }
+        if let modelProviders = filters.modelProviders, !modelProviders.isEmpty {
+            query += " AND threads.model_provider IN (\(placeholders(count: modelProviders.count)))"
+            bindings.append(contentsOf: modelProviders.map(SQLiteBinding.text))
+        }
+        if let cwdFilters = filters.cwdFilters {
+            if cwdFilters.isEmpty {
+                query += " AND 1 = 0"
+            } else {
+                query += " AND threads.cwd IN (\(placeholders(count: cwdFilters.count)))"
+                bindings.append(contentsOf: cwdFilters.map { .text($0.path) })
+            }
+        }
+        if let searchTerm = filters.searchTerm {
+            query += " AND instr(threads.title, ?) > 0"
+            bindings.append(.text(searchTerm))
+        }
+        if let anchor = filters.anchor {
+            query += " AND \(filters.sortKey.sqlColumn) \(filters.sortDirection.anchorOperator) ?"
+            bindings.append(.int(epochMilliseconds(anchor.timestamp)))
+        }
+    }
+
     private static func threadMetadata(from statement: OpaquePointer) throws -> ThreadMetadata {
         let threadSource: ThreadSource?
         if let rawThreadSource = optionalTextColumn(statement, index: 5) {
@@ -817,8 +922,8 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return ThreadMetadata(
             id: try ThreadId(string: try requiredTextColumn(statement, index: 0, columnName: "id")),
             rolloutPath: try requiredTextColumn(statement, index: 1, columnName: "rollout_path"),
-            createdAt: date(milliseconds: sqlite3_column_int64(statement, 2)),
-            updatedAt: date(milliseconds: sqlite3_column_int64(statement, 3)),
+            createdAt: epochMillisecondsDate(sqlite3_column_int64(statement, 2)),
+            updatedAt: epochMillisecondsDate(sqlite3_column_int64(statement, 3)),
             source: try requiredTextColumn(statement, index: 4, columnName: "source"),
             threadSource: threadSource,
             agentNickname: optionalTextColumn(statement, index: 6),
@@ -841,8 +946,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
-    private static func date(milliseconds: Int64) -> Date {
-        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+    private static func epochMillisecondsDate(_ value: Int64) -> Date {
+        let minimumEpochMilliseconds: Int64 = 1_577_836_800_000
+        let milliseconds = value < minimumEpochMilliseconds ? saturatingMultiply(value, 1_000) : value
+        return Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
     }
 
     private static func epochSecondsDate(_ seconds: Int64) -> Date {
@@ -851,6 +958,11 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
 
     private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {
         let result = value.addingReportingOverflow(increment)
+        return result.overflow ? Int64.max : result.partialValue
+    }
+
+    private static func saturatingMultiply(_ value: Int64, _ multiplier: Int64) -> Int64 {
+        let result = value.multipliedReportingOverflow(by: multiplier)
         return result.overflow ? Int64.max : result.partialValue
     }
 
@@ -948,6 +1060,53 @@ public struct ThreadMetadata: Equatable, Sendable {
     }
 }
 
+public struct ThreadsPage: Equatable, Sendable {
+    public let items: [ThreadMetadata]
+    public let nextAnchor: ThreadListAnchor?
+    public let numScannedRows: Int
+
+    public init(
+        items: [ThreadMetadata],
+        nextAnchor: ThreadListAnchor?,
+        numScannedRows: Int
+    ) {
+        self.items = items
+        self.nextAnchor = nextAnchor
+        self.numScannedRows = numScannedRows
+    }
+}
+
+public struct ThreadListFilterOptions: Equatable, Sendable {
+    public let archivedOnly: Bool
+    public let allowedSources: [String]
+    public let modelProviders: [String]?
+    public let cwdFilters: [URL]?
+    public let anchor: ThreadListAnchor?
+    public let sortKey: ThreadListSortKey
+    public let sortDirection: ThreadListSortDirection
+    public let searchTerm: String?
+
+    public init(
+        archivedOnly: Bool = false,
+        allowedSources: [String] = [],
+        modelProviders: [String]? = nil,
+        cwdFilters: [URL]? = nil,
+        anchor: ThreadListAnchor? = nil,
+        sortKey: ThreadListSortKey = .updatedAt,
+        sortDirection: ThreadListSortDirection = .descending,
+        searchTerm: String? = nil
+    ) {
+        self.archivedOnly = archivedOnly
+        self.allowedSources = allowedSources
+        self.modelProviders = modelProviders
+        self.cwdFilters = cwdFilters
+        self.anchor = anchor
+        self.sortKey = sortKey
+        self.sortDirection = sortDirection
+        self.searchTerm = searchTerm
+    }
+}
+
 public struct ThreadListAnchor: Equatable, Sendable {
     public let timestamp: Date
 
@@ -966,6 +1125,40 @@ public enum ThreadListSortKey: Equatable, Sendable {
             return "threads.created_at_ms"
         case .updatedAt:
             return "threads.updated_at_ms"
+        }
+    }
+}
+
+public enum ThreadListSortDirection: Equatable, Sendable {
+    case ascending
+    case descending
+
+    fileprivate var sqlKeyword: String {
+        switch self {
+        case .ascending:
+            return "ASC"
+        case .descending:
+            return "DESC"
+        }
+    }
+
+    fileprivate var anchorOperator: String {
+        switch self {
+        case .ascending:
+            return ">"
+        case .descending:
+            return "<"
+        }
+    }
+}
+
+private extension ThreadMetadata {
+    func timestamp(for sortKey: ThreadListSortKey) -> Date {
+        switch sortKey {
+        case .createdAt:
+            return createdAt
+        case .updatedAt:
+            return updatedAt
         }
     }
 }

@@ -1051,16 +1051,177 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(anchoredCreatedIDs, [firstCreatedThreadID])
     }
 
+    func testSQLiteStoreListsThreadMetadataPagesWithRustFiltersAndNextAnchor() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let newestThreadID = try threadID(107)
+        let middleThreadID = try threadID(108)
+        let oldestThreadID = try threadID(109)
+        let otherCwdThreadID = try threadID(110)
+        let emptyMessageThreadID = try threadID(111)
+        try insertRawSQLiteThread(
+            id: oldestThreadID,
+            agentPath: try AgentPath(validating: "/root/page_oldest"),
+            rolloutPath: "/tmp/page-oldest.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_060_000,
+            title: "Gamma project",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_061, milliseconds: 1_700_000_061_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: middleThreadID,
+            agentPath: try AgentPath(validating: "/root/page_middle"),
+            rolloutPath: "/tmp/page-middle.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_062_000,
+            title: "Beta project",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_063, milliseconds: 1_700_000_063_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: newestThreadID,
+            agentPath: try AgentPath(validating: "/root/page_newest"),
+            rolloutPath: "/tmp/page-newest.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_064_000,
+            title: "Alpha project",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_065, milliseconds: 1_700_000_065_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: otherCwdThreadID,
+            agentPath: try AgentPath(validating: "/root/page_other_cwd"),
+            rolloutPath: "/tmp/page-other-cwd.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/other",
+            firstUserMessage: "hello",
+            title: "Other project",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_066, milliseconds: 1_700_000_066_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: emptyMessageThreadID,
+            agentPath: try AgentPath(validating: "/root/page_empty"),
+            rolloutPath: "/tmp/page-empty.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            cwd: "/repo",
+            firstUserMessage: "",
+            title: "Empty project",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_067, milliseconds: 1_700_000_067_000),
+            databaseURL: databaseURL
+        )
+
+        let firstPage = try await store.listThreads(
+            pageSize: 2,
+            filters: ThreadListFilterOptions(
+                archivedOnly: false,
+                allowedSources: ["cli"],
+                modelProviders: ["openai"],
+                cwdFilters: [URL(fileURLWithPath: "/repo", isDirectory: true)],
+                sortKey: .updatedAt,
+                sortDirection: .descending,
+                searchTerm: "project"
+            )
+        )
+        let secondPage = try await store.listThreads(
+            pageSize: 2,
+            filters: ThreadListFilterOptions(
+                archivedOnly: false,
+                allowedSources: ["cli"],
+                modelProviders: ["openai"],
+                cwdFilters: [URL(fileURLWithPath: "/repo", isDirectory: true)],
+                anchor: firstPage.nextAnchor,
+                sortKey: .updatedAt,
+                sortDirection: .descending,
+                searchTerm: "project"
+            )
+        )
+        let emptyCwdPage = try await store.listThreads(
+            pageSize: 2,
+            filters: ThreadListFilterOptions(cwdFilters: [])
+        )
+
+        XCTAssertEqual(firstPage.items.map(\.id), [newestThreadID, middleThreadID])
+        XCTAssertEqual(firstPage.nextAnchor, ThreadListAnchor(timestamp: date(milliseconds: 1_700_000_063_000)))
+        XCTAssertEqual(firstPage.numScannedRows, 3)
+        XCTAssertEqual(secondPage.items.map(\.id), [oldestThreadID])
+        XCTAssertNil(secondPage.nextAnchor)
+        XCTAssertEqual(secondPage.numScannedRows, 1)
+        XCTAssertEqual(emptyCwdPage.items, [])
+        XCTAssertNil(emptyCwdPage.nextAnchor)
+        XCTAssertEqual(emptyCwdPage.numScannedRows, 0)
+    }
+
+    func testSQLiteStoreListsThreadMetadataSupportsAscendingAnchor() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let firstThreadID = try threadID(112)
+        let secondThreadID = try threadID(113)
+        try insertRawSQLiteThread(
+            id: firstThreadID,
+            agentPath: try AgentPath(validating: "/root/ascending_first"),
+            rolloutPath: "/tmp/ascending-first.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_070_000,
+            title: "First",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_090, milliseconds: 1_700_000_090_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: secondThreadID,
+            agentPath: try AgentPath(validating: "/root/ascending_second"),
+            rolloutPath: "/tmp/ascending-second.jsonl",
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_080_000,
+            title: "Second",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_080, milliseconds: 1_700_000_080_000),
+            databaseURL: databaseURL
+        )
+
+        let anchoredPage = try await store.listThreads(
+            pageSize: 10,
+            filters: ThreadListFilterOptions(
+                anchor: ThreadListAnchor(timestamp: date(milliseconds: 1_700_000_070_000)),
+                sortKey: .createdAt,
+                sortDirection: .ascending
+            )
+        )
+
+        XCTAssertEqual(anchoredPage.items.map(\.id), [secondThreadID])
+        XCTAssertNil(anchoredPage.nextAnchor)
+        XCTAssertEqual(anchoredPage.numScannedRows, 1)
+    }
+
     func testSQLiteStoreFindsNewestThreadByExactTitleWithRustFilters() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
         let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
         try createMinimalThreadsTable(databaseURL: databaseURL)
-        let olderThreadID = try threadID(107)
-        let newestThreadID = try threadID(108)
-        let archivedThreadID = try threadID(109)
-        let emptyMessageThreadID = try threadID(110)
-        let otherCwdThreadID = try threadID(111)
+        let olderThreadID = try threadID(114)
+        let newestThreadID = try threadID(115)
+        let archivedThreadID = try threadID(116)
+        let emptyMessageThreadID = try threadID(117)
+        let otherCwdThreadID = try threadID(118)
         try insertRawSQLiteThread(
             id: olderThreadID,
             agentPath: try AgentPath(validating: "/root/title_older"),
@@ -1193,7 +1354,7 @@ final class AgentGraphStoreTests: XCTestCase {
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
         let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
         try createMinimalThreadsTable(databaseURL: databaseURL)
-        let threadID = try threadID(112)
+        let threadID = try threadID(119)
         try insertRawSQLiteThread(
             id: threadID,
             agentPath: try AgentPath(validating: "/root/title_unknown_source"),
