@@ -541,7 +541,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules
   - Added Swift execpolicy host-executable parsing, validation, deduplication, last-definition-wins behavior, deferred example validation with host executable resolution, and optional absolute-path command matching that records `resolvedProgram`.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
-  - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, and Rust-matching `cd` path joining for read summaries only.
+  - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
   - added Swift Rust-style `--` operand handling for read/list summaries so dash-leading paths remain valid operands after the option terminator.
 - `codex-rs/shell-command/src/parse_command.rs` sed pipeline filtering parity

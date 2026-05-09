@@ -1009,6 +1009,9 @@ private func joinPaths(_ base: String, _ child: String) -> String {
     if isAbsoluteLike(child) {
         return child
     }
+    if base.isEmpty {
+        return child
+    }
     if base.hasSuffix("/") || base.hasSuffix("\\") {
         return base + child
     }

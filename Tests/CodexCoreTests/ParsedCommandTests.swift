@@ -78,6 +78,16 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testEmptyCdBaseDoesNotCreateAbsoluteReadPathLikeRust() {
+        XCTAssertEqual(parseCommand(["cd", "", "&&", "cat", "foo.txt"]), [
+            .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo.txt")
+        ])
+
+        XCTAssertEqual(parseCommand(["cd", "", "&&", "cd", "bar", "&&", "cat", "foo.txt"]), [
+            .read(cmd: "cat foo.txt", name: "foo.txt", path: "bar/foo.txt")
+        ])
+    }
+
     func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
             .unknown(cmd: "cd foo && bar")
