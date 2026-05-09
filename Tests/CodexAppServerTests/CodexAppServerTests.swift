@@ -4390,6 +4390,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "thread/turns/items/list is not supported yet")
     }
 
+    func testThreadTurnsListRejectsUnknownEnumValuesLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+
+        let badItemsView = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":"compact"}}"#,
+            codexHome: temp.url
+        )
+        let badItemsViewError = try XCTUnwrap(badItemsView["error"] as? [String: Any])
+        XCTAssertEqual(badItemsViewError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            badItemsViewError["message"] as? String,
+            "Invalid request: unknown variant `compact`, expected one of `notLoaded`, `summary`, `full`"
+        )
+
+        let badSortDirection = try appServerResponse(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","sortDirection":"sideways"}}"#,
+            codexHome: temp.url
+        )
+        let badSortDirectionError = try XCTUnwrap(badSortDirection["error"] as? [String: Any])
+        XCTAssertEqual(badSortDirectionError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            badSortDirectionError["message"] as? String,
+            "Invalid request: unknown variant `sideways`, expected `asc` or `desc`"
+        )
+    }
+
     func testThreadLoadedListPaginatesLoadedThreadIDs() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

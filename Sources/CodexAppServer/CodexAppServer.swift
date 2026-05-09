@@ -998,7 +998,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
 
-        let itemsView = turnItemsView(params?["itemsView"])
+        let itemsView = try turnItemsView(params?["itemsView"])
         let turns = try buildTurnsFromRolloutEvents(at: rolloutPath).map { turn in
             turnWithItemsView(turn, itemsView: itemsView)
         }
@@ -1006,7 +1006,7 @@ public enum CodexAppServer {
             turns,
             cursor: stringParam(params?["cursor"]),
             limit: listLimit(params?["limit"], defaultValue: 25, maximum: 100),
-            sortDirection: stringParam(params?["sortDirection"])
+            sortDirection: try threadTurnsSortDirection(params?["sortDirection"])
         )
         return [
             "data": page.turns,
@@ -13465,11 +13465,37 @@ private enum AppServerTurnItemsView: String {
     case full
 }
 
-private func turnItemsView(_ rawValue: Any?) -> AppServerTurnItemsView {
+private enum AppServerThreadTurnsSortDirection {
+    case asc
+    case desc
+}
+
+private func turnItemsView(_ rawValue: Any?) throws -> AppServerTurnItemsView {
     guard let value = CodexAppServer.stringParam(rawValue) else {
         return .summary
     }
-    return AppServerTurnItemsView(rawValue: value) ?? .summary
+    guard let itemsView = AppServerTurnItemsView(rawValue: value) else {
+        throw AppServerError.invalidRequest(
+            "Invalid request: unknown variant `\(value)`, expected one of `notLoaded`, `summary`, `full`"
+        )
+    }
+    return itemsView
+}
+
+private func threadTurnsSortDirection(_ rawValue: Any?) throws -> AppServerThreadTurnsSortDirection {
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        return .desc
+    }
+    switch value {
+    case "asc":
+        return .asc
+    case "desc":
+        return .desc
+    default:
+        throw AppServerError.invalidRequest(
+            "Invalid request: unknown variant `\(value)`, expected `asc` or `desc`"
+        )
+    }
 }
 
 private func turnWithItemsView(_ turn: [String: Any], itemsView: AppServerTurnItemsView) -> [String: Any] {
@@ -13502,7 +13528,7 @@ private func paginateThreadTurns(
     _ turns: [[String: Any]],
     cursor: String?,
     limit: Int,
-    sortDirection: String?
+    sortDirection: AppServerThreadTurnsSortDirection
 ) throws -> AppServerThreadTurnsPage {
     guard !turns.isEmpty else {
         return AppServerThreadTurnsPage(turns: [], nextCursor: nil, backwardsCursor: nil)
@@ -13515,7 +13541,7 @@ private func paginateThreadTurns(
         throw AppServerError.invalidRequest("invalid cursor: anchor turn is no longer present")
     }
 
-    let descending = sortDirection != "asc"
+    let descending = sortDirection == .desc
     var keyedTurns = Array(turns.enumerated())
     if descending {
         keyedTurns.reverse()
