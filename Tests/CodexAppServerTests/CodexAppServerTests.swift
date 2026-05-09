@@ -6219,6 +6219,74 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["model"] as? String, "gpt-new")
     }
 
+    func testConfigReadAfterPipelinedWriteSeesWrittenValue() throws {
+        let temp = try TemporaryDirectory()
+        try #"model = "gpt-old""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace"}}"#.utf8
+        )))
+        let writeResult = try XCTUnwrap(write["result"] as? [String: Any])
+        XCTAssertEqual(writeResult["status"] as? String, "ok")
+
+        let read = try decode(processor.processLine(Data(#"{"id":2,"method":"config/read","params":{}}"#.utf8)))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(readResult["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "gpt-new")
+    }
+
+    func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let base = """
+        [mcp_servers.linear]
+        bearer_token_env_var = "OLD_TOKEN"
+        name = "linear"
+        url = "https://linear.example"
+
+        [mcp_servers.linear.env_http_headers]
+        existing = "keep"
+
+        [mcp_servers.linear.http_headers]
+        alpha = "a"
+        """
+        try base.write(to: configFile, atomically: true, encoding: .utf8)
+        let overlay = #"{"bearer_token_env_var":"NEW_TOKEN","http_headers":{"alpha":"updated","beta":"b"}}"#
+
+        let upsert = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"mcp_servers.linear","value":\#(overlay),"mergeStrategy":"upsert"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((upsert["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let upserted = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(upserted.contains(#"bearer_token_env_var = "NEW_TOKEN""#))
+        XCTAssertTrue(upserted.contains(#"name = "linear""#))
+        XCTAssertTrue(upserted.contains(#"url = "https://linear.example""#))
+        XCTAssertTrue(upserted.contains(#"existing = "keep""#))
+        XCTAssertTrue(upserted.contains(#"alpha = "updated""#))
+        XCTAssertTrue(upserted.contains(#"beta = "b""#))
+
+        try base.write(to: configFile, atomically: true, encoding: .utf8)
+        let replace = try appServerResponse(
+            #"{"id":2,"method":"config/value/write","params":{"keyPath":"mcp_servers.linear","value":\#(overlay),"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((replace["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let replaced = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertTrue(replaced.contains(#"bearer_token_env_var = "NEW_TOKEN""#))
+        XCTAssertTrue(replaced.contains(#"alpha = "updated""#))
+        XCTAssertTrue(replaced.contains(#"beta = "b""#))
+        XCTAssertFalse(replaced.contains(#"name = "linear""#))
+        XCTAssertFalse(replaced.contains(#"existing = "keep""#))
+    }
+
     func testConfigValueWriteRejectsVersionConflict() throws {
         let temp = try TemporaryDirectory()
         try #"model = "gpt-old""#.write(
