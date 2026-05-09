@@ -128,6 +128,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartExperimentalFieldsRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let cases: [(String, String)] = [
+            (#"{"environments":[]}"#, "thread/start.environments"),
+            (#"{"dynamicTools":[]}"#, "thread/start.dynamicTools"),
+            (#"{"mockExperimentalField":"mock"}"#, "thread/start.mockExperimentalField"),
+            (#"{"experimentalRawEvents":true}"#, "thread/start.experimentalRawEvents"),
+            (#"{"persistFullHistory":true}"#, "thread/start.persistFullHistory")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/start","params":\#(testCase.0)}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(testCase.1) requires experimentalApi capability")
+        }
+    }
+
+    func testThreadStartExperimentalFalseFlagsDoNotRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"experimentalRawEvents":false,"persistFullHistory":false}}"#.utf8)))
+
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertNil(messages[0]["error"])
+    }
+
     func testAppServerAttestationProviderRequestsCapableSubscribedClient() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

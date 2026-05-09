@@ -624,6 +624,8 @@ Source baseline inspected for this scaffold:
   - added Rust's experimental API guards for `thread/realtime/start`, `thread/realtime/appendAudio`, `thread/realtime/appendText`, `thread/realtime/stop`, and `thread/realtime/listVoices`; ported the deterministic `thread/realtime/listVoices` response with the built-in v1/v2 voice lists and defaults. Realtime conversation start/append/stop now validate materialized threads and return Rust's disabled-thread error until the full realtime runtime is ported.
 - `codex-rs/app-server` turn steer route
   - added v2 `turn/steer` with active-turn id validation, no-active/mismatched/empty-input errors, rollout persistence for steer input, Rust's `turnId` response shape, and the experimental API guard for `responsesapiClientMetadata`.
+- `codex-rs/app-server-protocol` thread-start experimental field gating
+  - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, and `thread/start.persistFullHistory`.
 
 ## Known Gaps
 

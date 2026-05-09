@@ -1262,6 +1262,30 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func requireThreadStartExperimentalFieldsAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled else {
+            return
+        }
+        if let environments = params?["environments"], !(environments is NSNull) {
+            throw AppServerError.invalidRequest("thread/start.environments requires experimentalApi capability")
+        }
+        if let dynamicTools = params?["dynamicTools"], !(dynamicTools is NSNull) {
+            throw AppServerError.invalidRequest("thread/start.dynamicTools requires experimentalApi capability")
+        }
+        if let mockExperimentalField = params?["mockExperimentalField"], !(mockExperimentalField is NSNull) {
+            throw AppServerError.invalidRequest("thread/start.mockExperimentalField requires experimentalApi capability")
+        }
+        if boolParam(params?["experimentalRawEvents"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/start.experimentalRawEvents requires experimentalApi capability")
+        }
+        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
+        }
+    }
+
     fileprivate static func turnSteerResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
@@ -13869,6 +13893,10 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.newConversationResult(params: params, configuration: configuration)
                     )
                 case "thread/start":
+                    try CodexAppServer.requireThreadStartExperimentalFieldsAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
