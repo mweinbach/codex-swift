@@ -189,6 +189,13 @@ final class RolloutPolicyTests: XCTestCase {
             .imageGenerationBegin
         )
         XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .patchApplyUpdated(PatchApplyUpdatedEvent(
+                callID: "patch-1",
+                changes: [:]
+            ))),
+            .patchApplyUpdated
+        )
+        XCTAssertEqual(
             RolloutPolicy.eventKind(for: .requestPermissions(RequestPermissionsEvent(
                 callID: "perm-1",
                 turnID: "turn-1",
@@ -224,6 +231,29 @@ final class RolloutPolicyTests: XCTestCase {
                 duration: ProtocolDuration(secs: 1)
             ))),
             .dynamicToolCallResponse
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .hookStarted(HookStartedEvent(
+                turnID: nil,
+                run: minimalHookRunSummary()
+            ))),
+            .hookStarted
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .hookCompleted(HookCompletedEvent(
+                turnID: "turn-1",
+                run: minimalHookRunSummary()
+            ))),
+            .hookCompleted
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .planDelta(PlanDeltaEvent(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "item-1",
+                delta: "step"
+            ))),
+            .planDelta
         )
         XCTAssertEqual(
             RolloutPolicy.eventKind(for: .imageGenerationEnd(ImageGenerationEndEvent(
@@ -273,6 +303,24 @@ final class RolloutPolicyTests: XCTestCase {
             turnID: "turn-1",
             tool: "lookup",
             arguments: .object([:])
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.patchApplyUpdated(PatchApplyUpdatedEvent(
+            callID: "patch-1",
+            changes: [:]
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.hookStarted(HookStartedEvent(
+            turnID: nil,
+            run: minimalHookRunSummary()
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.hookCompleted(HookCompletedEvent(
+            turnID: "turn-1",
+            run: minimalHookRunSummary()
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.planDelta(PlanDeltaEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            itemID: "item-1",
+            delta: "step"
         ))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(
             .dynamicToolCallResponse(DynamicToolCallResponseEvent(
@@ -344,5 +392,23 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.isPersistedResponseItem(.eventMessage(.error)))
         XCTAssertTrue(RolloutPolicy.isPersistedResponseItem(.responseItem(.message(role: "assistant", content: []))))
         XCTAssertFalse(RolloutPolicy.isPersistedResponseItem(.responseItem(.other)))
+    }
+
+    private func minimalHookRunSummary() -> HookRunSummary {
+        try! HookRunSummary(
+            id: "run-1",
+            eventName: .postToolUse,
+            handlerType: .command,
+            executionMode: .sync,
+            scope: .turn,
+            sourcePath: AbsolutePath(absolutePath: "/tmp/hook.json"),
+            displayOrder: 0,
+            status: .completed,
+            statusMessage: nil,
+            startedAt: 10,
+            completedAt: 12,
+            durationMs: 2,
+            entries: []
+        )
     }
 }

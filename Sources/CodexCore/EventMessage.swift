@@ -76,6 +76,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case undoCompleted(UndoCompletedEvent)
     case streamError(StreamErrorEvent)
     case patchApplyBegin(PatchApplyBeginEvent)
+    case patchApplyUpdated(PatchApplyUpdatedEvent)
     case patchApplyEnd(PatchApplyEndEvent)
     case turnDiff(TurnDiffEvent)
     case guardianAssessment(GuardianAssessmentEvent)
@@ -92,7 +93,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case rawResponseItem(RawResponseItemEvent)
     case itemStarted(ItemStartedEvent)
     case itemCompleted(ItemCompletedEvent)
+    case hookStarted(HookStartedEvent)
+    case hookCompleted(HookCompletedEvent)
     case agentMessageContentDelta(AgentMessageContentDeltaEvent)
+    case planDelta(PlanDeltaEvent)
     case reasoningContentDelta(ReasoningContentDeltaEvent)
     case reasoningRawContentDelta(ReasoningRawContentDeltaEvent)
     case realtimeConversationListVoicesResponse(RealtimeConversationListVoicesResponseEvent)
@@ -151,6 +155,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case undoCompleted = "undo_completed"
         case streamError = "stream_error"
         case patchApplyBegin = "patch_apply_begin"
+        case patchApplyUpdated = "patch_apply_updated"
         case patchApplyEnd = "patch_apply_end"
         case turnDiff = "turn_diff"
         case guardianAssessment = "guardian_assessment"
@@ -167,7 +172,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case rawResponseItem = "raw_response_item"
         case itemStarted = "item_started"
         case itemCompleted = "item_completed"
+        case hookStarted = "hook_started"
+        case hookCompleted = "hook_completed"
         case agentMessageContentDelta = "agent_message_content_delta"
+        case planDelta = "plan_delta"
         case reasoningContentDelta = "reasoning_content_delta"
         case reasoningRawContentDelta = "reasoning_raw_content_delta"
         case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
@@ -298,6 +306,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .streamError(try StreamErrorEvent(from: decoder))
         case .patchApplyBegin:
             self = .patchApplyBegin(try PatchApplyBeginEvent(from: decoder))
+        case .patchApplyUpdated:
+            self = .patchApplyUpdated(try PatchApplyUpdatedEvent(from: decoder))
         case .patchApplyEnd:
             self = .patchApplyEnd(try PatchApplyEndEvent(from: decoder))
         case .turnDiff:
@@ -330,8 +340,14 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .itemStarted(try ItemStartedEvent(from: decoder))
         case .itemCompleted:
             self = .itemCompleted(try ItemCompletedEvent(from: decoder))
+        case .hookStarted:
+            self = .hookStarted(try HookStartedEvent(from: decoder))
+        case .hookCompleted:
+            self = .hookCompleted(try HookCompletedEvent(from: decoder))
         case .agentMessageContentDelta:
             self = .agentMessageContentDelta(try AgentMessageContentDeltaEvent(from: decoder))
+        case .planDelta:
+            self = .planDelta(try PlanDeltaEvent(from: decoder))
         case .reasoningContentDelta:
             self = .reasoningContentDelta(try ReasoningContentDeltaEvent(from: decoder))
         case .reasoningRawContentDelta:
@@ -491,6 +507,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case let .patchApplyBegin(event):
             try container.encode(EventType.patchApplyBegin, forKey: .type)
             try event.encode(to: encoder)
+        case let .patchApplyUpdated(event):
+            try container.encode(EventType.patchApplyUpdated, forKey: .type)
+            try event.encode(to: encoder)
         case let .patchApplyEnd(event):
             try container.encode(EventType.patchApplyEnd, forKey: .type)
             try event.encode(to: encoder)
@@ -537,8 +556,17 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case let .itemCompleted(event):
             try container.encode(EventType.itemCompleted, forKey: .type)
             try event.encode(to: encoder)
+        case let .hookStarted(event):
+            try container.encode(EventType.hookStarted, forKey: .type)
+            try event.encode(to: encoder)
+        case let .hookCompleted(event):
+            try container.encode(EventType.hookCompleted, forKey: .type)
+            try event.encode(to: encoder)
         case let .agentMessageContentDelta(event):
             try container.encode(EventType.agentMessageContentDelta, forKey: .type)
+            try event.encode(to: encoder)
+        case let .planDelta(event):
+            try container.encode(EventType.planDelta, forKey: .type)
             try event.encode(to: encoder)
         case let .reasoningContentDelta(event):
             try container.encode(EventType.reasoningContentDelta, forKey: .type)

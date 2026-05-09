@@ -115,6 +115,23 @@ final class PatchEventsTests: XCTestCase {
         ])
     }
 
+    func testPatchApplyUpdatedEventUsesRustShape() throws {
+        try XCTAssertJSONObjectEqual(PatchApplyUpdatedEvent(
+            callID: "patch-1",
+            changes: [
+                "Sources/New.swift": .add(content: "let x = 1\n")
+            ]
+        ), [
+            "call_id": "patch-1",
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ]
+        ])
+    }
+
     func testTurnDiffEventUsesRustFieldName() throws {
         try XCTAssertJSONObjectEqual(TurnDiffEvent(unifiedDiff: "diff --git a/a b/a\n"), [
             "unified_diff": "diff --git a/a b/a\n"

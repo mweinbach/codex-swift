@@ -90,6 +90,21 @@ public struct PatchApplyBeginEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct PatchApplyUpdatedEvent: Equatable, Codable, Sendable {
+    public let callID: String
+    public let changes: [String: FileChange]
+
+    private enum CodingKeys: String, CodingKey {
+        case callID = "call_id"
+        case changes
+    }
+
+    public init(callID: String, changes: [String: FileChange]) {
+        self.callID = callID
+        self.changes = changes
+    }
+}
+
 public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let turnID: String

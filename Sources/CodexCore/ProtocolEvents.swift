@@ -215,6 +215,27 @@ public struct AgentMessageContentDeltaEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct PlanDeltaEvent: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case itemID = "item_id"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+}
+
 public struct ReasoningContentDeltaEvent: Equatable, Codable, Sendable {
     public let threadID: String
     public let turnID: String

@@ -275,6 +275,72 @@ final class EventMessageTests: XCTestCase {
         }
     }
 
+    func testEventMessageCoversHookPatchAndPlanDeltaEventsLikeRust() throws {
+        let run = try HookRunSummary(
+            id: "run-1",
+            eventName: .postToolUse,
+            handlerType: .command,
+            executionMode: .sync,
+            scope: .turn,
+            sourcePath: AbsolutePath(absolutePath: "/tmp/hook.json"),
+            displayOrder: 0,
+            status: .completed,
+            statusMessage: "done",
+            startedAt: 10,
+            completedAt: 12,
+            durationMs: 2,
+            entries: []
+        )
+
+        let hookStarted = EventMessage.hookStarted(HookStartedEvent(turnID: nil, run: run))
+        let startedObject = try JSONObject(hookStarted)
+        XCTAssertEqual(startedObject["type"] as? String, "hook_started")
+        XCTAssertTrue(startedObject["turn_id"] is NSNull)
+        XCTAssertNotNil(startedObject["run"])
+
+        let hookCompleted = EventMessage.hookCompleted(HookCompletedEvent(turnID: "turn-1", run: run))
+        let completedObject = try JSONObject(hookCompleted)
+        XCTAssertEqual(completedObject["type"] as? String, "hook_completed")
+        XCTAssertEqual(completedObject["turn_id"] as? String, "turn-1")
+        XCTAssertNotNil(completedObject["run"])
+
+        let patchUpdated = EventMessage.patchApplyUpdated(PatchApplyUpdatedEvent(
+            callID: "patch-1",
+            changes: [
+                "Sources/New.swift": .add(content: "let x = 1\n")
+            ]
+        ))
+        try XCTAssertJSONObjectEqual(patchUpdated, [
+            "type": "patch_apply_updated",
+            "call_id": "patch-1",
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ]
+        ])
+
+        let planDelta = EventMessage.planDelta(PlanDeltaEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            itemID: "item-1",
+            delta: "step"
+        ))
+        try XCTAssertJSONObjectEqual(planDelta, [
+            "type": "plan_delta",
+            "thread_id": "thread-1",
+            "turn_id": "turn-1",
+            "item_id": "item-1",
+            "delta": "step"
+        ])
+
+        for event in [hookStarted, hookCompleted, patchUpdated, planDelta] {
+            let data = try JSONEncoder().encode(event)
+            XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), event)
+        }
+    }
+
     func testUnitEventMessagesUseTypeOnlyRustShape() throws {
         try XCTAssertJSONObjectEqual(EventMessage.contextCompacted(ContextCompactedEvent()), [
             "type": "context_compacted"

@@ -49,6 +49,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case undoCompleted = "undo_completed"
     case streamError = "stream_error"
     case patchApplyBegin = "patch_apply_begin"
+    case patchApplyUpdated = "patch_apply_updated"
     case patchApplyEnd = "patch_apply_end"
     case turnDiff = "turn_diff"
     case guardianAssessment = "guardian_assessment"
@@ -66,7 +67,10 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case rawResponseItem = "raw_response_item"
     case itemStarted = "item_started"
     case itemCompleted = "item_completed"
+    case hookStarted = "hook_started"
+    case hookCompleted = "hook_completed"
     case agentMessageContentDelta = "agent_message_content_delta"
+    case planDelta = "plan_delta"
     case reasoningContentDelta = "reasoning_content_delta"
     case reasoningRawContentDelta = "reasoning_raw_content_delta"
     case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
@@ -186,6 +190,8 @@ public enum RolloutPolicy {
             return .streamError
         case .patchApplyBegin:
             return .patchApplyBegin
+        case .patchApplyUpdated:
+            return .patchApplyUpdated
         case .patchApplyEnd:
             return .patchApplyEnd
         case .turnDiff:
@@ -218,8 +224,14 @@ public enum RolloutPolicy {
             return .itemStarted
         case .itemCompleted:
             return .itemCompleted
+        case .hookStarted:
+            return .hookStarted
+        case .hookCompleted:
+            return .hookCompleted
         case .agentMessageContentDelta:
             return .agentMessageContentDelta
+        case .planDelta:
+            return .planDelta
         case .reasoningContentDelta:
             return .reasoningContentDelta
         case .reasoningRawContentDelta:
@@ -368,6 +380,7 @@ public enum RolloutPolicy {
              .backgroundEvent,
              .streamError,
              .patchApplyBegin,
+             .patchApplyUpdated,
              .turnDiff,
              .getHistoryEntryResponse,
              .undoStarted,
@@ -381,7 +394,10 @@ public enum RolloutPolicy {
              .deprecationNotice,
              .itemStarted,
              .itemCompleted,
+             .hookStarted,
+             .hookCompleted,
              .agentMessageContentDelta,
+             .planDelta,
              .reasoningContentDelta,
              .reasoningRawContentDelta,
              .realtimeConversationListVoicesResponse,
