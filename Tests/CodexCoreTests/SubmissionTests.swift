@@ -872,6 +872,43 @@ final class SubmissionTests: XCTestCase {
         XCTAssertTrue(policy.canWritePathWithCwd(dotCodex.path + "/config.toml", cwd: cwd.path))
     }
 
+    func testFileSystemSandboxPolicyFullDiskAccessHelpersMatchRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let docs = try cwd.join("docs")
+        let narrowed = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .read)
+        ])
+        let overridden = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .read),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .write)
+        ])
+        let deniedRead = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("**/*.env"), access: .none)
+        ])
+
+        XCTAssertFalse(narrowed.hasFullDiskWriteAccess)
+        XCTAssertTrue(overridden.hasFullDiskWriteAccess)
+        XCTAssertFalse(deniedRead.hasFullDiskReadAccess)
+    }
+
+    func testFileSystemSandboxPolicyIncludePlatformDefaultsMatchesRust() {
+        let minimalRead = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
+        ])
+        let fullRead = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
+        ])
+
+        XCTAssertTrue(minimalRead.includePlatformDefaults)
+        XCTAssertFalse(fullRead.includePlatformDefaults)
+        XCTAssertFalse(FileSystemSandboxPolicy.unrestricted.includePlatformDefaults)
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

@@ -634,6 +634,18 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
     }
 
+    public var includePlatformDefaults: Bool {
+        guard case let .restricted(entries, _) = self,
+              !hasFullDiskReadAccess
+        else {
+            return false
+        }
+
+        return entries.contains { entry in
+            entry.access.canRead && entry.path.isMinimalSpecialPath
+        }
+    }
+
     public func resolveAccessWithCwd(path: String, cwd: String) -> FileSystemAccessMode {
         switch self {
         case .unrestricted, .externalSandbox:
@@ -999,6 +1011,15 @@ private extension FileSystemPath {
     var isRootSpecialPath: Bool {
         guard case let .special(value) = self,
               case .root = FileSystemSpecialPath(jsonValue: value)
+        else {
+            return false
+        }
+        return true
+    }
+
+    var isMinimalSpecialPath: Bool {
+        guard case let .special(value) = self,
+              case .minimal = FileSystemSpecialPath(jsonValue: value)
         else {
             return false
         }
