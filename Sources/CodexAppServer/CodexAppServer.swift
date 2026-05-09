@@ -8864,7 +8864,7 @@ public enum CodexAppServer {
                     accessToken: accessToken,
                     chatGPTAccountID: chatGPTAccountID,
                     chatGPTPlanType: chatGPTPlanType,
-                    mode: configuration.authCredentialsStoreMode
+                    mode: .ephemeral
                 )
             } catch {
                 throw AppServerError.internalError("failed to set external auth: \(error)")
@@ -8886,7 +8886,7 @@ public enum CodexAppServer {
 
     fileprivate static func externalChatGPTAuthActive(configuration: CodexAppServerConfiguration) throws -> Bool {
         do {
-            return try CodexAuthStorage.loadAuthDotJSON(
+            return try CodexAuthStorage.loadEffectiveAuthDotJSON(
                 codexHome: configuration.codexHome,
                 mode: configuration.authCredentialsStoreMode
             )?.authMode == .chatGPTAuthTokens
@@ -12298,7 +12298,7 @@ public enum CodexAppServer {
             return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
         }
 
-        guard let auth = try CodexAuthStorage.loadAuthDotJSON(
+        guard let auth = try CodexAuthStorage.loadEffectiveAuthDotJSON(
             codexHome: configuration.codexHome,
             mode: configuration.authCredentialsStoreMode
         ) else {

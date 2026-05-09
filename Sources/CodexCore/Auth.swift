@@ -6,6 +6,7 @@ public enum AuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
     case file
     case keyring
     case auto
+    case ephemeral
 }
 
 public enum OAuthCredentialsStoreMode: String, Codable, Equatable, Sendable {
@@ -512,6 +513,7 @@ public enum CodexAuthStorage {
     public static let keyringService = "Codex Auth"
     public static let openAIAPIKeyEnvironmentVariable = "OPENAI_API_KEY"
     public static let codexAPIKeyEnvironmentVariable = "CODEX_API_KEY"
+    private static let ephemeralAuthStore = EphemeralAuthStore()
 
     public typealias RefreshTransport = (URLRequest) async throws -> AuthRefreshHTTPResponse
 
@@ -544,7 +546,24 @@ public enum CodexAuthStorage {
                 // Rust logs this and falls back to file-backed auth in auto mode.
             }
             return try loadFileAuthDotJSON(codexHome: codexHome, decoder: decoder)
+        case .ephemeral:
+            return ephemeralAuthStore.load(key: computeKeyringStoreKey(codexHome: codexHome))
         }
+    }
+
+    public static func loadEffectiveAuthDotJSON(
+        codexHome: URL,
+        mode: AuthCredentialsStoreMode = .file,
+        decoder: JSONDecoder = JSONDecoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) throws -> AuthDotJSON? {
+        if let auth = try loadAuthDotJSON(codexHome: codexHome, mode: .ephemeral, decoder: decoder, keyringStore: keyringStore) {
+            return auth
+        }
+        guard mode != .ephemeral else {
+            return nil
+        }
+        return try loadAuthDotJSON(codexHome: codexHome, mode: mode, decoder: decoder, keyringStore: keyringStore)
     }
 
     public static func saveAuthDotJSON(
@@ -565,6 +584,8 @@ public enum CodexAuthStorage {
             } catch {
                 try saveFileAuthDotJSON(auth, codexHome: codexHome, encoder: encoder)
             }
+        case .ephemeral:
+            ephemeralAuthStore.save(auth, key: computeKeyringStoreKey(codexHome: codexHome))
         }
     }
 
@@ -662,11 +683,16 @@ public enum CodexAuthStorage {
     ) throws -> Bool {
         switch mode {
         case .file:
-            return try deleteAuthFile(codexHome: codexHome)
+            let ephemeralRemoved = ephemeralAuthStore.delete(key: computeKeyringStoreKey(codexHome: codexHome))
+            let fileRemoved = try deleteAuthFile(codexHome: codexHome)
+            return ephemeralRemoved || fileRemoved
         case .keyring, .auto:
+            let ephemeralRemoved = ephemeralAuthStore.delete(key: computeKeyringStoreKey(codexHome: codexHome))
             let keyringRemoved = try deleteKeyringAuth(codexHome: codexHome, keyringStore: keyringStore)
             let fileRemoved = try deleteAuthFile(codexHome: codexHome)
-            return keyringRemoved || fileRemoved
+            return ephemeralRemoved || keyringRemoved || fileRemoved
+        case .ephemeral:
+            return ephemeralAuthStore.delete(key: computeKeyringStoreKey(codexHome: codexHome))
         }
     }
 
@@ -676,7 +702,7 @@ public enum CodexAuthStorage {
         decoder: JSONDecoder = JSONDecoder(),
         keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) throws -> CodexAuthStatus {
-        guard let auth = try loadAuthDotJSON(
+        guard let auth = try loadEffectiveAuthDotJSON(
             codexHome: codexHome,
             mode: mode,
             decoder: decoder,
@@ -715,7 +741,7 @@ public enum CodexAuthStorage {
         encoder: JSONEncoder = JSONEncoder(),
         keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) async throws -> AuthTokenData? {
-        guard let auth = try loadAuthDotJSON(
+        guard let auth = try loadEffectiveAuthDotJSON(
             codexHome: codexHome,
             mode: mode,
             decoder: decoder,
@@ -937,7 +963,7 @@ public enum CodexAuthStorage {
             return .apiKey
         }
 
-        guard let auth = try loadAuthDotJSON(
+        guard let auth = try loadEffectiveAuthDotJSON(
             codexHome: codexHome,
             mode: mode,
             decoder: decoder,
@@ -1208,6 +1234,30 @@ private struct RefreshTokenResponse: Decodable {
         case idToken = "id_token"
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
+    }
+}
+
+private final class EphemeralAuthStore: @unchecked Sendable {
+    private let lock = NSLock()
+    // Mirrors Rust's process-local credential store; every access is serialized by lock.
+    private var values: [String: AuthDotJSON] = [:]
+
+    func load(key: String) -> AuthDotJSON? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    func save(_ auth: AuthDotJSON, key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        values[key] = auth
+    }
+
+    func delete(key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.removeValue(forKey: key) != nil
     }
 }
 

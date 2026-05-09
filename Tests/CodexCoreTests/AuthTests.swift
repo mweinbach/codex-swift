@@ -6,7 +6,9 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(AuthCredentialsStoreMode.self, from: Data(#""file""#.utf8)), .file)
         XCTAssertEqual(try JSONDecoder().decode(AuthCredentialsStoreMode.self, from: Data(#""keyring""#.utf8)), .keyring)
         XCTAssertEqual(try JSONDecoder().decode(AuthCredentialsStoreMode.self, from: Data(#""auto""#.utf8)), .auto)
+        XCTAssertEqual(try JSONDecoder().decode(AuthCredentialsStoreMode.self, from: Data(#""ephemeral""#.utf8)), .ephemeral)
         XCTAssertEqual(String(data: try JSONEncoder().encode(AuthCredentialsStoreMode.file), encoding: .utf8), #""file""#)
+        XCTAssertEqual(String(data: try JSONEncoder().encode(AuthCredentialsStoreMode.ephemeral), encoding: .utf8), #""ephemeral""#)
     }
 
     func testKnownChatGPTPlanWireValuesAndAliasesMatchRust() throws {
@@ -248,6 +250,31 @@ final class AuthTests: XCTestCase {
         XCTAssertTrue(try CodexAuthStorage.logout(codexHome: dir.url))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.url.appendingPathComponent("auth.json").path))
         XCTAssertFalse(try CodexAuthStorage.logout(codexHome: dir.url))
+    }
+
+    func testEphemeralAuthTakesPrecedenceAndLogoutClearsBothStores() throws {
+        let dir = try AuthTemporaryDirectory()
+        let accessToken = Self.fakeJWT(plan: "pro", accountID: "org-embedded")
+
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: dir.url,
+            accessToken: accessToken,
+            chatGPTAccountID: "org-embedded",
+            chatGPTPlanType: "pro",
+            mode: .ephemeral
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file)?.openAIAPIKey, "sk-file")
+        let effective = try XCTUnwrap(CodexAuthStorage.loadEffectiveAuthDotJSON(codexHome: dir.url, mode: .file))
+        XCTAssertEqual(effective.authMode, .chatGPTAuthTokens)
+        XCTAssertEqual(effective.tokens?.accessToken, accessToken)
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .file), .chatGPT)
+
+        XCTAssertTrue(try CodexAuthStorage.logout(codexHome: dir.url, mode: .file))
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .ephemeral))
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+        XCTAssertNil(try CodexAuthStorage.loadEffectiveAuthDotJSON(codexHome: dir.url, mode: .file))
     }
 
     func testKeyringStoreKeyMatchesRustHash() {

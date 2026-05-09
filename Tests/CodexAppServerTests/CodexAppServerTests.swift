@@ -5592,7 +5592,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
-    func testAccountLoginChatGPTAuthTokensPersistsExternalAuthAndNotifies() throws {
+    func testAccountLoginChatGPTAuthTokensStoresEphemeralAuthAndNotifies() throws {
         let temp = try TemporaryDirectory()
         let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
         let processor = try initializedProcessor(
@@ -5614,7 +5614,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedParams["authMode"] as? String, "chatgptAuthTokens")
         XCTAssertEqual(updatedParams["planType"] as? String, "pro")
 
-        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
         XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
         XCTAssertEqual(stored.tokens?.accessToken, accessToken)
         XCTAssertEqual(stored.tokens?.refreshToken, "")
@@ -5635,7 +5636,8 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: temp.url,
             accessToken: accessToken,
             chatGPTAccountID: "org-embedded",
-            chatGPTPlanType: "pro"
+            chatGPTPlanType: "pro",
+            mode: .ephemeral
         )
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
         let expectedMessage = "External auth is active. Use account/login/start (chatgptAuthTokens) to update it or account/logout to clear it."
@@ -5661,7 +5663,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(deviceCodeError["code"] as? Int, -32600)
         XCTAssertEqual(deviceCodeError["message"] as? String, expectedMessage)
 
-        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
         XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
         XCTAssertNil(stored.openAIAPIKey)
     }
@@ -5675,6 +5677,7 @@ final class CodexAppServerTests: XCTestCase {
             accessToken: accessToken,
             chatGPTAccountID: "org-embedded",
             chatGPTPlanType: "pro",
+            mode: .ephemeral,
             now: staleDate
         )
         let capture = AppServerRefreshCapture()
@@ -5701,7 +5704,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(account["planType"] as? String, "pro")
         let refreshRequests = await capture.requests
         XCTAssertEqual(refreshRequests.count, 0)
-        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
         XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
         XCTAssertEqual(stored.tokens?.accessToken, accessToken)
     }
@@ -6083,6 +6086,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
 
         let account = try decode(processor.processLine(Data(#"{"id":2,"method":"account/read","params":{}}"#.utf8)))
+        let result = try XCTUnwrap(account["result"] as? [String: Any])
+        XCTAssertTrue(result["account"] is NSNull)
+    }
+
+    func testAccountLogoutClearsExternalEphemeralAuthAndEmitsV2Notification() throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decodeMessages(processor.processLine(Data("""
+        {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-embedded","chatgptPlanType":"pro"}}
+        """.utf8)))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"account/logout"}"#.utf8)))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "account/updated")
+        XCTAssertTrue((messages[1]["params"] as? [String: Any])?["authMode"] is NSNull)
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+
+        let account = try decode(processor.processLine(Data(#"{"id":3,"method":"account/read","params":{}}"#.utf8)))
         let result = try XCTUnwrap(account["result"] as? [String: Any])
         XCTAssertTrue(result["account"] is NSNull)
     }
