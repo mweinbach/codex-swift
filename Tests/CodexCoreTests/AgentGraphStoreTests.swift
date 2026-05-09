@@ -603,6 +603,69 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(updatedMode, "disabled")
     }
 
+    func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let activeThreadID = try threadID(84)
+        let archivedThreadID = try threadID(85)
+        let missingThreadID = try threadID(86)
+        try insertRawSQLiteThread(
+            id: activeThreadID,
+            agentPath: try AgentPath(validating: "/root/active"),
+            rolloutPath: "/tmp/active-rollout.jsonl",
+            archived: false,
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: archivedThreadID,
+            agentPath: try AgentPath(validating: "/root/archived"),
+            rolloutPath: "/tmp/archived-rollout.jsonl",
+            archived: true,
+            databaseURL: databaseURL
+        )
+
+        let activeAnyPath = try await store.findRolloutPath(threadID: activeThreadID, archiveFilter: .all)
+        let archivedAnyPath = try await store.findRolloutPath(threadID: archivedThreadID, archiveFilter: .all)
+        let activePath = try await store.findRolloutPath(threadID: activeThreadID, archiveFilter: .unarchivedOnly)
+        let archivedPath = try await store.findRolloutPath(threadID: archivedThreadID, archiveFilter: .archivedOnly)
+        let activeArchivedPath = try await store.findRolloutPath(threadID: activeThreadID, archiveFilter: .archivedOnly)
+        let archivedActivePath = try await store.findRolloutPath(threadID: archivedThreadID, archiveFilter: .unarchivedOnly)
+        let missingPath = try await store.findRolloutPath(threadID: missingThreadID, archiveFilter: .all)
+
+        XCTAssertEqual(activeAnyPath, "/tmp/active-rollout.jsonl")
+        XCTAssertEqual(archivedAnyPath, "/tmp/archived-rollout.jsonl")
+        XCTAssertEqual(activePath, "/tmp/active-rollout.jsonl")
+        XCTAssertEqual(archivedPath, "/tmp/archived-rollout.jsonl")
+        XCTAssertNil(activeArchivedPath)
+        XCTAssertNil(archivedActivePath)
+        XCTAssertNil(missingPath)
+    }
+
+    func testSQLiteStoreUpdatesThreadTitle() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let titledThreadID = try threadID(87)
+        let missingThreadID = try threadID(88)
+        try insertRawSQLiteThread(
+            id: titledThreadID,
+            agentPath: try AgentPath(validating: "/root/title"),
+            title: "Old title",
+            databaseURL: databaseURL
+        )
+
+        let updated = try await store.updateThreadTitle(threadID: titledThreadID, title: "New title")
+        let missingUpdated = try await store.updateThreadTitle(threadID: missingThreadID, title: "Missing title")
+        let title = try readRawSQLiteThreadTitle(id: titledThreadID, databaseURL: databaseURL)
+
+        XCTAssertTrue(updated)
+        XCTAssertFalse(missingUpdated)
+        XCTAssertEqual(title, "New title")
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -658,7 +721,10 @@ final class AgentGraphStoreTests: XCTestCase {
                 CREATE TABLE threads (
                     id TEXT NOT NULL PRIMARY KEY,
                     agent_path TEXT,
-                    memory_mode TEXT
+                    memory_mode TEXT,
+                    rollout_path TEXT,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    title TEXT
                 )
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
@@ -674,11 +740,14 @@ final class AgentGraphStoreTests: XCTestCase {
         id: ThreadId,
         agentPath: AgentPath,
         memoryMode: String? = nil,
+        rolloutPath: String? = nil,
+        archived: Bool = false,
+        title: String? = nil,
         databaseURL: URL
     ) throws {
         try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
             var statement: OpaquePointer?
-            let query = "INSERT INTO threads (id, agent_path, memory_mode) VALUES (?, ?, ?)"
+            let query = "INSERT INTO threads (id, agent_path, memory_mode, rollout_path, archived, title) VALUES (?, ?, ?, ?, ?, ?)"
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
             defer {
@@ -691,7 +760,40 @@ final class AgentGraphStoreTests: XCTestCase {
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 3), SQLITE_OK)
             }
+            if let rolloutPath {
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 4, rolloutPath, -1, testSQLiteTransient), SQLITE_OK)
+            } else {
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 4), SQLITE_OK)
+            }
+            XCTAssertEqual(sqlite3_bind_int(preparedStatement, 5, archived ? 1 : 0), SQLITE_OK)
+            if let title {
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 6, title, -1, testSQLiteTransient), SQLITE_OK)
+            } else {
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 6), SQLITE_OK)
+            }
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func readRawSQLiteThreadTitle(id: ThreadId, databaseURL: URL) throws -> String? {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT title FROM threads WHERE id = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
+            let result = sqlite3_step(preparedStatement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            XCTAssertEqual(result, SQLITE_ROW)
+            guard let rawTitle = sqlite3_column_text(preparedStatement, 0) else {
+                return nil
+            }
+            return String(cString: rawTitle)
         }
     }
 

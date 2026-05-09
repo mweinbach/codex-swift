@@ -846,6 +846,9 @@ Source baseline inspected for this scaffold:
   - added SQLite `thread_dynamic_tools` persistence and retrieval for Rust's position-ordered dynamic tool specs, including namespace, JSON input schema, `defer_loading`, nil/empty no-op writes, no-row `nil` reads, and `ON CONFLICT(thread_id, position) DO NOTHING` no-overwrite behavior.
 - `codex-rs/state/src/runtime/threads.rs` thread memory mode
   - added SQLite thread memory-mode get/set helpers preserving Rust's absent-row and SQL-null `None` behavior plus update row-count reporting for missing thread ids.
+- `codex-rs/state/src/runtime/threads.rs` thread metadata helpers
+  - added SQLite rollout-path lookup by thread id with Rust's optional archive filter semantics mapped to an explicit Swift archive-filter enum, including absent-row and archive-mismatch `nil` behavior.
+  - added title updates preserving Rust's `UPDATE threads SET title = ? WHERE id = ?` row-count success reporting.
 
 ## Known Gaps
 

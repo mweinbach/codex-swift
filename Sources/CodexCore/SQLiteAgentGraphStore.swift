@@ -242,6 +242,50 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return sqlite3_changes(database) > 0
     }
 
+    public func findRolloutPath(
+        threadID: ThreadId,
+        archiveFilter: ThreadArchiveFilter
+    ) async throws -> String? {
+        var query = "SELECT rollout_path FROM threads WHERE id = ?"
+        switch archiveFilter {
+        case .all:
+            break
+        case .archivedOnly:
+            query += " AND archived = 1"
+        case .unarchivedOnly:
+            query += " AND archived = 0"
+        }
+
+        let database = handle.database
+        return try Self.withStatement(
+            query: query,
+            bindings: [.text(threadID.description)],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return Self.optionalTextColumn(statement, index: 0)
+        }
+    }
+
+    public func updateThreadTitle(threadID: ThreadId, title: String) async throws -> Bool {
+        let database = handle.database
+        try Self.execute(
+            "UPDATE threads SET title = ? WHERE id = ?",
+            bindings: [
+                .text(title),
+                .text(threadID.description),
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
@@ -479,6 +523,12 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
         return "sqlite error"
     }
+}
+
+public enum ThreadArchiveFilter: Equatable, Sendable {
+    case all
+    case archivedOnly
+    case unarchivedOnly
 }
 
 private enum SQLiteBinding {
