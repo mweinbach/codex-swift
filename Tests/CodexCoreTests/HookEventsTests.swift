@@ -148,6 +148,40 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNotNil(completed["run"])
     }
 
+    func testCompactOutputParsersReadUniversalFieldsLikeRust() throws {
+        let pre = try XCTUnwrap(HooksProtocol.parsePreCompactOutput("""
+          {"continue":false,"stopReason":"nope","suppressOutput":true,"systemMessage":"heads up"}
+        """))
+        XCTAssertEqual(pre.universal.continueProcessing, false)
+        XCTAssertEqual(pre.universal.stopReason, "nope")
+        XCTAssertEqual(pre.universal.suppressOutput, true)
+        XCTAssertEqual(pre.universal.systemMessage, "heads up")
+        XCTAssertNil(pre.invalidReason)
+
+        let post = try XCTUnwrap(HooksProtocol.parsePostCompactOutput(#"{"stopReason":null,"systemMessage":null}"#))
+        XCTAssertEqual(post.universal, HookUniversalOutput())
+    }
+
+    func testCompactOutputParsersRejectUnknownFieldsLikeSerdeDenyUnknownFields() {
+        XCTAssertNil(HooksProtocol.parsePreCompactOutput(#"{"decision":"block","reason":"policy"}"#))
+        XCTAssertNil(HooksProtocol.parsePostCompactOutput(#"{"continue":true,"extra":1}"#))
+    }
+
+    func testCompactOutputParsersRejectInvalidOrNonObjectJSONLikeRust() {
+        XCTAssertNil(HooksProtocol.parsePreCompactOutput(""))
+        XCTAssertNil(HooksProtocol.parsePreCompactOutput("checking compact policy\n"))
+        XCTAssertNil(HooksProtocol.parsePreCompactOutput(#"["not","object"]"#))
+        XCTAssertNil(HooksProtocol.parsePreCompactOutput(#"{"continue":"false"}"#))
+        XCTAssertNil(HooksProtocol.parsePostCompactOutput(#"{"stopReason":7}"#))
+    }
+
+    func testLooksLikeJSONMatchesRustTrimStartHeuristic() {
+        XCTAssertTrue(HooksProtocol.looksLikeJSON("  {\"continue\":false}"))
+        XCTAssertTrue(HooksProtocol.looksLikeJSON("\n[1,2]"))
+        XCTAssertFalse(HooksProtocol.looksLikeJSON("plain { text"))
+        XCTAssertFalse(HooksProtocol.looksLikeJSON("   \n\t"))
+    }
+
     private func jsonString<T: Encodable>(_ value: T) throws -> String {
         let data = try JSONEncoder().encode(value)
         return try XCTUnwrap(String(data: data, encoding: .utf8))

@@ -230,6 +230,35 @@ public struct HookCompletedEvent: Codable, Equatable, Sendable {
     }
 }
 
+public struct HookUniversalOutput: Equatable, Sendable {
+    public let continueProcessing: Bool
+    public let stopReason: String?
+    public let suppressOutput: Bool
+    public let systemMessage: String?
+
+    public init(
+        continueProcessing: Bool = true,
+        stopReason: String? = nil,
+        suppressOutput: Bool = false,
+        systemMessage: String? = nil
+    ) {
+        self.continueProcessing = continueProcessing
+        self.stopReason = stopReason
+        self.suppressOutput = suppressOutput
+        self.systemMessage = systemMessage
+    }
+}
+
+public struct HookStatelessOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let invalidReason: String?
+
+    public init(universal: HookUniversalOutput, invalidReason: String? = nil) {
+        self.universal = universal
+        self.invalidReason = invalidReason
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -253,6 +282,79 @@ public enum HooksProtocol {
         handlerIndex: Int
     ) -> String {
         "\(keySource):\(hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)"
+    }
+
+    public static func parsePreCompactOutput(_ stdout: String) -> HookStatelessOutput? {
+        parseCompactOutput(stdout)
+    }
+
+    public static func parsePostCompactOutput(_ stdout: String) -> HookStatelessOutput? {
+        parseCompactOutput(stdout)
+    }
+
+    public static func looksLikeJSON(_ stdout: String) -> Bool {
+        guard let first = stdout.first(where: { !$0.isWhitespace }) else {
+            return false
+        }
+        return first == "{" || first == "["
+    }
+
+    private static func parseCompactOutput(_ stdout: String) -> HookStatelessOutput? {
+        guard let object = parseJSONObject(stdout) else {
+            return nil
+        }
+        return parseUniversalOutput(object).map { HookStatelessOutput(universal: $0) }
+    }
+
+    private static func parseJSONObject(_ stdout: String) -> [String: Any]? {
+        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data),
+              let object = value as? [String: Any]
+        else {
+            return nil
+        }
+        return object
+    }
+
+    private static func parseUniversalOutput(_ object: [String: Any]) -> HookUniversalOutput? {
+        let allowedKeys: Set<String> = ["continue", "stopReason", "suppressOutput", "systemMessage"]
+        guard Set(object.keys).isSubset(of: allowedKeys),
+              let continueProcessing = boolValue(object["continue"], defaultValue: true),
+              let suppressOutput = boolValue(object["suppressOutput"], defaultValue: false),
+              let stopReason = optionalStringValue(object["stopReason"]),
+              let systemMessage = optionalStringValue(object["systemMessage"])
+        else {
+            return nil
+        }
+
+        return HookUniversalOutput(
+            continueProcessing: continueProcessing,
+            stopReason: stopReason,
+            suppressOutput: suppressOutput,
+            systemMessage: systemMessage
+        )
+    }
+
+    private static func boolValue(_ value: Any?, defaultValue: Bool) -> Bool? {
+        guard let value else {
+            return defaultValue
+        }
+        return value as? Bool
+    }
+
+    private static func optionalStringValue(_ value: Any?) -> String?? {
+        guard let value else {
+            return .some(nil)
+        }
+        if value is NSNull {
+            return .some(nil)
+        }
+        guard let string = value as? String else {
+            return nil
+        }
+        return .some(string)
     }
 }
 
