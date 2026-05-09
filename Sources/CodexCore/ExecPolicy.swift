@@ -630,8 +630,13 @@ public struct ExecPolicy: Equatable, Sendable {
 }
 
 public final class PolicyParser {
+    private struct StarlarkFunctionParameter {
+        let name: String
+        let defaultValueExpression: String?
+    }
+
     private struct StarlarkFunction {
-        let parameters: [String]
+        let parameters: [StarlarkFunctionParameter]
         let body: [String]
     }
 
@@ -1788,7 +1793,7 @@ public final class PolicyParser {
 
     private static func parseTopLevelFunctionHeader(_ statement: String) throws -> (
         name: String,
-        parameters: [String]
+        parameters: [StarlarkFunctionParameter]
     )? {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasSuffix(":"),
@@ -1814,24 +1819,43 @@ public final class PolicyParser {
 
         let parametersStart = signature.index(after: openIndex)
         let parametersText = String(signature[parametersStart..<signature.index(before: signature.endIndex)])
-        let parameters = try splitTopLevel(parametersText, separator: ",").compactMap { rawParameter -> String? in
-            let parameter = rawParameter.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !parameter.isEmpty else {
+        var sawDefault = false
+        let parameters = try splitTopLevel(parametersText, separator: ",").compactMap { rawParameter -> StarlarkFunctionParameter? in
+            let parameterText = rawParameter.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !parameterText.isEmpty else {
                 return nil
             }
-            guard isStarlarkIdentifier(parameter) else {
+            let name: String
+            let defaultValueExpression: String?
+            if let equalsIndex = topLevelEqualsIndex(in: parameterText) {
+                sawDefault = true
+                name = String(parameterText[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = parameterText.index(after: equalsIndex)
+                let defaultText = String(parameterText[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !defaultText.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(trimmed)
+                }
+                defaultValueExpression = defaultText
+            } else {
+                guard !sawDefault else {
+                    throw ConfigOverrideError.invalidLiteral(trimmed)
+                }
+                name = parameterText
+                defaultValueExpression = nil
+            }
+            guard isStarlarkIdentifier(name) else {
                 throw ConfigOverrideError.invalidLiteral(trimmed)
             }
-            return parameter
+            return StarlarkFunctionParameter(name: name, defaultValueExpression: defaultValueExpression)
         }
-        guard Set(parameters).count == parameters.count else {
+        guard Set(parameters.map(\.name)).count == parameters.count else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
         return (name, parameters)
     }
 
     private static func parseStarlarkFunction(
-        parameters: [String],
+        parameters: [StarlarkFunctionParameter],
         body: [String]
     ) throws -> StarlarkFunction {
         let nonEmpty = body
@@ -2135,7 +2159,7 @@ public final class PolicyParser {
                 let previous = index > text.startIndex ? text[text.index(before: index)] : nil
                 let nextIndex = text.index(after: index)
                 let next = nextIndex < text.endIndex ? text[nextIndex] : nil
-                guard previous != "=", next != "=" else {
+                guard !["=", "!", "<", ">"].contains(previous), next != "=" else {
                     return nil
                 }
                 return index
@@ -3055,22 +3079,79 @@ public final class PolicyParser {
 
         let bodyStart = text.index(after: openIndex)
         let body = String(text[bodyStart..<text.index(before: text.endIndex)])
-        let rawArguments = splitTopLevel(body, separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard rawArguments.count == function.parameters.count else {
-            throw ConfigOverrideError.invalidLiteral(text)
+        var scopedConstants = constants
+        try bindStarlarkFunctionArguments(
+            body,
+            function: function,
+            scopedConstants: &scopedConstants,
+            constants: constants,
+            functions: functions,
+            expression: text
+        )
+        return try evaluateStarlarkFunction(function, constants: &scopedConstants, functions: functions, expression: text)
+    }
+
+    private static func bindStarlarkFunctionArguments(
+        _ body: String,
+        function: StarlarkFunction,
+        scopedConstants: inout [String: ConfigValue],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
+        var rawArgumentsByName: [String: String] = [:]
+        var positionalIndex = 0
+        var sawNamedArgument = false
+        let parametersByName = Dictionary(uniqueKeysWithValues: function.parameters.map { ($0.name, $0) })
+
+        for piece in splitTopLevel(body, separator: ",") {
+            let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+
+            let name: String
+            let valueText: String
+            if let equalsIndex = topLevelEqualsIndex(in: trimmed) {
+                sawNamedArgument = true
+                name = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = trimmed.index(after: equalsIndex)
+                valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard parametersByName[name] != nil, !valueText.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+            } else {
+                guard !sawNamedArgument, positionalIndex < function.parameters.count else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                name = function.parameters[positionalIndex].name
+                valueText = trimmed
+                positionalIndex += 1
+            }
+
+            guard rawArgumentsByName[name] == nil else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            rawArgumentsByName[name] = valueText
         }
 
-        var scopedConstants = constants
-        for (parameter, rawArgument) in zip(function.parameters, rawArguments) {
-            scopedConstants[parameter] = try parsePolicyLiteral(
-                rawArgument,
-                constants: constants,
-                functions: functions
-            )
+        for parameter in function.parameters {
+            if let rawArgument = rawArgumentsByName[parameter.name] {
+                scopedConstants[parameter.name] = try parsePolicyLiteral(
+                    rawArgument,
+                    constants: constants,
+                    functions: functions
+                )
+            } else if let defaultValueExpression = parameter.defaultValueExpression {
+                scopedConstants[parameter.name] = try parsePolicyLiteral(
+                    defaultValueExpression,
+                    constants: constants,
+                    functions: functions
+                )
+            } else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
         }
-        return try evaluateStarlarkFunction(function, constants: &scopedConstants, functions: functions, expression: text)
     }
 
     private static func evaluateStarlarkFunction(

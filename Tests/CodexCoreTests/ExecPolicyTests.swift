@@ -1416,6 +1416,64 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkHelperKeywordAndDefaultArguments() throws {
+        let policy = try parsePolicy("""
+        def pattern(tool, subcommand = "status"):
+            return [tool, subcommand]
+
+        def decision(value = "allow"):
+            return value
+
+        def host(root, prefix = "api", suffix = "com"):
+            return prefix + "." + root + "." + suffix
+
+        def path(tool = "git"):
+            return "/usr/bin/" + tool
+
+        prefix_rule(pattern("git"), decision(), justification = "default helper")
+        prefix_rule(pattern(subcommand = "diff", tool = "git"), decision(value = "prompt"))
+        network_rule(host(root = "github"), "https", decision())
+        host_executable(name = "git", paths = [path()])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "default helper"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .prompt
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
+    func testParserTreatsHelperArgumentComparisonsAsExpressions() throws {
+        let policy = try parsePolicy("""
+        COMMAND = ["git", "status"]
+
+        def matches(value):
+            return value
+
+        if matches(len(COMMAND) >= 2):
+            prefix_rule(COMMAND, "allow")
+        if matches(value = len(COMMAND) != 1):
+            network_rule("github.com", "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(pattern: PrefixPattern(first: "git", rest: [.single("status")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkDictLiteralsAndStringIndexing() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

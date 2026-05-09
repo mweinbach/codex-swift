@@ -629,6 +629,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for simple top-level `def name(args): return expr` helpers and positional calls from supported policy literals, including helper use inside loops, conditionals, f-string expressions, examples, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark helper function local statements
   - Added Swift execpolicy parser support for local helper-function assignments, destructuring assignments, list/dictionary mutations, indexed updates, deletes, and augmented addition before `return`, matching Rust Starlark helper behavior for generated policy values.
+- `codex-rs/execpolicy/src/parser.rs` Starlark helper function call binding
+  - Added Swift execpolicy parser support for user-defined helper function default parameters and keyword arguments, including mixed positional/keyword binding and duplicate/missing/unknown argument rejection.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict literals and indexing
   - Added Swift execpolicy parser support for Starlark dict literals with string keys, expression-derived string keys, nested dict/list values, string-key indexing, and dictionary membership checks across supported policy literals and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict methods
