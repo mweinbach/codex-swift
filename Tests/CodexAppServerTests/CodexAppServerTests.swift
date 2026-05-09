@@ -1737,6 +1737,65 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
     }
 
+    func testPluginListLoadsConfiguredLocalMarketplace() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        [marketplaces.debug]
+        source_type = "local"
+        source = "\(sourcePath)"
+
+        [plugins."weather@debug"]
+        enabled = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "debug")
+        XCTAssertEqual(
+            marketplaces[0]["path"] as? String,
+            sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        )
+        let marketplaceInterface = try XCTUnwrap(marketplaces[0]["interface"] as? [String: Any])
+        XCTAssertEqual(marketplaceInterface["displayName"] as? String, "Debug Marketplace")
+
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["id"] as? String, "weather@debug")
+        XCTAssertEqual(plugins[0]["name"] as? String, "weather")
+        XCTAssertEqual(plugins[0]["installed"] as? Bool, false)
+        XCTAssertEqual(plugins[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(plugins[0]["installPolicy"] as? String, "INSTALLED_BY_DEFAULT")
+        XCTAssertEqual(plugins[0]["authPolicy"] as? String, "ON_USE")
+        XCTAssertEqual(plugins[0]["availability"] as? String, "AVAILABLE")
+        XCTAssertEqual(plugins[0]["keywords"] as? [String], ["forecast", "local"])
+        let source = try XCTUnwrap(plugins[0]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "local")
+        XCTAssertEqual(
+            source["path"] as? String,
+            sourceRoot.appendingPathComponent("plugins/weather", isDirectory: true).standardizedFileURL.path
+        )
+        let interface = try XCTUnwrap(plugins[0]["interface"] as? [String: Any])
+        XCTAssertEqual(interface["displayName"] as? String, "Weather")
+        XCTAssertEqual(interface["shortDescription"] as? String, "Local weather tools")
+        XCTAssertEqual(interface["capabilities"] as? [String], ["mcp", "skills"])
+        XCTAssertEqual((result["marketplaceLoadErrors"] as? [Any])?.count, 0)
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
+
+        let remoteOnly = try appServerResponse(
+            #"{"id":2,"method":"plugin/list","params":{"marketplaceKinds":["workspace-directory"]}}"#,
+            codexHome: temp.url
+        )
+        let remoteOnlyResult = try XCTUnwrap(remoteOnly["result"] as? [String: Any])
+        XCTAssertEqual((remoteOnlyResult["marketplaces"] as? [Any])?.count, 0)
+    }
+
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
@@ -4910,6 +4969,60 @@ final class CodexAppServerTests: XCTestCase {
         }
         """.write(
             to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        return root
+    }
+
+    private func makeLocalMarketplaceRootWithPlugin(
+        named name: String,
+        pluginName: String,
+        in parent: URL
+    ) throws -> URL {
+        let root = parent.appendingPathComponent("marketplace-\(name)", isDirectory: true)
+        let manifestDirectory = root.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "\(name)",
+          "interface": {
+            "displayName": "Debug Marketplace"
+          },
+          "plugins": [
+            {
+              "name": "\(pluginName)",
+              "source": "./plugins/\(pluginName)",
+              "policy": {
+                "installation": "INSTALLED_BY_DEFAULT",
+                "authentication": "ON_USE"
+              }
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let pluginManifestDirectory = root
+            .appendingPathComponent("plugins/\(pluginName)", isDirectory: true)
+            .appendingPathComponent(".codex-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: pluginManifestDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "\(pluginName)",
+          "description": "Reads local weather",
+          "keywords": ["forecast", "local"],
+          "interface": {
+            "displayName": "Weather",
+            "shortDescription": "Local weather tools",
+            "capabilities": ["mcp", "skills"]
+          }
+        }
+        """.write(
+            to: pluginManifestDirectory.appendingPathComponent("plugin.json", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )

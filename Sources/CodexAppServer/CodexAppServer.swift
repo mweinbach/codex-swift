@@ -1799,14 +1799,16 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func pluginListResult(params: [String: Any]?) throws -> [String: Any] {
-        if let cwds = stringArrayParam(params?["cwds"]) {
-            for cwd in cwds {
-                guard URL(fileURLWithPath: cwd, isDirectory: true).path == cwd,
-                      cwd.hasPrefix("/")
-                else {
-                    throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
-                }
+    fileprivate static func pluginListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let cwds = stringArrayParam(params?["cwds"]) ?? []
+        for cwd in cwds {
+            guard URL(fileURLWithPath: cwd, isDirectory: true).path == cwd,
+                  cwd.hasPrefix("/")
+            else {
+                throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
             }
         }
         if let kinds = stringArrayParam(params?["marketplaceKinds"]) {
@@ -1815,11 +1817,313 @@ public enum CodexAppServer {
                 throw AppServerError.invalidParams("unknown variant `\(kind)`, expected one of `local`, `workspace-directory`, `shared-with-me`")
             }
         }
-        return [
+        let empty: [String: Any] = [
             "marketplaces": [],
             "marketplaceLoadErrors": [],
             "featuredPluginIds": []
         ]
+        let kinds = stringArrayParam(params?["marketplaceKinds"]) ?? ["local"]
+        guard kinds.contains("local") else {
+            return empty
+        }
+
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+        guard runtimeConfig.features.isEnabled(.plugins) else {
+            return empty
+        }
+
+        return try localPluginListResult(cwds: cwds, configuration: configuration)
+    }
+
+    private static func localPluginListResult(
+        cwds: [String],
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let roots = localMarketplaceDiscoveryRoots(
+            cwds: cwds.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            codexHome: configuration.codexHome,
+            config: config
+        )
+        let manifestPaths = localMarketplaceManifestPaths(from: roots)
+        var marketplaces: [[String: Any]] = []
+        var loadErrors: [[String: Any]] = []
+
+        for manifestPath in manifestPaths {
+            do {
+                marketplaces.append(try pluginMarketplaceEntry(manifestPath: manifestPath, config: config))
+            } catch {
+                loadErrors.append([
+                    "marketplacePath": manifestPath.path,
+                    "message": (error as? AppServerError)?.description ?? error.localizedDescription
+                ])
+            }
+        }
+
+        return [
+            "marketplaces": marketplaces,
+            "marketplaceLoadErrors": loadErrors,
+            "featuredPluginIds": []
+        ]
+    }
+
+    private static func localMarketplaceDiscoveryRoots(
+        cwds: [URL],
+        codexHome: URL,
+        config: ConfigValue
+    ) -> [URL] {
+        var roots = cwds
+        roots.append(contentsOf: configuredMarketplaceRoots(in: config, codexHome: codexHome))
+        let curatedRoot = codexHome.appendingPathComponent(".tmp/plugins", isDirectory: true)
+        if FileManager.default.fileExists(atPath: curatedRoot.path) {
+            roots.append(curatedRoot)
+        }
+        var seen: Set<String> = []
+        return roots.map(\.standardizedFileURL).filter { seen.insert($0.path).inserted }
+    }
+
+    private static func configuredMarketplaceRoots(in config: ConfigValue, codexHome: URL) -> [URL] {
+        guard let marketplaces = marketplaceConfigTable(in: config) else {
+            return []
+        }
+        let defaultRoot = codexHome.appendingPathComponent(".tmp/marketplaces", isDirectory: true)
+        return marketplaces.compactMap { name, value -> URL? in
+            guard let entry = configTable(value) else {
+                return nil
+            }
+            let root: URL
+            if stringConfig(entry, "source_type") == "local",
+               let source = stringConfig(entry, "source"),
+               !source.isEmpty {
+                root = URL(fileURLWithPath: source, isDirectory: true)
+            } else {
+                root = defaultRoot.appendingPathComponent(name, isDirectory: true)
+            }
+            return localMarketplaceManifestPath(in: root) == nil ? nil : root
+        }
+    }
+
+    private static func localMarketplaceManifestPaths(from roots: [URL]) -> [URL] {
+        var paths: [URL] = []
+        for root in roots {
+            if let path = localMarketplaceManifestPath(in: root), !paths.contains(path) {
+                paths.append(path)
+                continue
+            }
+            if let repoRoot = gitRepositoryRoot(containing: root),
+               let path = localMarketplaceManifestPath(in: repoRoot),
+               !paths.contains(path) {
+                paths.append(path)
+            }
+        }
+        return paths
+    }
+
+    private static func gitRepositoryRoot(containing url: URL) -> URL? {
+        var current = url.standardizedFileURL
+        while true {
+            let dotGit = current.appendingPathComponent(".git", isDirectory: true)
+            if FileManager.default.fileExists(atPath: dotGit.path) {
+                return current
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path {
+                return nil
+            }
+            current = parent
+        }
+    }
+
+    private static func pluginMarketplaceEntry(manifestPath: URL, config: ConfigValue) throws -> [String: Any] {
+        let marketplaceRoot = try marketplaceRoot(forManifestPath: manifestPath)
+        let data = try Data(contentsOf: manifestPath)
+        let object = try marketplaceManifestObject(data: data, manifestPath: manifestPath)
+        guard let name = object["name"] as? String else {
+            throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: missing field `name`")
+        }
+        let plugins = try marketplacePluginSummaries(
+            object["plugins"],
+            marketplaceName: name,
+            marketplaceRoot: marketplaceRoot,
+            manifestPath: manifestPath,
+            config: config
+        )
+        return [
+            "name": name,
+            "path": manifestPath.path,
+            "interface": marketplaceInterfaceObject(object["interface"]),
+            "plugins": plugins
+        ].nullStripped()
+    }
+
+    private static func marketplaceManifestObject(data: Data, manifestPath: URL) throws -> [String: Any] {
+        do {
+            return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        } catch {
+            throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: \(error)")
+        }
+    }
+
+    private static func marketplacePluginSummaries(
+        _ value: Any?,
+        marketplaceName: String,
+        marketplaceRoot: URL,
+        manifestPath: URL,
+        config: ConfigValue
+    ) throws -> [[String: Any]] {
+        guard let plugins = value as? [[String: Any]] else {
+            throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: missing field `plugins`")
+        }
+        var seen: Set<String> = []
+        return plugins.compactMap { plugin in
+            guard let pluginName = plugin["name"] as? String,
+                  let source = localPluginSourcePath(plugin["source"], marketplaceRoot: marketplaceRoot)
+            else {
+                return nil
+            }
+            let id = "\(pluginName)@\(marketplaceName)"
+            guard seen.insert(id).inserted else {
+                return nil
+            }
+            let manifest = localPluginManifest(root: source)
+            let policy = plugin["policy"] as? [String: Any] ?? [:]
+            return [
+                "id": id,
+                "name": pluginName,
+                "shareContext": NSNull(),
+                "source": [
+                    "type": "local",
+                    "path": source.path
+                ],
+                "installed": false,
+                "enabled": configuredPluginEnabled(id: id, in: config),
+                "installPolicy": policy["installation"] as? String ?? "AVAILABLE",
+                "authPolicy": policy["authentication"] as? String ?? "ON_INSTALL",
+                "availability": "AVAILABLE",
+                "interface": manifest.interface,
+                "keywords": manifest.keywords
+            ].nullStripped()
+        }
+    }
+
+    private static func localPluginSourcePath(_ value: Any?, marketplaceRoot: URL) -> URL? {
+        let rawPath: String?
+        if let path = value as? String {
+            rawPath = path
+        } else if let source = value as? [String: Any],
+                  let sourceType = source["source"] as? String,
+                  sourceType == "local" {
+            rawPath = source["path"] as? String
+        } else {
+            rawPath = nil
+        }
+        guard let rawPath,
+              rawPath.hasPrefix("./"),
+              rawPath.count > 2
+        else {
+            return nil
+        }
+        let relative = String(rawPath.dropFirst(2))
+        let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            return nil
+        }
+        return components.reduce(marketplaceRoot) { partial, component in
+            partial.appendingPathComponent(String(component), isDirectory: true)
+        }.standardizedFileURL
+    }
+
+    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String]) {
+        let candidates = [
+            root.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
+            root.appendingPathComponent(".claude-plugin/plugin.json", isDirectory: false)
+        ]
+        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let data = try? Data(contentsOf: path),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return (NSNull(), [])
+        }
+        let keywords = object["keywords"] as? [String] ?? []
+        return (pluginInterfaceObject(object["interface"], pluginRoot: root), keywords)
+    }
+
+    private static func marketplaceInterfaceObject(_ value: Any?) -> Any {
+        guard let interface = value as? [String: Any] else {
+            return NSNull()
+        }
+        return ["displayName": nullable(interface["displayName"] as? String)].nullStripped()
+    }
+
+    private static func pluginInterfaceObject(_ value: Any?, pluginRoot: URL) -> Any {
+        guard let interface = value as? [String: Any] else {
+            return NSNull()
+        }
+        let screenshots = (interface["screenshots"] as? [String] ?? []).compactMap {
+            pluginAssetPath($0, pluginRoot: pluginRoot)
+        }
+        return [
+            "displayName": nullable(interface["displayName"] as? String),
+            "shortDescription": nullable(interface["shortDescription"] as? String),
+            "longDescription": nullable(interface["longDescription"] as? String),
+            "developerName": nullable(interface["developerName"] as? String),
+            "category": nullable(interface["category"] as? String),
+            "capabilities": interface["capabilities"] as? [String] ?? [],
+            "websiteUrl": nullable(interface["websiteUrl"] as? String ?? interface["websiteURL"] as? String),
+            "privacyPolicyUrl": nullable(interface["privacyPolicyUrl"] as? String ?? interface["privacyPolicyURL"] as? String),
+            "termsOfServiceUrl": nullable(interface["termsOfServiceUrl"] as? String ?? interface["termsOfServiceURL"] as? String),
+            "defaultPrompt": nullable(interface["defaultPrompt"] as? [String]),
+            "brandColor": nullable(interface["brandColor"] as? String),
+            "composerIcon": nullable((interface["composerIcon"] as? String).flatMap { pluginAssetPath($0, pluginRoot: pluginRoot) }),
+            "composerIconUrl": NSNull(),
+            "logo": nullable((interface["logo"] as? String).flatMap { pluginAssetPath($0, pluginRoot: pluginRoot) }),
+            "logoUrl": NSNull(),
+            "screenshots": screenshots,
+            "screenshotUrls": []
+        ].nullStripped()
+    }
+
+    private static func pluginAssetPath(_ rawPath: String, pluginRoot: URL) -> String? {
+        guard rawPath.hasPrefix("./"), rawPath.count > 2 else {
+            return nil
+        }
+        return pluginRoot.appendingPathComponent(String(rawPath.dropFirst(2)), isDirectory: false)
+            .standardizedFileURL.path
+    }
+
+    private static func configuredPluginEnabled(id: String, in config: ConfigValue) -> Bool {
+        guard let root = configTable(config),
+              let plugins = root["plugins"].flatMap(configTable),
+              let entry = plugins[id].flatMap(configTable)
+        else {
+            return false
+        }
+        return boolConfig(entry, "enabled") ?? true
+    }
+
+    private static func marketplaceRoot(forManifestPath manifestPath: URL) throws -> URL {
+        let suffixes = [
+            ".agents/plugins/marketplace.json",
+            ".claude-plugin/marketplace.json"
+        ]
+        for suffix in suffixes where manifestPath.path.hasSuffix("/\(suffix)") {
+            var root = manifestPath
+            for _ in suffix.split(separator: "/") {
+                root.deleteLastPathComponent()
+            }
+            return root
+        }
+        throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: marketplace file is not in a supported location")
     }
 
     fileprivate static func pluginReadResult(params: [String: Any]?) throws -> [String: Any] {
@@ -6544,7 +6848,7 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginListResult(params: params)
+                        result: try CodexAppServer.pluginListResult(params: params, configuration: configuration)
                     )
                 case "plugin/read":
                     response = CodexAppServer.responseObject(
