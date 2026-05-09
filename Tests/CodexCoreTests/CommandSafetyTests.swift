@@ -5,6 +5,8 @@ final class CommandSafetyTests: XCTestCase {
     func testKnownSafeExamples() {
         XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["ls"]))
         XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["git", "status"]))
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["git", "branch"]))
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["git", "branch", "--show-current"]))
         XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["base64"]))
         XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["sed", "-n", "1,5p", "file.txt"]))
         XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["nl", "-nrz", "Cargo.toml"]))
@@ -26,6 +28,8 @@ final class CommandSafetyTests: XCTestCase {
     func testUnknownOrPartialCommandsAreUnsafe() {
         XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["foo"]))
         XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["git", "fetch"]))
+        XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["git", "checkout", "status"]))
+        XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["cargo", "check"]))
         XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["sed", "-n", "xp", "file.txt"]))
 
         for args in [
@@ -40,6 +44,42 @@ final class CommandSafetyTests: XCTestCase {
             ["find", ".", "-fprintf", "/root/suid.txt", "%#m %u %p\n"]
         ] {
             XCTAssertFalse(CommandSafety.isSafeToCallWithExec(args), "expected \(args) to be unsafe")
+        }
+    }
+
+    func testGitSafetyMatchesRustGlobalAndOutputRules() {
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["git", "log", "-p", "-1"]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["git", "diff", "-p"]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["git", "show", "-p", "HEAD"]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "git log -p -1"]))
+
+        for args in [
+            ["git", "branch", "-d", "feature"],
+            ["git", "branch", "new-branch"],
+            ["git", "log", "--output=/tmp/git-log-out-test", "-n", "1"],
+            ["git", "diff", "--output", "/tmp/git-diff-out-test"],
+            ["git", "show", "--output=/tmp/git-show-out-test", "HEAD"],
+            ["git", "--paginate", "log", "-1"],
+            ["git", "-p", "log", "-1"],
+            ["git", "-C", ".", "status"],
+            ["git", "-C.", "status"],
+            ["git", "-c", "core.pager=cat", "log", "-n", "1"],
+            ["git", "-ccore.pager=cat", "status"],
+            ["git", "--config-env", "core.pager=PAGER", "show", "HEAD"],
+            ["git", "--config-env=core.pager=PAGER", "show", "HEAD"],
+            ["git", "--git-dir", ".evil-git", "diff", "HEAD~1..HEAD"],
+            ["git", "--git-dir=.evil-git", "diff", "HEAD~1..HEAD"],
+            ["git", "--work-tree", ".", "status"],
+            ["git", "--work-tree=.", "status"],
+            ["git", "--exec-path", ".git/helpers", "show", "HEAD"],
+            ["git", "--exec-path=.git/helpers", "show", "HEAD"],
+            ["git", "--namespace", "attacker", "show", "HEAD"],
+            ["git", "--namespace=attacker", "show", "HEAD"],
+            ["git", "--super-prefix", "attacker/", "show", "HEAD"],
+            ["git", "--super-prefix=attacker/", "show", "HEAD"],
+            ["bash", "-lc", "git --git-dir=.evil-git diff HEAD~1..HEAD"]
+        ] {
+            XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
         }
     }
 
@@ -205,12 +245,7 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "pwsh.exe",
             "-Command",
-            "git -c core.pager=cat show HEAD:foo.rs"
-        ]))
-        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
-            "pwsh.exe",
-            "-Command",
-            "-git cat-file -p HEAD:foo.rs"
+            "git show HEAD:foo.rs"
         ]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "pwsh.exe",
@@ -252,6 +287,10 @@ final class CommandSafetyTests: XCTestCase {
             ["powershell.exe", "-Command", "ls foo@(calc.exe)"],
             ["powershell.exe", "-Command", "Write-Output $(Get-Content foo)"],
             ["powershell.exe", "-Command", "''"],
+            ["powershell.exe", "-Command", "git -c core.pager=cat show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git --git-dir=.evil-git diff HEAD~1..HEAD"],
+            ["powershell.exe", "-Command", "git diff --output codex_poc.txt"],
+            ["powershell.exe", "-Command", "-git cat-file -p HEAD:foo.rs"],
             ["powershell.exe", "-EncodedCommand", "RwBlAHQALQBMAG8AYwBhAHQAaQBvAG4A"],
             ["powershell.exe", "-UnknownFlag", "Get-Location"],
             ["powershell.exe", "-Command", "Get-Content", "Cargo.toml"]

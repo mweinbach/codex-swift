@@ -97,15 +97,7 @@ public enum CommandSafety {
             }
 
         case "git":
-            switch command.dropFirst().first {
-            case "branch", "status", "log", "diff", "show":
-                return true
-            default:
-                return false
-            }
-
-        case "cargo":
-            return command.dropFirst().first == "check"
+            return isSafeGitCommand(command)
 
         case "sed":
             return command.count <= 4
@@ -683,49 +675,171 @@ public enum CommandSafety {
     }
 
     private static func isSafePowerShellGitCommand(_ words: [String]) -> Bool {
-        let safeSubcommands: Set<String> = ["status", "log", "show", "diff", "cat-file"]
-        var index = words.index(after: words.startIndex)
+        isSafeGitCommand(words)
+    }
 
-        while index < words.endIndex {
-            let argument = words[index]
-            let lower = argument.lowercased()
+    private enum GitOptionPattern {
+        case exact(String)
+        case shortWithInlineValue(String)
+        case prefix(String)
 
-            if argument.hasPrefix("-") {
-                if lower == "-c" || lower == "--config" {
-                    let nextIndex = words.index(after: index)
-                    guard nextIndex < words.endIndex else {
-                        return false
-                    }
-                    index = words.index(after: nextIndex)
-                    continue
-                }
+        func matches(_ argument: String) -> Bool {
+            switch self {
+            case let .exact(option):
+                return argument == option
+            case let .shortWithInlineValue(option):
+                return argument.hasPrefix(option) && argument.count > option.count
+            case let .prefix(prefix):
+                return argument.hasPrefix(prefix)
+            }
+        }
+    }
 
-                if lower.hasPrefix("-c=")
-                    || lower.hasPrefix("--config=")
-                    || lower.hasPrefix("--git-dir=")
-                    || lower.hasPrefix("--work-tree=")
-                {
-                    index = words.index(after: index)
-                    continue
-                }
+    private static let unsafeGitGlobalOptions: [GitOptionPattern] = [
+        .exact("-C"),
+        .shortWithInlineValue("-C"),
+        .exact("-c"),
+        .shortWithInlineValue("-c"),
+        .exact("-p"),
+        .exact("--config-env"),
+        .prefix("--config-env="),
+        .exact("--exec-path"),
+        .prefix("--exec-path="),
+        .exact("--git-dir"),
+        .prefix("--git-dir="),
+        .exact("--namespace"),
+        .prefix("--namespace="),
+        .exact("--paginate"),
+        .exact("--super-prefix"),
+        .prefix("--super-prefix="),
+        .exact("--work-tree"),
+        .prefix("--work-tree=")
+    ]
 
-                if lower == "--git-dir" || lower == "--work-tree" {
-                    let nextIndex = words.index(after: index)
-                    guard nextIndex < words.endIndex else {
-                        return false
-                    }
-                    index = words.index(after: nextIndex)
-                    continue
-                }
+    private static let unsafeGitSubcommandOptions: [GitOptionPattern] = [
+        .exact("--output"),
+        .prefix("--output="),
+        .exact("--ext-diff"),
+        .exact("--textconv"),
+        .exact("--exec"),
+        .prefix("--exec=")
+    ]
 
-                index = words.index(after: index)
+    private static func isSafeGitCommand(_ command: [String]) -> Bool {
+        guard let (subcommandIndex, subcommand) = findGitSubcommand(
+            in: command,
+            allowedSubcommands: ["status", "log", "diff", "show", "branch"]
+        ) else {
+            return false
+        }
+
+        if gitHasUnsafeGlobalOption(Array(command[1..<subcommandIndex])) {
+            return false
+        }
+
+        let subcommandArguments = Array(command.dropFirst(subcommandIndex + 1))
+        switch subcommand {
+        case "status", "log", "diff", "show":
+            return gitSubcommandArgumentsAreReadOnly(subcommandArguments)
+        case "branch":
+            return gitSubcommandArgumentsAreReadOnly(subcommandArguments)
+                && gitBranchIsReadOnly(subcommandArguments)
+        default:
+            return false
+        }
+    }
+
+    private static func findGitSubcommand(
+        in command: [String],
+        allowedSubcommands: Set<String>
+    ) -> (Int, String)? {
+        guard command.first.flatMap(commandBasename) == "git" else {
+            return nil
+        }
+
+        var skipNext = false
+        for (index, argument) in command.enumerated().dropFirst() {
+            if skipNext {
+                skipNext = false
                 continue
             }
 
-            return safeSubcommands.contains(lower)
+            if isGitGlobalOptionWithInlineValue(argument) {
+                continue
+            }
+
+            if isGitGlobalOptionWithValue(argument) {
+                skipNext = true
+                continue
+            }
+
+            if argument == "--" || argument.hasPrefix("-") {
+                continue
+            }
+
+            if allowedSubcommands.contains(argument) {
+                return (index, argument)
+            }
+
+            return nil
         }
 
-        return false
+        return nil
+    }
+
+    private static func isGitGlobalOptionWithValue(_ argument: String) -> Bool {
+        [
+            "-C",
+            "-c",
+            "--config-env",
+            "--exec-path",
+            "--git-dir",
+            "--namespace",
+            "--super-prefix",
+            "--work-tree"
+        ].contains(argument)
+    }
+
+    private static func isGitGlobalOptionWithInlineValue(_ argument: String) -> Bool {
+        argument.hasPrefix("--config-env=")
+            || argument.hasPrefix("--exec-path=")
+            || argument.hasPrefix("--git-dir=")
+            || argument.hasPrefix("--namespace=")
+            || argument.hasPrefix("--super-prefix=")
+            || argument.hasPrefix("--work-tree=")
+            || ((argument.hasPrefix("-C") || argument.hasPrefix("-c")) && argument.count > 2)
+    }
+
+    private static func gitHasUnsafeGlobalOption(_ arguments: [String]) -> Bool {
+        arguments.contains { argument in
+            unsafeGitGlobalOptions.contains { $0.matches(argument) }
+        }
+    }
+
+    private static func gitSubcommandArgumentsAreReadOnly(_ arguments: [String]) -> Bool {
+        !arguments.contains { argument in
+            unsafeGitSubcommandOptions.contains { $0.matches(argument) }
+        }
+    }
+
+    private static func gitBranchIsReadOnly(_ arguments: [String]) -> Bool {
+        if arguments.isEmpty {
+            return true
+        }
+
+        var sawReadOnlyFlag = false
+        for argument in arguments {
+            switch argument {
+            case "--list", "-l", "--show-current", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose":
+                sawReadOnlyFlag = true
+            case _ where argument.hasPrefix("--format="):
+                sawReadOnlyFlag = true
+            default:
+                return false
+            }
+        }
+
+        return sawReadOnlyFlag
     }
 
     private static func isDangerousCommandWindows(_ command: [String]) -> Bool {

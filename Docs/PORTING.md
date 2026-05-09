@@ -186,7 +186,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server-protocol/src/protocol/v2.rs` config-layer models plus `codex-rs/core/src/config_loader/state.rs` and `codex-rs/core/src/config_loader/fingerprint.rs`
   - config layer source wire tags, precedence ordering, layer metadata, deterministic SHA256 layer versions, user-layer replacement, effective config merging, origin tracking, and project-layer root-to-cwd validation
 - `codex-rs/core/src/bash.rs`, `codex-rs/core/src/command_safety/is_safe_command.rs`, `codex-rs/core/src/command_safety/windows_safe_commands.rs`, and `codex-rs/core/src/command_safety/is_dangerous_command.rs`
-  - non-Windows command safety allow-list, Windows PowerShell read-only command allow-list, dangerous command detection, approval-prompt gating, and conservative shell plain-command sequence parsing for safe operators
+  - non-Windows command safety allow-list, Rust's read-only Git subcommand/global-option filtering, Windows PowerShell read-only command allow-list, dangerous command detection, approval-prompt gating, and conservative shell plain-command sequence parsing for safe operators
 - `codex-rs/core/src/command_safety/windows_dangerous_commands.rs`
   - PowerShell/Cmd/browser ShellExecute-style URL launch danger detection, including `Start-Process`, `Invoke-Item`, Shell.Application COM calls, `rundll32 url.dll,FileProtocolHandler`, `cmd /c start`, and direct browser/explorer/mshta URL launches
 - Initial `codex-rs/agent-graph-store`
