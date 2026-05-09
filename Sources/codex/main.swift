@@ -681,11 +681,31 @@ private func runNonInteractiveExec(
         environment: environment
     )
 
-    let providerResolution = try resolveExecModelProvider(settings: settings, environment: environment)
+    let providerResolution = try resolveExecModelProvider(
+        settings: settings,
+        environment: environment,
+        arguments: arguments
+    )
     guard providerResolution.info.wireAPI == .responses else {
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
             stderrMessage: "codex-swift: exec currently supports Responses API model providers only."
+        )
+    }
+    let cliModel = execOptionValue(short: "-m", long: "--model", in: arguments)
+    let ossModel = providerResolution.isOSS
+        ? OSSProvider.defaultModelOverride(providerID: providerResolution.id, cliModel: cliModel)
+        : nil
+    let model = ossModel ?? cliModel ?? settings.model
+        ?? (providerResolution.isOSS
+            ? ModelsManager.openAIDefaultAPIModel
+            : nil)
+
+    if providerResolution.isOSS {
+        try await OSSProvider.ensureProviderReady(
+            providerID: providerResolution.id,
+            providerInfo: providerResolution.info,
+            model: model ?? ModelsManager.openAIDefaultAPIModel
         )
     }
 
@@ -699,12 +719,11 @@ private func runNonInteractiveExec(
         authMode: authResolution.authMode,
         environment: environment
     )
-    let model = execOptionValue(short: "-m", long: "--model", in: arguments)
-        ?? settings.model
+    let resolvedModel = model
         ?? (authResolution.authMode?.isChatGPT == true
             ? ModelsManager.openAIDefaultChatGPTModel
             : ModelsManager.openAIDefaultAPIModel)
-    let modelFamily = ModelsManager.constructModelFamilyOffline(model: model)
+    let modelFamily = ModelsManager.constructModelFamilyOffline(model: resolvedModel)
     let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: arguments)
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
     let shell = ShellResolver.defaultUserShell()
@@ -743,7 +762,7 @@ private func runNonInteractiveExec(
             cwd: cwd.path,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            model: model,
+            model: resolvedModel,
             effort: settings.modelReasoningEffort ?? modelFamily.defaultReasoningEffort,
             summary: settings.modelReasoningSummary ?? (modelFamily.supportsReasoningSummaries ? .auto : .none),
             baseInstructions: prompt.baseInstructionsOverride,
@@ -764,7 +783,7 @@ private func runNonInteractiveExec(
         initialPrompt: prompt,
         streamPrompt: { nextPrompt in
             await client.streamPrompt(
-                model: model,
+                model: resolvedModel,
                 instructions: nextPrompt.fullInstructions(for: modelFamily),
                 prompt: nextPrompt,
                 options: NonInteractiveExec.responsesOptions(
@@ -860,6 +879,7 @@ private func gitMergeBaseWithHead(cwd: String, branch: String) throws -> String?
 private struct ExecModelProviderResolution {
     let id: String
     let info: ModelProviderInfo
+    let isOSS: Bool
 }
 
 private struct ExecAuthResolution {
@@ -873,7 +893,8 @@ private struct ExecRuntimeError: Error, CustomStringConvertible {
 
 private func resolveExecModelProvider(
     settings: CodexRuntimeConfig,
-    environment: [String: String]
+    environment: [String: String],
+    arguments: [String]
 ) throws -> ExecModelProviderResolution {
     var providers = settings.modelProviders
     let versionedOpenAI = ModelProviderInfo.createOpenAIProvider(
@@ -883,11 +904,24 @@ private func resolveExecModelProvider(
     providers["openai"] = versionedOpenAI
     providers["openai-responses"] = versionedOpenAI
 
-    let providerID = settings.modelProvider ?? "openai"
+    let ossEnabled = execHasFlag("--oss", in: arguments)
+    let providerID: String
+    if ossEnabled {
+        guard let ossProviderID = OSSProvider.resolveProviderID(
+            explicitProvider: execLongOptionValue("--local-provider", in: arguments),
+            settings: settings
+        ) else {
+            throw ExecRuntimeError(description: OSSProvider.missingProviderMessage)
+        }
+        providerID = ossProviderID
+    } else {
+        providerID = settings.modelProvider ?? "openai"
+    }
+
     guard let provider = providers[providerID] else {
         throw ExecRuntimeError(description: "Unknown model provider '\(providerID)'")
     }
-    return ExecModelProviderResolution(id: providerID, info: provider)
+    return ExecModelProviderResolution(id: providerID, info: provider, isOSS: ossEnabled)
 }
 
 private func resolveExecAuth(
@@ -1044,6 +1078,24 @@ private func execOptionValue(short: String, long: String, in arguments: [String]
         }
         if argument.hasPrefix(short), argument.count > short.count, !short.hasPrefix("--") {
             return String(argument.dropFirst(short.count))
+        }
+        index += 1
+    }
+    return nil
+}
+
+private func execLongOptionValue(_ long: String, in arguments: [String]) -> String? {
+    var index = 0
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == long {
+            guard index + 1 < arguments.count else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+        if argument.hasPrefix("\(long)=") {
+            return String(argument.dropFirst(long.count + 1))
         }
         index += 1
     }
