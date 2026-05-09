@@ -83,6 +83,7 @@ public enum ContextNormalization {
                  .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
+                 .contextCompaction,
                  .knownPersisted,
                  .other:
                 continue
@@ -219,6 +220,7 @@ public enum ContextNormalization {
              .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
+             .contextCompaction,
              .knownPersisted,
              .other:
             return

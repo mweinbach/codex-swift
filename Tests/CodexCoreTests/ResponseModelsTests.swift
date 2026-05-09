@@ -288,6 +288,16 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(item, .compaction(encryptedContent: "abc"))
     }
 
+    func testRoundTripsContextCompactionLikeRust() throws {
+        let json = #"{"type":"context_compaction","encrypted_content":"abc"}"#
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .contextCompaction(encryptedContent: "abc"))
+
+        try XCTAssertJSONObjectEqual(ResponseItem.contextCompaction(), [
+            "type": "context_compaction"
+        ])
+    }
+
     func testRoundTripsWebSearchCallActions() throws {
         let json = #"""
         {

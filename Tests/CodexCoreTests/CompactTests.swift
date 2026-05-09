@@ -169,6 +169,22 @@ final class CompactTests: XCTestCase {
         ])
     }
 
+    func testInsertInitialContextFallsBackToContextCompactionItem() {
+        let initialContext: [ResponseItem] = [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")])
+        ]
+
+        let refreshed = Compact.insertInitialContextBeforeLastRealUserOrSummary(
+            compactedHistory: [.contextCompaction(encryptedContent: "encrypted")],
+            initialContext: initialContext
+        )
+
+        XCTAssertEqual(refreshed, [
+            .message(role: "developer", content: [.inputText(text: "fresh permissions")]),
+            .contextCompaction(encryptedContent: "encrypted"),
+        ])
+    }
+
     func testInsertInitialContextAppendsWhenNoBoundaryExists() {
         let initialContext: [ResponseItem] = [
             .message(role: "developer", content: [.inputText(text: "fresh permissions")])

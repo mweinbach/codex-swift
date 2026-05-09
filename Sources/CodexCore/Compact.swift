@@ -115,8 +115,7 @@ public enum Compact {
             if case .compaction = compactedHistory[index] {
                 return true
             }
-            if case let .knownPersisted(type) = compactedHistory[index],
-               type == "context_compaction" {
+            if case .contextCompaction = compactedHistory[index] {
                 return true
             }
             return false

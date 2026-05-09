@@ -986,6 +986,7 @@ public enum NonInteractiveExec {
                  .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
+                 .contextCompaction,
                  .knownPersisted,
                  .other:
                 return false

@@ -360,6 +360,7 @@ private extension ResponseItem {
              .toolSearchOutput,
              .ghostSnapshot,
              .compaction,
+             .contextCompaction,
              .knownPersisted,
              .other:
             return nil

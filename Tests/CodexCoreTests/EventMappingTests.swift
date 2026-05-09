@@ -193,6 +193,7 @@ final class EventMappingTests: XCTestCase {
 
     func testSkipsNonSearchWebSearchActionsAndOtherItems() {
         XCTAssertNil(EventMapping.parseTurnItem(.compaction(encryptedContent: "encrypted")))
+        XCTAssertNil(EventMapping.parseTurnItem(.contextCompaction(encryptedContent: "encrypted")))
         XCTAssertNil(EventMapping.parseTurnItem(.knownPersisted(type: "function_call")))
         XCTAssertNil(EventMapping.parseTurnItem(.other))
     }

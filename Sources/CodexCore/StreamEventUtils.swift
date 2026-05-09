@@ -55,6 +55,7 @@ public enum StreamEventUtils {
              .customToolCall,
              .ghostSnapshot,
              .compaction,
+             .contextCompaction,
              .knownPersisted,
              .other:
             return nil

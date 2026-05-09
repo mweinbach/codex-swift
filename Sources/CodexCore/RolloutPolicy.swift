@@ -208,6 +208,7 @@ public enum RolloutPolicy {
              .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
+             .contextCompaction,
              .knownPersisted:
             return true
         case .other:

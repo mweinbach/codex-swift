@@ -47,6 +47,7 @@ public enum EventMapping {
             ))
 
         case .compaction,
+             .contextCompaction,
              .localShellCall,
              .functionCall,
              .toolSearchCall,
