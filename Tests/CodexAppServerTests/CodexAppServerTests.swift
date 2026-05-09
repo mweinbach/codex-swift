@@ -3599,6 +3599,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((readBody["params"] as? [String: Any])?["uri"] as? String, "test://codex/resource")
     }
 
+    func testMcpResourceReadWithoutThreadCallsConfiguredStdioServer() throws {
+        let temp = try TemporaryDirectory()
+        let script = temp.url.appendingPathComponent("stdio-mcp.sh", isDirectory: false)
+        try """
+        #!/bin/sh
+        count=0
+        while IFS= read -r line; do
+          count=$((count + 1))
+          case "$count" in
+            1)
+              printf '%s\\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"stdio","version":"1.0.0"}}}'
+              ;;
+            2)
+              printf '%s\\n' "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"result\\":{\\"contents\\":[{\\"uri\\":\\"test://codex/stdio\\",\\"mimeType\\":\\"text/plain\\",\\"text\\":\\"$MCP_ENV:$INLINE\\"}]}}"
+              exit 0
+              ;;
+          esac
+        done
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try """
+        [mcp_servers.stdio]
+        command = "\(script.path)"
+        env_vars = ["MCP_ENV"]
+        tool_timeout_sec = 10
+
+        [mcp_servers.stdio.env]
+        INLINE = "inline-value"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "MCP_ENV": "passed-value",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/resource/read","params":{"server":"stdio","uri":"test://codex/stdio"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let contents = try XCTUnwrap(result["contents"] as? [[String: Any]])
+        XCTAssertEqual(contents.count, 1)
+        XCTAssertEqual(contents[0]["uri"] as? String, "test://codex/stdio")
+        XCTAssertEqual(contents[0]["mimeType"] as? String, "text/plain")
+        XCTAssertEqual(contents[0]["text"] as? String, "passed-value:inline-value")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

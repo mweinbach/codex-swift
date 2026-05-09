@@ -5758,8 +5758,18 @@ public enum CodexAppServer {
             throw AppServerError.internalError("MCP server '\(server)' is disabled.")
         }
         switch serverConfig.transport {
-        case .stdio:
-            throw AppServerError.internalError("MCP resource read is not implemented for stdio server \(server)")
+        case let .stdio(command, args, env, envVars, cwd):
+            return try mcpStdioResourceReadResult(
+                server: server,
+                command: command,
+                args: args,
+                env: env,
+                envVars: envVars,
+                cwd: cwd,
+                uri: uri,
+                timeoutSeconds: serverConfig.toolTimeoutSec ?? serverConfig.startupTimeoutSec,
+                configuration: configuration
+            ).object
         case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
             return try runAsyncBlocking {
                 try await mcpStreamableHTTPResourceReadResult(
@@ -5773,6 +5783,142 @@ public enum CodexAppServer {
                 )
             }.object
         }
+    }
+
+    fileprivate static func mcpStdioResourceReadResult(
+        server: String,
+        command: String,
+        args: [String],
+        env: [String: String]?,
+        envVars: [String],
+        cwd: String?,
+        uri: String,
+        timeoutSeconds: Double?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerJSONObject {
+        let process = Process()
+        if command.contains("/") {
+            process.executableURL = URL(fileURLWithPath: command)
+            process.arguments = args
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + args
+        }
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        var environment = configuration.environment
+        for name in envVars {
+            if let value = configuration.environment[name] {
+                environment[name] = value
+            }
+        }
+        for (name, value) in env ?? [:] {
+            environment[name] = value
+        }
+        process.environment = environment
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to start MCP server \(server): \(error)")
+        }
+        let timeout = timeoutSeconds.map { max($0, 0.1) } ?? 10
+        defer {
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+
+        try mcpWriteStdioRequest([
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": [
+                "protocolVersion": "2025-06-18",
+                "capabilities": [:],
+                "clientInfo": [
+                    "name": "codex-swift",
+                    "version": configuration.version
+                ]
+            ]
+        ], to: stdin.fileHandleForWriting, server: server)
+
+        try mcpWriteStdioRequest([
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "resources/read",
+            "params": [
+                "uri": uri
+            ]
+        ], to: stdin.fileHandleForWriting, server: server)
+        stdin.fileHandleForWriting.closeFile()
+        let waitSemaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            process.waitUntilExit()
+            waitSemaphore.signal()
+        }
+        if waitSemaphore.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw AppServerError.internalError("timed out reading MCP server \(server) response")
+        }
+        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let stderrText = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resourceResponse = try mcpStdioResponse(id: 1, from: stdoutData, stderr: stderrText, server: server)
+        guard let result = resourceResponse["result"] as? [String: Any] else {
+            if let error = resourceResponse["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw AppServerError.internalError(message)
+            }
+            throw AppServerError.internalError("MCP server \(server) returned a response without result")
+        }
+        guard result["contents"] is [Any] else {
+            throw AppServerError.internalError("MCP server \(server) returned a resource read result without contents")
+        }
+        return AppServerJSONObject(object: result)
+    }
+
+    fileprivate static func mcpWriteStdioRequest(
+        _ object: [String: Any],
+        to handle: FileHandle,
+        server: String
+    ) throws {
+        guard JSONSerialization.isValidJSONObject(object) else {
+            throw AppServerError.internalError("invalid MCP stdio request body for \(server)")
+        }
+        var data = try JSONSerialization.data(withJSONObject: object)
+        data.append(0x0A)
+        handle.write(data)
+    }
+
+    fileprivate static func mcpStdioResponse(
+        id: Int,
+        from data: Data,
+        stderr: String,
+        server: String
+    ) throws -> [String: Any] {
+        let text = String(decoding: data, as: UTF8.self)
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let lineData = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                continue
+            }
+            if (object["id"] as? Int) == id {
+                return object
+            }
+        }
+        if !stderr.isEmpty {
+            throw AppServerError.internalError("MCP server \(server) produced no response: \(stderr)")
+        }
+        throw AppServerError.internalError("MCP server \(server) produced no response")
     }
 
     fileprivate static func mcpStreamableHTTPResourceReadResult(
