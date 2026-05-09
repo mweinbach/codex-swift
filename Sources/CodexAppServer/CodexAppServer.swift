@@ -12154,12 +12154,13 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: FileHandle, stderr: FileHandle?) async {
-        let stdoutTask = Task.detached {
-            Self.readToEnd(stdout)
+        let streamOutput = params.streamStdoutStderr || params.tty
+        let stdoutTask = Task.detached { [self] in
+            await collectOutput(stdout, stream: "stdout", streamOutput: streamOutput)
         }
         let stderrTask = stderr.map { handle in
-            Task.detached {
-                Self.readToEnd(handle)
+            Task.detached { [self] in
+                await collectOutput(handle, stream: "stderr", streamOutput: streamOutput)
             }
         }
         if let timeoutMs = params.timeoutMs {
@@ -12176,12 +12177,8 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         }
         await exitSignal.wait()
         pseudoTerminal?.closeSlaveHandles()
-        let stdoutCapture = Self.capture(await stdoutTask.value, cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(await stderrTask?.value ?? Data(), cap: params.outputBytesCap)
-        if params.streamStdoutStderr || params.tty {
-            await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
-            await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
-        }
+        let stdoutCapture = await stdoutTask.value
+        let stderrCapture = await stderrTask?.value ?? AppServerProcessOutputCapture(text: "", capReached: false)
         await sendResponse(stdout: stdoutCapture, stderr: stderrCapture)
         if let processID = params.processID {
             onExit(processID)
@@ -12225,36 +12222,45 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         await notificationSink(data)
     }
 
-    private static func capture(_ data: Data, cap: Int?) -> AppServerProcessOutputCapture {
-        let capReached: Bool
-        let capped: Data
-        if let cap, data.count > cap {
-            capped = data.prefix(cap)
-            capReached = true
-        } else {
-            capped = data
-            capReached = false
-        }
-        return AppServerProcessOutputCapture(
-            text: TextEncoding.bytesToStringSmart(capped),
-            capReached: capReached
-        )
-    }
-
-    private static func readToEnd(_ handle: FileHandle) -> Data {
+    private func collectOutput(
+        _ handle: FileHandle,
+        stream: String,
+        streamOutput: Bool
+    ) async -> AppServerProcessOutputCapture {
         var data = Data()
+        var observedBytes = 0
+        var capReached = false
         var buffer = [UInt8](repeating: 0, count: 8192)
         while true {
             let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
             if count > 0 {
-                data.append(buffer, count: count)
+                let allowedCount: Int
+                if let outputBytesCap = params.outputBytesCap {
+                    allowedCount = min(max(outputBytesCap - observedBytes, 0), count)
+                    observedBytes += allowedCount
+                    capReached = observedBytes == outputBytesCap
+                } else {
+                    allowedCount = count
+                }
+                let chunk = Data(buffer.prefix(allowedCount))
+                if streamOutput {
+                    await sendOutputDelta(stream: stream, data: chunk, capReached: capReached)
+                } else {
+                    data.append(chunk)
+                }
+                if capReached {
+                    break
+                }
             } else if count == -1 && errno == EINTR {
                 continue
             } else {
                 break
             }
         }
-        return data
+        return AppServerProcessOutputCapture(
+            text: TextEncoding.bytesToStringSmart(data),
+            capReached: capReached
+        )
     }
 }
 
@@ -12446,12 +12452,13 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: FileHandle, stderr: FileHandle?) async {
-        let stdoutTask = Task.detached {
-            Self.readToEnd(stdout)
+        let streamOutput = params.streamStdoutStderr || params.tty
+        let stdoutTask = Task.detached { [self] in
+            await collectOutput(stdout, stream: "stdout", streamOutput: streamOutput)
         }
         let stderrTask = stderr.map { handle in
-            Task.detached {
-                Self.readToEnd(handle)
+            Task.detached { [self] in
+                await collectOutput(handle, stream: "stderr", streamOutput: streamOutput)
             }
         }
         if let timeoutMs = params.timeoutMs {
@@ -12468,12 +12475,8 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         }
         await exitSignal.wait()
         pseudoTerminal?.closeSlaveHandles()
-        let stdoutCapture = Self.capture(await stdoutTask.value, cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(await stderrTask?.value ?? Data(), cap: params.outputBytesCap)
-        if params.streamStdoutStderr || params.tty {
-            await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
-            await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
-        }
+        let stdoutCapture = await stdoutTask.value
+        let stderrCapture = await stderrTask?.value ?? AppServerProcessOutputCapture(text: "", capReached: false)
         await sendExited(stdout: stdoutCapture, stderr: stderrCapture)
         onExit(params.processHandle)
     }
@@ -12516,36 +12519,45 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         await notificationSink(data)
     }
 
-    private static func capture(_ data: Data, cap: Int?) -> AppServerProcessOutputCapture {
-        let capReached: Bool
-        let capped: Data
-        if let cap, data.count > cap {
-            capped = data.prefix(cap)
-            capReached = true
-        } else {
-            capped = data
-            capReached = false
-        }
-        return AppServerProcessOutputCapture(
-            text: TextEncoding.bytesToStringSmart(capped),
-            capReached: capReached
-        )
-    }
-
-    private static func readToEnd(_ handle: FileHandle) -> Data {
+    private func collectOutput(
+        _ handle: FileHandle,
+        stream: String,
+        streamOutput: Bool
+    ) async -> AppServerProcessOutputCapture {
         var data = Data()
+        var observedBytes = 0
+        var capReached = false
         var buffer = [UInt8](repeating: 0, count: 8192)
         while true {
             let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
             if count > 0 {
-                data.append(buffer, count: count)
+                let allowedCount: Int
+                if let outputBytesCap = params.outputBytesCap {
+                    allowedCount = min(max(outputBytesCap - observedBytes, 0), count)
+                    observedBytes += allowedCount
+                    capReached = observedBytes == outputBytesCap
+                } else {
+                    allowedCount = count
+                }
+                let chunk = Data(buffer.prefix(allowedCount))
+                if streamOutput {
+                    await sendOutputDelta(stream: stream, data: chunk, capReached: capReached)
+                } else {
+                    data.append(chunk)
+                }
+                if capReached {
+                    break
+                }
             } else if count == -1 && errno == EINTR {
                 continue
             } else {
                 break
             }
         }
-        return data
+        return AppServerProcessOutputCapture(
+            text: TextEncoding.bytesToStringSmart(data),
+            capReached: capReached
+        )
     }
 }
 

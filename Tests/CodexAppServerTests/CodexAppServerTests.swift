@@ -7282,6 +7282,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecStreamsOutputBeforeProcessExit() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf live; sleep 5"],"processId":"cmd-live-stream","cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#.utf8
+        )))
+
+        let outputData = try await nextNotificationPayload(notificationCapture, timeoutNanoseconds: 1_000_000_000)
+        let output = try XCTUnwrap(decodeMessages(outputData).first)
+        XCTAssertEqual(output["method"] as? String, "command/exec/outputDelta")
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processId"] as? String, "cmd-live-stream")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "live"
+        )
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/terminate","params":{"processId":"cmd-live-stream"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+    }
+
     func testCommandExecRejectsDuplicateProcessIDAndTerminateStopsActiveSession() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7624,6 +7656,38 @@ final class CodexAppServerTests: XCTestCase {
         let exitedParams = try XCTUnwrap(exited["params"] as? [String: Any])
         XCTAssertEqual(exitedParams["stdout"] as? String, "")
         XCTAssertEqual(exitedParams["stderr"] as? String, "")
+    }
+
+    func testProcessSpawnStreamsOutputBeforeProcessExit() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf live-proc; sleep 5"],"processHandle":"proc-live-stream","cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#.utf8
+        )))
+
+        let outputData = try await nextNotificationPayload(notificationCapture, timeoutNanoseconds: 1_000_000_000)
+        let output = try XCTUnwrap(decodeMessages(outputData).first)
+        XCTAssertEqual(output["method"] as? String, "process/outputDelta")
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processHandle"] as? String, "proc-live-stream")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "live-proc"
+        )
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/kill","params":{"processHandle":"proc-live-stream"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
     }
 
     func testProcessWriteStdinFeedsStreamingProcessAndCanCloseStdin() async throws {
