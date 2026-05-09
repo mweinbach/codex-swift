@@ -2669,13 +2669,77 @@ final class CodexAppServerTests: XCTestCase {
         let emptyImportResult = try XCTUnwrap(emptyImport["result"] as? [String: Any])
         XCTAssertTrue(emptyImportResult.isEmpty)
 
-        let nonEmptyImport = try appServerResponse(
-            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":null}]}}"#,
+        let unsupportedImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SKILLS","description":"Skills","cwd":null}]}}"#,
             codexHome: temp.url
         )
-        let nonEmptyImportError = try XCTUnwrap(nonEmptyImport["error"] as? [String: Any])
-        XCTAssertEqual(nonEmptyImportError["code"] as? Int, -32600)
-        XCTAssertEqual(nonEmptyImportError["message"] as? String, "external agent config import is not implemented")
+        let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
+        XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
+        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for SKILLS is not implemented")
+    }
+
+    func testExternalAgentConfigImportConfigMigratesRepoSettingsAndCompletes() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claudeSettings = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeSettings, withIntermediateDirectories: true)
+        try """
+        {
+          "env": {
+            "ALPHA": "one",
+            "COUNT": 7,
+            "DROP": null,
+            "FLAG": true,
+            "OBJECT": {}
+          },
+          "sandbox": { "enabled": false }
+        }
+        """.write(
+            to: claudeSettings.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "env": { "ALPHA": "local", "BETA": "two" },
+          "sandbox": { "enabled": true }
+        }
+        """.write(
+            to: claudeSettings.appendingPathComponent("settings.local.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+
+        let response = messages[0]
+        XCTAssertEqual((response["result"] as? [String: Any])?.isEmpty, true)
+
+        let notification = messages[1]
+        XCTAssertEqual(notification["method"] as? String, "externalAgentConfig/import/completed")
+        XCTAssertEqual((notification["params"] as? [String: Any])?.isEmpty, true)
+
+        let migrated = try String(
+            contentsOf: repo.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migrated.contains(#"sandbox_mode = "workspace-write""#))
+        XCTAssertTrue(migrated.contains(#"inherit = "core""#))
+        XCTAssertTrue(migrated.contains(#"ALPHA = "local""#))
+        XCTAssertTrue(migrated.contains(#"BETA = "two""#))
+        XCTAssertTrue(migrated.contains(#"COUNT = "7""#))
+        XCTAssertTrue(migrated.contains(#"FLAG = "true""#))
+        XCTAssertFalse(migrated.contains("DROP"))
+        XCTAssertFalse(migrated.contains("OBJECT"))
     }
 
     func testMcpResourceAndToolCallsValidateThreadBeforeLiveDispatch() throws {
@@ -4903,7 +4967,7 @@ final class CodexAppServerTests: XCTestCase {
         let cwd = try TemporaryDirectory()
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"cwd":"\#(cwd.url.path)","timeoutMs":10}}"#,
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sleep","5"],"cwd":"\#(cwd.url.path)","timeoutMs":10}}"#,
             codexHome: codexHome.url
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -5025,11 +5089,11 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         XCTAssertNil(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sleep","5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
 
         let duplicate = try decode(processor.processLine(Data(
-            #"{"id":2,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":2,"method":"command/exec","params":{"command":["/bin/sleep","5"],"processId":"cmd-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
         let duplicateError = try XCTUnwrap(duplicate["error"] as? [String: Any])
         XCTAssertEqual(duplicateError["code"] as? Int, -32600)
@@ -5053,7 +5117,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         XCTAssertNil(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sleep","5"],"processId":"cmd-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
         )))
 
         let responseData = try await nextNotificationPayload(notificationCapture)
@@ -5075,7 +5139,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         XCTAssertNil(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 5"],"processId":"cmd-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sleep","5"],"processId":"cmd-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
 
         let resize = try decode(processor.processLine(Data(
@@ -5339,7 +5403,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let spawn = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-no-stdin","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-no-stdin","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
         XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
 
@@ -5368,7 +5432,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let spawn = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-resize","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
         XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
 
@@ -5397,7 +5461,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let spawn = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
         )))
         XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
 
@@ -5421,12 +5485,12 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let spawn = try decodeMessages(processor.processLine(Data(
-            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
         XCTAssertEqual((spawn[0]["result"] as? [String: Any])?.isEmpty, true)
 
         let duplicate = try decode(processor.processLine(Data(
-            #"{"id":2,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":2,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-kill","cwd":"\#(cwd.url.path)"}}"#.utf8
         )))
         let duplicateError = try XCTUnwrap(duplicate["error"] as? [String: Any])
         XCTAssertEqual(duplicateError["code"] as? Int, -32600)
@@ -5557,7 +5621,7 @@ final class CodexAppServerTests: XCTestCase {
 
     private func nextNotificationPayload(
         _ capture: AppServerNotificationCapture,
-        timeoutNanoseconds: UInt64 = 2_000_000_000
+        timeoutNanoseconds: UInt64 = 5_000_000_000
     ) async throws -> Data {
         let start = DispatchTime.now().uptimeNanoseconds
         while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {

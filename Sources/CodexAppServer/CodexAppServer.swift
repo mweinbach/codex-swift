@@ -2870,12 +2870,271 @@ public enum CodexAppServer {
         ["items": []]
     }
 
-    fileprivate static func externalAgentConfigImportResult(params: [String: Any]?) throws -> [String: Any] {
-        let items = params?["migrationItems"] as? [Any] ?? []
-        guard items.isEmpty else {
-            throw AppServerError.invalidRequest("external agent config import is not implemented")
+    fileprivate static func externalAgentConfigImportResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (result: [String: Any], notifications: [[String: Any]]) {
+        guard let items = params?["migrationItems"] as? [[String: Any]] else {
+            throw AppServerError.invalidParams("externalAgentConfig/import migrationItems must be an array")
         }
-        return [:]
+        guard !items.isEmpty else {
+            return ([:], [])
+        }
+
+        for item in items {
+            guard let itemType = item["itemType"] as? String else {
+                throw AppServerError.invalidParams("external agent migration item is missing itemType")
+            }
+            let cwd = stringParam(item["cwd"])
+            switch itemType {
+            case "CONFIG":
+                try importExternalAgentConfig(cwd: cwd, configuration: configuration)
+            default:
+                throw AppServerError.invalidRequest("external agent config import for \(itemType) is not implemented")
+            }
+        }
+
+        return (
+            [:],
+            [[
+                "method": "externalAgentConfig/import/completed",
+                "params": [:]
+            ]]
+        )
+    }
+
+    private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        let sourceSettings: URL
+        let targetConfig: URL
+        if let cwd, !cwd.isEmpty {
+            guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
+                return
+            }
+            sourceSettings = repoRoot
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("settings.json", isDirectory: false)
+            targetConfig = repoRoot
+                .appendingPathComponent(".codex", isDirectory: true)
+                .appendingPathComponent("config.toml", isDirectory: false)
+        } else {
+            let home = configuration.environment["HOME"].flatMap { value in
+                value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+            } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            sourceSettings = home
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("settings.json", isDirectory: false)
+            targetConfig = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        }
+
+        guard var settings = try externalAgentSettings(at: sourceSettings) else {
+            return
+        }
+        let localSettingsPath = sourceSettings
+            .deletingLastPathComponent()
+            .appendingPathComponent("settings.local.json", isDirectory: false)
+        if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
+            mergeJSONSettings(into: &settings, incoming: localSettings)
+        }
+
+        let migrated = try externalAgentConfigValue(from: settings)
+        guard case let .table(migratedTable) = migrated, !migratedTable.isEmpty else {
+            return
+        }
+
+        let existing: ConfigValue
+        if FileManager.default.fileExists(atPath: targetConfig.path) {
+            let raw = try String(contentsOf: targetConfig, encoding: .utf8)
+            existing = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .table([:])
+                : try parseExternalAgentTargetConfig(raw)
+        } else {
+            existing = .table([:])
+        }
+        var next = existing
+        guard try mergeMissingConfigValues(into: &next, incoming: migrated) else {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: targetConfig.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try renderConfigToml(next).write(to: targetConfig, atomically: true, encoding: .utf8)
+    }
+
+    private static func externalAgentSettings(at path: URL) throws -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: path)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AppServerError.internalError("external agent settings root must be an object")
+        }
+        return object
+    }
+
+    private static func externalAgentLocalSettings(at path: URL) throws -> [String: Any]? {
+        do {
+            return try externalAgentSettings(at: path)
+        } catch AppServerError.internalError {
+            return nil
+        } catch {
+            throw error
+        }
+    }
+
+    private static func mergeJSONSettings(into existing: inout [String: Any], incoming: [String: Any]) {
+        for (key, incomingValue) in incoming {
+            if var existingObject = existing[key] as? [String: Any],
+               let incomingObject = incomingValue as? [String: Any] {
+                mergeJSONSettings(into: &existingObject, incoming: incomingObject)
+                existing[key] = existingObject
+            } else {
+                existing[key] = incomingValue
+            }
+        }
+    }
+
+    private static func externalAgentConfigValue(from settings: [String: Any]) throws -> ConfigValue {
+        var root: [String: ConfigValue] = [:]
+        if let env = settings["env"] as? [String: Any], !env.isEmpty {
+            root["shell_environment_policy"] = .table([
+                "inherit": .string("core"),
+                "set": .table(externalAgentEnvironmentTable(from: env))
+            ])
+        }
+        if let sandbox = settings["sandbox"] as? [String: Any],
+           sandbox["enabled"] as? Bool == true {
+            root["sandbox_mode"] = .string("workspace-write")
+        }
+        return .table(root)
+    }
+
+    private static func externalAgentEnvironmentTable(from env: [String: Any]) -> [String: ConfigValue] {
+        var table: [String: ConfigValue] = [:]
+        for (key, value) in env {
+            if let stringValue = externalAgentEnvironmentString(value) {
+                table[key] = .string(stringValue)
+            }
+        }
+        return table
+    }
+
+    private static func externalAgentEnvironmentString(_ value: Any) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let bool as Bool:
+            return bool ? "true" : "false"
+        case let number as NSNumber:
+            return number.stringValue
+        case _ as NSNull:
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private static func mergeMissingConfigValues(into existing: inout ConfigValue, incoming: ConfigValue) throws -> Bool {
+        guard case var .table(existingTable) = existing,
+              case let .table(incomingTable) = incoming
+        else {
+            throw AppServerError.internalError("expected TOML table while merging migrated config values")
+        }
+        var changed = false
+        for (key, incomingValue) in incomingTable {
+            if var existingValue = existingTable[key] {
+                if case .table = existingValue,
+                   case .table = incomingValue,
+                   try mergeMissingConfigValues(into: &existingValue, incoming: incomingValue) {
+                    existingTable[key] = existingValue
+                    changed = true
+                }
+            } else {
+                existingTable[key] = incomingValue
+                changed = true
+            }
+        }
+        existing = .table(existingTable)
+        return changed
+    }
+
+    private static func parseExternalAgentTargetConfig(_ raw: String) throws -> ConfigValue {
+        var root: [String: ConfigValue] = [:]
+        var currentPath: [String] = []
+        for rawLine in raw.split(whereSeparator: \.isNewline) {
+            let line = stripTomlComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty {
+                continue
+            }
+            if line.hasPrefix("[") && line.hasSuffix("]") {
+                let tableName = String(line.dropFirst().dropLast())
+                currentPath = try tableName.split(separator: ".").map { segment in
+                    try parseExternalAgentConfigKeySegment(String(segment))
+                }
+                ensureConfigTable(at: currentPath, in: &root)
+                continue
+            }
+            guard let equals = line.firstIndex(of: "=") else {
+                throw AppServerError.internalError("invalid existing config.toml")
+            }
+            let key = line[..<equals].trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueText = line[line.index(after: equals)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = try ConfigValueParser.parseTomlLiteral(valueText)
+            setConfigTableValue(value, keyPath: currentPath + [try parseExternalAgentConfigKeySegment(key)], in: &root)
+        }
+        return .table(root)
+    }
+
+    private static func parseExternalAgentConfigKeySegment(_ raw: String) throws -> String {
+        let segment = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !segment.isEmpty else {
+            throw AppServerError.internalError("invalid existing config.toml key")
+        }
+        if segment.hasPrefix("\"") || segment.hasPrefix("'") {
+            guard case let .string(value) = try ConfigValueParser.parseTomlLiteral(segment) else {
+                throw AppServerError.internalError("invalid existing config.toml key")
+            }
+            return value
+        }
+        return segment
+    }
+
+    private static func ensureConfigTable(at path: [String], in root: inout [String: ConfigValue]) {
+        guard let first = path.first else {
+            return
+        }
+        if path.count == 1 {
+            if root[first] == nil {
+                root[first] = .table([:])
+            }
+            return
+        }
+        var child: [String: ConfigValue]
+        if case let .table(existing)? = root[first] {
+            child = existing
+        } else {
+            child = [:]
+        }
+        ensureConfigTable(at: Array(path.dropFirst()), in: &child)
+        root[first] = .table(child)
+    }
+
+    private static func setConfigTableValue(_ value: ConfigValue, keyPath: [String], in root: inout [String: ConfigValue]) {
+        guard let first = keyPath.first else {
+            return
+        }
+        if keyPath.count == 1 {
+            root[first] = value
+            return
+        }
+        var child: [String: ConfigValue]
+        if case let .table(existing)? = root[first] {
+            child = existing
+        } else {
+            child = [:]
+        }
+        setConfigTableValue(value, keyPath: Array(keyPath.dropFirst()), in: &child)
+        root[first] = .table(child)
     }
 
     fileprivate static func addConversationListenerResult() -> [String: Any] {
@@ -7010,6 +7269,42 @@ private struct AppServerProcessOutputCapture {
     let capReached: Bool
 }
 
+private final class AppServerProcessExitSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        let continuations = lock.withLock {
+            guard !exited else {
+                return [] as [CheckedContinuation<Void, Never>]
+            }
+            exited = true
+            let continuations = waiters
+            waiters.removeAll()
+            return continuations
+        }
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                if exited {
+                    return true
+                }
+                waiters.append(continuation)
+                return false
+            }
+            if shouldResume {
+                continuation.resume()
+            }
+        }
+    }
+}
+
 private final class AppServerCommandExecProcess: @unchecked Sendable {
     private let params: AppServerCommandExecParams
     private let requestID: Any
@@ -7017,6 +7312,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     private let onExit: @Sendable (String) -> Void
     private let lock = NSLock()
     private let process = Process()
+    private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
     private var stdinClosed = false
     private var terminated = false
@@ -7056,6 +7352,9 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     func start() throws {
         let stdout = Pipe()
         let stderr = Pipe()
+        process.terminationHandler = { [exitSignal] _ in
+            exitSignal.signal()
+        }
         if params.streamStdin || params.tty {
             let stdin = Pipe()
             stdinPipe = stdin
@@ -7064,8 +7363,8 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        Task.detached { [weak self] in
-            await self?.finish(stdout: stdout, stderr: stderr)
+        Task.detached { [self] in
+            await finish(stdout: stdout, stderr: stderr)
         }
     }
 
@@ -7130,7 +7429,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
                 terminate()
             }
         }
-        process.waitUntilExit()
+        await exitSignal.wait()
         let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
         let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
         if params.streamStdoutStderr {
@@ -7241,6 +7540,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private let onExit: @Sendable (String) -> Void
     private let lock = NSLock()
     private let process = Process()
+    private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
     private var stdinClosed = false
     private var terminated = false
@@ -7281,6 +7581,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     func start() throws {
         let stdout = Pipe()
         let stderr = Pipe()
+        process.terminationHandler = { [exitSignal] _ in
+            exitSignal.signal()
+        }
         if params.streamStdin || params.tty {
             let stdin = Pipe()
             stdinPipe = stdin
@@ -7289,8 +7592,8 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        Task.detached { [weak self] in
-            await self?.finish(stdout: stdout, stderr: stderr)
+        Task.detached { [self] in
+            await finish(stdout: stdout, stderr: stderr)
         }
     }
 
@@ -7355,7 +7658,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
                 terminate()
             }
         }
-        process.waitUntilExit()
+        await exitSignal.wait()
         let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
         let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
         if params.streamStdoutStderr {
@@ -8295,10 +8598,12 @@ final class CodexAppServerMessageProcessor {
                         result: CodexAppServer.externalAgentConfigDetectResult(params: params)
                     )
                 case "externalAgentConfig/import":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.externalAgentConfigImportResult(params: params)
+                    let result = try CodexAppServer.externalAgentConfigImportResult(
+                        params: params,
+                        configuration: configuration
                     )
+                    response = CodexAppServer.responseObject(id: id, result: result.result)
+                    notifications.append(contentsOf: result.notifications)
                 case "skills/list":
                     response = CodexAppServer.responseObject(
                         id: id,
