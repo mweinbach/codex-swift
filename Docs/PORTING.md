@@ -651,6 +651,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for string `.join(...)`, `.startswith(...)`, and `.endswith(...)` method calls across supported policy literals and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string normalization methods
   - Added Swift execpolicy parser support for string `.lower()`, `.upper()`, `.strip(...)`, `.lstrip(...)`, `.rstrip(...)`, and separator-based `.split(...)` method calls across supported policy literals, helper returns, list/loop bodies, and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string replacement method
+  - Added Swift execpolicy parser support for string `.replace(old, new[, count])` calls across supported policy literals, including limited replacements, zero-count no-ops, and empty-search-string insertion behavior.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list-comprehension filters
   - Added Swift execpolicy parser support for simple list-comprehension `if` filters evaluated with the same supported condition expressions as top-level branches.
 - `codex-rs/execpolicy/src/parser.rs` Starlark conditional expressions

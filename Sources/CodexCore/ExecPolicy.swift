@@ -2644,7 +2644,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace"].contains(methodName)
         else {
             return nil
         }
@@ -2705,6 +2705,26 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             return .array(receiver.components(separatedBy: separator).map(ConfigValue.string))
+        case "replace":
+            guard rawArguments.count == 2 || rawArguments.count == 3 else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let oldValue = try parseStringMethodArgument(
+                rawArguments[0],
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+            let newValue = try parseStringMethodArgument(
+                rawArguments[1],
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+            let count = try rawArguments.count == 3
+                ? parseStarlarkInteger(rawArguments[2], constants: constants, functions: functions, expression: text)
+                : -1
+            return .string(replacingStarlarkString(receiver, oldValue: oldValue, newValue: newValue, count: count))
         default:
             return nil
         }
@@ -2826,6 +2846,19 @@ public final class PolicyParser {
         return value
     }
 
+    private static func parseStringMethodArgument(
+        _ rawArgument: String,
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> String {
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .string(value) = argument else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return value
+    }
+
     private static func trimmingStarlarkString(
         _ string: String,
         characters: String?,
@@ -2856,6 +2889,65 @@ public final class PolicyParser {
             }
         }
         return String(string[lowerBound..<upperBound])
+    }
+
+    private static func replacingStarlarkString(
+        _ string: String,
+        oldValue: String,
+        newValue: String,
+        count: Int
+    ) -> String {
+        guard count != 0 else {
+            return string
+        }
+        if oldValue.isEmpty {
+            return replacingEmptyStarlarkString(string, newValue: newValue, count: count)
+        }
+        guard count > 0 else {
+            return string.replacingOccurrences(of: oldValue, with: newValue)
+        }
+
+        var result = ""
+        var cursor = string.startIndex
+        var remaining = count
+        while remaining > 0,
+              let range = string.range(of: oldValue, range: cursor..<string.endIndex) {
+            result += string[cursor..<range.lowerBound]
+            result += newValue
+            cursor = range.upperBound
+            remaining -= 1
+        }
+        result += string[cursor..<string.endIndex]
+        return result
+    }
+
+    private static func replacingEmptyStarlarkString(_ string: String, newValue: String, count: Int) -> String {
+        let unlimited = count < 0
+        var remaining = count
+        var result = ""
+
+        func shouldInsert() -> Bool {
+            unlimited || remaining > 0
+        }
+
+        func recordInsertion() {
+            if !unlimited {
+                remaining -= 1
+            }
+        }
+
+        if shouldInsert() {
+            result += newValue
+            recordInsertion()
+        }
+        for character in string {
+            result.append(character)
+            if shouldInsert() {
+                result += newValue
+                recordInsertion()
+            }
+        }
+        return result
     }
 
     private static func topLevelMethodDotIndex(in text: String) -> String.Index? {

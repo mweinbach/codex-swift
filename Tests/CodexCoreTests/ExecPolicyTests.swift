@@ -1935,6 +1935,38 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringReplaceMethod() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "pnpm--install".replace("--", "-", 1).split("-")
+        HOST = "api github com".replace(" ", ".")
+        PATH = "/opt/codex/bin/git".replace("/opt/codex", "/usr")
+        LIMITED = "x-x-x".replace("x", TOOL, 2)
+        EMPTY_OLD = "".replace("", TOOL, 1)
+        UNCHANGED = "status".replace("s", "x", 0)
+
+        prefix_rule([COMMAND[0], COMMAND[1]], "prompt", justification = LIMITED)
+        prefix_rule([EMPTY_OLD, UNCHANGED], "allow")
+        network_rule(HOST, "https", "allow")
+        host_executable(TOOL, [PATH])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .prompt,
+                justification: "git-git-x"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(pattern: PrefixPattern(first: "git", rest: [.single("status")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkConditionalExpressions() throws {
         let policy = try parsePolicy("""
         USE_GIT = False
