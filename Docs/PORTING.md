@@ -375,7 +375,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cloud-tasks-client/src/api.rs` and `codex-rs/cloud-tasks-client/src/mock.rs`
   - cloud task IDs/statuses/summaries, apply outcome/error wire behavior, mock task rows, diff-count summaries, task text/messages, sibling attempts, and local create/apply/preflight behavior
 - `codex-rs/cloud-tasks-client/src/http.rs` plus task-detail helpers from `codex-rs/backend-client`
-  - ChatGPT backend URL normalization, `/wham` versus `/api/codex` task paths, auth/user-agent request construction, list/detail/create/sibling response mapping, task text/error extraction, unified-diff validation, injectable git-apply outcome mapping, and Rust-matching apply error-log status/patch summaries
+  - ChatGPT backend URL normalization, `/wham` versus `/api/codex` task paths, auth/user-agent request construction, list/detail/create/sibling response mapping, task list OpenAPI required-field decoding, task text/error extraction, unified-diff validation, injectable git-apply outcome mapping, and Rust-matching apply error-log status/patch summaries
 - `codex-rs/cloud-tasks-client/src/http.rs` apply bridge to `codex-rs/utils/git/src/apply.rs`
   - concrete Swift `CodexGit` adapter for cloud task apply/preflight injection without making `CodexCore` depend on the git target
 - `codex-rs/cli/src/main.rs` apply dispatch through cloud task HTTP client
@@ -709,6 +709,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `min(...)` and `max(...)` over supported comparable positional values or single iterables, including `key = len` and supported helper-function key callables for generated rule values.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric absolute-value builtin
   - Added Swift execpolicy parser support for `abs(...)` over supported integer and floating-point policy expressions, covering generated rule values, hosts, and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark numeric sum builtin
+  - Added Swift execpolicy parser support for `sum(...)` over supported iterable numeric expressions with optional positional or keyword `start`, covering generated rule values, hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark float conversion builtin
   - Added Swift execpolicy parser support for `float(...)` over supported string, integer, floating-point, boolean, and zero-argument policy expressions, covering generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string hash builtin

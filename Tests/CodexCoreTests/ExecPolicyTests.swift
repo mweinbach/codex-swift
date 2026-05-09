@@ -3270,6 +3270,34 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkSumBuiltin() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COUNTS = [1, 2, 3]
+        TOTAL = sum(COUNTS)
+        OFFSET_TOTAL = sum([0.5, 1.5], start = TOTAL)
+        POSITIONAL_START = sum([2, 3], TOTAL)
+
+        prefix_rule([TOOL, "status-" + str(TOTAL)], "allow", justification = "sum " + str(sum([4, 5])))
+        network_rule("api" + str(int(OFFSET_TOTAL)) + ".github.com", "https", "allow")
+        network_rule("pos" + str(POSITIONAL_START) + ".github.com", "https", "allow")
+        host_executable(TOOL, ["/opt/" + str(sum([])) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status-6")]),
+                decision: .allow,
+                justification: "sum 9"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api8.github.com", protocol: .https, decision: .allow),
+            NetworkRule(host: "pos11.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/0/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkHashBuiltin() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

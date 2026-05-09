@@ -586,6 +586,8 @@ private struct CloudTaskListResponse: Decodable, Equatable, Sendable {
 private struct CloudTaskListItem: Decodable, Equatable, Sendable {
     let id: String
     let title: String
+    let archived: Bool
+    let hasUnreadTurn: Bool
     let updatedAt: Double?
     let taskStatusDisplay: [String: JSONValue]?
     let pullRequests: [JSONValue]?
@@ -593,6 +595,8 @@ private struct CloudTaskListItem: Decodable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
         case title
+        case archived
+        case hasUnreadTurn = "has_unread_turn"
         case updatedAt = "updated_at"
         case taskStatusDisplay = "task_status_display"
         case pullRequests = "pull_requests"

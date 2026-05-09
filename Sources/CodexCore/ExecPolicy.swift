@@ -4852,7 +4852,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "dir", "enumerate", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "dir", "enumerate", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "sum", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -4947,6 +4947,13 @@ public final class PolicyParser {
                 constants: constants,
                 functions: functions,
                 selectsMinimum: false
+            )
+        case "sum":
+            return try parseStarlarkSumCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
             )
         case "abs":
             return try parseStarlarkAbsoluteValueCall(
@@ -5380,6 +5387,56 @@ public final class PolicyParser {
             }
         }
         return selected
+    }
+
+    private static func parseStarlarkSumCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        var positionalArguments: [String] = []
+        var rawStart: String?
+        var sawKeywordArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawKeywordArgument = true
+                let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard rawName == "start", rawStart == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                rawStart = rawValue
+                continue
+            }
+
+            guard !sawKeywordArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            positionalArguments.append(rawArgument)
+        }
+
+        guard (1...2).contains(positionalArguments.count),
+              rawStart == nil || positionalArguments.count == 1
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let rawIterable = positionalArguments[0]
+        if positionalArguments.count == 2 {
+            rawStart = positionalArguments[1]
+        }
+        let iterable = try parsePolicyLiteral(rawIterable, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: expression)
+        var result = try rawStart.map {
+            try parsePolicyLiteral($0, constants: constants, functions: functions)
+        } ?? .integer(0)
+        for item in items {
+            result = try evaluateStarlarkAddition(result, item, expression: expression)
+        }
+        return result
     }
 
     private static func starlarkComparableKey(

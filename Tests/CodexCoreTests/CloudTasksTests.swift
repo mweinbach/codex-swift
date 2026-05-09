@@ -207,6 +207,8 @@ final class CloudTasksTests: XCTestCase {
                 {
                   "id": "T-9000",
                   "title": "Review branch",
+                  "archived": false,
+                  "has_unread_turn": true,
                   "updated_at": 1778243696.25,
                   "task_status_display": {
                     "environment_label": "Env A",
@@ -276,6 +278,35 @@ final class CloudTasksTests: XCTestCase {
             pagedTransport.executeRequests.first?.url,
             "https://chatgpt.com/backend-api/wham/tasks/list?limit=7&task_filter=current&cursor=before&environment_id=env-B"
         )
+    }
+
+    func testHTTPClientListTasksRequiresRustOpenAPIBooleanFields() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            {
+              "items": [
+                {
+                  "id": "T-missing",
+                  "title": "Missing required booleans"
+                }
+              ]
+            }
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com/",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+
+        let result = await client.listTasks(environment: nil, limit: 20, cursor: nil)
+
+        guard case let .failure(error) = result else {
+            return XCTFail("expected Rust-style missing-field decode failure")
+        }
+        XCTAssertTrue(String(describing: error).contains("keyNotFound"))
+        XCTAssertTrue(String(describing: error).contains("archived"))
     }
 
     func testHTTPClientListEnvironmentsMergesRepoAndGlobalRows() async throws {
