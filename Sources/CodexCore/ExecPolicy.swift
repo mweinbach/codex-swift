@@ -1313,18 +1313,13 @@ public final class PolicyParser {
             .filter { !$0.isEmpty }
         switch methodName {
         case "update":
-            guard rawArguments.count == 1,
-                  let rawArgument = rawArguments.first
-            else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
-            guard case let .table(updateItems) = argument else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            for (key, value) in updateItems {
-                items[key] = value
-            }
+            try applyStarlarkDictUpdateArguments(
+                rawArguments,
+                to: &items,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
         case "clear":
             guard rawArguments.isEmpty else {
                 throw ConfigOverrideError.invalidLiteral(trimmed)
@@ -1345,6 +1340,58 @@ public final class PolicyParser {
         }
         constants[receiverText] = .table(items)
         return true
+    }
+
+    private static func applyStarlarkDictUpdateArguments(
+        _ rawArguments: [String],
+        to items: inout [String: ConfigValue],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
+        var sawKeywordArgument = false
+        var consumedPositionalArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                let rawKey = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard isStarlarkIdentifier(rawKey), !rawValue.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                sawKeywordArgument = true
+                items[rawKey] = try parsePolicyLiteral(rawValue, constants: constants, functions: functions)
+                continue
+            }
+
+            guard !sawKeywordArgument, !consumedPositionalArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            consumedPositionalArgument = true
+            guard rawArgument != "None" else {
+                continue
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            switch argument {
+            case let .table(updateItems):
+                for (key, value) in updateItems {
+                    items[key] = value
+                }
+            case let .array(pairs):
+                for pair in pairs {
+                    guard case let .array(pairItems) = pair,
+                          pairItems.count == 2,
+                          case let .string(key) = pairItems[0]
+                    else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    items[key] = pairItems[1]
+                }
+            default:
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+        }
     }
 
     private static func parseStarlarkDictPopAssignment(

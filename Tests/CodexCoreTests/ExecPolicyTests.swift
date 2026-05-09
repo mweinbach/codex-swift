@@ -1795,6 +1795,91 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkDictUpdateArgumentForms() throws {
+        let policy = try parsePolicy("""
+        SETTINGS = {"git": {"command": "status", "decision": "prompt"}}
+        SETTINGS.update()
+        SETTINGS.update(None, pnpm = {"command": "install", "decision": "allow"})
+        SETTINGS.update([
+            ("hg", {"command": "status", "decision": "forbidden"}),
+            ["jj", {"command": "log", "decision": "allow"}],
+        ])
+        SETTINGS.update({"git": {"command": "diff", "decision": "allow"}}, node = {"command": "test", "decision": "prompt"})
+
+        def with_extra(settings):
+            settings.update([("bun", {"command": "test", "decision": "allow"})], deno = {"command": "fmt", "decision": "prompt"})
+            return settings
+
+        EXTRA = with_extra({})
+        SETTINGS.update(EXTRA)
+
+        for tool in sorted(SETTINGS.keys()):
+            config = SETTINGS[tool]
+            prefix_rule([tool, config["command"]], config["decision"], justification = "dict update " + tool)
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .allow,
+                justification: "dict update git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .allow,
+                justification: "dict update pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.single("status")]),
+                decision: .forbidden,
+                justification: "dict update hg"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "dict update jj"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "node"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "node", rest: [.single("test")]),
+                decision: .prompt,
+                justification: "dict update node"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "bun"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "bun", rest: [.single("test")]),
+                decision: .allow,
+                justification: "dict update bun"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "deno"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "deno", rest: [.single("fmt")]),
+                decision: .prompt,
+                justification: "dict update deno"
+            )
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        SETTINGS.update(a = "ok", {"b": "bad"})
+        prefix_rule(["git", "status"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        SETTINGS.update([("ok", "value", "extra")])
+        prefix_rule(["git", "status"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkCollectionRemovalMethods() throws {
         let policy = try parsePolicy("""
         COMMANDS = [
