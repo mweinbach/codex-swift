@@ -710,6 +710,31 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertTrue(object["encrypted_content"] is NSNull)
     }
 
+    func testDecodesReasoningMissingIDLikeRustDefault() throws {
+        let json = #"""
+        {
+            "type": "reasoning",
+            "summary": [
+                {"type": "summary_text", "text": "Step 1"}
+            ]
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .reasoning(id: "", summary: [.summaryText(text: "Step 1")]))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "reasoning",
+            "summary": [
+                [
+                    "type": "summary_text",
+                    "text": "Step 1"
+                ]
+            ],
+            "encrypted_content": NSNull()
+        ])
+    }
+
     func testResponseItemSerializesRustNullOptionals() throws {
         try XCTAssertJSONObjectEqual(ResponseItem.reasoning(id: "rs_1", summary: []), [
             "type": "reasoning",

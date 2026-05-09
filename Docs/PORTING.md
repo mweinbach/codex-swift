@@ -489,6 +489,8 @@ Source baseline inspected for this scaffold:
   - `ResponseInputItem.mcpToolCallOutput` now serializes and decodes Rust's `output` field for `CallToolResult` while retaining a decode-only `result` fallback for older Swift-authored artifacts.
 - `codex-rs/protocol/src/models.rs` response item null optionals
   - `ResponseItem` now preserves Rust's non-skipped optional fields by serializing `null` for missing reasoning `encrypted_content` and local-shell/tool-search `call_id` values, while continuing to omit optionals Rust marks with `skip_serializing_if`.
+- `codex-rs/protocol/src/models.rs` reasoning item ID default
+  - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
 
 ## Known Gaps
 

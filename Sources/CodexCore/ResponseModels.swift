@@ -795,11 +795,10 @@ public enum ResponseItem: Equatable, Codable, Sendable {
                 phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase)
             )
         case "reasoning":
-            if let id = try container.decodeIfPresent(String.self, forKey: .id),
-               let summary = try? container.decode([ReasoningItemReasoningSummary].self, forKey: .summary)
+            if let summary = try? container.decode([ReasoningItemReasoningSummary].self, forKey: .summary)
             {
                 self = .reasoning(
-                    id: id,
+                    id: try container.decodeIfPresent(String.self, forKey: .id) ?? "",
                     summary: summary,
                     content: try container.decodeIfPresent([ReasoningItemContent].self, forKey: .content),
                     encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent)
