@@ -6890,6 +6890,66 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(enabledHooks[0]["enabled"] as? Bool, true)
     }
 
+    func testConfigBatchWriteUpdatesHookTrustStatus() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let configFile = codexHome.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        [hooks]
+
+        [[hooks.UserPromptSubmit]]
+
+        [[hooks.UserPromptSubmit.hooks]]
+        type = "command"
+        command = "python3 /tmp/listed-hook.py"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let initial = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let initialResult = try XCTUnwrap(initial["result"] as? [String: Any])
+        let initialData = try XCTUnwrap(initialResult["data"] as? [[String: Any]])
+        let initialHooks = try XCTUnwrap(initialData[0]["hooks"] as? [[String: Any]])
+        let hookKey = try XCTUnwrap(initialHooks[0]["key"] as? String)
+        let initialHash = try XCTUnwrap(initialHooks[0]["currentHash"] as? String)
+        XCTAssertEqual(initialHooks[0]["trustStatus"] as? String, "untrusted")
+
+        let trust = try appServerResponse(
+            #"{"id":2,"method":"config/batchWrite","params":{"edits":[{"keyPath":"hooks.state","value":{"\#(hookKey)":{"trusted_hash":"\#(initialHash)"}},"mergeStrategy":"upsert"}],"reloadUserConfig":true}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((trust["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let trusted = try appServerResponse(
+            #"{"id":3,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let trustedResult = try XCTUnwrap(trusted["result"] as? [String: Any])
+        let trustedData = try XCTUnwrap(trustedResult["data"] as? [[String: Any]])
+        let trustedHooks = try XCTUnwrap(trustedData[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(trustedHooks[0]["key"] as? String, hookKey)
+        XCTAssertEqual(trustedHooks[0]["currentHash"] as? String, initialHash)
+        XCTAssertEqual(trustedHooks[0]["trustStatus"] as? String, "trusted")
+
+        let modify = try appServerResponse(
+            #"{"id":4,"method":"config/batchWrite","params":{"edits":[{"keyPath":"hooks.UserPromptSubmit","value":[{"hooks":[{"type":"command","command":"python3 /tmp/listed-hook.py","statusMessage":"modified hook"}]}],"mergeStrategy":"replace"}],"reloadUserConfig":true}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((modify["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let modified = try appServerResponse(
+            #"{"id":5,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let modifiedResult = try XCTUnwrap(modified["result"] as? [String: Any])
+        let modifiedData = try XCTUnwrap(modifiedResult["data"] as? [[String: Any]])
+        let modifiedHooks = try XCTUnwrap(modifiedData[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(modifiedHooks[0]["key"] as? String, hookKey)
+        XCTAssertNotEqual(modifiedHooks[0]["currentHash"] as? String, initialHash)
+        XCTAssertEqual(modifiedHooks[0]["trustStatus"] as? String, "modified")
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """

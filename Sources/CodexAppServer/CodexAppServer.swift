@@ -10256,7 +10256,10 @@ public enum CodexAppServer {
     }
 
     private static func hookTrustStatus(currentHash: String, state: HookState?) -> String {
-        state?.trustedHash == currentHash ? "trusted" : "untrusted"
+        guard let trustedHash = state?.trustedHash else {
+            return "untrusted"
+        }
+        return trustedHash == currentHash ? "trusted" : "modified"
     }
 
     private static func configHookObjects(
