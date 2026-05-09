@@ -9,6 +9,51 @@ final class ApprovalsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ExecPolicyAmendment.self, from: Data(encoded!.utf8)), amendment)
     }
 
+    func testCommandPrefixFormatterSortsByRustOrder() {
+        let prefixes = [
+            ["b", "zz"],
+            ["aa"],
+            ["b"],
+            ["a", "b", "c"],
+            ["a"],
+            ["b", "a"]
+        ]
+
+        XCTAssertEqual(
+            CommandPrefixFormatter.formatAllowPrefixes(prefixes),
+            """
+            - ["a"]
+            - ["b"]
+            - ["aa"]
+            - ["b", "a"]
+            - ["b", "zz"]
+            - ["a", "b", "c"]
+            """
+        )
+    }
+
+    func testCommandPrefixFormatterLimitsRenderedPrefixesLikeRust() {
+        let prefixes = (0..<(CommandPrefixFormatter.maxRenderedPrefixes + 5)).map { index in
+            [String(format: "%03d", index)]
+        }
+
+        let output = CommandPrefixFormatter.formatAllowPrefixes(prefixes)
+        XCTAssertEqual(output?.hasSuffix(CommandPrefixFormatter.truncatedMarker), true)
+        XCTAssertEqual(output?.split(separator: "\n").count, CommandPrefixFormatter.maxRenderedPrefixes + 1)
+    }
+
+    func testCommandPrefixFormatterLimitsOutputTextLikeRust() {
+        let prefixes = (0..<200).map { index in
+            [String(format: "tool-%03d", index), String(repeating: "x", count: 500)]
+        }
+
+        let output = CommandPrefixFormatter.formatAllowPrefixes(prefixes)
+        XCTAssertLessThanOrEqual(
+            output?.count ?? 0,
+            CommandPrefixFormatter.maxAllowPrefixTextBytes + CommandPrefixFormatter.truncatedMarker.count
+        )
+    }
+
     func testReviewDecisionUnitVariantsUseRustSnakeCaseStrings() throws {
         let cases: [(ReviewDecision, String)] = [
             (.approved, #""approved""#),

@@ -18,6 +18,56 @@ public struct ExecPolicyAmendment: Equatable, Codable, Sendable {
     }
 }
 
+public enum CommandPrefixFormatter {
+    public static let maxRenderedPrefixes = 100
+    public static let maxAllowPrefixTextBytes = 5_000
+    public static let truncatedMarker = "...\n[Some commands were truncated]"
+
+    public static func formatAllowPrefixes(_ prefixes: [[String]]) -> String? {
+        var truncated = prefixes.count > maxRenderedPrefixes
+        let sorted = prefixes.sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count < rhs.count
+            }
+
+            let lhsCombinedLength = lhs.reduce(0) { $0 + $1.count }
+            let rhsCombinedLength = rhs.reduce(0) { $0 + $1.count }
+            if lhsCombinedLength != rhsCombinedLength {
+                return lhsCombinedLength < rhsCombinedLength
+            }
+
+            return lhs.lexicographicallyPrecedes(rhs)
+        }
+
+        var output = sorted
+            .prefix(maxRenderedPrefixes)
+            .map { "- \(renderCommandPrefix($0))" }
+            .joined(separator: "\n")
+
+        if output.count > maxAllowPrefixTextBytes {
+            truncated = true
+            let endIndex = output.index(output.startIndex, offsetBy: maxAllowPrefixTextBytes)
+            output = String(output[..<endIndex])
+        }
+
+        return truncated ? output + truncatedMarker : output
+    }
+
+    private static func renderCommandPrefix(_ prefix: [String]) -> String {
+        let tokens = prefix.map(jsonString).joined(separator: ", ")
+        return "[\(tokens)]"
+    }
+
+    private static func jsonString(_ value: String) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8)
+        else {
+            return String(reflecting: value)
+        }
+        return encoded
+    }
+}
+
 public enum NetworkPolicyRuleAction: String, Codable, Equatable, Sendable {
     case allow
     case deny
