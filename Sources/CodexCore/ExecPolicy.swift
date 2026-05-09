@@ -2403,6 +2403,15 @@ public final class PolicyParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let base = try parsePolicyLiteral(baseText, constants: constants, functions: functions)
+        if indexText.contains(":") {
+            return try parseStarlarkSliceExpression(
+                base,
+                indexText: indexText,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+        }
         switch base {
         case let .array(items):
             let itemIndex = try parseStarlarkInteger(
@@ -2427,6 +2436,129 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
+    }
+
+    private static func parseStarlarkSliceExpression(
+        _ base: ConfigValue,
+        indexText: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> ConfigValue {
+        let pieces = splitTopLevel(indexText, separator: ":")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard (2...3).contains(pieces.count) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let start = try parseOptionalStarlarkInteger(
+            pieces[0],
+            constants: constants,
+            functions: functions,
+            expression: expression
+        )
+        let stop = try parseOptionalStarlarkInteger(
+            pieces[1],
+            constants: constants,
+            functions: functions,
+            expression: expression
+        )
+        let step: Int?
+        if pieces.count == 3 {
+            step = try parseOptionalStarlarkInteger(
+                pieces[2],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+        } else {
+            step = nil
+        }
+
+        switch base {
+        case let .array(items):
+            let indexes = try starlarkSliceIndexes(
+                count: items.count,
+                start: start,
+                stop: stop,
+                step: step,
+                expression: expression
+            )
+            return .array(indexes.map { items[$0] })
+        case let .string(value):
+            let characters = Array(value)
+            let indexes = try starlarkSliceIndexes(
+                count: characters.count,
+                start: start,
+                stop: stop,
+                step: step,
+                expression: expression
+            )
+            return .string(String(indexes.map { characters[$0] }))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func parseOptionalStarlarkInteger(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> Int? {
+        guard !text.isEmpty else {
+            return nil
+        }
+        return try parseStarlarkInteger(text, constants: constants, functions: functions, expression: expression)
+    }
+
+    private static func starlarkSliceIndexes(
+        count: Int,
+        start rawStart: Int?,
+        stop rawStop: Int?,
+        step rawStep: Int?,
+        expression: String
+    ) throws -> [Int] {
+        let step = rawStep ?? 1
+        guard step != 0 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        var indexes: [Int] = []
+        if step > 0 {
+            let lower = normalizedPositiveSliceBound(rawStart, count: count, defaultValue: 0)
+            let upper = normalizedPositiveSliceBound(rawStop, count: count, defaultValue: count)
+            var index = lower
+            while index < upper {
+                indexes.append(index)
+                index += step
+            }
+        } else {
+            let lower = normalizedNegativeSliceBound(rawStart, count: count, defaultValue: count - 1)
+            let upper = normalizedNegativeSliceBound(rawStop, count: count, defaultValue: -1)
+            var index = lower
+            while index > upper {
+                indexes.append(index)
+                index += step
+            }
+        }
+        return indexes
+    }
+
+    private static func normalizedPositiveSliceBound(_ value: Int?, count: Int, defaultValue: Int) -> Int {
+        var resolved = value ?? defaultValue
+        if resolved < 0 {
+            resolved += count
+        }
+        return min(max(resolved, 0), count)
+    }
+
+    private static func normalizedNegativeSliceBound(_ value: Int?, count: Int, defaultValue: Int) -> Int {
+        var resolved = value ?? defaultValue
+        if resolved < 0, value != nil {
+            resolved += count
+        }
+        return min(max(resolved, -1), count - 1)
     }
 
     private static func parseStarlarkInteger(
