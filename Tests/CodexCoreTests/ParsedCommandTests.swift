@@ -32,6 +32,14 @@ final class ParsedCommandTests: XCTestCase {
         )
     }
 
+    func testShlexJoinNulFallbackMatchesRust() {
+        XCTAssertEqual(shlexJoin(["cat", "bad\0arg"]), "<command included NUL byte>")
+        XCTAssertEqual(CommandParser.shlexJoin(["cat", "bad\0arg"]), "<command included NUL byte>")
+        XCTAssertEqual(parseCommand(["tool", "bad\0arg"]), [
+            .unknown(cmd: "<command included NUL byte>")
+        ])
+    }
+
     func testGitStatusIsUnknown() {
         XCTAssertEqual(parseCommand(["git", "status"]), [
             .unknown(cmd: "git status")

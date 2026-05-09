@@ -550,6 +550,8 @@ Source baseline inspected for this scaffold:
   - aligned Swift small-formatting detection with Rust `sed_read_path` so `sed -n -e <range> <file>` and `sed -n <range> -- <file>` survive pipeline helper filtering as file reads.
 - `codex-rs/shell-command/src/parse_command.rs` byte-count tail helper parity
   - covered Rust-style filtering for `tail -c <count>` and `tail -c +<offset>` pipeline helpers so upstream list/search/read summaries are preserved.
+- `codex-rs/shell-command/src/parse_command.rs` shell command joining
+  - `shlexJoin` now returns Rust's `<command included NUL byte>` fallback when a token contains a NUL byte instead of attempting to quote an unrepresentable shell word.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
 - `codex-rs/shell-command/src/bash.rs` word-only shell parser rejection

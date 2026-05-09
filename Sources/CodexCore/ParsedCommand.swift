@@ -71,7 +71,10 @@ public enum ParsedCommand: Equatable, Codable, Sendable {
 }
 
 public func shlexJoin(_ tokens: [String]) -> String {
-    tokens.map(shellQuote).joined(separator: " ")
+    if tokens.contains(where: { $0.contains("\0") }) {
+        return "<command included NUL byte>"
+    }
+    return tokens.map(shellQuote).joined(separator: " ")
 }
 
 public func parseCommand(_ command: [String]) -> [ParsedCommand] {
@@ -91,7 +94,10 @@ private func dedupeParsed(_ parsed: [ParsedCommand]) -> [ParsedCommand] {
 
 public enum CommandParser {
     public static func shlexJoin(_ tokens: [String]) -> String {
-        tokens.map(shellQuote).joined(separator: " ")
+        if tokens.contains(where: { $0.contains("\0") }) {
+            return "<command included NUL byte>"
+        }
+        return tokens.map(shellQuote).joined(separator: " ")
     }
 
     public static func parseCommand(_ command: [String]) -> [ParsedCommand] {
