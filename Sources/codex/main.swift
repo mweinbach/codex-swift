@@ -685,7 +685,7 @@ private func runNonInteractiveExec(
         cliOverrides: configOverrides,
         environment: environment
     )
-    let hookHandlers = HookConfig.configuredHandlers(from: configStack, environment: environment)
+    let hookHandlers = HookConfig.configuredHandlers(from: configStack, codexHome: codexHome, environment: environment)
     try await CodexAuthStorage.enforceLoginRestrictions(
         codexHome: codexHome,
         config: settings,

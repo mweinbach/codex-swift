@@ -101,6 +101,122 @@ final class HookConfigTests: XCTestCase {
         ])
     }
 
+    func testConfiguredHandlersIncludeTrustedEnabledPluginHooks() throws {
+        let codexHome = try HookConfigTemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let manifestRoot = pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try #"{"name":"demo"}"#.write(
+            to: manifestRoot.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "echo ${NAME}",
+                    "timeout": 7,
+                    "statusMessage": "running plugin hook"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let key = HookConfig.pluginHookKey(
+            pluginID: "demo@test",
+            sourcePath: "hooks/hooks.json",
+            eventName: .preToolUse,
+            groupIndex: 0,
+            handlerIndex: 0
+        )
+        let hash = HookConfig.commandHookHash(
+            eventName: .preToolUse,
+            matcher: "Bash",
+            command: "echo ${NAME}",
+            timeoutSec: 7,
+            statusMessage: "running plugin hook"
+        )
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(name: .user(file: try path(codexHome.url.appendingPathComponent("config.toml").path)), config: .table([
+                "features": .table([
+                    "hooks": .bool(true),
+                    "plugins": .bool(true),
+                    "plugin_hooks": .bool(true)
+                ]),
+                "plugins": .table([
+                    "demo@test": .table(["enabled": .bool(true)])
+                ]),
+                "hooks": .table([
+                    "state": .table([
+                        key: .table(["trusted_hash": .string(hash)])
+                    ])
+                ])
+            ]))
+        ])
+
+        let handlers = HookConfig.configuredHandlers(
+            from: stack,
+            codexHome: codexHome.url,
+            environment: ["NAME": "swift"]
+        )
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .preToolUse,
+                matcher: "Bash",
+                command: "echo swift",
+                timeoutSec: 7,
+                statusMessage: "running plugin hook",
+                sourcePath: try path(hooksRoot.appendingPathComponent("hooks.json").standardizedFileURL.path),
+                source: .plugin,
+                displayOrder: 0
+            )
+        ])
+    }
+
+    func testConfiguredHandlersSkipUntrustedPluginHooks() throws {
+        let codexHome = try HookConfigTemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "echo no"}]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(name: .user(file: try path(codexHome.url.appendingPathComponent("config.toml").path)), config: .table([
+                "features": .table([
+                    "hooks": .bool(true),
+                    "plugins": .bool(true),
+                    "plugin_hooks": .bool(true)
+                ]),
+                "plugins": .table([
+                    "demo@test": .table(["enabled": .bool(true)])
+                ])
+            ]))
+        ])
+
+        XCTAssertEqual(HookConfig.configuredHandlers(from: stack, codexHome: codexHome.url), [])
+    }
+
     private func hookConfig(
         command: String,
         timeoutSec: UInt64 = 600,
@@ -148,5 +264,19 @@ final class HookConfigTests: XCTestCase {
 
     private func path(_ value: String) throws -> AbsolutePath {
         try AbsolutePath(absolutePath: value)
+    }
+}
+
+private final class HookConfigTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-hook-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }
