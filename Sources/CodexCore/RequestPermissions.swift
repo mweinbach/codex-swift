@@ -702,7 +702,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             .filter { $0.access.canRead }
             .filter { canReadPathWithCwd($0.path.path, cwd: cwd) }
             .map(\.path)
-        return Self.deduplicated(roots)
+        return Self.deduplicated(roots, normalizeEffectivePaths: true)
     }
 
     public func getWritableRootsWithCwd(_ cwd: String) -> [WritableRoot] {
@@ -718,8 +718,13 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             .filter { canWritePathWithCwd($0.path.path, cwd: cwd) }
             .map(\.path)
 
-        return Self.deduplicated(writableEntries).map { root in
-            let protectMissingDotCodex = Self.absolutePathForLegacyCwd(cwd) == root
+        return Self.deduplicated(writableEntries, normalizeEffectivePaths: true).map { root in
+            let preserveRawCarveoutPaths = root.parent != nil
+            let rawWritableRoots = writableEntries.filter {
+                Self.normalizeEffectiveAbsolutePath($0) == root
+            }
+            let protectMissingDotCodex = Self.absolutePathForLegacyCwd(cwd)
+                .map(Self.normalizeEffectiveAbsolutePath) == root
             var readOnlySubpaths = Self.defaultReadOnlySubpathsForWritableRoot(
                 root,
                 protectMissingDotCodex: protectMissingDotCodex
@@ -729,13 +734,35 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
 
             readOnlySubpaths.append(contentsOf: resolvedEntries.compactMap { entry in
                 guard !entry.access.canWrite,
-                      !canWritePathWithCwd(entry.path.path, cwd: cwd),
-                      entry.path != root,
-                      entry.path.isUnderOrEqual(root)
+                      !canWritePathWithCwd(entry.path.path, cwd: cwd)
                 else {
                     return nil
                 }
-                return entry.path
+
+                let effectivePath = Self.normalizeEffectiveAbsolutePath(entry.path)
+                if preserveRawCarveoutPaths {
+                    if entry.path == root {
+                        return nil
+                    }
+                    if entry.path.isUnderOrEqual(root) {
+                        return entry.path
+                    }
+                    for rawRoot in rawWritableRoots {
+                        guard let suffix = entry.path.path.pathSuffix(after: rawRoot.path),
+                              !suffix.isEmpty
+                        else {
+                            continue
+                        }
+                        return try? root.join(suffix)
+                    }
+                }
+
+                guard effectivePath != root,
+                      effectivePath.isUnderOrEqual(root)
+                else {
+                    return nil
+                }
+                return effectivePath
             })
 
             return WritableRoot(
@@ -756,7 +783,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             .filter { !canReadPathWithCwd($0.path.path, cwd: cwd) }
             .filter { root != $0.path }
             .map(\.path)
-        return Self.deduplicated(roots)
+        return Self.deduplicated(roots, normalizeEffectivePaths: true)
     }
 
     public func getUnreadableGlobsWithCwd(_ cwd: String) -> [String] {
@@ -1248,13 +1275,77 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
     }
 
-    private static func deduplicated(_ paths: [AbsolutePath]) -> [AbsolutePath] {
+    private static func deduplicated(
+        _ paths: [AbsolutePath],
+        normalizeEffectivePaths: Bool = false
+    ) -> [AbsolutePath] {
         var seen: Set<AbsolutePath> = []
         var result: [AbsolutePath] = []
-        for path in paths where seen.insert(path).inserted {
-            result.append(path)
+        for path in paths {
+            let dedupPath = normalizeEffectivePaths ? normalizeEffectiveAbsolutePath(path) : path
+            if seen.insert(dedupPath).inserted {
+                result.append(dedupPath)
+            }
         }
         return result
+    }
+
+    private static func normalizeEffectiveAbsolutePath(_ path: AbsolutePath) -> AbsolutePath {
+        let rawPath = path.path
+        for ancestor in path.ancestors {
+            guard fileExistsForSymlinkMetadata(atPath: ancestor.path),
+                  let normalizedAncestor = canonicalizePreservingSymlinks(ancestor),
+                  let suffix = rawPath.pathSuffix(after: ancestor.path),
+                  let normalizedPath = try? normalizedAncestor.join(suffix)
+            else {
+                continue
+            }
+            return normalizedPath
+        }
+        return path
+    }
+
+    private static func canonicalizePreservingSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
+        let logical = path
+        let canonical = canonicalizeSymlinks(path) ?? logical
+        if shouldPreserveLogicalPath(logical), canonical != logical {
+            return logical
+        }
+        return canonical
+    }
+
+    private static func canonicalizeSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
+        var current = "/"
+        for component in path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init) {
+            let candidate = current == "/" ? "/\(component)" : "\(current)/\(component)"
+            if isSymbolicLink(atPath: candidate),
+               let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: candidate) {
+                if destination.hasPrefix("/") {
+                    current = (try? AbsolutePath(absolutePath: destination))?.path ?? destination
+                } else {
+                    let parent = (candidate as NSString).deletingLastPathComponent
+                    let base = parent.isEmpty ? "/" : parent
+                    current = (try? AbsolutePath.resolve(destination, against: base))?.path ?? candidate
+                }
+            } else {
+                current = candidate
+            }
+        }
+        return try? AbsolutePath(absolutePath: current)
+    }
+
+    private static func shouldPreserveLogicalPath(_ path: AbsolutePath) -> Bool {
+        path.ancestors.contains { ancestor in
+            isSymbolicLink(atPath: ancestor.path) && ancestor.parent?.parent != nil
+        }
+    }
+
+    private static func fileExistsForSymlinkMetadata(atPath path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path) || isSymbolicLink(atPath: path)
+    }
+
+    private static func isSymbolicLink(atPath path: String) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeSymbolicLink
     }
 
     private static let protectedMetadataPathNames = [
@@ -1347,6 +1438,16 @@ private extension AbsolutePath {
         path == root.path || path.hasPrefix(root.path.withTrailingSlash)
     }
 
+    var ancestors: [AbsolutePath] {
+        var result = [self]
+        var current = self
+        while let parent = current.parent {
+            result.append(parent)
+            current = parent
+        }
+        return result
+    }
+
     var pathComponentCount: Int {
         path.split(separator: "/", omittingEmptySubsequences: true).count
     }
@@ -1355,6 +1456,17 @@ private extension AbsolutePath {
 private extension String {
     var withTrailingSlash: String {
         hasSuffix("/") ? self : self + "/"
+    }
+
+    func pathSuffix(after ancestor: String) -> String? {
+        if self == ancestor {
+            return ""
+        }
+        let prefix = ancestor.withTrailingSlash
+        guard hasPrefix(prefix) else {
+            return nil
+        }
+        return String(dropFirst(prefix.count))
     }
 }
 

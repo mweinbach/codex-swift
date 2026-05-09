@@ -554,6 +554,8 @@ Source baseline inspected for this scaffold:
   - Added Swift semantic-signature comparison and direct-runtime-enforcement classification for filesystem policies.
 - `codex-rs/protocol/src/permissions.rs` stable special-path target matching
   - Matched Rust's cwd-independent target folding for `:root` versus `/` and `:slash_tmp` versus `/tmp`.
+- `codex-rs/protocol/src/permissions.rs` symlink-aware permission projections
+  - Matched Rust's effective path normalization for readable roots, unreadable roots, and writable-root masks, including top-level alias canonicalization and nested symlink preservation.
 - `codex-rs/protocol/src/models.rs` permission profile runtime permissions
   - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 - `codex-rs/protocol/src/permissions.rs` filesystem deny-read preservation

@@ -929,6 +929,9 @@ final class SubmissionTests: XCTestCase {
         let cwd = try AbsolutePath(absolutePath: temp.url.path)
         let docs = try cwd.join("docs")
         let docsPrivate = try docs.join("private")
+        let effectiveCwd = try rustEffectiveTopLevelAliasPath(cwd)
+        let effectiveDocs = try effectiveCwd.join("docs")
+        let effectiveDocsPrivate = try effectiveDocs.join("private")
         let rootDenyPolicy = FileSystemSandboxPolicy.restricted(entries: [
             FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .none),
             FileSystemSandboxEntry(path: .path(docs.path), access: .read)
@@ -941,11 +944,71 @@ final class SubmissionTests: XCTestCase {
             FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
         ])
 
-        XCTAssertEqual(rootDenyPolicy.getReadableRootsWithCwd(cwd.path), [docs])
+        XCTAssertEqual(rootDenyPolicy.getReadableRootsWithCwd(cwd.path), [effectiveDocs])
         XCTAssertEqual(rootDenyPolicy.getUnreadableRootsWithCwd(cwd.path), [])
-        XCTAssertEqual(nestedDenyPolicy.getUnreadableRootsWithCwd(cwd.path), [docsPrivate])
+        XCTAssertEqual(nestedDenyPolicy.getUnreadableRootsWithCwd(cwd.path), [effectiveDocsPrivate])
         XCTAssertEqual(fullReadPolicy.getReadableRootsWithCwd(cwd.path), [])
         XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getUnreadableRootsWithCwd(cwd.path), [])
+    }
+
+    func testFileSystemSandboxPolicyProjectionsNormalizeTopLevelAliasesLikeRust() throws {
+        guard let tmpDestination = try? FileManager.default.destinationOfSymbolicLink(atPath: "/tmp") else {
+            throw XCTSkip("/tmp is not a top-level symlink on this platform")
+        }
+        let effectiveTmp = tmpDestination.hasPrefix("/") ? tmpDestination : "/" + tmpDestination
+        let rawRootURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("codex-swift-permissions-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rawRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rawRootURL) }
+
+        let rawRoot = try AbsolutePath(absolutePath: rawRootURL.path)
+        let rawPrivate = try rawRoot.join("private")
+        let effectiveRoot = try AbsolutePath.resolve(rawRootURL.lastPathComponent, against: effectiveTmp)
+        let effectivePrivate = try effectiveRoot.join("private")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(rawRoot.path), access: .write),
+            FileSystemSandboxEntry(path: .path(rawPrivate.path), access: .none)
+        ])
+
+        XCTAssertEqual(policy.getReadableRootsWithCwd(rawRoot.path), [effectiveRoot])
+        XCTAssertEqual(policy.getUnreadableRootsWithCwd(rawRoot.path), [effectivePrivate])
+        XCTAssertEqual(policy.getWritableRootsWithCwd(rawRoot.path), [
+            WritableRoot(root: effectiveRoot, readOnlySubpaths: [
+                try effectiveRoot.join(".codex"),
+                effectivePrivate
+            ])
+        ])
+    }
+
+    func testFileSystemSandboxPolicyProjectionsPreserveNestedSymlinkRootsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let realRootURL = temp.url.appendingPathComponent("real", isDirectory: true)
+        let linkRootURL = temp.url.appendingPathComponent("link", isDirectory: true)
+        let blockedURL = realRootURL.appendingPathComponent("blocked", isDirectory: true)
+        let agentsURL = realRootURL.appendingPathComponent(".agents", isDirectory: true)
+        let codexURL = realRootURL.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: blockedURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: agentsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexURL, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkRootURL, withDestinationURL: realRootURL)
+
+        let linkRoot = try AbsolutePath(absolutePath: linkRootURL.path)
+        let linkBlocked = try linkRoot.join("blocked")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(linkBlocked.path), access: .none)
+        ])
+
+        XCTAssertEqual(policy.getReadableRootsWithCwd(linkRoot.path), [linkRoot])
+        XCTAssertEqual(policy.getUnreadableRootsWithCwd(linkRoot.path), [linkBlocked])
+        XCTAssertEqual(policy.getWritableRootsWithCwd(linkRoot.path), [
+            WritableRoot(root: linkRoot, readOnlySubpaths: [
+                try linkRoot.join(".agents"),
+                try linkRoot.join(".codex"),
+                linkBlocked
+            ])
+        ])
     }
 
     func testFileSystemSandboxPolicyWritableRootsIncludeReadOnlyCarveoutsLikeRust() throws {
@@ -953,15 +1016,17 @@ final class SubmissionTests: XCTestCase {
         let cwd = try AbsolutePath(absolutePath: temp.url.path)
         let docs = try cwd.join("docs")
         let docsPrivate = try docs.join("private")
+        let effectiveCwd = try rustEffectiveTopLevelAliasPath(cwd)
+        let effectiveDocsPrivate = try effectiveCwd.join("docs/private")
         let policy = FileSystemSandboxPolicy.restricted(entries: [
             FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
             FileSystemSandboxEntry(path: .path(docsPrivate.path), access: .read)
         ])
 
         XCTAssertEqual(policy.getWritableRootsWithCwd(cwd.path), [
-            WritableRoot(root: cwd, readOnlySubpaths: [
-                try cwd.join(".codex"),
-                docsPrivate
+            WritableRoot(root: effectiveCwd, readOnlySubpaths: [
+                try effectiveCwd.join(".codex"),
+                effectiveDocsPrivate
             ])
         ])
         XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getWritableRootsWithCwd(cwd.path), [])
@@ -981,15 +1046,16 @@ final class SubmissionTests: XCTestCase {
         try FileManager.default.createDirectory(at: dotGitURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dotAgentsURL, withIntermediateDirectories: true)
         let cwd = try AbsolutePath(absolutePath: cwdURL.path)
+        let effectiveCwd = try rustEffectiveTopLevelAliasPath(cwd)
         let policy = FileSystemSandboxPolicy.restricted(entries: [
             FileSystemSandboxEntry(path: .path(cwd.path), access: .write)
         ])
 
         XCTAssertEqual(policy.getWritableRootsWithCwd(cwd.path), [
-            WritableRoot(root: cwd, readOnlySubpaths: [
-                try cwd.join(".git"),
-                try cwd.join(".agents"),
-                try cwd.join(".codex")
+            WritableRoot(root: effectiveCwd, readOnlySubpaths: [
+                try effectiveCwd.join(".git"),
+                try effectiveCwd.join(".agents"),
+                try effectiveCwd.join(".codex")
             ])
         ])
     }
@@ -1341,6 +1407,25 @@ final class SubmissionTests: XCTestCase {
     func testListSkillsDefaultsDecodeLikeSerdeDefaults() throws {
         let decoded = try JSONDecoder().decode(Op.self, from: Data(#"{"type":"list_skills"}"#.utf8))
         XCTAssertEqual(decoded, .listSkills(cwds: [], forceReload: false))
+    }
+
+    private func rustEffectiveTopLevelAliasPath(_ path: AbsolutePath) throws -> AbsolutePath {
+        let components = path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let firstComponent = components.first else {
+            return path
+        }
+
+        let topLevel = "/\(firstComponent)"
+        guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: topLevel) else {
+            return path
+        }
+
+        let effectiveRoot = destination.hasPrefix("/") ? destination : "/" + destination
+        let remainder = components.dropFirst().joined(separator: "/")
+        if remainder.isEmpty {
+            return try AbsolutePath(absolutePath: effectiveRoot)
+        }
+        return try AbsolutePath.resolve(remainder, against: effectiveRoot)
     }
 }
 
