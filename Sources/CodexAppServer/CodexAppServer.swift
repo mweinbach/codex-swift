@@ -6911,6 +6911,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private var stdinPipe: Pipe?
     private var stdinClosed = false
     private var terminated = false
+    private var timedOut = false
 
     init(
         params: AppServerProcessSpawnParams,
@@ -7011,6 +7012,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: 10_000_000)
             }
             if process.isRunning {
+                lock.withLock {
+                    timedOut = true
+                }
                 terminate()
             }
         }
@@ -7045,7 +7049,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             "method": "process/exited",
             "params": [
                 "processHandle": params.processHandle,
-                "exitCode": Int(process.terminationStatus),
+                "exitCode": lock.withLock { timedOut } ? 124 : Int(process.terminationStatus),
                 "stdout": params.streamStdoutStderr ? "" : stdout.text,
                 "stdoutCapReached": stdout.capReached,
                 "stderr": params.streamStdoutStderr ? "" : stderr.text,

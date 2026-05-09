@@ -5200,6 +5200,30 @@ final class CodexAppServerTests: XCTestCase {
         _ = try await nextNotificationPayload(notificationCapture)
     }
 
+    func testProcessSpawnTimeoutReportsRustExitCode() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","sleep 5"],"processHandle":"proc-timeout","cwd":"\#(cwd.url.path)","timeoutMs":10}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-timeout")
+        XCTAssertEqual(params["exitCode"] as? Int, 124)
+    }
+
     func testProcessSpawnRejectsDuplicateHandleAndKillTerminatesActiveProcess() async throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
