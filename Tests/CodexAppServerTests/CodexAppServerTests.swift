@@ -1941,6 +1941,83 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testMarketplaceRemoveDeletesConfigAndInstalledRoot() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [marketplaces.debug]
+        source_type = "git"
+        source = "https://github.com/owner/repo.git"
+        ref = "main"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let installedRoot = temp.url
+            .appendingPathComponent(".tmp", isDirectory: true)
+            .appendingPathComponent("marketplaces", isDirectory: true)
+            .appendingPathComponent("debug", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: installedRoot.appendingPathComponent(".agents/plugins", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "{}".write(
+            to: installedRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"marketplace/remove","params":{"marketplaceName":"debug"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(result["installedRoot"] as? String, installedRoot.standardizedFileURL.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: installedRoot.path))
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertFalse(config.contains("[marketplaces.debug]"))
+    }
+
+    func testMarketplaceRemoveValidatesNameAndUnknownMarketplace() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalid = try appServerResponse(
+            #"{"id":1,"method":"marketplace/remove","params":{"marketplaceName":"bad name"}}"#,
+            codexHome: temp.url
+        )
+        let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(invalidError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidError["message"] as? String,
+            "invalid marketplace name: only ASCII letters, digits, `_`, and `-` are allowed"
+        )
+
+        let unknown = try appServerResponse(
+            #"{"id":2,"method":"marketplace/remove","params":{"marketplaceName":"debug"}}"#,
+            codexHome: temp.url
+        )
+        let unknownError = try XCTUnwrap(unknown["error"] as? [String: Any])
+        XCTAssertEqual(unknownError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            unknownError["message"] as? String,
+            "marketplace `debug` is not configured or installed"
+        )
+
+        try """
+        [marketplaces.Debug]
+        source_type = "git"
+        source = "https://github.com/owner/repo.git"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let caseMismatch = try appServerResponse(
+            #"{"id":3,"method":"marketplace/remove","params":{"marketplaceName":"debug"}}"#,
+            codexHome: temp.url
+        )
+        let caseMismatchError = try XCTUnwrap(caseMismatch["error"] as? [String: Any])
+        XCTAssertEqual(caseMismatchError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            caseMismatchError["message"] as? String,
+            "marketplace `debug` does not match configured marketplace `Debug` exactly"
+        )
+    }
+
     func testExternalAgentConfigDetectAndEmptyImportReturnRustShapes() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

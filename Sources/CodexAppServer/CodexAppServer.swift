@@ -1909,6 +1909,36 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func marketplaceRemoveResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let marketplaceName = stringParam(params?["marketplaceName"]) ?? ""
+        try validatePluginSegment(marketplaceName, kind: "marketplace name")
+
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        var config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let removedConfig = try removeMarketplaceConfig(named: marketplaceName, from: &config)
+        if removedConfig {
+            try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        }
+
+        let installedRoot = configuration.codexHome
+            .appendingPathComponent(".tmp", isDirectory: true)
+            .appendingPathComponent("marketplaces", isDirectory: true)
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .standardizedFileURL
+        let removedInstalledRoot = try removeMarketplaceInstalledRoot(installedRoot)
+        if removedInstalledRoot == nil && !removedConfig {
+            throw AppServerError.invalidRequest("marketplace `\(marketplaceName)` is not configured or installed")
+        }
+
+        return [
+            "marketplaceName": marketplaceName,
+            "installedRoot": nullable(removedInstalledRoot)
+        ]
+    }
+
     fileprivate static func externalAgentConfigDetectResult(params _: [String: Any]?) -> [String: Any] {
         ["items": []]
     }
@@ -3412,6 +3442,59 @@ public enum CodexAppServer {
             }
             return name
         }.sorted()
+    }
+
+    private static func validatePluginSegment(_ segment: String, kind: String) throws {
+        guard !segment.isEmpty else {
+            throw AppServerError.invalidRequest("invalid \(kind): must not be empty")
+        }
+        guard segment.allSatisfy({ character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "_" || character == "-")
+        }) else {
+            throw AppServerError.invalidRequest("invalid \(kind): only ASCII letters, digits, `_`, and `-` are allowed")
+        }
+    }
+
+    private static func removeMarketplaceConfig(named marketplaceName: String, from config: inout ConfigValue) throws -> Bool {
+        guard case var .table(root) = config,
+              let marketplacesValue = root["marketplaces"],
+              case var .table(marketplaces) = marketplacesValue
+        else {
+            return false
+        }
+
+        if marketplaces.removeValue(forKey: marketplaceName) != nil {
+            if marketplaces.isEmpty {
+                root.removeValue(forKey: "marketplaces")
+            } else {
+                root["marketplaces"] = .table(marketplaces)
+            }
+            config = .table(root)
+            return true
+        }
+
+        if let configuredName = marketplaces.keys.first(where: { $0.lowercased() == marketplaceName.lowercased() }) {
+            throw AppServerError.invalidRequest(
+                "marketplace `\(marketplaceName)` does not match configured marketplace `\(configuredName)` exactly"
+            )
+        }
+        return false
+    }
+
+    private static func removeMarketplaceInstalledRoot(_ root: URL) throws -> String? {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: root.path) else {
+            return nil
+        }
+
+        do {
+            try fileManager.removeItem(at: root)
+        } catch {
+            throw AppServerError.internalError(
+                "failed to remove installed marketplace root \(root.path): \(error)"
+            )
+        }
+        return root.path
     }
 
     private struct FilesystemMetadata {
@@ -6210,6 +6293,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginUninstallResult(params: params)
+                    )
+                case "marketplace/remove":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.marketplaceRemoveResult(params: params, configuration: configuration)
                     )
                 case "marketplace/upgrade":
                     response = CodexAppServer.responseObject(
