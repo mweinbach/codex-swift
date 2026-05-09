@@ -92,8 +92,60 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(payload.success, true)
         XCTAssertEqual(payload.contentItems, [
             .inputText(text: "caption"),
-            .inputImage(imageURL: "data:image/png;base64,BASE64")
+            .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail)
         ])
+    }
+
+    func testMcpCallToolResultImageContentPreservesDetailMetadataLikeRust() {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .image(McpImageContent(
+                    data: "BASE64",
+                    mimeType: "image/png",
+                    meta: .object([McpImageContent.imageDetailMetaKey: .string("original")])
+                ))
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputImage(imageURL: "data:image/png;base64,BASE64", detail: .original)
+        ])
+    }
+
+    func testMcpCallToolResultMixedUnsupportedBlocksBecomeTextWhenImagePresentLikeRust() throws {
+        let resource = McpResourceLink(
+            name: "readme",
+            uri: "file:///tmp/README.md",
+            description: "docs",
+            mimeType: "text/markdown",
+            size: 42,
+            title: "README"
+        )
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: "caption")),
+                .image(McpImageContent(data: "BASE64", mimeType: "image/png")),
+                .resourceLink(resource)
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        let items = try XCTUnwrap(payload.contentItems)
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(Array(items.dropLast()), [
+            .inputText(text: "caption"),
+            .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail)
+        ])
+
+        guard case let .inputText(resourceText) = items.last else {
+            return XCTFail("expected resource fallback text")
+        }
+        let resourceObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(resourceText.utf8)) as? [String: Any])
+        XCTAssertEqual(resourceObject["type"] as? String, "resource_link")
+        XCTAssertEqual(resourceObject["name"] as? String, "readme")
+        XCTAssertEqual(resourceObject["uri"] as? String, "file:///tmp/README.md")
+        XCTAssertEqual(resourceObject["mimeType"] as? String, "text/markdown")
     }
 
     func testMcpCallToolResultUnsupportedBlocksSkipContentItems() {

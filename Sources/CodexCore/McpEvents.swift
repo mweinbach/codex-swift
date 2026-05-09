@@ -608,21 +608,32 @@ public struct McpTextContent: Equatable, Codable, Sendable {
 }
 
 public struct McpImageContent: Equatable, Codable, Sendable {
+    public static let imageDetailMetaKey = "codex/imageDetail"
+
     public let annotations: McpAnnotations?
     public let data: String
+    public let meta: JSONValue?
     public let mimeType: String
     public let type: String
 
     private enum CodingKeys: String, CodingKey {
         case annotations
         case data
+        case meta = "_meta"
         case mimeType = "mimeType"
         case type
     }
 
-    public init(data: String, mimeType: String, type: String = "image", annotations: McpAnnotations? = nil) {
+    public init(
+        data: String,
+        mimeType: String,
+        type: String = "image",
+        annotations: McpAnnotations? = nil,
+        meta: JSONValue? = nil
+    ) {
         self.annotations = annotations
         self.data = data
+        self.meta = meta
         self.mimeType = mimeType
         self.type = type
     }

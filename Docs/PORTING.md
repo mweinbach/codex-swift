@@ -240,6 +240,7 @@ Source baseline inspected for this scaffold:
   - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
+  - MCP image output conversion now preserves Rust's default image detail, `_meta` image-detail override, and unsupported block fallback text when mixed with image content.
 - `codex-rs/core/src/function_tool.rs`
   - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, and fatal errors
 - `codex-rs/exec-server/src/environment_{provider,toml}.rs` and `codex-rs/core/src/environment_selection.rs`
@@ -521,6 +522,8 @@ Source baseline inspected for this scaffold:
   - Added Swift parsing for Rust special filesystem path tokens, including the legacy `current_working_directory` alias for project roots and forward-compatible unknown-token preservation.
 - `codex-rs/protocol/src/models.rs` runtime permission profile construction
   - Added Swift helpers for deriving `ManagedFileSystemPermissions` and `PermissionProfile` from runtime filesystem/network policies, including Rust's external-sandbox override and disabled-unrestricted behavior.
+- `codex-rs/protocol/src/models.rs` filesystem permission decode strictness
+  - Tightened Swift `FileSystemPermissions` decoding to preserve Rust's denied unknown-field behavior for legacy/canonical shapes and nonzero `glob_scan_max_depth` constraint.
 
 ## Known Gaps
 

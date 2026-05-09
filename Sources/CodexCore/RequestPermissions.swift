@@ -173,6 +173,9 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
     }
 
     public init(entries: [FileSystemSandboxEntry] = [], globScanMaxDepth: Int? = nil) {
+        if let globScanMaxDepth {
+            precondition(globScanMaxDepth > 0, "globScanMaxDepth must be nonzero")
+        }
         self.entries = entries
         self.globScanMaxDepth = globScanMaxDepth
     }
@@ -191,13 +194,23 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if container.contains(.entries) || container.contains(.globScanMaxDepth) {
+            try Self.rejectUnknownKeys(in: decoder, allowed: ["entries", "glob_scan_max_depth"])
+            let globScanMaxDepth = try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+            if let globScanMaxDepth, globScanMaxDepth <= 0 {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .globScanMaxDepth,
+                    in: container,
+                    debugDescription: "glob_scan_max_depth must be nonzero"
+                )
+            }
             self.init(
                 entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries) ?? [],
-                globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+                globScanMaxDepth: globScanMaxDepth
             )
             return
         }
 
+        try Self.rejectUnknownKeys(in: decoder, allowed: ["read", "write"])
         self.init(
             read: try container.decodeIfPresent([String].self, forKey: .read),
             write: try container.decodeIfPresent([String].self, forKey: .write)
@@ -240,6 +253,34 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
         }
 
         return (read.isEmpty ? nil : read, write.isEmpty ? nil : write)
+    }
+
+    private static func rejectUnknownKeys(in decoder: Decoder, allowed: Set<String>) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        if let unknown = container.allKeys.first(where: { !allowed.contains($0.stringValue) }) {
+            throw DecodingError.keyNotFound(
+                unknown,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Unknown field '\(unknown.stringValue)'"
+                )
+            )
+        }
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = "\(intValue)"
+        self.intValue = intValue
     }
 }
 

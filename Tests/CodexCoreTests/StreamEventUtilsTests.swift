@@ -190,7 +190,7 @@ final class StreamEventUtilsTests: XCTestCase {
         XCTAssertEqual(output.success, true)
         XCTAssertEqual(output.contentItems, [
             .inputText(text: "caption"),
-            .inputImage(imageURL: "data:image/jpeg;base64,ABC")
+            .inputImage(imageURL: "data:image/jpeg;base64,ABC", detail: defaultImageDetail)
         ])
     }
 

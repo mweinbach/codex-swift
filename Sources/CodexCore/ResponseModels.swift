@@ -209,15 +209,31 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
                 } else {
                     imageURL = "data:\(image.mimeType);base64,\(image.data)"
                 }
-                items.append(.inputImage(imageURL: imageURL))
+                items.append(.inputImage(
+                    imageURL: imageURL,
+                    detail: Self.imageDetail(from: image.meta) ?? defaultImageDetail
+                ))
             case .audio,
                  .resourceLink,
                  .embeddedResource:
-                return nil
+                let content = (try? String(
+                    data: JSONEncoder.codexCompact.encode(block),
+                    encoding: .utf8
+                )) ?? "<content>"
+                items.append(.inputText(text: content))
             }
         }
 
         return sawImage ? items : nil
+    }
+
+    private static func imageDetail(from meta: JSONValue?) -> ImageDetail? {
+        guard case let .object(values) = meta,
+              case let .string(detail)? = values[McpImageContent.imageDetailMetaKey]
+        else {
+            return nil
+        }
+        return ImageDetail(rawValue: detail)
     }
 }
 

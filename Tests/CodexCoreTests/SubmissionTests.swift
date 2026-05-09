@@ -325,6 +325,29 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testFileSystemPermissionsRejectRustDeniedShapes() {
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
+        {
+            "entries": [],
+            "read": ["/repo"]
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
+        {
+            "read": ["/repo"],
+            "extra": true
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
+        {
+            "entries": [],
+            "glob_scan_max_depth": 0
+        }
+        """#.utf8)))
+    }
+
     func testPermissionProfileHelperSemanticsLikeRust() {
         let managed = PermissionProfile.managed(fileSystem: .restricted(entries: []), network: .restricted)
         XCTAssertEqual(managed.enforcement, .managed)
