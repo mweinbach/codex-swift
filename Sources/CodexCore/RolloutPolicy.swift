@@ -74,6 +74,16 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case reasoningContentDelta = "reasoning_content_delta"
     case reasoningRawContentDelta = "reasoning_raw_content_delta"
     case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
+    case collabAgentSpawnBegin = "collab_agent_spawn_begin"
+    case collabAgentSpawnEnd = "collab_agent_spawn_end"
+    case collabAgentInteractionBegin = "collab_agent_interaction_begin"
+    case collabAgentInteractionEnd = "collab_agent_interaction_end"
+    case collabWaitingBegin = "collab_waiting_begin"
+    case collabWaitingEnd = "collab_waiting_end"
+    case collabCloseBegin = "collab_close_begin"
+    case collabCloseEnd = "collab_close_end"
+    case collabResumeBegin = "collab_resume_begin"
+    case collabResumeEnd = "collab_resume_end"
 }
 
 public enum RolloutItem: Equatable, Sendable {
@@ -238,6 +248,26 @@ public enum RolloutPolicy {
             return .reasoningRawContentDelta
         case .realtimeConversationListVoicesResponse:
             return .realtimeConversationListVoicesResponse
+        case .collabAgentSpawnBegin:
+            return .collabAgentSpawnBegin
+        case .collabAgentSpawnEnd:
+            return .collabAgentSpawnEnd
+        case .collabAgentInteractionBegin:
+            return .collabAgentInteractionBegin
+        case .collabAgentInteractionEnd:
+            return .collabAgentInteractionEnd
+        case .collabWaitingBegin:
+            return .collabWaitingBegin
+        case .collabWaitingEnd:
+            return .collabWaitingEnd
+        case .collabCloseBegin:
+            return .collabCloseBegin
+        case .collabCloseEnd:
+            return .collabCloseEnd
+        case .collabResumeBegin:
+            return .collabResumeBegin
+        case .collabResumeEnd:
+            return .collabResumeEnd
         }
     }
 
@@ -349,7 +379,12 @@ public enum RolloutPolicy {
              .guardianAssessment,
              .execCommandEnd,
              .viewImageToolCall,
-             .dynamicToolCallResponse:
+             .dynamicToolCallResponse,
+             .collabAgentSpawnEnd,
+             .collabAgentInteractionEnd,
+             .collabWaitingEnd,
+             .collabCloseEnd,
+             .collabResumeEnd:
             return .extended
         case .warning,
              .guardianWarning,
@@ -401,6 +436,11 @@ public enum RolloutPolicy {
              .reasoningContentDelta,
              .reasoningRawContentDelta,
              .realtimeConversationListVoicesResponse,
+             .collabAgentSpawnBegin,
+             .collabAgentInteractionBegin,
+             .collabWaitingBegin,
+             .collabCloseBegin,
+             .collabResumeBegin,
              .skillsUpdateAvailable:
             return nil
         }

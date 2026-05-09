@@ -100,6 +100,16 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case reasoningContentDelta(ReasoningContentDeltaEvent)
     case reasoningRawContentDelta(ReasoningRawContentDeltaEvent)
     case realtimeConversationListVoicesResponse(RealtimeConversationListVoicesResponseEvent)
+    case collabAgentSpawnBegin(CollabAgentSpawnBeginEvent)
+    case collabAgentSpawnEnd(CollabAgentSpawnEndEvent)
+    case collabAgentInteractionBegin(CollabAgentInteractionBeginEvent)
+    case collabAgentInteractionEnd(CollabAgentInteractionEndEvent)
+    case collabWaitingBegin(CollabWaitingBeginEvent)
+    case collabWaitingEnd(CollabWaitingEndEvent)
+    case collabCloseBegin(CollabCloseBeginEvent)
+    case collabCloseEnd(CollabCloseEndEvent)
+    case collabResumeBegin(CollabResumeBeginEvent)
+    case collabResumeEnd(CollabResumeEndEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -179,6 +189,16 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case reasoningContentDelta = "reasoning_content_delta"
         case reasoningRawContentDelta = "reasoning_raw_content_delta"
         case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
+        case collabAgentSpawnBegin = "collab_agent_spawn_begin"
+        case collabAgentSpawnEnd = "collab_agent_spawn_end"
+        case collabAgentInteractionBegin = "collab_agent_interaction_begin"
+        case collabAgentInteractionEnd = "collab_agent_interaction_end"
+        case collabWaitingBegin = "collab_waiting_begin"
+        case collabWaitingEnd = "collab_waiting_end"
+        case collabCloseBegin = "collab_close_begin"
+        case collabCloseEnd = "collab_close_end"
+        case collabResumeBegin = "collab_resume_begin"
+        case collabResumeEnd = "collab_resume_end"
 
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
@@ -354,6 +374,26 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .reasoningRawContentDelta(try ReasoningRawContentDeltaEvent(from: decoder))
         case .realtimeConversationListVoicesResponse:
             self = .realtimeConversationListVoicesResponse(try RealtimeConversationListVoicesResponseEvent(from: decoder))
+        case .collabAgentSpawnBegin:
+            self = .collabAgentSpawnBegin(try CollabAgentSpawnBeginEvent(from: decoder))
+        case .collabAgentSpawnEnd:
+            self = .collabAgentSpawnEnd(try CollabAgentSpawnEndEvent(from: decoder))
+        case .collabAgentInteractionBegin:
+            self = .collabAgentInteractionBegin(try CollabAgentInteractionBeginEvent(from: decoder))
+        case .collabAgentInteractionEnd:
+            self = .collabAgentInteractionEnd(try CollabAgentInteractionEndEvent(from: decoder))
+        case .collabWaitingBegin:
+            self = .collabWaitingBegin(try CollabWaitingBeginEvent(from: decoder))
+        case .collabWaitingEnd:
+            self = .collabWaitingEnd(try CollabWaitingEndEvent(from: decoder))
+        case .collabCloseBegin:
+            self = .collabCloseBegin(try CollabCloseBeginEvent(from: decoder))
+        case .collabCloseEnd:
+            self = .collabCloseEnd(try CollabCloseEndEvent(from: decoder))
+        case .collabResumeBegin:
+            self = .collabResumeBegin(try CollabResumeBeginEvent(from: decoder))
+        case .collabResumeEnd:
+            self = .collabResumeEnd(try CollabResumeEndEvent(from: decoder))
         }
     }
 
@@ -576,6 +616,36 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .realtimeConversationListVoicesResponse(event):
             try container.encode(EventType.realtimeConversationListVoicesResponse, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabAgentSpawnBegin(event):
+            try container.encode(EventType.collabAgentSpawnBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabAgentSpawnEnd(event):
+            try container.encode(EventType.collabAgentSpawnEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabAgentInteractionBegin(event):
+            try container.encode(EventType.collabAgentInteractionBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabAgentInteractionEnd(event):
+            try container.encode(EventType.collabAgentInteractionEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabWaitingBegin(event):
+            try container.encode(EventType.collabWaitingBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabWaitingEnd(event):
+            try container.encode(EventType.collabWaitingEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabCloseBegin(event):
+            try container.encode(EventType.collabCloseBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabCloseEnd(event):
+            try container.encode(EventType.collabCloseEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabResumeBegin(event):
+            try container.encode(EventType.collabResumeBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .collabResumeEnd(event):
+            try container.encode(EventType.collabResumeEnd, forKey: .type)
             try event.encode(to: encoder)
         }
     }

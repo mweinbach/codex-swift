@@ -113,7 +113,12 @@ final class RolloutPolicyTests: XCTestCase {
             .guardianAssessment,
             .execCommandEnd,
             .viewImageToolCall,
-            .dynamicToolCallResponse
+            .dynamicToolCallResponse,
+            .collabAgentSpawnEnd,
+            .collabAgentInteractionEnd,
+            .collabWaitingEnd,
+            .collabCloseEnd,
+            .collabResumeEnd
         ]
 
         for event in RolloutEventMessageKind.allCases {
