@@ -346,6 +346,10 @@ public enum RolloutPolicy {
         _ event: EventMessage,
         mode: EventPersistenceMode = .limited
     ) -> Bool {
-        shouldPersistEventMessage(eventKind(for: event), mode: mode)
+        if case let .itemCompleted(itemCompletedEvent) = event,
+           case .plan = itemCompletedEvent.item {
+            return true
+        }
+        return shouldPersistEventMessage(eventKind(for: event), mode: mode)
     }
 }

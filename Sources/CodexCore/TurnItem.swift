@@ -3,6 +3,7 @@ import Foundation
 public enum TurnItem: Equatable, Codable, Sendable {
     case userMessage(UserMessageItem)
     case agentMessage(AgentMessageItem)
+    case plan(PlanItem)
     case reasoning(ReasoningItem)
     case webSearch(WebSearchItem)
     case imageGeneration(ImageGenerationItem)
@@ -14,6 +15,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
     private enum ItemType: String, Codable {
         case userMessage = "UserMessage"
         case agentMessage = "AgentMessage"
+        case plan = "Plan"
         case reasoning = "Reasoning"
         case webSearch = "WebSearch"
         case imageGeneration = "ImageGeneration"
@@ -24,6 +26,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .userMessage(item):
             return item.id
         case let .agentMessage(item):
+            return item.id
+        case let .plan(item):
             return item.id
         case let .reasoning(item):
             return item.id
@@ -41,6 +45,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .userMessage(try UserMessageItem(from: decoder))
         case .agentMessage:
             self = .agentMessage(try AgentMessageItem(from: decoder))
+        case .plan:
+            self = .plan(try PlanItem(from: decoder))
         case .reasoning:
             self = .reasoning(try ReasoningItem(from: decoder))
         case .webSearch:
@@ -58,6 +64,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
             try item.encode(to: encoder)
         case let .agentMessage(item):
             try container.encode(ItemType.agentMessage, forKey: .type)
+            try item.encode(to: encoder)
+        case let .plan(item):
+            try container.encode(ItemType.plan, forKey: .type)
             try item.encode(to: encoder)
         case let .reasoning(item):
             try container.encode(ItemType.reasoning, forKey: .type)
@@ -77,6 +86,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return [item.asLegacyEvent()]
         case let .agentMessage(item):
             return item.asLegacyEvents()
+        case .plan:
+            return []
         case let .reasoning(item):
             return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
         case let .webSearch(item):
@@ -84,6 +95,16 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .imageGeneration(item):
             return [item.asLegacyEvent()]
         }
+    }
+}
+
+public struct PlanItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let text: String
+
+    public init(id: String = UUID().uuidString.lowercased(), text: String) {
+        self.id = id
+        self.text = text
     }
 }
 
@@ -283,17 +304,20 @@ public struct ItemStartedEvent: Equatable, Codable, Sendable {
     public let threadID: ConversationId
     public let turnID: String
     public let item: TurnItem
+    public let startedAtMilliseconds: Int64
 
     private enum CodingKeys: String, CodingKey {
         case threadID = "thread_id"
         case turnID = "turn_id"
         case item
+        case startedAtMilliseconds = "started_at_ms"
     }
 
-    public init(threadID: ConversationId, turnID: String, item: TurnItem) {
+    public init(threadID: ConversationId, turnID: String, item: TurnItem, startedAtMilliseconds: Int64 = 0) {
         self.threadID = threadID
         self.turnID = turnID
         self.item = item
+        self.startedAtMilliseconds = startedAtMilliseconds
     }
 
     public func asLegacyEvents(showRawAgentReasoning _: Bool = false) -> [LegacyEventMessage] {
@@ -312,17 +336,28 @@ public struct ItemCompletedEvent: Equatable, Codable, Sendable {
     public let threadID: ConversationId
     public let turnID: String
     public let item: TurnItem
+    public let completedAtMilliseconds: Int64
 
     private enum CodingKeys: String, CodingKey {
         case threadID = "thread_id"
         case turnID = "turn_id"
         case item
+        case completedAtMilliseconds = "completed_at_ms"
     }
 
-    public init(threadID: ConversationId, turnID: String, item: TurnItem) {
+    public init(threadID: ConversationId, turnID: String, item: TurnItem, completedAtMilliseconds: Int64 = 0) {
         self.threadID = threadID
         self.turnID = turnID
         self.item = item
+        self.completedAtMilliseconds = completedAtMilliseconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.threadID = try container.decode(ConversationId.self, forKey: .threadID)
+        self.turnID = try container.decode(String.self, forKey: .turnID)
+        self.item = try container.decode(TurnItem.self, forKey: .item)
+        self.completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
     }
 
     public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {

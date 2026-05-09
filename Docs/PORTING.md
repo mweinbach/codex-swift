@@ -107,7 +107,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, optional message phases, content items, function-call namespace preservation, function/custom-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, compaction alias decoding, and context-compaction item optional payload encoding
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
-  - turn item wire tags, user/agent/reasoning/web-search/image-generation item models, item IDs, legacy message/reasoning/web-search/image-generation events, and item started/completed legacy bridging
+  - turn item wire tags, user/agent/plan/reasoning/web-search/image-generation item models, item IDs, legacy message/reasoning/web-search/image-generation events, item started/completed timing fields, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models
   - `TokenUsage`, `TokenUsageInfo`, context-window accounting helpers, additive usage accumulation, and final token-usage output formatting
 - `codex-rs/protocol/src/protocol.rs` token-count rate-limit models plus `codex-rs/core/src/state/session.rs` rate-limit merge helper
@@ -294,7 +294,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
-  - rollout response-item, memories response-item, and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
+  - rollout response-item, memories response-item, and event-message persistence buckets including completed plan-item replay, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
 - `codex-rs/core/src/rollout/recorder.rs`
   - rollout recorder create/resume path layout, session metadata JSONL prelude, persisted-item filtering, per-line flushes, shutdown, conversation listing delegation, and rollout history extraction with invalid-line skips and first session-id selection
 - `codex-rs/core/src/rollout/list.rs`

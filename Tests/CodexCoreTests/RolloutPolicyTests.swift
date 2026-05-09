@@ -168,6 +168,17 @@ final class RolloutPolicyTests: XCTestCase {
             status: "completed",
             result: "base64-png"
         ))))
+        let threadID = try! ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.itemCompleted(ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .plan(PlanItem(id: "plan-1", text: "next"))
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.itemCompleted(ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .agentMessage(AgentMessageItem(id: "agent-1", content: [.text("done")]))
+        ))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.guardianAssessment(GuardianAssessmentEvent(
             id: "guardian-1",
             status: .inProgress,

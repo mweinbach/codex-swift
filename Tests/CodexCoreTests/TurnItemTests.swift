@@ -177,6 +177,21 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
     }
 
+    func testPlanTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.plan(PlanItem(id: "plan-1", text: "1. Port protocol events"))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "Plan",
+            "id": "plan-1",
+            "text": "1. Port protocol events"
+        ])
+        XCTAssertEqual(item.id, "plan-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
     func testImageGenerationTurnItemWireShapeUsesRustTags() throws {
         let item = TurnItem.imageGeneration(ImageGenerationItem(
             id: "ig-1",
@@ -243,7 +258,8 @@ final class TurnItemTests: XCTestCase {
         let webSearch = ItemStartedEvent(
             threadID: threadID,
             turnID: "turn-1",
-            item: .webSearch(WebSearchItem(id: "search-1", query: "docs"))
+            item: .webSearch(WebSearchItem(id: "search-1", query: "docs")),
+            startedAtMilliseconds: 123
         )
         let imageGeneration = ItemStartedEvent(
             threadID: threadID,
@@ -252,12 +268,14 @@ final class TurnItemTests: XCTestCase {
                 id: "ig-1",
                 status: "in_progress",
                 result: ""
-            ))
+            )),
+            startedAtMilliseconds: 124
         )
         let userMessage = ItemStartedEvent(
             threadID: threadID,
             turnID: "turn-1",
-            item: .userMessage(UserMessageItem(id: "user-1", content: []))
+            item: .userMessage(UserMessageItem(id: "user-1", content: [])),
+            startedAtMilliseconds: 125
         )
 
         XCTAssertEqual(webSearch.asLegacyEvents(), [
@@ -267,6 +285,57 @@ final class TurnItemTests: XCTestCase {
             .imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))
         ])
         XCTAssertEqual(userMessage.asLegacyEvents(), [])
+    }
+
+    func testItemLifecycleEventsCarryRustTimingFields() throws {
+        let threadID = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let started = ItemStartedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .plan(PlanItem(id: "plan-1", text: "next")),
+            startedAtMilliseconds: 123
+        )
+        let completed = ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .plan(PlanItem(id: "plan-1", text: "next")),
+            completedAtMilliseconds: 456
+        )
+
+        try XCTAssertJSONObjectEqual(started, [
+            "thread_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+            "turn_id": "turn-1",
+            "item": [
+                "type": "Plan",
+                "id": "plan-1",
+                "text": "next"
+            ],
+            "started_at_ms": 123
+        ])
+        try XCTAssertJSONObjectEqual(completed, [
+            "thread_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+            "turn_id": "turn-1",
+            "item": [
+                "type": "Plan",
+                "id": "plan-1",
+                "text": "next"
+            ],
+            "completed_at_ms": 456
+        ])
+
+        let missingCompletedAt = try JSONDecoder().decode(ItemCompletedEvent.self, from: Data("""
+        {
+          "thread_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+          "turn_id": "turn-1",
+          "item": {
+            "type": "Plan",
+            "id": "plan-1",
+            "text": "next"
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(missingCompletedAt.completedAtMilliseconds, 0)
     }
 
     func testItemCompletedEventDelegatesToTurnItemLegacyEvents() throws {
