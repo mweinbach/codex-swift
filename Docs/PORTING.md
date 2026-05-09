@@ -294,7 +294,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
-  - rollout response-item and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
+  - rollout response-item, memories response-item, and event-message persistence buckets, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
 - `codex-rs/core/src/rollout/recorder.rs`
   - rollout recorder create/resume path layout, session metadata JSONL prelude, persisted-item filtering, per-line flushes, shutdown, conversation listing delegation, and rollout history extraction with invalid-line skips and first session-id selection
 - `codex-rs/core/src/rollout/list.rs`
@@ -535,7 +535,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` rollout turn context sidecars
   - Expanded Swift `TurnContextItem` rollout serialization with Rust's turn/trace IDs, current date/timezone, permission profile, network, runtime filesystem policy, personality, collaboration mode, realtime-active fields, and fallback permission-profile derivation.
 - `codex-rs/rollout/src/policy.rs` event persistence modes
-  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events and extended-only error/exec/view-image events.
+  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image events, and the stricter memories response-item persistence bucket.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
   - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules

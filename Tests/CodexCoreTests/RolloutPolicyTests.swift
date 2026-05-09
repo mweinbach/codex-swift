@@ -41,6 +41,53 @@ final class RolloutPolicyTests: XCTestCase {
         }
     }
 
+    func testResponseItemMemoriesPersistenceMatchesRustBuckets() {
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.message(role: "user", content: [])))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.message(role: "assistant", content: [])))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.message(role: "developer", content: [])))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.functionCall(name: "do_it", arguments: "{}", callID: "call-1")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.toolSearchCall(callID: "search-1", execution: "client", arguments: .object(["query": .string("docs")]))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: [])))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.customToolCall(callID: "tool-1", name: "custom", input: "{}")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.customToolCallOutput(callID: "tool-1", output: "ok")))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.localShellCall(callID: "shell-1", status: .completed, action: .exec(LocalShellExecAction(command: ["echo"])))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.webSearchCall(status: "completed", action: .search(query: "weather"))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.reasoning(id: "r1", summary: [])))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.imageGenerationCall(id: "ig-1", status: "completed", result: "Zm9v")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.compaction(encryptedContent: "encrypted")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.contextCompaction(encryptedContent: "encrypted")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.ghostSnapshot(ghostCommit: GhostCommit(
+            id: "ghost-1",
+            preexistingUntrackedFiles: [],
+            preexistingUntrackedDirs: []
+        ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.other))
+
+        for type in [
+            "local_shell_call",
+            "function_call",
+            "tool_search_call",
+            "function_call_output",
+            "tool_search_output",
+            "custom_tool_call",
+            "custom_tool_call_output",
+            "web_search_call",
+        ] {
+            XCTAssertTrue(RolloutPolicy.shouldPersistResponseItemForMemories(.knownPersisted(type: type)), type)
+        }
+
+        for type in [
+            "reasoning",
+            "image_generation_call",
+            "compaction",
+            "context_compaction",
+            "ghost_snapshot",
+        ] {
+            XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.knownPersisted(type: type)), type)
+        }
+    }
+
     func testEventMessagePersistenceMatchesRustBuckets() {
         let limited: Set<RolloutEventMessageKind> = [
             .userMessage,

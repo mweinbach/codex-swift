@@ -224,6 +224,40 @@ public enum RolloutPolicy {
         }
     }
 
+    public static func shouldPersistResponseItemForMemories(_ item: ResponseItem) -> Bool {
+        switch item {
+        case let .message(_, role, _, _):
+            return role != "developer"
+        case .localShellCall,
+             .functionCall,
+             .functionCallOutput,
+             .customToolCall,
+             .customToolCallOutput,
+             .toolSearchCall,
+             .toolSearchOutput,
+             .webSearchCall:
+            return true
+        case let .knownPersisted(type):
+            return [
+                "local_shell_call",
+                "function_call",
+                "function_call_output",
+                "custom_tool_call",
+                "custom_tool_call_output",
+                "tool_search_call",
+                "tool_search_output",
+                "web_search_call",
+            ].contains(type)
+        case .reasoning,
+             .imageGenerationCall,
+             .compaction,
+             .contextCompaction,
+             .ghostSnapshot,
+             .other:
+            return false
+        }
+    }
+
     public static func shouldPersistEventMessage(
         _ event: RolloutEventMessageKind,
         mode: EventPersistenceMode = .limited
