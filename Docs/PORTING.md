@@ -681,6 +681,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `float(...)` over supported string, integer, floating-point, boolean, and zero-argument policy expressions, covering generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string hash builtin
   - Added Swift execpolicy parser support for Rust Starlark's string-only `hash(...)` builtin using the Java-compatible UTF-16 hash algorithm, covering generated rule values, hosts, paths, and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark character codepoint builtins
+  - Added Swift execpolicy parser support for `chr(...)` and `ord(...)` over supported integer and single-codepoint string policy expressions, covering generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes

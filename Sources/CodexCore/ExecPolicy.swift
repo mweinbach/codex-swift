@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "chr", "ord", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -3480,6 +3480,20 @@ public final class PolicyParser {
             )
         case "hash":
             return try parseStarlarkHashCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "chr":
+            return try parseStarlarkCharacterCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "ord":
+            return try parseStarlarkOrdinalCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3844,6 +3858,49 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
         return .integer(Int64(starlarkHashCode(for: string)))
+    }
+
+    private static func parseStarlarkCharacterCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .integer(codePoint) = value,
+              codePoint >= 0,
+              codePoint <= 0x10_FFFF,
+              let scalar = UnicodeScalar(UInt32(codePoint))
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .string(String(scalar))
+    }
+
+    private static func parseStarlarkOrdinalCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .string(string) = value,
+              string.unicodeScalars.count == 1,
+              let scalar = string.unicodeScalars.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .integer(Int64(scalar.value))
     }
 
     private static func parseStarlarkStringConversionCall(

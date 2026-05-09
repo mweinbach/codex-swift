@@ -2450,6 +2450,32 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/102354/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkCharacterBuiltins() throws {
+        let policy = try parsePolicy("""
+        TOOL = chr(103) + chr(105) + chr(116)
+        COMMAND = chr(ord("A") + 18) + "tatus"
+        HOST_CODE = ord("A") + 1
+
+        prefix_rule([TOOL, COMMAND.lower()], "allow", justification = "chr " + chr(ord("0") + 7))
+
+        if TOOL == "git" and COMMAND == "Status" and ord(chr(90)) == 90:
+            network_rule("api" + str(HOST_CODE) + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + str(ord("g")) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "chr 7"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api66.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/103/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
