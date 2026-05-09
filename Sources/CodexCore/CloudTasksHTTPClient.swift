@@ -423,7 +423,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         if status == .partial || status == .error || (preflight && status != .success) {
             let mode = preflight ? "preflight" : "apply"
             errorLog("""
-            apply_result: mode=\(mode) id=\(id.rawValue) status=\(status) applied=\(result.appliedPaths.count) skipped=\(result.skippedPaths.count) conflicts=\(result.conflictedPaths.count) cmd=\(result.commandForLog)
+            apply_result: mode=\(mode) id=\(id.rawValue) status=\(Self.logStatus(status)) applied=\(result.appliedPaths.count) skipped=\(result.skippedPaths.count) conflicts=\(result.conflictedPaths.count) cmd=\(result.commandForLog)
             stdout_tail=
             \(Self.tail(result.stdout, max: 2_000))
             stderr_tail=
@@ -1231,8 +1231,19 @@ private extension CloudHTTPClient {
         text.count <= max ? text : String(text.suffix(max))
     }
 
+    static func logStatus(_ status: CloudApplyStatus) -> String {
+        switch status {
+        case .success:
+            return "Success"
+        case .partial:
+            return "Partial"
+        case .error:
+            return "Error"
+        }
+    }
+
     static func summarizePatchForLogging(_ patch: String, cwd: URL) -> String {
-        let trimmed = patch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = patch.drop(while: { $0.isWhitespace })
         let kind: String
         if trimmed.hasPrefix("*** Begin Patch") {
             kind = "codex-patch"
@@ -1243,9 +1254,18 @@ private extension CloudHTTPClient {
         } else {
             kind = "unknown"
         }
-        let head = patch.split(separator: "\n", omittingEmptySubsequences: false).prefix(20).joined(separator: "\n")
+        let lines = rustLines(patch)
+        let head = lines.prefix(20).joined(separator: "\n")
         let headTruncated = head.count > 800 ? "\(head.prefix(800))..." : head
-        return "patch_summary: kind=\(kind) lines=\(patch.split(separator: "\n", omittingEmptySubsequences: false).count) chars=\(patch.count) cwd=\(cwd.path) ; head=\n\(headTruncated)"
+        return "patch_summary: kind=\(kind) lines=\(lines.count) chars=\(patch.utf8.count) cwd=\(cwd.path) ; head=\n\(headTruncated)"
+    }
+
+    static func rustLines(_ text: String) -> [Substring] {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        if text.hasSuffix("\n") {
+            _ = lines.popLast()
+        }
+        return lines
     }
 }
 

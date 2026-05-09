@@ -509,6 +509,38 @@ final class CloudTasksTests: XCTestCase {
             )
         )
     }
+
+    func testHTTPClientApplyErrorLogMatchesRustPatchSummaryAndStatus() async throws {
+        let diff = "diff --git a/unicode.txt b/unicode.txt\n--- a/unicode.txt\n+++ b/unicode.txt\n@@ -1 +1 @@\n-cafe\n+cafeé\n"
+        let logs = CloudLogCapture()
+        let client = CloudHTTPClient(
+            baseURL: "https://example.com",
+            transport: CloudCapturingTransport(),
+            auth: StaticAPIAuthProvider(),
+            currentDirectory: { URL(fileURLWithPath: "/tmp/project", isDirectory: true) },
+            applyGitPatch: { request in
+                XCTAssertEqual(request.diff, diff)
+                return .success(CloudGitApplyResult(
+                    exitCode: 1,
+                    appliedPaths: ["unicode.txt"],
+                    skippedPaths: [],
+                    conflictedPaths: ["unicode.txt"],
+                    stdout: "out",
+                    stderr: "érr",
+                    commandForLog: "git apply --check"
+                ))
+            },
+            errorLog: { logs.messages.append($0) }
+        )
+
+        let outcome = try await client.applyTaskPreflight(id: CloudTaskID("T-log"), diffOverride: diff).get()
+
+        XCTAssertEqual(outcome.status, .partial)
+        let log = try XCTUnwrap(logs.messages.last)
+        XCTAssertTrue(log.contains("apply_result: mode=preflight id=T-log status=Partial applied=1 skipped=0 conflicts=1 cmd=git apply --check"))
+        XCTAssertTrue(log.contains("stderr_tail=\nérr"))
+        XCTAssertTrue(log.contains("patch_summary: kind=git-diff lines=6 chars=\(diff.utf8.count) cwd=/tmp/project ; head=\n\(String(diff.dropLast()))"))
+    }
 }
 
 private func fixedCloudDate() -> Date {
@@ -596,4 +628,8 @@ private final class CloudCapturingTransport: APITransport, @unchecked Sendable {
 
 private final class CloudApplyCapture: @unchecked Sendable {
     var requests: [CloudGitApplyRequest] = []
+}
+
+private final class CloudLogCapture: @unchecked Sendable {
+    var messages: [String] = []
 }
