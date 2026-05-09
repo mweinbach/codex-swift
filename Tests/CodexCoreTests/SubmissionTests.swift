@@ -325,6 +325,22 @@ final class SubmissionTests: XCTestCase {
         )
     }
 
+    func testPermissionProfileHelperSemanticsLikeRust() {
+        let managed = PermissionProfile.managed(fileSystem: .restricted(entries: []), network: .restricted)
+        XCTAssertEqual(managed.enforcement, .managed)
+        XCTAssertEqual(managed.networkSandboxPolicy, .restricted)
+        XCTAssertFalse(managed.networkSandboxPolicy.isEnabled)
+
+        let disabled = PermissionProfile.disabled
+        XCTAssertEqual(disabled.enforcement, .disabled)
+        XCTAssertEqual(disabled.networkSandboxPolicy, .enabled)
+        XCTAssertTrue(disabled.networkSandboxPolicy.isEnabled)
+
+        let external = PermissionProfile.external(network: .restricted)
+        XCTAssertEqual(external.enforcement, .external)
+        XCTAssertEqual(external.networkSandboxPolicy, .restricted)
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,

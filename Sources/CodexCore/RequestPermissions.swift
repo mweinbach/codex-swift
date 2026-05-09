@@ -245,6 +245,12 @@ public enum NetworkSandboxPolicy: String, Codable, Equatable, Sendable {
     }
 }
 
+public enum SandboxEnforcement: String, Codable, Equatable, Sendable {
+    case managed
+    case disabled
+    case external
+}
+
 public enum ManagedFileSystemPermissions: Equatable, Codable, Sendable {
     case restricted(entries: [FileSystemSandboxEntry], globScanMaxDepth: Int? = nil)
     case unrestricted
@@ -346,6 +352,27 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
         case let .external(network):
             try container.encode(ProfileType.external, forKey: .type)
             try container.encode(network, forKey: .network)
+        }
+    }
+
+    public var enforcement: SandboxEnforcement {
+        switch self {
+        case .managed:
+            return .managed
+        case .disabled:
+            return .disabled
+        case .external:
+            return .external
+        }
+    }
+
+    public var networkSandboxPolicy: NetworkSandboxPolicy {
+        switch self {
+        case let .managed(_, network),
+             let .external(network):
+            return network
+        case .disabled:
+            return .enabled
         }
     }
 }
