@@ -625,7 +625,9 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server` turn steer route
   - added v2 `turn/steer` with active-turn id validation, no-active/mismatched/empty-input errors, rollout persistence for steer input, Rust's `turnId` response shape, and the experimental API guard for `responsesapiClientMetadata`.
 - `codex-rs/app-server-protocol` thread-start experimental field gating
-  - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, and `thread/start.persistFullHistory`.
+  - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
+- `codex-rs/app-server-protocol` turn-start experimental field gating
+  - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.
 
 ## Known Gaps
 

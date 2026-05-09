@@ -1269,6 +1269,7 @@ public enum CodexAppServer {
         guard !experimentalAPIEnabled else {
             return
         }
+        try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
         if let environments = params?["environments"], !(environments is NSNull) {
             throw AppServerError.invalidRequest("thread/start.environments requires experimentalApi capability")
         }
@@ -1284,6 +1285,42 @@ public enum CodexAppServer {
         if boolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
         }
+    }
+
+    fileprivate static func requireTurnStartExperimentalFieldsAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled else {
+            return
+        }
+        try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
+        if let metadata = params?["responsesapiClientMetadata"], !(metadata is NSNull) {
+            throw AppServerError.invalidRequest("turn/start.responsesapiClientMetadata requires experimentalApi capability")
+        }
+        if let environments = params?["environments"], !(environments is NSNull) {
+            throw AppServerError.invalidRequest("turn/start.environments requires experimentalApi capability")
+        }
+        if let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("turn/start.permissions requires experimentalApi capability")
+        }
+        if let collaborationMode = params?["collaborationMode"], !(collaborationMode is NSNull) {
+            throw AppServerError.invalidRequest("turn/start.collaborationMode requires experimentalApi capability")
+        }
+    }
+
+    fileprivate static func requireGranularApprovalPolicyExperimentalAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled,
+              let approvalPolicy = params?["approvalPolicy"],
+              !(approvalPolicy is NSNull),
+              approvalPolicyParam(approvalPolicy) == nil
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("askForApproval.granular requires experimentalApi capability")
     }
 
     fileprivate static func turnSteerResult(
@@ -13993,6 +14030,10 @@ final class CodexAppServerMessageProcessor {
                         notifications.append(CodexAppServer.threadStartedNotification(thread: notificationThread))
                     }
                 case "turn/start":
+                    try CodexAppServer.requireTurnStartExperimentalFieldsAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,

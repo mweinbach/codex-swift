@@ -132,6 +132,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
 
         let cases: [(String, String)] = [
+            (#"{"approvalPolicy":{"type":"granular","sandboxApproval":true}}"#, "askForApproval.granular"),
             (#"{"environments":[]}"#, "thread/start.environments"),
             (#"{"dynamicTools":[]}"#, "thread/start.dynamicTools"),
             (#"{"mockExperimentalField":"mock"}"#, "thread/start.mockExperimentalField"),
@@ -456,6 +457,26 @@ final class CodexAppServerTests: XCTestCase {
         let content = try XCTUnwrap(items[0]["content"] as? [[String: Any]])
         XCTAssertEqual(content[0]["text"] as? String, "Hello")
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
+    }
+
+    func testTurnStartExperimentalFieldsRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let cases: [(String, String)] = [
+            (#""responsesapiClientMetadata":{"k":"v"}"#, "turn/start.responsesapiClientMetadata"),
+            (#""environments":[]"#, "turn/start.environments"),
+            (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""permissions":{"profile":"readOnly"}"#, "turn/start.permissions"),
+            (#""collaborationMode":{"mode":"plan"}"#, "turn/start.collaborationMode")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try decode(processor.processLine(Data(#"{"id":\#(index + 10),"method":"turn/start","params":{"threadId":"00000000-0000-0000-0000-000000000000","input":[{"type":"text","text":"Hello"}],\#(testCase.0)}}"#.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(testCase.1) requires experimentalApi capability")
+        }
     }
 
     func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
