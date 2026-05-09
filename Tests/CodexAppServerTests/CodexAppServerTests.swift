@@ -5261,6 +5261,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginAPIKeyCancelsActiveChatGPTDeviceCodeLogin() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let probe = AppServerDeviceCodeProbe(scenario: .pending)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authDeviceCodeTransport: { request in try await probe.handle(request) },
+                environment: ["CODEX_APP_SERVER_LOGIN_ISSUER": "https://issuer.example"]
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+
+        let apiKeyMessages = try decodeMessages(
+            processor.processLine(Data(#"{"id":2,"method":"account/login/start","params":{"type":"apiKey","apiKey":"sk-test-123"}}"#.utf8))
+        )
+        XCTAssertEqual(apiKeyMessages.count, 3)
+        let apiKeyResult = try XCTUnwrap(apiKeyMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(apiKeyResult["type"] as? String, "apiKey")
+        XCTAssertEqual(apiKeyMessages[1]["method"] as? String, "account/login/completed")
+        let loginCompletedParams = try XCTUnwrap(apiKeyMessages[1]["params"] as? [String: Any])
+        XCTAssertTrue(loginCompletedParams["loginId"] is NSNull)
+        XCTAssertEqual(loginCompletedParams["success"] as? Bool, true)
+        XCTAssertEqual(apiKeyMessages[2]["method"] as? String, "account/updated")
+        let updatedParams = try XCTUnwrap(apiKeyMessages[2]["params"] as? [String: Any])
+        XCTAssertEqual(updatedParams["authMode"] as? String, "apikey")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, false)
+        XCTAssertEqual(completedParams["error"] as? String, "Login was not completed")
+
+        let cancelOldLogin = try decode(
+            processor.processLine(Data(#"{"id":3,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#.utf8))
+        )
+        let cancelResult = try XCTUnwrap(cancelOldLogin["result"] as? [String: Any])
+        XCTAssertEqual(cancelResult["status"] as? String, "notFound")
+    }
+
     func testAccountLogoutCancelsActiveChatGPTDeviceCodeLogin() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

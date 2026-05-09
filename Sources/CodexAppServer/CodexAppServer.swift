@@ -8017,7 +8017,8 @@ public enum CodexAppServer {
 
     fileprivate static func loginApiKeyResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        cancelActiveLogin: () -> Void = {}
     ) throws -> [String: Any] {
         guard let apiKey = stringParam(params?["apiKey"]) else {
             throw AppServerError.invalidRequest("missing apiKey")
@@ -8025,6 +8026,7 @@ public enum CodexAppServer {
         if try forcedLoginMethod(configuration: configuration) == "chatgpt" {
             throw AppServerError.invalidRequest("API key login is disabled. Use ChatGPT login instead.")
         }
+        cancelActiveLogin()
         do {
             try CodexAuthStorage.loginWithAPIKey(
                 codexHome: configuration.codexHome,
@@ -8039,7 +8041,8 @@ public enum CodexAppServer {
 
     fileprivate static func loginAccountResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        cancelActiveLogin: () -> Void = {}
     ) throws -> [String: Any] {
         let type = stringParam(params?["type"])
         if type == "chatgptAuthTokens", try forcedLoginMethod(configuration: configuration) == "api" {
@@ -8056,6 +8059,7 @@ public enum CodexAppServer {
                 throw AppServerError.invalidRequest("missing chatgptAccountId")
             }
             let chatGPTPlanType = stringParam(params?["chatgptPlanType"])
+            cancelActiveLogin()
             if let forcedWorkspace = try forcedChatGPTWorkspaceID(configuration: configuration),
                chatGPTAccountID != forcedWorkspace {
                 throw AppServerError.invalidRequest(
@@ -8078,7 +8082,7 @@ public enum CodexAppServer {
         guard type == "apiKey" else {
             throw AppServerError.invalidRequest("unsupported account login type: \(type ?? "<missing>")")
         }
-        _ = try loginApiKeyResult(params: params, configuration: configuration)
+        _ = try loginApiKeyResult(params: params, configuration: configuration, cancelActiveLogin: cancelActiveLogin)
         return ["type": "apiKey"]
     }
 
@@ -13463,7 +13467,11 @@ final class CodexAppServerMessageProcessor {
                     } else {
                         response = CodexAppServer.responseObject(
                             id: id,
-                            result: try CodexAppServer.loginAccountResult(params: params, configuration: configuration)
+                            result: try CodexAppServer.loginAccountResult(
+                                params: params,
+                                configuration: configuration,
+                                cancelActiveLogin: { self.cancelActiveAccountLogins() }
+                            )
                         )
                         notifications.append(CodexAppServer.accountLoginCompletedNotification())
                         notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
