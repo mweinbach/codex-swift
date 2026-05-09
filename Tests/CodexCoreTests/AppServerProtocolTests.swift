@@ -158,6 +158,35 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, request)
     }
 
+    func testExecCommandApprovalServerRequestEncodesNilOptionalsLikeRust() throws {
+        let request = AppServerProtocol.ServerRequest.execCommandApproval(
+            requestID: .integer(7),
+            params: AppServerProtocol.ExecCommandApprovalParams(
+                conversationID: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                callID: "call-42",
+                approvalID: nil,
+                command: ["pwd"],
+                cwd: "/tmp",
+                reason: nil,
+                parsedCmd: []
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "execCommandApproval",
+            "id": 7,
+            "params": [
+                "conversationId": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                "callId": "call-42",
+                "approvalId": NSNull(),
+                "command": ["pwd"],
+                "cwd": "/tmp",
+                "reason": NSNull(),
+                "parsedCmd": []
+            ]
+        ])
+    }
+
     func testExecCommandApprovalServerResponseMatchesRustWireShape() throws {
         let response = AppServerProtocol.ServerResponse.execCommandApproval(
             requestID: .integer(7),
@@ -177,6 +206,75 @@ final class AppServerProtocolTests: XCTestCase {
         let decoded = try JSONDecoder().decode(
             AppServerProtocol.ServerResponse.self,
             from: Data(#"{"method":"execCommandApproval","id":7,"response":{"decision":"approved_for_session"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
+    func testApplyPatchApprovalServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.ApplyPatchApprovalParams(
+            conversationID: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            callID: "patch-42",
+            fileChanges: [
+                "/tmp/App.swift": .update(unifiedDiff: "@@ -1 +1 @@\n-old\n+new\n", movePath: nil)
+            ],
+            reason: nil,
+            grantRoot: nil
+        )
+        let request = AppServerProtocol.ServerRequest.applyPatchApproval(
+            requestID: .integer(6),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(6))
+        XCTAssertEqual(request.method, "applyPatchApproval")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "applyPatchApproval",
+            "id": 6,
+            "params": [
+                "conversationId": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                "callId": "patch-42",
+                "fileChanges": [
+                    "/tmp/App.swift": [
+                        "type": "update",
+                        "unified_diff": "@@ -1 +1 @@\n-old\n+new\n",
+                        "move_path": NSNull()
+                    ]
+                ],
+                "reason": NSNull(),
+                "grantRoot": NSNull()
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.applyPatchApproval(params).request(withID: .integer(6)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"applyPatchApproval","id":6,"params":{"conversationId":"67e55044-10b1-426f-9247-bb680e5fe0c8","callId":"patch-42","fileChanges":{"/tmp/App.swift":{"type":"update","unified_diff":"@@ -1 +1 @@\n-old\n+new\n","move_path":null}},"reason":null,"grantRoot":null}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testApplyPatchApprovalServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.applyPatchApproval(
+            requestID: .integer(6),
+            response: AppServerProtocol.ApplyPatchApprovalResponse(decision: .approved)
+        )
+
+        XCTAssertEqual(response.id, .integer(6))
+        XCTAssertEqual(response.method, "applyPatchApproval")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "applyPatchApproval",
+            "id": 6,
+            "response": [
+                "decision": "approved"
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"applyPatchApproval","id":6,"response":{"decision":"approved"}}"#.utf8)
         )
         XCTAssertEqual(decoded, response)
     }

@@ -5,6 +5,7 @@ public enum AppServerProtocol {
         case attestationGenerate(requestID: RequestID, params: Attestation.GenerateParams)
         case chatGPTAuthTokensRefresh(requestID: RequestID, params: ChatGPTAuthTokensRefreshParams)
         case execCommandApproval(requestID: RequestID, params: ExecCommandApprovalParams)
+        case applyPatchApproval(requestID: RequestID, params: ApplyPatchApprovalParams)
 
         public var id: RequestID {
             switch self {
@@ -13,6 +14,8 @@ public enum AppServerProtocol {
             case let .chatGPTAuthTokensRefresh(requestID, _):
                 requestID
             case let .execCommandApproval(requestID, _):
+                requestID
+            case let .applyPatchApproval(requestID, _):
                 requestID
             }
         }
@@ -25,6 +28,8 @@ public enum AppServerProtocol {
                 ChatGPTAuthTokensRefreshParams.method
             case .execCommandApproval:
                 ExecCommandApprovalParams.method
+            case .applyPatchApproval:
+                ApplyPatchApprovalParams.method
             }
         }
 
@@ -53,6 +58,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(ExecCommandApprovalParams.self, forKey: .params)
                 )
+            case ApplyPatchApprovalParams.method:
+                self = .applyPatchApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(ApplyPatchApprovalParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -73,6 +83,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .execCommandApproval(_, params):
                 try container.encode(params, forKey: .params)
+            case let .applyPatchApproval(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -81,6 +93,7 @@ public enum AppServerProtocol {
         case attestationGenerate(Attestation.GenerateParams)
         case chatGPTAuthTokensRefresh(ChatGPTAuthTokensRefreshParams)
         case execCommandApproval(ExecCommandApprovalParams)
+        case applyPatchApproval(ApplyPatchApprovalParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -94,6 +107,8 @@ public enum AppServerProtocol {
                 .chatGPTAuthTokensRefresh(requestID: id, params: params)
             case let .execCommandApproval(params):
                 .execCommandApproval(requestID: id, params: params)
+            case let .applyPatchApproval(params):
+                .applyPatchApproval(requestID: id, params: params)
             }
         }
     }
@@ -102,6 +117,7 @@ public enum AppServerProtocol {
         case attestationGenerate(requestID: RequestID, response: Attestation.GenerateResponse)
         case chatGPTAuthTokensRefresh(requestID: RequestID, response: ChatGPTAuthTokensRefreshResponse)
         case execCommandApproval(requestID: RequestID, response: ExecCommandApprovalResponse)
+        case applyPatchApproval(requestID: RequestID, response: ApplyPatchApprovalResponse)
 
         public var id: RequestID {
             switch self {
@@ -110,6 +126,8 @@ public enum AppServerProtocol {
             case let .chatGPTAuthTokensRefresh(requestID, _):
                 requestID
             case let .execCommandApproval(requestID, _):
+                requestID
+            case let .applyPatchApproval(requestID, _):
                 requestID
             }
         }
@@ -122,6 +140,8 @@ public enum AppServerProtocol {
                 ChatGPTAuthTokensRefreshParams.method
             case .execCommandApproval:
                 ExecCommandApprovalParams.method
+            case .applyPatchApproval:
+                ApplyPatchApprovalParams.method
             }
         }
 
@@ -150,6 +170,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(ExecCommandApprovalResponse.self, forKey: .response)
                 )
+            case ApplyPatchApprovalParams.method:
+                self = .applyPatchApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(ApplyPatchApprovalResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -170,7 +195,58 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .execCommandApproval(_, response):
                 try container.encode(response, forKey: .response)
+            case let .applyPatchApproval(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public struct ApplyPatchApprovalParams: Equatable, Codable, Sendable {
+        public static let method = "applyPatchApproval"
+
+        public let conversationID: String
+        public let callID: String
+        public let fileChanges: [String: FileChange]
+        public let reason: String?
+        public let grantRoot: String?
+
+        public init(
+            conversationID: String,
+            callID: String,
+            fileChanges: [String: FileChange],
+            reason: String? = nil,
+            grantRoot: String? = nil
+        ) {
+            self.conversationID = conversationID
+            self.callID = callID
+            self.fileChanges = fileChanges
+            self.reason = reason
+            self.grantRoot = grantRoot
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case conversationID = "conversationId"
+            case callID = "callId"
+            case fileChanges
+            case reason
+            case grantRoot
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(conversationID, forKey: .conversationID)
+            try container.encode(callID, forKey: .callID)
+            try container.encode(fileChanges, forKey: .fileChanges)
+            try container.encodeNilOrValue(reason, forKey: .reason)
+            try container.encodeNilOrValue(grantRoot, forKey: .grantRoot)
+        }
+    }
+
+    public struct ApplyPatchApprovalResponse: Equatable, Codable, Sendable {
+        public let decision: ReviewDecision
+
+        public init(decision: ReviewDecision) {
+            self.decision = decision
         }
     }
 
@@ -211,6 +287,17 @@ public enum AppServerProtocol {
             case cwd
             case reason
             case parsedCmd
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(conversationID, forKey: .conversationID)
+            try container.encode(callID, forKey: .callID)
+            try container.encodeNilOrValue(approvalID, forKey: .approvalID)
+            try container.encode(command, forKey: .command)
+            try container.encode(cwd, forKey: .cwd)
+            try container.encodeNilOrValue(reason, forKey: .reason)
+            try container.encode(parsedCmd, forKey: .parsedCmd)
         }
     }
 
