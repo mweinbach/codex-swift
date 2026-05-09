@@ -1911,6 +1911,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(remoteDisabledError["message"] as? String, "remote plugin uninstall is not enabled")
     }
 
+    func testMarketplaceUpgradeReturnsRustEmptyOutcomeWithoutConfiguredGitMarketplaces() throws {
+        let temp = try TemporaryDirectory()
+
+        let all = try appServerResponse(
+            #"{"id":1,"method":"marketplace/upgrade","params":{}}"#,
+            codexHome: temp.url
+        )
+        let allResult = try XCTUnwrap(all["result"] as? [String: Any])
+        XCTAssertEqual(allResult["selectedMarketplaces"] as? [String], [])
+        XCTAssertEqual(allResult["upgradedRoots"] as? [String], [])
+        XCTAssertEqual((allResult["errors"] as? [Any])?.count, 0)
+
+        try """
+        [marketplaces.local]
+        source_type = "local"
+        source = "/tmp/marketplace"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let missingGit = try appServerResponse(
+            #"{"id":2,"method":"marketplace/upgrade","params":{"marketplaceName":"local"}}"#,
+            codexHome: temp.url
+        )
+        let missingGitError = try XCTUnwrap(missingGit["error"] as? [String: Any])
+        XCTAssertEqual(missingGitError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            missingGitError["message"] as? String,
+            "marketplace `local` is not configured as a Git marketplace"
+        )
+    }
+
     func testExternalAgentConfigDetectAndEmptyImportReturnRustShapes() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

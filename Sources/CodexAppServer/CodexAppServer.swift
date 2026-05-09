@@ -1885,6 +1885,30 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("local plugin uninstall is not implemented")
     }
 
+    fileprivate static func marketplaceUpgradeResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        let configuredGitMarketplaces = configuredGitMarketplaceNames(in: stack)
+        if let marketplaceName = stringParam(params?["marketplaceName"]),
+           !configuredGitMarketplaces.contains(marketplaceName) {
+            throw AppServerError.invalidRequest(
+                "marketplace `\(marketplaceName)` is not configured as a Git marketplace"
+            )
+        }
+
+        return [
+            "selectedMarketplaces": [],
+            "upgradedRoots": [],
+            "errors": []
+        ]
+    }
+
     fileprivate static func externalAgentConfigDetectResult(params _: [String: Any]?) -> [String: Any] {
         ["items": []]
     }
@@ -3369,6 +3393,25 @@ public enum CodexAppServer {
     private static func isLikelyLocalPluginID(_ pluginID: String) -> Bool {
         let parts = pluginID.split(separator: "@", omittingEmptySubsequences: false)
         return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
+    }
+
+    private static func configuredGitMarketplaceNames(in stack: ConfigLayerStack) -> [String] {
+        guard let userLayer = stack.getUserLayer(),
+              let userConfig = configTable(userLayer.config),
+              let marketplacesValue = userConfig["marketplaces"],
+              let marketplaces = configTable(marketplacesValue)
+        else {
+            return []
+        }
+
+        return marketplaces.compactMap { (name: String, value: ConfigValue) -> String? in
+            guard let entry = configTable(value),
+                  stringConfig(entry, "source_type") == "git"
+            else {
+                return nil
+            }
+            return name
+        }.sorted()
     }
 
     private struct FilesystemMetadata {
@@ -6167,6 +6210,11 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginUninstallResult(params: params)
+                    )
+                case "marketplace/upgrade":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.marketplaceUpgradeResult(params: params, configuration: configuration)
                     )
                 case "listConversations":
                     response = CodexAppServer.responseObject(
