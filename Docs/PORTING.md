@@ -657,6 +657,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `len(...)` over strings/lists/dicts, ordered comparisons over strings and numbers, `not in`, and string membership checks in supported policy conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string methods
   - Added Swift execpolicy parser support for string `.join(...)`, `.startswith(...)`, and `.endswith(...)` method calls across supported policy literals and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string predicate methods
+  - Added Swift execpolicy parser support for Unicode-aware `.isalnum()`, `.isalpha()`, `.isdigit()`, `.islower()`, `.isspace()`, and `.isupper()` method calls across supported policy literals and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string normalization methods
   - Added Swift execpolicy parser support for string `.lower()`, `.upper()`, `.strip(...)`, `.lstrip(...)`, `.rstrip(...)`, and separator-based `.split(...)` method calls across supported policy literals, helper returns, list/loop bodies, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string replacement method

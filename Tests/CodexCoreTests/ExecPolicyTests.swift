@@ -2116,6 +2116,36 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringPredicateMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "status"
+        TOKEN = "base64"
+        DIGITS = "123"
+        UPPER = "HAL"
+        SPACE = " \\t\\n"
+
+        if TOKEN.isalnum() and TOOL.isalpha() and DIGITS.isdigit() and COMMAND.islower() and UPPER.isupper() and SPACE.isspace():
+            prefix_rule([TOOL, COMMAND], "allow", justification = "pred " + TOKEN)
+
+        if not "".isdigit() and not "Catch-22".isalnum() and not "123".isalpha():
+            network_rule("api" + str(len(TOKEN)) + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + UPPER + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "pred base64"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api6.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/HAL/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "

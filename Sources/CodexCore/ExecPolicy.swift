@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2787,6 +2787,24 @@ public final class PolicyParser {
                 ? parseStarlarkInteger(rawArguments[2], constants: constants, functions: functions, expression: text)
                 : -1
             return .string(replacingStarlarkString(receiver, oldValue: oldValue, newValue: newValue, count: count))
+        case "isalnum":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsAlphanumeric(receiver))
+        case "isalpha":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsAlphabetic(receiver))
+        case "isdigit":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsNumeric(receiver))
+        case "islower":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsLowercase(receiver))
+        case "isspace":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsWhitespace(receiver))
+        case "isupper":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsUppercase(receiver))
         default:
             return nil
         }
@@ -2981,6 +2999,50 @@ public final class PolicyParser {
         }
         result += string[cursor..<string.endIndex]
         return result
+    }
+
+    private static func starlarkStringIsAlphanumeric(_ string: String) -> Bool {
+        !string.isEmpty && string.unicodeScalars.allSatisfy { scalar in
+            scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+        }
+    }
+
+    private static func starlarkStringIsAlphabetic(_ string: String) -> Bool {
+        !string.isEmpty && string.unicodeScalars.allSatisfy { $0.properties.isAlphabetic }
+    }
+
+    private static func starlarkStringIsNumeric(_ string: String) -> Bool {
+        !string.isEmpty && string.unicodeScalars.allSatisfy { $0.properties.numericType != nil }
+    }
+
+    private static func starlarkStringIsLowercase(_ string: String) -> Bool {
+        var sawLowercase = false
+        for scalar in string.unicodeScalars {
+            if scalar.properties.isUppercase {
+                return false
+            }
+            if scalar.properties.isLowercase {
+                sawLowercase = true
+            }
+        }
+        return sawLowercase
+    }
+
+    private static func starlarkStringIsWhitespace(_ string: String) -> Bool {
+        !string.isEmpty && string.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
+    }
+
+    private static func starlarkStringIsUppercase(_ string: String) -> Bool {
+        var sawUppercase = false
+        for scalar in string.unicodeScalars {
+            if scalar.properties.isLowercase {
+                return false
+            }
+            if scalar.properties.isUppercase {
+                sawUppercase = true
+            }
+        }
+        return sawUppercase
     }
 
     private static func starlarkWhitespaceSplit(_ string: String) -> [String] {
