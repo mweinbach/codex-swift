@@ -299,6 +299,31 @@ public struct HookPreToolUseOutput: Equatable, Sendable {
     }
 }
 
+public struct HookPostToolUseOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let shouldBlock: Bool
+    public let reason: String?
+    public let invalidBlockReason: String?
+    public let additionalContext: String?
+    public let invalidReason: String?
+
+    public init(
+        universal: HookUniversalOutput,
+        shouldBlock: Bool,
+        reason: String?,
+        invalidBlockReason: String? = nil,
+        additionalContext: String?,
+        invalidReason: String? = nil
+    ) {
+        self.universal = universal
+        self.shouldBlock = shouldBlock
+        self.reason = reason
+        self.invalidBlockReason = invalidBlockReason
+        self.additionalContext = additionalContext
+        self.invalidReason = invalidReason
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -373,6 +398,45 @@ public enum HooksProtocol {
         return HookPreToolUseOutput(
             universal: universal,
             blockReason: blockReason,
+            additionalContext: hookSpecific.additionalContext,
+            invalidReason: invalidReason
+        )
+    }
+
+    public static func parsePostToolUseOutput(_ stdout: String) -> HookPostToolUseOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(
+                object,
+                extraAllowedKeys: ["decision", "reason", "hookSpecificOutput"]
+              ),
+              let decision = optionalStringEnumValue(object["decision"], allowedValues: ["block"]),
+              let reason = optionalStringValue(object["reason"])
+        else {
+            return nil
+        }
+
+        let hookSpecific = parsePostToolUseHookSpecificOutput(object["hookSpecificOutput"])
+        guard hookSpecific.valid else {
+            return nil
+        }
+
+        let invalidReason = unsupportedPostToolUseUniversal(universal)
+            ?? hookSpecific.invalidReason
+        let shouldBlock = decision == "block"
+        let invalidBlockReason: String?
+        if shouldBlock && trimmedReason(reason) == nil {
+            invalidBlockReason = invalidBlockMessage("PostToolUse")
+        } else if !shouldBlock && universal.continueProcessing && reason != nil {
+            invalidBlockReason = "PostToolUse hook returned reason without decision"
+        } else {
+            invalidBlockReason = nil
+        }
+
+        return HookPostToolUseOutput(
+            universal: universal,
+            shouldBlock: shouldBlock && invalidReason == nil && invalidBlockReason == nil,
+            reason: reason,
+            invalidBlockReason: invalidBlockReason,
             additionalContext: hookSpecific.additionalContext,
             invalidReason: invalidReason
         )
@@ -557,6 +621,46 @@ public enum HooksProtocol {
         default:
             return nil
         }
+    }
+
+    private static func parsePostToolUseHookSpecificOutput(_ value: Any?) -> (
+        valid: Bool,
+        additionalContext: String?,
+        invalidReason: String?
+    ) {
+        guard let value else {
+            return (true, nil, nil)
+        }
+        if value is NSNull {
+            return (true, nil, nil)
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).isSubset(of: [
+                "hookEventName",
+                "additionalContext",
+                "updatedMCPToolOutput",
+              ]),
+              let eventName = object["hookEventName"] as? String,
+              allHookEventWireNames.contains(eventName),
+              let additionalContext = optionalStringValue(object["additionalContext"])
+        else {
+            return (false, nil, nil)
+        }
+
+        return (
+            true,
+            additionalContext,
+            isNonNullJSONValue(object["updatedMCPToolOutput"])
+                ? "PostToolUse hook returned unsupported updatedMCPToolOutput"
+                : nil
+        )
+    }
+
+    private static func unsupportedPostToolUseUniversal(_ universal: HookUniversalOutput) -> String? {
+        if universal.suppressOutput {
+            return "PostToolUse hook returned unsupported suppressOutput"
+        }
+        return nil
     }
 
     private static func parsePermissionRequestHookSpecificOutput(_ value: Any?) -> (

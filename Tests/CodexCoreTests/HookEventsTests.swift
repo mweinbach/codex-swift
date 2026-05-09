@@ -282,6 +282,87 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNil(HooksProtocol.parsePreToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
     }
 
+    func testPostToolUseOutputParsesBlockAndAdditionalContextLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput("""
+        {
+          "decision": "block",
+          "reason": "  failed validation  ",
+          "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "tool note"
+          }
+        }
+        """))
+        XCTAssertTrue(parsed.shouldBlock)
+        XCTAssertEqual(parsed.reason, "  failed validation  ")
+        XCTAssertNil(parsed.invalidBlockReason)
+        XCTAssertEqual(parsed.additionalContext, "tool note")
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPostToolUseOutputAllowsContinueFalseAndStopReasonLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput("""
+        {"continue":false,"stopReason":"done","reason":"ignored because stopped"}
+        """))
+        XCTAssertEqual(parsed.universal.continueProcessing, false)
+        XCTAssertEqual(parsed.universal.stopReason, "done")
+        XCTAssertFalse(parsed.shouldBlock)
+        XCTAssertNil(parsed.invalidBlockReason)
+        XCTAssertEqual(parsed.reason, "ignored because stopped")
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPostToolUseOutputReportsInvalidBlockReasonLikeRust() throws {
+        let missing = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput(#"{"decision":"block"}"#))
+        XCTAssertFalse(missing.shouldBlock)
+        XCTAssertEqual(
+            missing.invalidBlockReason,
+            "PostToolUse hook returned decision:block without a non-empty reason"
+        )
+        XCTAssertNil(missing.invalidReason)
+
+        let empty = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput(#"{"decision":"block","reason":"  "}"#))
+        XCTAssertFalse(empty.shouldBlock)
+        XCTAssertEqual(
+            empty.invalidBlockReason,
+            "PostToolUse hook returned decision:block without a non-empty reason"
+        )
+    }
+
+    func testPostToolUseOutputReportsReasonWithoutDecisionOnlyWhenContinuingLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput(#"{"reason":"because"}"#))
+        XCTAssertFalse(parsed.shouldBlock)
+        XCTAssertEqual(parsed.invalidBlockReason, "PostToolUse hook returned reason without decision")
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPostToolUseOutputReportsUnsupportedUniversalAndHookSpecificFieldsLikeRust() throws {
+        let suppressOutput = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput(#"{"suppressOutput":true}"#))
+        XCTAssertFalse(suppressOutput.shouldBlock)
+        XCTAssertEqual(suppressOutput.invalidReason, "PostToolUse hook returned unsupported suppressOutput")
+        XCTAssertNil(suppressOutput.invalidBlockReason)
+
+        let updatedOutput = try XCTUnwrap(HooksProtocol.parsePostToolUseOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedMCPToolOutput": {}
+          }
+        }
+        """))
+        XCTAssertFalse(updatedOutput.shouldBlock)
+        XCTAssertEqual(updatedOutput.invalidReason, "PostToolUse hook returned unsupported updatedMCPToolOutput")
+    }
+
+    func testPostToolUseOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"decision":"approve"}"#))
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"decision":"block","extra":1}"#))
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"hookSpecificOutput":{"additionalContext":"missing event"}}"#))
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":3}}"#))
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"PostToolUse","extra":1}}"#))
+        XCTAssertNil(HooksProtocol.parsePostToolUseOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
+    }
+
     func testPermissionRequestOutputParsesAllowAndDenyDecisionsLikeRust() throws {
         let allowed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
         {
