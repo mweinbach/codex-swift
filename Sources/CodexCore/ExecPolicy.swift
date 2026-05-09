@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "sorted", "reversed", "str", "int", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "str", "int", "bool"].contains(name) else {
             return nil
         }
 
@@ -3429,6 +3429,13 @@ public final class PolicyParser {
             )
         case "list", "tuple":
             return try parseStarlarkIterableConversionCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "dict":
+            return try parseStarlarkDictionaryConversionCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3574,6 +3581,55 @@ public final class PolicyParser {
 
         let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         return try .array(starlarkIterableItems(iterable, expression: expression))
+    }
+
+    private static func parseStarlarkDictionaryConversionCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        var table: [String: ConfigValue] = [:]
+        var sawKeywordArgument = false
+        var consumedPositionalArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                let rawKey = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard isStarlarkIdentifier(rawKey), !rawValue.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                sawKeywordArgument = true
+                table[rawKey] = try parsePolicyLiteral(rawValue, constants: constants, functions: functions)
+                continue
+            }
+
+            guard !sawKeywordArgument, !consumedPositionalArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            consumedPositionalArgument = true
+            let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            switch value {
+            case let .table(items):
+                table.merge(items) { _, new in new }
+            case let .array(items):
+                for item in items {
+                    guard case let .array(pair) = item,
+                          pair.count == 2,
+                          case let .string(key) = pair[0]
+                    else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    table[key] = pair[1]
+                }
+            default:
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+        }
+
+        return .table(table)
     }
 
     private static func parseStarlarkSortedCall(

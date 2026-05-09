@@ -2313,6 +2313,49 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkDictBuiltin() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        BASE = dict([("status", "allow"), ["diff", "prompt"]])
+        COMMANDS = dict(BASE, log = "allow", show = "prompt")
+        EMPTY = dict()
+
+        for command in sorted(COMMANDS.keys()):
+            prefix_rule([TOOL, command], COMMANDS[command], justification = "dict builtin " + command)
+
+        if len(EMPTY) == 0 and dict(github = "api.github.com")["github"].endswith(".com"):
+            network_rule(dict(github = "api.github.com")["github"], "https", "allow")
+            host_executable(TOOL, ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .prompt,
+                justification: "dict builtin diff"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .allow,
+                justification: "dict builtin log"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .prompt,
+                justification: "dict builtin show"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "dict builtin status"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
