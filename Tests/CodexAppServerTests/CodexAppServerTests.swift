@@ -7143,6 +7143,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecIgnoresSnakeCaseTimeoutAliasLikeRustProtocol() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","sleep 0.05; printf ok"],"cwd":"\#(cwd.url.path)","timeout_ms":1}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "ok")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecValidatesRustOptionConflicts() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

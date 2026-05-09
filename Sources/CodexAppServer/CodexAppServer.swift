@@ -7799,7 +7799,7 @@ public enum CodexAppServer {
             tty: tty,
             streamStdin: streamStdin,
             streamStdoutStderr: streamStdoutStderr,
-            timeoutMs: disableTimeout ? nil : optionalIntParam(params?["timeoutMs"] ?? params?["timeout_ms"]),
+            timeoutMs: disableTimeout ? nil : optionalIntParam(params?["timeoutMs"]),
             outputBytesCap: disableOutputCap ? nil : processOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
