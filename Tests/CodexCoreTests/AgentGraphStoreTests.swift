@@ -774,6 +774,28 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertFalse(missingUpdated)
     }
 
+    func testSQLiteStoreDeletesThreadAndReturnsRowsAffected() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let deletedThreadID = try threadID(95)
+        try insertRawSQLiteThread(
+            id: deletedThreadID,
+            agentPath: try AgentPath(validating: "/root/deleted"),
+            rolloutPath: "/tmp/deleted-rollout.jsonl",
+            databaseURL: databaseURL
+        )
+
+        let deletedRows = try await store.deleteThread(threadID: deletedThreadID)
+        let deletedRolloutPath = try await store.findRolloutPath(threadID: deletedThreadID, archiveFilter: .all)
+        let secondDeleteRows = try await store.deleteThread(threadID: deletedThreadID)
+
+        XCTAssertEqual(deletedRows, 1)
+        XCTAssertNil(deletedRolloutPath)
+        XCTAssertEqual(secondDeleteRows, 0)
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }

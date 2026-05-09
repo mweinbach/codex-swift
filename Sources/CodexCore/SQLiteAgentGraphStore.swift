@@ -332,6 +332,16 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return sqlite3_changes(database) > 0
     }
 
+    public func deleteThread(threadID: ThreadId) async throws -> Int {
+        let database = handle.database
+        try Self.execute(
+            "DELETE FROM threads WHERE id = ?",
+            bindings: [.text(threadID.description)],
+            database: database
+        )
+        return Int(sqlite3_changes(database))
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus

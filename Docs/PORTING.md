@@ -853,6 +853,8 @@ Source baseline inspected for this scaffold:
   - added SQLite `updated_at`/`updated_at_ms` touch behavior with Rust's process-local monotonic millisecond allocation: newer timestamps advance directly, same hot one-second bucket writes bump by one millisecond, older backfill timestamps pass through, and missing rows report `false`.
 - `codex-rs/state/src/runtime/threads.rs` thread git-info update
   - added SQLite git SHA, branch, and origin URL patching with Rust's double-option semantics mapped to an explicit Swift patch enum: preserve leaves existing columns unchanged, clear writes SQL `NULL`, set writes the replacement string, and missing rows report `false`.
+- `codex-rs/state/src/runtime/threads.rs` thread delete
+  - added SQLite thread metadata deletion by id with Rust's row-count reporting: deleting an existing row returns `1`, repeated or missing deletes return `0`, and the row is no longer discoverable by rollout-path lookup.
 
 ## Known Gaps
 
