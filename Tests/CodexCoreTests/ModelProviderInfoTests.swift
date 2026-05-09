@@ -156,6 +156,7 @@ final class ModelProviderInfoTests: XCTestCase {
         ))
         XCTAssertEqual(api.streamIdleTimeoutMilliseconds, 300_000)
         XCTAssertEqual(provider.toAPIProvider(authMode: .chatGPT, environment: [:]).baseURL, "https://chatgpt.com/backend-api/codex")
+        XCTAssertEqual(provider.toAPIProvider(authMode: .chatGPTAuthTokens, environment: [:]).baseURL, "https://chatgpt.com/backend-api/codex")
     }
 
     func testAPIProviderURLRendering() {
@@ -375,6 +376,7 @@ final class ModelProviderInfoTests: XCTestCase {
     func testAuthModeWireValues() throws {
         XCTAssertEqual(try JSONEncoder().encode(AuthMode.apiKey), Data(#""apikey""#.utf8))
         XCTAssertEqual(try JSONEncoder().encode(AuthMode.chatGPT), Data(#""chatgpt""#.utf8))
+        XCTAssertEqual(try JSONEncoder().encode(AuthMode.chatGPTAuthTokens), Data(#""chatgptAuthTokens""#.utf8))
     }
 
     private func apiProvider(name: String, baseURL: String, wireAPI: WireAPI) -> APIProvider {

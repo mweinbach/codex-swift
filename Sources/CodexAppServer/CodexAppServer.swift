@@ -6460,7 +6460,12 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let remoteModels = try ModelsCache.load(from: ModelsManager.cachePath(codexHome: configuration.codexHome))?.models ?? []
-        let chatGPTMode = (try currentAuth(configuration: configuration))?.method == "chatgpt"
+        let chatGPTMode: Bool
+        if case .chatGPT = try currentAuth(configuration: configuration)?.kind {
+            chatGPTMode = true
+        } else {
+            chatGPTMode = false
+        }
         let availableModels = ModelsManager.buildAvailableModels(
             remoteModels: remoteModels,
             localModels: ModelsManager.builtinModelPresets(),
@@ -8034,8 +8039,38 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let type = stringParam(params?["type"])
+        if type == "chatgptAuthTokens", try forcedLoginMethod(configuration: configuration) == "api" {
+            throw AppServerError.invalidRequest("External ChatGPT auth is disabled. Use API key login instead.")
+        }
         if type == "chatgpt", try forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
+        }
+        if type == "chatgptAuthTokens" {
+            guard let accessToken = stringParam(params?["accessToken"]) else {
+                throw AppServerError.invalidRequest("missing accessToken")
+            }
+            guard let chatGPTAccountID = stringParam(params?["chatgptAccountId"]) else {
+                throw AppServerError.invalidRequest("missing chatgptAccountId")
+            }
+            let chatGPTPlanType = stringParam(params?["chatgptPlanType"])
+            if let forcedWorkspace = try forcedChatGPTWorkspaceID(configuration: configuration),
+               chatGPTAccountID != forcedWorkspace {
+                throw AppServerError.invalidRequest(
+                    "External auth must use workspace \(forcedWorkspace), but received \"\(chatGPTAccountID)\"."
+                )
+            }
+            do {
+                try CodexAuthStorage.saveChatGPTAuthTokens(
+                    codexHome: configuration.codexHome,
+                    accessToken: accessToken,
+                    chatGPTAccountID: chatGPTAccountID,
+                    chatGPTPlanType: chatGPTPlanType,
+                    mode: configuration.authCredentialsStoreMode
+                )
+            } catch {
+                throw AppServerError.internalError("failed to set external auth: \(error)")
+            }
+            return ["type": "chatgptAuthTokens"]
         }
         guard type == "apiKey" else {
             throw AppServerError.invalidRequest("unsupported account login type: \(type ?? "<missing>")")
@@ -8139,10 +8174,19 @@ public enum CodexAppServer {
     }
 
     fileprivate static func accountUpdatedNotification(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
-        [
+        let auth = try currentAuth(configuration: configuration)
+        let planType: Any
+        switch auth?.kind {
+        case let .chatGPT(idToken):
+            planType = planTypeWireValue(idToken.chatGPTPlanType) ?? NSNull()
+        case .apiKey, nil:
+            planType = NSNull()
+        }
+        return [
             "method": "account/updated",
             "params": [
-                "authMode": try currentAuth(configuration: configuration)?.method ?? NSNull()
+                "authMode": auth?.method ?? NSNull(),
+                "planType": planType
             ].nullStripped(keepNulls: true)
         ]
     }
@@ -8189,6 +8233,17 @@ public enum CodexAppServer {
             return nil
         }
         return stringConfig(table, "forced_login_method")
+    }
+
+    fileprivate static func forcedChatGPTWorkspaceID(configuration: CodexAppServerConfiguration) throws -> String? {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        guard let table = configTable(stack.effectiveConfig()) else {
+            return nil
+        }
+        return stringConfig(table, "forced_chatgpt_workspace_id")
     }
 
     fileprivate static func buildUserAgent(
@@ -11393,7 +11448,7 @@ public enum CodexAppServer {
         }
         if let tokens = auth.tokens, !tokens.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AppServerAuth(
-                method: "chatgpt",
+                method: auth.authMode == .chatGPTAuthTokens ? "chatgptAuthTokens" : "chatgpt",
                 token: tokens.accessToken,
                 accountID: tokens.accountID ?? tokens.idToken.chatGPTAccountID,
                 kind: .chatGPT(tokens.idToken)

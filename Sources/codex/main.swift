@@ -701,7 +701,7 @@ private func runNonInteractiveExec(
     )
     let model = execOptionValue(short: "-m", long: "--model", in: arguments)
         ?? settings.model
-        ?? (authResolution.authMode == .chatGPT
+        ?? (authResolution.authMode?.isChatGPT == true
             ? ModelsManager.openAIDefaultChatGPTModel
             : ModelsManager.openAIDefaultAPIModel)
     let modelFamily = ModelsManager.constructModelFamilyOffline(model: model)

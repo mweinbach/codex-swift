@@ -196,7 +196,7 @@ public enum ModelsManager {
     }
 
     public static func builtinModelPresets(authMode: AuthMode? = nil) -> [ModelPreset] {
-        filterByAuth(allModelPresets, chatGPTMode: authMode == .chatGPT)
+        filterByAuth(allModelPresets, chatGPTMode: authMode?.isChatGPT == true)
     }
 
     public static var allModelPresets: [ModelPreset] {

@@ -435,6 +435,8 @@ Source baseline inspected for this scaffold:
   - `configRequirements/read` now returns null when no requirements are configured and maps the ported requirements fields for allowed approval policies and sandbox modes into the Rust app-server response keys.
 - `codex-rs/app-server/src/request_processors/account_processor.rs` add-credits nudge emails
   - `account/sendAddCreditsNudgeEmail` now preserves Rust auth requirement errors, ChatGPT-auth backend headers, `credits`/`usage_limit` request bodies, `sent` and `cooldown_active` response statuses, and backend-failure internal errors.
+- `codex-rs/app-server/src/request_processors/account_processor.rs` external ChatGPT auth tokens
+  - `account/login/start` now accepts the Rust `chatgptAuthTokens` variant, validates forced API login and forced workspace constraints with Rust-shaped errors, stores the supplied access token/account metadata under the `chatgptAuthTokens` auth mode, returns `{ type: "chatgptAuthTokens" }`, emits `account/login/completed` plus `account/updated` with `authMode` and `planType`, and exposes the embedded ChatGPT identity through `account/read`. Rust's purely ephemeral external-auth storage and 401-triggered client refresh request flow remain pending.
 - `codex-rs/app-server/src/request_processors/account_processor.rs` account rate-limit reads
   - `account/rateLimits/read` now returns Rust's backward-compatible primary `rateLimits` snapshot plus the multi-bucket `rateLimitsByLimitId` map, including decoded backend `additional_rate_limits` entries, `rate_limit_reached_type`, and ChatGPT-vs-Codex API path selection.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config writes

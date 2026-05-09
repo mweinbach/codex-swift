@@ -5060,6 +5060,83 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginChatGPTAuthTokensPersistsExternalAuthAndNotifies() throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data("""
+        {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-embedded","chatgptPlanType":"pro"}}
+        """.utf8)))
+        XCTAssertEqual(messages.count, 3)
+
+        let loginResult = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(loginResult["type"] as? String, "chatgptAuthTokens")
+
+        XCTAssertEqual(messages[1]["method"] as? String, "account/login/completed")
+        XCTAssertEqual(messages[2]["method"] as? String, "account/updated")
+        let updatedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual(updatedParams["authMode"] as? String, "chatgptAuthTokens")
+        XCTAssertEqual(updatedParams["planType"] as? String, "pro")
+
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
+        XCTAssertEqual(stored.tokens?.accessToken, accessToken)
+        XCTAssertEqual(stored.tokens?.refreshToken, "")
+        XCTAssertEqual(stored.tokens?.accountID, "org-embedded")
+
+        let account = try decode(processor.processLine(Data(#"{"id":2,"method":"account/read","params":{"refreshToken":true}}"#.utf8)))
+        let accountResult = try XCTUnwrap(account["result"] as? [String: Any])
+        let accountPayload = try XCTUnwrap(accountResult["account"] as? [String: Any])
+        XCTAssertEqual(accountPayload["type"] as? String, "chatgpt")
+        XCTAssertEqual(accountPayload["email"] as? String, "embedded@example.com")
+        XCTAssertEqual(accountPayload["planType"] as? String, "pro")
+    }
+
+    func testAccountLoginChatGPTAuthTokensHonorsForcedWorkspaceAndForcedAPI() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        forced_login_method = "api"
+        forced_chatgpt_workspace_id = "org-allowed"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-denied")
+
+        let forcedAPI = try appServerResponse(
+            """
+            {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-denied"}}
+            """,
+            codexHome: temp.url
+        )
+        let forcedAPIError = try XCTUnwrap(forcedAPI["error"] as? [String: Any])
+        XCTAssertEqual(forcedAPIError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            forcedAPIError["message"] as? String,
+            "External ChatGPT auth is disabled. Use API key login instead."
+        )
+
+        try #"forced_chatgpt_workspace_id = "org-allowed""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let wrongWorkspace = try appServerResponse(
+            """
+            {"id":2,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-denied"}}
+            """,
+            codexHome: temp.url
+        )
+        let wrongWorkspaceError = try XCTUnwrap(wrongWorkspace["error"] as? [String: Any])
+        XCTAssertEqual(wrongWorkspaceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            wrongWorkspaceError["message"] as? String,
+            "External auth must use workspace org-allowed, but received \"org-denied\"."
+        )
+    }
+
     func testAccountLoginChatGPTStartsServerAndCancelReportsCanceled() throws {
         let temp = try TemporaryDirectory()
         try #"forced_chatgpt_workspace_id = "ws-v2""#.write(
@@ -7611,13 +7688,13 @@ final class CodexAppServerTests: XCTestCase {
         try (existing + "\n" + lines).write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private func fakeJWT(email: String, plan: String) throws -> String {
+    private func fakeJWT(email: String, plan: String, accountID: String = "acct-test") throws -> String {
         let header = ["alg": "none", "typ": "JWT"]
         let payload: [String: Any] = [
             "email": email,
             "https://api.openai.com/auth": [
                 "chatgpt_plan_type": plan,
-                "chatgpt_account_id": "acct-test"
+                "chatgpt_account_id": accountID
             ]
         ]
         return try [

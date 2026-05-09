@@ -271,17 +271,20 @@ public struct AuthTokenData: Codable, Equatable, Sendable {
 }
 
 public struct AuthDotJSON: Codable, Equatable, Sendable {
+    public let authMode: AuthMode?
     public let openAIAPIKey: String?
     public let tokens: AuthTokenData?
     public let lastRefresh: String?
 
-    public init(openAIAPIKey: String?, tokens: AuthTokenData?, lastRefresh: String?) {
+    public init(authMode: AuthMode? = nil, openAIAPIKey: String?, tokens: AuthTokenData?, lastRefresh: String?) {
+        self.authMode = authMode
         self.openAIAPIKey = openAIAPIKey
         self.tokens = tokens
         self.lastRefresh = lastRefresh
     }
 
     private enum CodingKeys: String, CodingKey {
+        case authMode = "auth_mode"
         case openAIAPIKey = "OPENAI_API_KEY"
         case tokens
         case lastRefresh = "last_refresh"
@@ -603,12 +606,49 @@ public enum CodexAuthStorage {
     ) throws {
         let parsedIDToken = try IdTokenParser.parse(idToken)
         let auth = AuthDotJSON(
+            authMode: nil,
             openAIAPIKey: apiKey,
             tokens: AuthTokenData(
                 idToken: parsedIDToken,
                 accessToken: accessToken,
                 refreshToken: refreshToken,
                 accountID: parsedIDToken.chatGPTAccountID
+            ),
+            lastRefresh: formatDate(now)
+        )
+        try saveAuthDotJSON(auth, codexHome: codexHome, mode: mode, encoder: encoder, keyringStore: keyringStore)
+    }
+
+    public static func saveChatGPTAuthTokens(
+        codexHome: URL,
+        accessToken: String,
+        chatGPTAccountID: String,
+        chatGPTPlanType: String?,
+        mode: AuthCredentialsStoreMode = .file,
+        now: Date = Date(),
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) throws {
+        var parsedToken = try IdTokenParser.parse(accessToken)
+        parsedToken.chatGPTAccountID = chatGPTAccountID
+        if let chatGPTPlanType {
+            if let known = KnownChatGPTPlan.fromRawValue(chatGPTPlanType) {
+                parsedToken.chatGPTPlanType = .known(known)
+            } else {
+                parsedToken.chatGPTPlanType = .unknown(chatGPTPlanType)
+            }
+        } else if parsedToken.chatGPTPlanType == nil {
+            parsedToken.chatGPTPlanType = .unknown("unknown")
+        }
+        parsedToken.rawJWT = accessToken
+        let auth = AuthDotJSON(
+            authMode: .chatGPTAuthTokens,
+            openAIAPIKey: nil,
+            tokens: AuthTokenData(
+                idToken: parsedToken,
+                accessToken: accessToken,
+                refreshToken: "",
+                accountID: chatGPTAccountID
             ),
             lastRefresh: formatDate(now)
         )

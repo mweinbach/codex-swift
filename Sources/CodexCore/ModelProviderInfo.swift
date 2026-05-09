@@ -3,6 +3,16 @@ import Foundation
 public enum AuthMode: String, Codable, Equatable, Sendable {
     case apiKey = "apikey"
     case chatGPT = "chatgpt"
+    case chatGPTAuthTokens = "chatgptAuthTokens"
+
+    public var isChatGPT: Bool {
+        switch self {
+        case .chatGPT, .chatGPTAuthTokens:
+            return true
+        case .apiKey:
+            return false
+        }
+    }
 }
 
 public struct ProviderRetryConfig: Equatable, Sendable {
@@ -358,7 +368,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         authMode: AuthMode? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> APIProvider {
-        let defaultBaseURL = authMode == .chatGPT
+        let defaultBaseURL = authMode?.isChatGPT == true
             ? "https://chatgpt.com/backend-api/codex"
             : "https://api.openai.com/v1"
 
