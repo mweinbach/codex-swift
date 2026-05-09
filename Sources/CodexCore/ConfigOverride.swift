@@ -304,6 +304,8 @@ private extension String {
                 switch escaped {
                 case "n":
                     result.append("\n")
+                case "r":
+                    result.append("\r")
                 case "t":
                     result.append("\t")
                 case "\"":

@@ -2352,6 +2352,45 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkStringIterableAndLineMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        CHARS = "go世".elems()
+        CODEPOINTS = "A世".codepoints()
+        LINES = "one\\n\\ntwo".splitlines()
+        KEPT = "one\\r\\ntwo\\rthree".splitlines(True)
+        EMPTY = "\\n".splitlines()
+
+        if CHARS[2] == "世" and CODEPOINTS[0] == 65 and CODEPOINTS[1] == 19990:
+            prefix_rule([TOOL, LINES[2]], "allow", justification = KEPT[0] + "/" + KEPT[1])
+
+        if LINES[1] == "" and len(EMPTY) == 1 and "status".startswith(("diff", "stat")) and "archive.tar".endswith((".zip", ".tar")):
+            network_rule("lines" + str(len(KEPT)) + ".example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + CHARS[0] + CHARS[1] + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("two")]),
+                decision: .allow,
+                justification: "one\r\n/two\r"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "lines3.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/go/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "one\\ntwo".splitlines(1) == ["one", "two"]:
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "git".startswith(("g", 1)):
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "

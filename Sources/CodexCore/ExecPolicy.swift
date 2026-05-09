@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "rsplit", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "elems", "codepoints", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2737,12 +2737,18 @@ public final class PolicyParser {
                 return value
             }
             return .string(strings.joined(separator: receiver))
+        case "elems":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .array(receiver.unicodeScalars.map { .string(String($0)) })
+        case "codepoints":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .array(receiver.unicodeScalars.map { .integer(Int64($0.value)) })
         case "startswith":
-            let prefix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
-            return .bool(receiver.hasPrefix(prefix))
+            let prefixes = try parseStringOrTupleMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .bool(prefixes.contains { receiver.hasPrefix($0) })
         case "endswith":
-            let suffix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
-            return .bool(receiver.hasSuffix(suffix))
+            let suffixes = try parseStringOrTupleMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .bool(suffixes.contains { receiver.hasSuffix($0) })
         case "lower":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .string(receiver.lowercased())
@@ -2770,6 +2776,9 @@ public final class PolicyParser {
         case "rsplit":
             let arguments = try parseStringSplitMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
             return .array(splittingStarlarkString(receiver, separator: arguments.separator, maxsplit: arguments.maxsplit, direction: .reverse).map(ConfigValue.string))
+        case "splitlines":
+            let keepends = try parseStringSplitLinesKeependsArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .array(splittingStarlarkLines(receiver, keepends: keepends).map(ConfigValue.string))
         case "replace":
             guard rawArguments.count == 2 || rawArguments.count == 3 else {
                 throw ConfigOverrideError.invalidLiteral(text)
@@ -2981,6 +2990,33 @@ public final class PolicyParser {
         return value
     }
 
+    private static func parseStringOrTupleMethodArgument(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> [String] {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        switch argument {
+        case let .string(value):
+            return [value]
+        case let .array(items):
+            return try items.map { item in
+                guard case let .string(value) = item else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                return value
+            }
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
     private static func parseStringSearchMethodArguments(
         _ rawArguments: [String],
         expression: String,
@@ -3056,6 +3092,25 @@ public final class PolicyParser {
             ? parseStarlarkInteger(rawArguments[1], constants: constants, functions: functions, expression: expression)
             : nil
         return (separator, maxsplit)
+    }
+
+    private static func parseStringSplitLinesKeependsArgument(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        guard rawArguments.count <= 1 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        guard let rawArgument = rawArguments.first else {
+            return false
+        }
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .bool(keepends) = argument else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return keepends
     }
 
     private static func trimmingStarlarkString(
@@ -3483,6 +3538,45 @@ public final class PolicyParser {
             pieces.append(String(current.reversed()))
         }
         return Array(pieces.reversed())
+    }
+
+    private static func splittingStarlarkLines(_ string: String, keepends: Bool) -> [String] {
+        var lines: [String] = []
+        let scalars = string.unicodeScalars
+        var lineStart = scalars.startIndex
+        var index = scalars.startIndex
+
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            guard scalar == "\n" || scalar == "\r" else {
+                index = scalars.index(after: index)
+                continue
+            }
+
+            let lineEnd = index
+            var nextLineStart = scalars.index(after: index)
+            if scalar == "\r",
+               nextLineStart < scalars.endIndex,
+               scalars[nextLineStart] == "\n" {
+                nextLineStart = scalars.index(after: nextLineStart)
+            }
+
+            let sliceEnd = keepends ? nextLineStart : lineEnd
+            let stringLineStart = String.Index(lineStart, within: string)!
+            let stringSliceEnd = String.Index(sliceEnd, within: string)!
+            lines.append(String(string[stringLineStart..<stringSliceEnd]))
+            if nextLineStart == scalars.endIndex {
+                return lines
+            }
+            lineStart = nextLineStart
+            index = nextLineStart
+        }
+
+        if lineStart < scalars.endIndex {
+            let stringLineStart = String.Index(lineStart, within: string)!
+            lines.append(String(string[stringLineStart..<string.endIndex]))
+        }
+        return lines
     }
 
     private static func replacingEmptyStarlarkString(_ string: String, newValue: String, count: Int) -> String {
