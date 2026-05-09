@@ -784,6 +784,68 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.timeoutMS, 1000)
     }
 
+    func testShellToolCallParamsDecodeApprovalHintsLikeRust() throws {
+        let json = #"""
+        {
+            "command": ["git", "push"],
+            "workdir": "/repo",
+            "timeout_ms": 1000,
+            "sandbox_permissions": "require_escalated",
+            "prefix_rule": ["git", "push"],
+            "additional_permissions": {
+                "network": {
+                    "enabled": true
+                },
+                "file_system": {
+                    "read": ["/repo"]
+                }
+            },
+            "justification": "publish branch"
+        }
+        """#
+
+        let params = try JSONDecoder().decode(ShellToolCallParams.self, from: Data(json.utf8))
+        XCTAssertEqual(params.command, ["git", "push"])
+        XCTAssertEqual(params.timeoutMS, 1000)
+        XCTAssertEqual(params.sandboxPermissions, .requireEscalated)
+        XCTAssertEqual(params.prefixRule, ["git", "push"])
+        XCTAssertEqual(params.additionalPermissions?.network, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(params.additionalPermissions?.fileSystem, .object([
+            "read": .array([.string("/repo")])
+        ]))
+        XCTAssertEqual(params.justification, "publish branch")
+    }
+
+    func testShellCommandToolCallParamsDecodeApprovalHintsLikeRust() throws {
+        let json = #"""
+        {
+            "command": "git status",
+            "workdir": "/repo",
+            "login": false,
+            "timeout": 2000,
+            "sandbox_permissions": "use_default",
+            "prefix_rule": ["git"],
+            "additional_permissions": {
+                "network": {
+                    "enabled": false
+                }
+            },
+            "justification": "inspect repo"
+        }
+        """#
+
+        let params = try JSONDecoder().decode(ShellCommandToolCallParams.self, from: Data(json.utf8))
+        XCTAssertEqual(params.command, "git status")
+        XCTAssertEqual(params.workdir, "/repo")
+        XCTAssertEqual(params.login, false)
+        XCTAssertEqual(params.timeoutMS, 2000)
+        XCTAssertEqual(params.sandboxPermissions, .useDefault)
+        XCTAssertEqual(params.prefixRule, ["git"])
+        XCTAssertEqual(params.additionalPermissions?.network, RequestPermissionNetworkPermissions(enabled: false))
+        XCTAssertNil(params.additionalPermissions?.fileSystem)
+        XCTAssertEqual(params.justification, "inspect repo")
+    }
+
     func testSandboxPermissionsWireValues() {
         XCTAssertTrue(SandboxPermissions.requireEscalated.requiresEscalatedPermissions)
         XCTAssertFalse(SandboxPermissions.useDefault.requiresEscalatedPermissions)

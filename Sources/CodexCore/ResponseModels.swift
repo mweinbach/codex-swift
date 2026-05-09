@@ -620,6 +620,8 @@ public struct ShellToolCallParams: Equatable, Decodable, Sendable {
     public let workdir: String?
     public let timeoutMS: UInt64?
     public let sandboxPermissions: SandboxPermissions?
+    public let prefixRule: [String]?
+    public let additionalPermissions: RequestPermissionProfile?
     public let justification: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -628,6 +630,8 @@ public struct ShellToolCallParams: Equatable, Decodable, Sendable {
         case timeout
         case timeoutMS = "timeout_ms"
         case sandboxPermissions = "sandbox_permissions"
+        case prefixRule = "prefix_rule"
+        case additionalPermissions = "additional_permissions"
         case justification
     }
 
@@ -638,6 +642,11 @@ public struct ShellToolCallParams: Equatable, Decodable, Sendable {
         self.timeoutMS = try container.decodeIfPresent(UInt64.self, forKey: .timeoutMS)
             ?? container.decodeIfPresent(UInt64.self, forKey: .timeout)
         self.sandboxPermissions = try container.decodeIfPresent(SandboxPermissions.self, forKey: .sandboxPermissions)
+        self.prefixRule = try container.decodeIfPresent([String].self, forKey: .prefixRule)
+        self.additionalPermissions = try container.decodeIfPresent(
+            RequestPermissionProfile.self,
+            forKey: .additionalPermissions
+        )
         self.justification = try container.decodeIfPresent(String.self, forKey: .justification)
     }
 }
@@ -648,6 +657,8 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
     public let login: Bool?
     public let timeoutMS: UInt64?
     public let sandboxPermissions: SandboxPermissions?
+    public let prefixRule: [String]?
+    public let additionalPermissions: RequestPermissionProfile?
     public let justification: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -657,6 +668,8 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
         case timeout
         case timeoutMS = "timeout_ms"
         case sandboxPermissions = "sandbox_permissions"
+        case prefixRule = "prefix_rule"
+        case additionalPermissions = "additional_permissions"
         case justification
     }
 
@@ -668,6 +681,11 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
         self.timeoutMS = try container.decodeIfPresent(UInt64.self, forKey: .timeoutMS)
             ?? container.decodeIfPresent(UInt64.self, forKey: .timeout)
         self.sandboxPermissions = try container.decodeIfPresent(SandboxPermissions.self, forKey: .sandboxPermissions)
+        self.prefixRule = try container.decodeIfPresent([String].self, forKey: .prefixRule)
+        self.additionalPermissions = try container.decodeIfPresent(
+            RequestPermissionProfile.self,
+            forKey: .additionalPermissions
+        )
         self.justification = try container.decodeIfPresent(String.self, forKey: .justification)
     }
 }

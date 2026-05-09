@@ -491,6 +491,8 @@ Source baseline inspected for this scaffold:
   - `ResponseItem` now preserves Rust's non-skipped optional fields by serializing `null` for missing reasoning `encrypted_content` and local-shell/tool-search `call_id` values, while continuing to omit optionals Rust marks with `skip_serializing_if`.
 - `codex-rs/protocol/src/models.rs` reasoning item ID default
   - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
+- `codex-rs/protocol/src/models.rs` shell tool approval hints
+  - `ShellToolCallParams` and `ShellCommandToolCallParams` now decode Rust's `prefix_rule` and `additional_permissions` fields alongside timeout aliases, sandbox permissions, and justifications, preserving model-provided approval hints for later approval/runtime plumbing.
 
 ## Known Gaps
 
