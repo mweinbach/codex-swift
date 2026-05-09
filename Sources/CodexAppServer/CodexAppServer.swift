@@ -2088,6 +2088,11 @@ public enum CodexAppServer {
         }.standardizedFileURL
     }
 
+    private struct LocalPluginInlineHooks {
+        let sourcePath: String
+        let hooks: [String: Any]
+    }
+
     private struct LocalPluginManifest {
         let interface: Any
         let keywords: [String]
@@ -2097,6 +2102,7 @@ public enum CodexAppServer {
         let appConfig: URL?
         let mcpConfig: URL?
         let hookConfigs: [URL]?
+        let inlineHooks: [LocalPluginInlineHooks]
 
         static var empty: LocalPluginManifest {
             LocalPluginManifest(
@@ -2107,7 +2113,8 @@ public enum CodexAppServer {
                 skillRoot: nil,
                 appConfig: nil,
                 mcpConfig: nil,
-                hookConfigs: nil
+                hookConfigs: nil,
+                inlineHooks: []
             )
         }
     }
@@ -2132,7 +2139,8 @@ public enum CodexAppServer {
             skillRoot: localPluginManifestPath(root: root, value: object["skills"]),
             appConfig: localPluginManifestPath(root: root, value: object["apps"]),
             mcpConfig: localPluginManifestPath(root: root, value: object["mcpServers"]),
-            hookConfigs: localPluginManifestHookPaths(root: root, value: object["hooks"])
+            hookConfigs: localPluginManifestHookPaths(root: root, value: object["hooks"]),
+            inlineHooks: localPluginManifestInlineHooks(value: object["hooks"])
         )
     }
 
@@ -2174,17 +2182,27 @@ public enum CodexAppServer {
         guard enabled else {
             return []
         }
-        let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
-        var summaries: [[String: Any]] = []
-        for hooksPath in hookPaths {
-            guard let data = try? Data(contentsOf: hooksPath),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let hooks = object["hooks"] as? [String: Any]
-            else {
-                continue
+        let hookConfigs: [LocalPluginInlineHooks]
+        if !manifest.inlineHooks.isEmpty {
+            hookConfigs = manifest.inlineHooks
+        } else {
+            let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
+            hookConfigs = hookPaths.compactMap { hooksPath -> LocalPluginInlineHooks? in
+                guard let data = try? Data(contentsOf: hooksPath),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let hooks = object["hooks"] as? [String: Any]
+                else {
+                    return nil
+                }
+                return LocalPluginInlineHooks(
+                    sourcePath: localPluginRelativePath(root: root, path: hooksPath),
+                    hooks: hooks
+                )
             }
-            let sourcePath = localPluginRelativePath(root: root, path: hooksPath)
-            for (eventKey, value) in hooks {
+        }
+        var summaries: [[String: Any]] = []
+        for config in hookConfigs {
+            for (eventKey, value) in config.hooks {
                 guard let eventName = localPluginHookEventName(eventKey),
                       let groups = value as? [[String: Any]]
                 else {
@@ -2194,7 +2212,7 @@ public enum CodexAppServer {
                     let handlers = group["hooks"] as? [[String: Any]] ?? []
                     for handlerIndex in handlers.indices {
                         summaries.append([
-                            "key": "\(pluginID):\(sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
+                            "key": "\(pluginID):\(config.sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
                             "eventName": appServerHookEventName(eventName)
                         ])
                     }
@@ -2270,6 +2288,22 @@ public enum CodexAppServer {
             return paths.isEmpty ? nil : paths
         }
         return nil
+    }
+
+    private static func localPluginManifestInlineHooks(value: Any?) -> [LocalPluginInlineHooks] {
+        if let object = value as? [String: Any],
+           let hooks = object["hooks"] as? [String: Any] {
+            return [LocalPluginInlineHooks(sourcePath: "plugin.json#hooks[0]", hooks: hooks)]
+        }
+        if let objects = value as? [[String: Any]] {
+            return objects.enumerated().compactMap { index, object in
+                guard let hooks = object["hooks"] as? [String: Any] else {
+                    return nil
+                }
+                return LocalPluginInlineHooks(sourcePath: "plugin.json#hooks[\(index)]", hooks: hooks)
+            }
+        }
+        return []
     }
 
     private static func localPluginResolvedManifestPath(root: URL, rawPath: String) -> URL? {

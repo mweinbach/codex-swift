@@ -2019,6 +2019,72 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(plugin["mcpServers"] as? [String], ["radar"])
     }
 
+    func testPluginReadUsesInlineManifestHooks() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let pluginRoot = sourceRoot.appendingPathComponent("plugins/weather", isDirectory: true)
+        try """
+        [features]
+        plugin_hooks = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        try """
+        {
+          "name": "weather",
+          "description": "Reads local weather",
+          "hooks": [
+            {
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo inline one"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "hooks": {
+                "PostToolUse": [
+                  {
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo inline two"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let hooks = try XCTUnwrap(plugin["hooks"] as? [[String: Any]])
+        XCTAssertEqual(
+            hooks.map { $0["key"] as? String },
+            [
+                "weather@debug:plugin.json#hooks[0]:pre_tool_use:0:0",
+                "weather@debug:plugin.json#hooks[1]:post_tool_use:0:0"
+            ]
+        )
+    }
+
     func testPluginReadValidatesSourceAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path
