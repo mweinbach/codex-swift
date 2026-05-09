@@ -638,7 +638,7 @@ public enum ChatGPTLogin {
             ("response_type", "code"),
             ("client_id", clientID),
             ("redirect_uri", redirectURI),
-            ("scope", "openid profile email offline_access"),
+            ("scope", "openid profile email offline_access api.connectors.read api.connectors.invoke"),
             ("code_challenge", pkce.codeChallenge),
             ("code_challenge_method", "S256"),
             ("id_token_add_organizations", "true"),

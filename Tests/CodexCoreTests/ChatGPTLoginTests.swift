@@ -16,7 +16,7 @@ final class ChatGPTLoginTests: XCTestCase {
 
         XCTAssertEqual(
             authURL,
-            "https://auth.example/oauth/authorize?response_type=code&client_id=client-id&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access&code_challenge=challenge&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&state=state%2F123&originator=codex_cli_rs&allowed_workspace_id=workspace-123"
+            "https://auth.example/oauth/authorize?response_type=code&client_id=client-id&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access%20api.connectors.read%20api.connectors.invoke&code_challenge=challenge&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&state=state%2F123&originator=codex_cli_rs&allowed_workspace_id=workspace-123"
         )
     }
 
