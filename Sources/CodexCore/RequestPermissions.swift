@@ -486,6 +486,51 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
     case externalSandbox
 }
 
+extension FileSystemSandboxPolicy: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case globScanMaxDepth = "glob_scan_max_depth"
+        case entries
+    }
+
+    private enum Kind: String, Codable {
+        case restricted
+        case unrestricted
+        case externalSandbox = "external-sandbox"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .restricted:
+            self = .restricted(
+                entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries) ?? [],
+                globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+            )
+        case .unrestricted:
+            self = .unrestricted
+        case .externalSandbox:
+            self = .externalSandbox
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .restricted(entries, globScanMaxDepth):
+            try container.encode(Kind.restricted, forKey: .kind)
+            try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
+            if !entries.isEmpty {
+                try container.encode(entries, forKey: .entries)
+            }
+        case .unrestricted:
+            try container.encode(Kind.unrestricted, forKey: .kind)
+        case .externalSandbox:
+            try container.encode(Kind.externalSandbox, forKey: .kind)
+        }
+    }
+}
+
 public extension ManagedFileSystemPermissions {
     static func fromSandboxPolicy(_ policy: FileSystemSandboxPolicy) -> ManagedFileSystemPermissions? {
         switch policy {

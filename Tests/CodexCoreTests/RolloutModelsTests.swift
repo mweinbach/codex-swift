@@ -196,7 +196,11 @@ final class RolloutModelsTests: XCTestCase {
 
     func testTurnContextItemWireShapeIncludesOptionalFields() throws {
         let context = TurnContextItem(
+            turnID: "turn-1",
+            traceID: "trace-1",
             cwd: "/repo",
+            currentDate: "2026-05-09",
+            timezone: "America/New_York",
             approvalPolicy: .never,
             sandboxPolicy: .workspaceWrite(
                 writableRoots: [],
@@ -204,7 +208,33 @@ final class RolloutModelsTests: XCTestCase {
                 excludeTmpdirEnvVar: true,
                 excludeSlashTmp: false
             ),
+            permissionProfile: .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+                ]),
+                network: .restricted
+            ),
+            network: TurnContextNetworkItem(
+                allowedDomains: ["api.openai.com"],
+                deniedDomains: ["example.test"]
+            ),
+            fileSystemSandboxPolicy: .restricted(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo"), access: .write)
+                ],
+                globScanMaxDepth: 3
+            ),
             model: "o3",
+            personality: .friendly,
+            collaborationMode: CollaborationMode(
+                mode: .plan,
+                settings: CollaborationModeSettings(
+                    model: "o3",
+                    reasoningEffort: .high,
+                    developerInstructions: "plan first"
+                )
+            ),
+            realtimeActive: true,
             effort: .high,
             summary: .detailed,
             baseInstructions: "base",
@@ -215,7 +245,11 @@ final class RolloutModelsTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(context, [
+            "turn_id": "turn-1",
+            "trace_id": "trace-1",
             "cwd": "/repo",
+            "current_date": "2026-05-09",
+            "timezone": "America/New_York",
             "approval_policy": "never",
             "sandbox_policy": [
                 "type": "workspace-write",
@@ -223,7 +257,52 @@ final class RolloutModelsTests: XCTestCase {
                 "exclude_tmpdir_env_var": true,
                 "exclude_slash_tmp": false
             ],
+            "permission_profile": [
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": [
+                        [
+                            "path": [
+                                "type": "special",
+                                "value": [
+                                    "kind": "root"
+                                ]
+                            ],
+                            "access": "read"
+                        ]
+                    ]
+                ],
+                "network": "restricted"
+            ],
+            "network": [
+                "allowed_domains": ["api.openai.com"],
+                "denied_domains": ["example.test"]
+            ],
+            "file_system_sandbox_policy": [
+                "kind": "restricted",
+                "glob_scan_max_depth": 3,
+                "entries": [
+                    [
+                        "path": [
+                            "type": "path",
+                            "path": "/repo"
+                        ],
+                        "access": "write"
+                    ]
+                ]
+            ],
             "model": "o3",
+            "personality": "friendly",
+            "collaboration_mode": [
+                "mode": "plan",
+                "settings": [
+                    "model": "o3",
+                    "reasoning_effort": "high",
+                    "developer_instructions": "plan first"
+                ]
+            ],
+            "realtime_active": true,
             "effort": "high",
             "summary": "detailed",
             "base_instructions": "base",
@@ -237,6 +316,24 @@ final class RolloutModelsTests: XCTestCase {
                 "limit": 2048
             ]
         ])
+
+        let data = try JSONEncoder().encode(context)
+        XCTAssertEqual(try JSONDecoder().decode(TurnContextItem.self, from: data), context)
+        XCTAssertEqual(context.effectivePermissionProfile, context.permissionProfile)
+    }
+
+    func testTurnContextItemDerivesPermissionProfileFromRuntimePolicyLikeRust() {
+        let runtimePolicy = FileSystemSandboxPolicy.externalSandbox
+        let context = TurnContextItem(
+            cwd: "/repo",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            fileSystemSandboxPolicy: runtimePolicy,
+            model: "gpt-5.4",
+            summary: .auto
+        )
+
+        XCTAssertEqual(context.effectivePermissionProfile, .external(network: .restricted))
     }
 
     func testRolloutRecordItemUsesTypeAndPayloadWrapper() throws {

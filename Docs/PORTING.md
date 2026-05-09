@@ -524,6 +524,8 @@ Source baseline inspected for this scaffold:
   - Added Swift helpers for deriving `ManagedFileSystemPermissions` and `PermissionProfile` from runtime filesystem/network policies, including Rust's external-sandbox override and disabled-unrestricted behavior.
 - `codex-rs/protocol/src/models.rs` filesystem permission decode strictness
   - Tightened Swift `FileSystemPermissions` decoding to preserve Rust's denied unknown-field behavior for legacy/canonical shapes and nonzero `glob_scan_max_depth` constraint.
+- `codex-rs/protocol/src/protocol.rs` rollout turn context sidecars
+  - Expanded Swift `TurnContextItem` rollout serialization with Rust's turn/trace IDs, current date/timezone, permission profile, network, runtime filesystem policy, personality, collaboration mode, realtime-active fields, and fallback permission-profile derivation.
 
 ## Known Gaps
 

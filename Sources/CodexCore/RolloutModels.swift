@@ -198,11 +198,36 @@ public struct ConversationPathResponseEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct TurnContextNetworkItem: Equatable, Codable, Sendable {
+    public let allowedDomains: [String]
+    public let deniedDomains: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case allowedDomains = "allowed_domains"
+        case deniedDomains = "denied_domains"
+    }
+
+    public init(allowedDomains: [String], deniedDomains: [String]) {
+        self.allowedDomains = allowedDomains
+        self.deniedDomains = deniedDomains
+    }
+}
+
 public struct TurnContextItem: Equatable, Codable, Sendable {
+    public let turnID: String?
+    public let traceID: String?
     public let cwd: String
+    public let currentDate: String?
+    public let timezone: String?
     public let approvalPolicy: AskForApproval
     public let sandboxPolicy: SandboxPolicy
+    public let permissionProfile: PermissionProfile?
+    public let network: TurnContextNetworkItem?
+    public let fileSystemSandboxPolicy: FileSystemSandboxPolicy?
     public let model: String
+    public let personality: Personality?
+    public let collaborationMode: CollaborationMode?
+    public let realtimeActive: Bool?
     public let effort: ReasoningEffort?
     public let summary: ReasoningSummary
     public let baseInstructions: String?
@@ -212,10 +237,20 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
     public let truncationPolicy: TruncationPolicy?
 
     private enum CodingKeys: String, CodingKey {
+        case turnID = "turn_id"
+        case traceID = "trace_id"
         case cwd
+        case currentDate = "current_date"
+        case timezone
         case approvalPolicy = "approval_policy"
         case sandboxPolicy = "sandbox_policy"
+        case permissionProfile = "permission_profile"
+        case network
+        case fileSystemSandboxPolicy = "file_system_sandbox_policy"
         case model
+        case personality
+        case collaborationMode = "collaboration_mode"
+        case realtimeActive = "realtime_active"
         case effort
         case summary
         case baseInstructions = "base_instructions"
@@ -223,6 +258,52 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         case developerInstructions = "developer_instructions"
         case finalOutputJSONSchema = "final_output_json_schema"
         case truncationPolicy = "truncation_policy"
+    }
+
+    public init(
+        turnID: String? = nil,
+        traceID: String? = nil,
+        cwd: String,
+        currentDate: String? = nil,
+        timezone: String? = nil,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        permissionProfile: PermissionProfile? = nil,
+        network: TurnContextNetworkItem? = nil,
+        fileSystemSandboxPolicy: FileSystemSandboxPolicy? = nil,
+        model: String,
+        personality: Personality? = nil,
+        collaborationMode: CollaborationMode? = nil,
+        realtimeActive: Bool? = nil,
+        effort: ReasoningEffort? = nil,
+        summary: ReasoningSummary,
+        baseInstructions: String? = nil,
+        userInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        finalOutputJSONSchema: JSONValue? = nil,
+        truncationPolicy: TruncationPolicy? = nil
+    ) {
+        self.turnID = turnID
+        self.traceID = traceID
+        self.cwd = cwd
+        self.currentDate = currentDate
+        self.timezone = timezone
+        self.approvalPolicy = approvalPolicy
+        self.sandboxPolicy = sandboxPolicy
+        self.permissionProfile = permissionProfile
+        self.network = network
+        self.fileSystemSandboxPolicy = fileSystemSandboxPolicy
+        self.model = model
+        self.personality = personality
+        self.collaborationMode = collaborationMode
+        self.realtimeActive = realtimeActive
+        self.effort = effort
+        self.summary = summary
+        self.baseInstructions = baseInstructions
+        self.userInstructions = userInstructions
+        self.developerInstructions = developerInstructions
+        self.finalOutputJSONSchema = finalOutputJSONSchema
+        self.truncationPolicy = truncationPolicy
     }
 
     public init(
@@ -238,17 +319,43 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         finalOutputJSONSchema: JSONValue? = nil,
         truncationPolicy: TruncationPolicy? = nil
     ) {
-        self.cwd = cwd
-        self.approvalPolicy = approvalPolicy
-        self.sandboxPolicy = sandboxPolicy
-        self.model = model
-        self.effort = effort
-        self.summary = summary
-        self.baseInstructions = baseInstructions
-        self.userInstructions = userInstructions
-        self.developerInstructions = developerInstructions
-        self.finalOutputJSONSchema = finalOutputJSONSchema
-        self.truncationPolicy = truncationPolicy
+        self.init(
+            turnID: nil,
+            traceID: nil,
+            cwd: cwd,
+            currentDate: nil,
+            timezone: nil,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: nil,
+            network: nil,
+            fileSystemSandboxPolicy: nil,
+            model: model,
+            personality: nil,
+            collaborationMode: nil,
+            realtimeActive: nil,
+            effort: effort,
+            summary: summary,
+            baseInstructions: baseInstructions,
+            userInstructions: userInstructions,
+            developerInstructions: developerInstructions,
+            finalOutputJSONSchema: finalOutputJSONSchema,
+            truncationPolicy: truncationPolicy
+        )
+    }
+
+    public var effectivePermissionProfile: PermissionProfile {
+        if let permissionProfile {
+            return permissionProfile
+        }
+        if let fileSystemSandboxPolicy {
+            return PermissionProfile.fromRuntimePermissionsWithEnforcement(
+                SandboxEnforcement.fromLegacySandboxPolicy(sandboxPolicy),
+                fileSystem: fileSystemSandboxPolicy,
+                network: NetworkSandboxPolicy.fromLegacySandboxPolicy(sandboxPolicy)
+            )
+        }
+        return PermissionProfile.fromLegacySandboxPolicy(sandboxPolicy)
     }
 }
 

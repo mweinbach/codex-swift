@@ -63,6 +63,12 @@ public enum TrustLevel: String, Codable, CaseIterable, Equatable, Sendable {
     case untrusted
 }
 
+public enum Personality: String, Codable, CaseIterable, Equatable, Sendable {
+    case none
+    case friendly
+    case pragmatic
+}
+
 public enum CollaborationModeKind: String, Codable, CaseIterable, Equatable, Sendable {
     case plan
     case defaultMode = "default"
@@ -95,6 +101,38 @@ public enum CollaborationModeKind: String, Codable, CaseIterable, Equatable, Sen
         case .defaultMode:
             return "Default"
         }
+    }
+}
+
+public struct CollaborationModeSettings: Codable, Equatable, Sendable {
+    public var model: String
+    public var reasoningEffort: ReasoningEffort?
+    public var developerInstructions: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case reasoningEffort = "reasoning_effort"
+        case developerInstructions = "developer_instructions"
+    }
+
+    public init(
+        model: String,
+        reasoningEffort: ReasoningEffort? = nil,
+        developerInstructions: String? = nil
+    ) {
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.developerInstructions = developerInstructions
+    }
+}
+
+public struct CollaborationMode: Codable, Equatable, Sendable {
+    public var mode: CollaborationModeKind
+    public var settings: CollaborationModeSettings
+
+    public init(mode: CollaborationModeKind, settings: CollaborationModeSettings) {
+        self.mode = mode
+        self.settings = settings
     }
 }
 
