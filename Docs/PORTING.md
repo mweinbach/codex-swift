@@ -669,6 +669,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `.count(...)`, `.find(...)`, `.index(...)`, `.rfind(...)`, and `.rindex(...)`, including optional `start`/`end` bounds, `None` bounds, non-overlapping counts, empty-needle behavior, reverse search, and failing index lookups.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string partition methods
   - Added Swift execpolicy parser support for `.partition(...)` and `.rpartition(...)`, including tuple-shaped results, missing-separator triples, reverse partitioning, destructuring use, and empty-separator rejection.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string split methods
+  - Extended Swift execpolicy parser support for `.split(...)` with `None`, `maxsplit`, negative and zero `maxsplit`, explicit separators that preserve empty fields, and added `.rsplit(...)` reverse splitting with matching whitespace and separator behavior.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string normalization methods
   - Added Swift execpolicy parser support for string `.lower()`, `.upper()`, `.strip(...)`, `.lstrip(...)`, `.rstrip(...)`, and separator-based `.split(...)` method calls across supported policy literals, helper returns, list/loop bodies, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string replacement method

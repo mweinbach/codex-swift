@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "rsplit", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2765,14 +2765,11 @@ public final class PolicyParser {
             let characters = try parseOptionalStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .string(trimmingStarlarkString(receiver, characters: characters, edges: .trailing))
         case "split":
-            if rawArguments.isEmpty {
-                return .array(starlarkWhitespaceSplit(receiver).map(ConfigValue.string))
-            }
-            let separator = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
-            guard !separator.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(text)
-            }
-            return .array(receiver.components(separatedBy: separator).map(ConfigValue.string))
+            let arguments = try parseStringSplitMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            return .array(splittingStarlarkString(receiver, separator: arguments.separator, maxsplit: arguments.maxsplit, direction: .forward).map(ConfigValue.string))
+        case "rsplit":
+            let arguments = try parseStringSplitMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            return .array(splittingStarlarkString(receiver, separator: arguments.separator, maxsplit: arguments.maxsplit, direction: .reverse).map(ConfigValue.string))
         case "replace":
             guard rawArguments.count == 2 || rawArguments.count == 3 else {
                 throw ConfigOverrideError.invalidLiteral(text)
@@ -3028,6 +3025,37 @@ public final class PolicyParser {
             return nil
         }
         return try parseStarlarkInteger(rawArgument, constants: constants, functions: functions, expression: expression)
+    }
+
+    private static func parseStringSplitMethodArguments(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> (separator: String?, maxsplit: Int?) {
+        guard rawArguments.count <= 2 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let separator: String?
+        if rawArguments.isEmpty || rawArguments[0] == "None" {
+            separator = nil
+        } else {
+            separator = try parseStringMethodArgument(
+                rawArguments[0],
+                expression: expression,
+                constants: constants,
+                functions: functions
+            )
+            if separator?.isEmpty == true {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+        }
+
+        let maxsplit = try rawArguments.count == 2
+            ? parseStarlarkInteger(rawArguments[1], constants: constants, functions: functions, expression: expression)
+            : nil
+        return (separator, maxsplit)
     }
 
     private static func trimmingStarlarkString(
@@ -3325,6 +3353,136 @@ public final class PolicyParser {
 
     private static func starlarkWhitespaceSplit(_ string: String) -> [String] {
         string.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).map(String.init)
+    }
+
+    private static func splittingStarlarkString(
+        _ string: String,
+        separator: String?,
+        maxsplit rawMaxsplit: Int?,
+        direction: StarlarkStringSearchDirection
+    ) -> [String] {
+        let maxPieces = rawMaxsplit.flatMap { $0 < 0 ? nil : $0 + 1 }
+        guard let separator else {
+            switch (direction, maxPieces) {
+            case (.forward, nil):
+                return starlarkWhitespaceSplit(string)
+            case (.forward, let maxPieces?):
+                return splittingStarlarkWhitespace(string, maxPieces: maxPieces)
+            case (.reverse, nil):
+                return starlarkWhitespaceSplit(string)
+            case (.reverse, let maxPieces?):
+                return reverseSplittingStarlarkWhitespace(string, maxPieces: maxPieces)
+            }
+        }
+
+        switch direction {
+        case .forward:
+            return splittingStarlarkString(string, separator: separator, maxPieces: maxPieces)
+        case .reverse:
+            return reverseSplittingStarlarkString(string, separator: separator, maxPieces: maxPieces)
+        }
+    }
+
+    private static func splittingStarlarkString(
+        _ string: String,
+        separator: String,
+        maxPieces: Int?
+    ) -> [String] {
+        guard let maxPieces else {
+            return string.components(separatedBy: separator)
+        }
+        guard maxPieces > 1 else {
+            return [string]
+        }
+
+        var pieces: [String] = []
+        var cursor = string.startIndex
+        var remainingSplits = maxPieces - 1
+        while remainingSplits > 0,
+              let range = string.range(of: separator, range: cursor..<string.endIndex) {
+            pieces.append(String(string[cursor..<range.lowerBound]))
+            cursor = range.upperBound
+            remainingSplits -= 1
+        }
+        pieces.append(String(string[cursor...]))
+        return pieces
+    }
+
+    private static func reverseSplittingStarlarkString(
+        _ string: String,
+        separator: String,
+        maxPieces: Int?
+    ) -> [String] {
+        guard let maxPieces else {
+            return string.components(separatedBy: separator)
+        }
+        guard maxPieces > 1 else {
+            return [string]
+        }
+
+        var pieces: [String] = []
+        var searchUpperBound = string.endIndex
+        var remainingSplits = maxPieces - 1
+        while remainingSplits > 0,
+              let range = string.range(of: separator, options: .backwards, range: string.startIndex..<searchUpperBound) {
+            pieces.append(String(string[range.upperBound..<searchUpperBound]))
+            searchUpperBound = range.lowerBound
+            remainingSplits -= 1
+        }
+        pieces.append(String(string[..<searchUpperBound]))
+        return Array(pieces.reversed())
+    }
+
+    private static func splittingStarlarkWhitespace(_ string: String, maxPieces: Int) -> [String] {
+        var pieces: [String] = []
+        var current = ""
+        var split = 1
+        var eatWhitespace = true
+        for character in string {
+            if split >= maxPieces, !eatWhitespace {
+                current.append(character)
+            } else if character.isWhitespace || character.isNewline {
+                if !current.isEmpty {
+                    pieces.append(current)
+                    current = ""
+                    split += 1
+                    eatWhitespace = true
+                }
+            } else {
+                eatWhitespace = false
+                current.append(character)
+            }
+        }
+        if !current.isEmpty {
+            pieces.append(current)
+        }
+        return pieces
+    }
+
+    private static func reverseSplittingStarlarkWhitespace(_ string: String, maxPieces: Int) -> [String] {
+        var pieces: [String] = []
+        var current = ""
+        var split = 1
+        var eatWhitespace = true
+        for character in string.reversed() {
+            if split >= maxPieces, !eatWhitespace {
+                current.append(character)
+            } else if character.isWhitespace || character.isNewline {
+                if !current.isEmpty {
+                    pieces.append(String(current.reversed()))
+                    current = ""
+                    split += 1
+                    eatWhitespace = true
+                }
+            } else {
+                eatWhitespace = false
+                current.append(character)
+            }
+        }
+        if !current.isEmpty {
+            pieces.append(String(current.reversed()))
+        }
+        return Array(pieces.reversed())
     }
 
     private static func replacingEmptyStarlarkString(_ string: String, newValue: String, count: Int) -> String {

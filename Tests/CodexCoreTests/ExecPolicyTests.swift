@@ -2311,6 +2311,47 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkStringSplitMaxsplitAndReverse() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        WORDS = "one two  three".split(None, 1)
+        RWORDS = "one two  three".rsplit(None, 1)
+        BANANA = "banana".split("n", 1)
+        RBANANA = "banana".rsplit("n", 1)
+        SPACES = "one two  three".split(" ")
+        NEGATIVE = "banana".split("n", -1)
+        ZERO = "banana".split("n", 0)
+
+        if WORDS[0] == "one" and WORDS[1] == "two  three" and RWORDS[0] == "one two" and RWORDS[1] == "three":
+            prefix_rule([TOOL, BANANA[1]], "allow", justification = RBANANA[0] + "/" + RBANANA[1])
+
+        if SPACES[2] == "" and NEGATIVE[2] == "a" and ZERO[0] == "banana":
+            network_rule("split" + str(len(SPACES)) + ".example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("ana")]),
+                decision: .allow,
+                justification: "bana/a"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "split4.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "banana".split("") == ["banana"]:
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "banana".rsplit("") == ["banana"]:
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "
