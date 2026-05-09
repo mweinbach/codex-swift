@@ -857,9 +857,7 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.sandboxPermissions, .requireEscalated)
         XCTAssertEqual(params.prefixRule, ["git", "push"])
         XCTAssertEqual(params.additionalPermissions?.network, RequestPermissionNetworkPermissions(enabled: true))
-        XCTAssertEqual(params.additionalPermissions?.fileSystem, .object([
-            "read": .array([.string("/repo")])
-        ]))
+        XCTAssertEqual(params.additionalPermissions?.fileSystem, FileSystemPermissions(read: ["/repo"]))
         XCTAssertEqual(params.justification, "publish branch")
     }
 
@@ -911,9 +909,65 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertFalse(params.sandboxPermissions?.requiresEscalatedPermissions ?? true)
         XCTAssertTrue(params.sandboxPermissions?.requestsSandboxOverride ?? false)
         XCTAssertTrue(params.sandboxPermissions?.usesAdditionalPermissions ?? false)
-        XCTAssertEqual(params.additionalPermissions?.fileSystem, .object([
-            "write": .array([.string("/repo/cache")])
-        ]))
+        XCTAssertEqual(params.additionalPermissions?.fileSystem, FileSystemPermissions(write: ["/repo/cache"]))
+    }
+
+    func testFileSystemPermissionsCanonicalWireShapeLikeRust() throws {
+        let json = #"""
+        {
+            "entries": [
+                {
+                    "path": {
+                        "type": "glob_pattern",
+                        "pattern": "**/*.secret"
+                    },
+                    "access": "none"
+                }
+            ],
+            "glob_scan_max_depth": 3
+        }
+        """#
+
+        let permissions = try JSONDecoder().decode(FileSystemPermissions.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            permissions,
+            FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none)
+                ],
+                globScanMaxDepth: 3
+            )
+        )
+        XCTAssertNil(permissions.legacyReadWriteRoots)
+
+        try XCTAssertJSONObjectEqual(permissions, [
+            "entries": [
+                [
+                    "path": [
+                        "type": "glob_pattern",
+                        "pattern": "**/*.secret"
+                    ],
+                    "access": "none"
+                ]
+            ],
+            "glob_scan_max_depth": 3
+        ])
+    }
+
+    func testFileSystemPermissionsLegacyWireShapeLikeRust() throws {
+        let permissions = try JSONDecoder().decode(
+            FileSystemPermissions.self,
+            from: Data(#"{"read":["/repo"],"write":["/repo/Sources"]}"#.utf8)
+        )
+
+        XCTAssertEqual(permissions, FileSystemPermissions(read: ["/repo"], write: ["/repo/Sources"]))
+        XCTAssertEqual(permissions.legacyReadWriteRoots?.read, ["/repo"])
+        XCTAssertEqual(permissions.legacyReadWriteRoots?.write, ["/repo/Sources"])
+
+        try XCTAssertJSONObjectEqual(permissions, [
+            "read": ["/repo"],
+            "write": ["/repo/Sources"]
+        ])
     }
 
     func testSearchToolCallParamsWireShapeLikeRust() throws {

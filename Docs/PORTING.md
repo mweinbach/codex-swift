@@ -501,6 +501,8 @@ Source baseline inspected for this scaffold:
   - `SandboxPermissions` now decodes Rust's `with_additional_permissions` wire value and exposes helper semantics for escalated execution, any explicit sandbox override, and sandboxed additional-permission widening.
 - `codex-rs/protocol/src/models.rs` user image input conversion
   - `ResponseInputItem(userInputs:)` now wraps remote image inputs with Rust's `<image>` markers, emits numbered local-image labels, shares the remote/local image counter, and uses Rust's unsupported-image placeholder wording.
+- `codex-rs/protocol/src/models.rs` filesystem permission overlays
+  - Added typed `FileSystemPermissions`, `FileSystemSandboxEntry`, `FileSystemPath`, and `FileSystemAccessMode` models for request/additional permissions, including Rust's legacy `read`/`write` roots and canonical `entries` plus `glob_scan_max_depth` wire shapes.
 
 ## Known Gaps
 

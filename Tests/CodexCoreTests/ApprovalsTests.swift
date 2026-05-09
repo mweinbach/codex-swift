@@ -80,7 +80,7 @@ final class ApprovalsTests: XCTestCase {
             ],
             additionalPermissions: RequestPermissionProfile(
                 network: RequestPermissionNetworkPermissions(enabled: true),
-                fileSystem: .object(["read": .array([.string("/repo")])])
+                fileSystem: FileSystemPermissions(read: ["/repo"])
             ),
             availableDecisions: [
                 .approved,

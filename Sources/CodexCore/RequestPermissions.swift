@@ -13,16 +13,168 @@ public struct RequestPermissionNetworkPermissions: Codable, Equatable, Sendable 
     }
 }
 
+public enum FileSystemAccessMode: String, Codable, Equatable, Sendable {
+    case read
+    case write
+    case none
+
+    public var canRead: Bool {
+        self != .none
+    }
+
+    public var canWrite: Bool {
+        self == .write
+    }
+}
+
+public enum FileSystemPath: Equatable, Codable, Sendable {
+    case path(String)
+    case globPattern(String)
+    case special(JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case path
+        case pattern
+        case value
+    }
+
+    private enum PathType: String, Codable {
+        case path
+        case globPattern = "glob_pattern"
+        case special
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(PathType.self, forKey: .type) {
+        case .path:
+            self = .path(try container.decode(String.self, forKey: .path))
+        case .globPattern:
+            self = .globPattern(try container.decode(String.self, forKey: .pattern))
+        case .special:
+            self = .special(try container.decode(JSONValue.self, forKey: .value))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .path(path):
+            try container.encode(PathType.path, forKey: .type)
+            try container.encode(path, forKey: .path)
+        case let .globPattern(pattern):
+            try container.encode(PathType.globPattern, forKey: .type)
+            try container.encode(pattern, forKey: .pattern)
+        case let .special(value):
+            try container.encode(PathType.special, forKey: .type)
+            try container.encode(value, forKey: .value)
+        }
+    }
+}
+
+public struct FileSystemSandboxEntry: Codable, Equatable, Sendable {
+    public let path: FileSystemPath
+    public let access: FileSystemAccessMode
+
+    public init(path: FileSystemPath, access: FileSystemAccessMode) {
+        self.path = path
+        self.access = access
+    }
+}
+
+public struct FileSystemPermissions: Codable, Equatable, Sendable {
+    public let entries: [FileSystemSandboxEntry]
+    public let globScanMaxDepth: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case entries
+        case globScanMaxDepth = "glob_scan_max_depth"
+        case read
+        case write
+    }
+
+    public init(entries: [FileSystemSandboxEntry] = [], globScanMaxDepth: Int? = nil) {
+        self.entries = entries
+        self.globScanMaxDepth = globScanMaxDepth
+    }
+
+    public init(read: [String]? = nil, write: [String]? = nil) {
+        var entries: [FileSystemSandboxEntry] = []
+        entries += (read ?? []).map { FileSystemSandboxEntry(path: .path($0), access: .read) }
+        entries += (write ?? []).map { FileSystemSandboxEntry(path: .path($0), access: .write) }
+        self.init(entries: entries)
+    }
+
+    public var isEmpty: Bool {
+        entries.isEmpty
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.entries) || container.contains(.globScanMaxDepth) {
+            self.init(
+                entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries) ?? [],
+                globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+            )
+            return
+        }
+
+        self.init(
+            read: try container.decodeIfPresent([String].self, forKey: .read),
+            write: try container.decodeIfPresent([String].self, forKey: .write)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let legacy = legacyReadWriteRoots {
+            try container.encodeIfPresent(legacy.read, forKey: .read)
+            try container.encodeIfPresent(legacy.write, forKey: .write)
+            return
+        }
+
+        if !entries.isEmpty {
+            try container.encode(entries, forKey: .entries)
+        }
+        try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
+    }
+
+    public var legacyReadWriteRoots: (read: [String]?, write: [String]?)? {
+        guard globScanMaxDepth == nil else {
+            return nil
+        }
+
+        var read: [String] = []
+        var write: [String] = []
+        for entry in entries {
+            guard case let .path(path) = entry.path else {
+                return nil
+            }
+            switch entry.access {
+            case .read:
+                read.append(path)
+            case .write:
+                write.append(path)
+            case .none:
+                return nil
+            }
+        }
+
+        return (read.isEmpty ? nil : read, write.isEmpty ? nil : write)
+    }
+}
+
 public struct RequestPermissionProfile: Codable, Equatable, Sendable {
     public let network: RequestPermissionNetworkPermissions?
-    public let fileSystem: JSONValue?
+    public let fileSystem: FileSystemPermissions?
 
     private enum CodingKeys: String, CodingKey {
         case network
         case fileSystem = "file_system"
     }
 
-    public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+    public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
         self.network = network
         self.fileSystem = fileSystem
     }

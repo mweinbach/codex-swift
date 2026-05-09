@@ -102,9 +102,7 @@ final class RequestResponseOperationTests: XCTestCase {
             response: RequestPermissionsResponse(
                 permissions: RequestPermissionProfile(
                     network: RequestPermissionNetworkPermissions(enabled: true),
-                    fileSystem: .object([
-                        "read": .array([.string("/repo")])
-                    ])
+                    fileSystem: FileSystemPermissions(read: ["/repo"])
                 ),
                 scope: .session,
                 strictAutoReview: true
