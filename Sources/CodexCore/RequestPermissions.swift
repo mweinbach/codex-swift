@@ -73,6 +73,47 @@ public enum FileSystemPath: Equatable, Codable, Sendable {
     }
 }
 
+public enum FileSystemSpecialPath: Equatable, Sendable {
+    case root
+    case minimal
+    case projectRoots(subpath: String?)
+    case tmpdir
+    case slashTmp
+    case unknown(path: String, subpath: String?)
+
+    public var jsonValue: JSONValue {
+        switch self {
+        case .root:
+            return .object(["kind": .string("root")])
+        case .minimal:
+            return .object(["kind": .string("minimal")])
+        case let .projectRoots(subpath):
+            return Self.object(kind: "project_roots", subpath: subpath)
+        case .tmpdir:
+            return .object(["kind": .string("tmpdir")])
+        case .slashTmp:
+            return .object(["kind": .string("slash_tmp")])
+        case let .unknown(path, subpath):
+            var object: [String: JSONValue] = [
+                "kind": .string("unknown"),
+                "path": .string(path)
+            ]
+            if let subpath {
+                object["subpath"] = .string(subpath)
+            }
+            return .object(object)
+        }
+    }
+
+    private static func object(kind: String, subpath: String?) -> JSONValue {
+        var object: [String: JSONValue] = ["kind": .string(kind)]
+        if let subpath {
+            object["subpath"] = .string(subpath)
+        }
+        return .object(object)
+    }
+}
+
 public struct FileSystemSandboxEntry: Codable, Equatable, Sendable {
     public let path: FileSystemPath
     public let access: FileSystemAccessMode
@@ -290,6 +331,60 @@ public enum ManagedFileSystemPermissions: Equatable, Codable, Sendable {
             try container.encode(PermissionType.unrestricted, forKey: .type)
         }
     }
+
+    public static func readOnly() -> ManagedFileSystemPermissions {
+        .restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ])
+    }
+
+    public static func workspaceWrite(
+        writableRoots: [AbsolutePath] = [],
+        excludeTmpdirEnvVar: Bool = false,
+        excludeSlashTmp: Bool = false
+    ) -> ManagedFileSystemPermissions {
+        var entries: [FileSystemSandboxEntry] = [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ]
+
+        if !excludeSlashTmp {
+            entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .write))
+        }
+        if !excludeTmpdirEnvVar {
+            entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.tmpdir.jsonValue), access: .write))
+        }
+        entries.append(contentsOf: writableRoots.map {
+            FileSystemSandboxEntry(path: .path($0.path), access: .write)
+        })
+
+        appendDefaultReadOnlyProjectRootSubpath(".git", to: &entries)
+        appendDefaultReadOnlyProjectRootSubpath(".agents", to: &entries)
+        appendDefaultReadOnlyProjectRootSubpath(".codex", to: &entries)
+        for writableRoot in writableRoots {
+            appendDefaultReadOnlyPath(writableRoot.path + "/.git", to: &entries)
+            appendDefaultReadOnlyPath(writableRoot.path + "/.agents", to: &entries)
+            appendDefaultReadOnlyPath(writableRoot.path + "/.codex", to: &entries)
+        }
+
+        return .restricted(entries: entries)
+    }
+
+    private static func appendDefaultReadOnlyProjectRootSubpath(_ subpath: String, to entries: inout [FileSystemSandboxEntry]) {
+        let path = FileSystemPath.special(FileSystemSpecialPath.projectRoots(subpath: subpath).jsonValue)
+        appendReadOnlyPath(path, to: &entries)
+    }
+
+    private static func appendDefaultReadOnlyPath(_ path: String, to entries: inout [FileSystemSandboxEntry]) {
+        appendReadOnlyPath(.path(path), to: &entries)
+    }
+
+    private static func appendReadOnlyPath(_ path: FileSystemPath, to entries: inout [FileSystemSandboxEntry]) {
+        guard !entries.contains(where: { $0.path == path }) else {
+            return
+        }
+        entries.append(FileSystemSandboxEntry(path: path, access: .read))
+    }
 }
 
 public enum PermissionProfile: Equatable, Codable, Sendable {
@@ -374,6 +469,30 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
         case .disabled:
             return .enabled
         }
+    }
+
+    public static func readOnly() -> PermissionProfile {
+        .managed(fileSystem: .readOnly(), network: .restricted)
+    }
+
+    public static func workspaceWrite() -> PermissionProfile {
+        workspaceWriteWith()
+    }
+
+    public static func workspaceWriteWith(
+        writableRoots: [AbsolutePath] = [],
+        network: NetworkSandboxPolicy = .restricted,
+        excludeTmpdirEnvVar: Bool = false,
+        excludeSlashTmp: Bool = false
+    ) -> PermissionProfile {
+        .managed(
+            fileSystem: .workspaceWrite(
+                writableRoots: writableRoots,
+                excludeTmpdirEnvVar: excludeTmpdirEnvVar,
+                excludeSlashTmp: excludeSlashTmp
+            ),
+            network: network
+        )
     }
 }
 

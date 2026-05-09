@@ -511,6 +511,8 @@ Source baseline inspected for this scaffold:
   - Reused typed `FileSystemPermissions` for app-server permissions, granted-permission, and command additional-permission payloads while preserving the existing camelCase app-server field names.
 - `codex-rs/protocol/src/models.rs` permission profile helpers
   - Added `SandboxEnforcement` and Swift helpers for `PermissionProfile.enforcement` and `networkSandboxPolicy`, including Rust's disabled-profile behavior of reporting enabled network access.
+- `codex-rs/protocol/src/models.rs` permission profile constructors
+  - Added Swift constructors for Rust's canonical read-only and workspace-write typed permission profiles, including special-path entries for project roots, temp roots, and protected metadata subpaths.
 
 ## Known Gaps
 

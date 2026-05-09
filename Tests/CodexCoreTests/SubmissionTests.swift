@@ -341,6 +341,40 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(external.networkSandboxPolicy, .restricted)
     }
 
+    func testPermissionProfileConstructorsMatchRust() throws {
+        XCTAssertEqual(
+            PermissionProfile.readOnly(),
+            .managed(fileSystem: .readOnly(), network: .restricted)
+        )
+
+        let extraRoot = try AbsolutePath(absolutePath: "/repo/generated")
+        let workspaceWrite = PermissionProfile.workspaceWriteWith(
+            writableRoots: [extraRoot],
+            network: .enabled,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: false
+        )
+
+        XCTAssertEqual(
+            workspaceWrite,
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .write),
+                    FileSystemSandboxEntry(path: .path("/repo/generated"), access: .write),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".git").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".agents").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: ".codex").jsonValue), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/generated/.git"), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/generated/.agents"), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/generated/.codex"), access: .read)
+                ]),
+                network: .enabled
+            )
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
