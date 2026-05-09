@@ -184,22 +184,28 @@ public enum HookCommandRunner {
     }
 
     private static func waitForExitOrTimeout(process: Process, timeoutSec: UInt64) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                process.waitUntilExit()
-                return false
+        await withCheckedContinuation { continuation in
+            let state = HookProcessWaitState(continuation: continuation)
+
+            process.terminationHandler = { _ in
+                state.resume(timedOut: false)
             }
-            group.addTask {
+
+            if !process.isRunning {
+                state.resume(timedOut: false)
+                return
+            }
+
+            Task.detached {
                 try? await Task.sleep(nanoseconds: timeoutSec.saturatingNanoseconds)
-                return true
+                guard let continuation = state.claim() else {
+                    return
+                }
+                if process.isRunning {
+                    process.terminate()
+                }
+                continuation.resume(returning: true)
             }
-            let timedOut = await group.next() ?? false
-            if timedOut {
-                process.terminate()
-                process.waitUntilExit()
-            }
-            group.cancelAll()
-            return timedOut
         }
     }
 
@@ -217,6 +223,27 @@ private extension UInt64 {
     var saturatingNanoseconds: UInt64 {
         let (value, overflow) = multipliedReportingOverflow(by: 1_000_000_000)
         return overflow ? UInt64.max : value
+    }
+}
+
+private final class HookProcessWaitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(timedOut: Bool) {
+        claim()?.resume(returning: timedOut)
+    }
+
+    func claim() -> CheckedContinuation<Bool, Never>? {
+        lock.withLock {
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
     }
 }
 
