@@ -56,6 +56,20 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testBashExpansionUnsupportedSyntaxCollapsesToUnknownLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "echo $(pwd) && cat README.md"]), [
+            .unknown(cmd: "echo $(pwd) && cat README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"echo "$HOME" && cat README.md"#]), [
+            .unknown(cmd: #"echo "$HOME" && cat README.md"#)
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "echo {a,b} && cat README.md"]), [
+            .unknown(cmd: "echo {a,b} && cat README.md")
+        ])
+    }
+
     func testSupportsCat() {
         XCTAssertEqual(parseCommand(["cat", "webview/README.md"]), [
             .read(cmd: "cat webview/README.md", name: "README.md", path: "webview/README.md")

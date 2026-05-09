@@ -1048,8 +1048,13 @@ private func containsUnsupportedShellSyntax(_ script: String) -> Bool {
             doubleQuoted.toggle()
             continue
         }
-        if !singleQuoted, !doubleQuoted, char == ">" || char == "<" || char == "`" {
+        if !singleQuoted, (char == "$" || char == "`") {
             return true
+        }
+        if !singleQuoted, !doubleQuoted {
+            if char == ">" || char == "<" || char == "(" || char == ")" || char == "{" || char == "}" {
+                return true
+            }
         }
     }
 

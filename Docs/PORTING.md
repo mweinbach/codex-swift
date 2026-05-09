@@ -552,6 +552,8 @@ Source baseline inspected for this scaffold:
   - covered Rust-style filtering for `tail -c <count>` and `tail -c +<offset>` pipeline helpers so upstream list/search/read summaries are preserved.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
+- `codex-rs/shell-command/src/bash.rs` word-only shell parser rejection
+  - tightened Swift bash-script fallback detection so expansion and subshell constructs collapse to a whole-script unknown instead of being simplified as word-only command sequences.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
