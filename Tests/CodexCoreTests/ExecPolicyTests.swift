@@ -1148,6 +1148,52 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkBooleanExpressionsAsLiterals() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log"]
+        HOSTS = {"github": "api.github.com"}
+        HAS_STATUS = COMMANDS[0] == "status"
+        HAS_GITHUB = "github" in HOSTS
+        SHOULD_PROMPT = HAS_STATUS and HAS_GITHUB and len(COMMANDS) >= 3
+        SHOULD_BLOCK = not ("commit" in COMMANDS) and TOOL != "jj"
+        MATCH = f"{TOOL} {COMMANDS[0]}" if SHOULD_PROMPT else "jj status"
+
+        def host(public):
+            return "api.github.com" if public else "blocked.example.com"
+
+        if SHOULD_PROMPT:
+            prefix_rule(
+                [TOOL, COMMANDS[0]],
+                "prompt",
+                match = [MATCH],
+                justification = "bool literal prompt",
+            )
+
+        if SHOULD_BLOCK:
+            prefix_rule([TOOL, "commit"], "forbidden")
+
+        network_rule(host(SHOULD_PROMPT or False), "https", "allow")
+        host_executable(TOOL, ["/usr/bin/" + TOOL] if SHOULD_BLOCK else [])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "bool literal prompt"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("commit")]),
+                decision: .forbidden
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

@@ -635,6 +635,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for simple list-comprehension `if` filters evaluated with the same supported condition expressions as top-level branches.
 - `codex-rs/execpolicy/src/parser.rs` Starlark conditional expressions
   - Added Swift execpolicy parser support for `value if condition else fallback` expressions across supported policy literals, including constants, helper returns, list-comprehension outputs, builtin arguments, examples, network hosts, and host executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark boolean expressions as literals
+  - Added Swift execpolicy parser support for explicit boolean/comparison expressions assigned to constants and passed through supported function or builtin arguments, covering `and`, `or`, prefix `not`, ordered/equality comparisons, and membership operators.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity

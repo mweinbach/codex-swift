@@ -1517,6 +1517,13 @@ public final class PolicyParser {
         ) {
             return conditional
         }
+        if let boolean = try parseStarlarkBooleanExpression(
+            trimmed,
+            constants: constants,
+            functions: functions
+        ) {
+            return boolean
+        }
         let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         if additivePieces.count > 1 {
@@ -2490,6 +2497,33 @@ public final class PolicyParser {
             return value != 0
         case let .double(value):
             return value != 0
+        }
+    }
+
+    private static func parseStarlarkBooleanExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard containsExplicitStarlarkBooleanOperator(text) else {
+            return nil
+        }
+        return try .bool(evaluateStarlarkCondition(text, constants: constants, functions: functions))
+    }
+
+    private static func containsExplicitStarlarkBooleanOperator(_ text: String) -> Bool {
+        if topLevelKeywordRange("or", in: text) != nil ||
+            topLevelKeywordRange("and", in: text) != nil ||
+            topLevelKeywordRange("not in", in: text) != nil ||
+            topLevelKeywordRange("in", in: text) != nil {
+            return true
+        }
+        if let notRange = topLevelKeywordRange("not", in: text),
+           notRange.lowerBound == text.startIndex {
+            return true
+        }
+        return ["==", "!=", "<=", ">=", "<", ">"].contains { operatorText in
+            topLevelOperatorRange(operatorText, in: text) != nil
         }
     }
 
