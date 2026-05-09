@@ -635,6 +635,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for named list constant `.append(...)` and `.extend(...)` statements, covering policy data built incrementally before loops, generated prefix rules, examples, and host executable path lists.
 - `codex-rs/execpolicy/src/parser.rs` Starlark collection mutation methods
   - Added Swift execpolicy parser support for named list constant `.insert(index, value)` statements with Starlark/Python-style clamped insertion indexes, plus named dictionary constant `.update({...})` statements for supported table values used by generated rules, network hosts, and host executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark collection removal methods
+  - Added Swift execpolicy parser support for named list constant `.clear()`, `.pop([index])`, and `.remove(value)` statements plus named dictionary constant `.clear()` and `.pop(key[, default])` statements before generated rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark augmented addition assignments
   - Added Swift execpolicy parser support for identifier-target `+=` statements using the same supported Starlark addition semantics as expressions, covering incrementally extended list, tuple-backed list, and string constants used by rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark indexed assignments

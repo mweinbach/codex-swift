@@ -1566,6 +1566,73 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkCollectionRemovalMethods() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = [
+            ("git", "status", "allow"),
+            ("hg", "status", "forbidden"),
+            ("pnpm", "install", "prompt"),
+            ("jj", "log", "allow"),
+        ]
+        COMMANDS.remove(("hg", "status", "forbidden"))
+        COMMANDS.pop(-1)
+        COMMANDS.append(("node", "test", "prompt"))
+        COMMANDS.pop(1)
+
+        SETTINGS = {
+            "git": {"path": "/usr/bin/git", "host": "api.github.com"},
+            "pnpm": {"path": "/usr/local/bin/pnpm", "host": "registry.npmjs.org"},
+            "hg": {"path": "/usr/bin/hg", "host": "hg.example.com"},
+        }
+        SETTINGS.pop("hg")
+        SETTINGS.pop("missing", {})
+
+        SCRATCH = ["temporary"]
+        SCRATCH.clear()
+        EMPTY = {"unused": "value"}
+        EMPTY.clear()
+
+        for tool, subcommand, decision in COMMANDS:
+            prefix_rule([tool, subcommand], decision, justification = "collection removal " + tool)
+
+        for tool in sorted(SETTINGS):
+            network_rule(SETTINGS[tool]["host"], "https", "allow")
+            host_executable(tool, [SETTINGS[tool]["path"]])
+
+        if len(SCRATCH) == 0 and len(EMPTY) == 0:
+            prefix_rule(["cleanup", "done"], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "collection removal git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [])
+        XCTAssertEqual(policy.rules(for: "jj"), [])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [])
+        XCTAssertEqual(policy.rules(for: "node"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "node", rest: [.single("test")]),
+                decision: .prompt,
+                justification: "collection removal node"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "cleanup"), [
+            PrefixRule(pattern: PrefixPattern(first: "cleanup", rest: [.single("done")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow),
+            NetworkRule(host: "registry.npmjs.org", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "pnpm": ["/usr/local/bin/pnpm"]
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
         let policy = try parsePolicy("""
         COMMANDS = [("git", "status")]

@@ -1210,12 +1210,18 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard methodName == "update" else {
+        guard ["update", "clear", "pop"].contains(methodName) else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
-              case var .table(items) = constants[receiverText]
+              let receiver = constants[receiverText]
         else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        guard case var .table(items) = receiver else {
+            if methodName == "clear" || methodName == "pop" {
+                return false
+            }
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
 
@@ -1224,18 +1230,43 @@ public final class PolicyParser {
         let rawArguments = splitTopLevel(body, separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard rawArguments.count == 1,
-              let rawArgument = rawArguments.first
-        else {
-            throw ConfigOverrideError.invalidLiteral(trimmed)
-        }
-
-        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
-        guard case let .table(updateItems) = argument else {
-            throw ConfigOverrideError.invalidLiteral(trimmed)
-        }
-        for (key, value) in updateItems {
-            items[key] = value
+        switch methodName {
+        case "update":
+            guard rawArguments.count == 1,
+                  let rawArgument = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            guard case let .table(updateItems) = argument else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            for (key, value) in updateItems {
+                items[key] = value
+            }
+        case "clear":
+            guard rawArguments.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            items.removeAll()
+        case "pop":
+            guard rawArguments.count == 1 || rawArguments.count == 2,
+                  let rawKey = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
+            guard case let .string(key) = key else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            if items.removeValue(forKey: key) == nil {
+                guard rawArguments.count == 2 else {
+                    throw ConfigOverrideError.invalidLiteral(trimmed)
+                }
+                _ = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+            }
+        default:
+            return false
         }
         constants[receiverText] = .table(items)
         return true
@@ -1261,7 +1292,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["append", "extend", "insert"].contains(methodName) else {
+        guard ["append", "extend", "insert", "clear", "pop", "remove"].contains(methodName) else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
@@ -1313,6 +1344,42 @@ public final class PolicyParser {
                 clampedIndex = min(insertionIndex, items.count)
             }
             items.insert(argument, at: clampedIndex)
+        case "clear":
+            guard rawArguments.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            items.removeAll()
+        case "pop":
+            guard rawArguments.count <= 1 else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let itemIndex: Int
+            if let rawArgument = rawArguments.first {
+                itemIndex = try parseStarlarkInteger(
+                    rawArgument,
+                    constants: constants,
+                    functions: functions,
+                    expression: trimmed
+                )
+            } else {
+                itemIndex = -1
+            }
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
+            guard items.indices.contains(resolvedIndex) else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            items.remove(at: resolvedIndex)
+        case "remove":
+            guard rawArguments.count == 1,
+                  let rawArgument = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            guard let removalIndex = items.firstIndex(of: argument) else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            items.remove(at: removalIndex)
         default:
             return false
         }
