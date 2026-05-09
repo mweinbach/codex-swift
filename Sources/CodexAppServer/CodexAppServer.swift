@@ -738,6 +738,7 @@ public enum CodexAppServer {
             "modelProvider": started.modelProvider,
             "cwd": started.cwd.path,
             "approvalPolicy": started.approvalPolicy.rawValue,
+            "approvalsReviewer": "user",
             "sandbox": try jsonObject(started.sandbox),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)

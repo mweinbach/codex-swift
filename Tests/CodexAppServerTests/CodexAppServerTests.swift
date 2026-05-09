@@ -104,6 +104,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["modelProvider"] as? String, "mock_provider")
         XCTAssertEqual(result["cwd"] as? String, cwd.url.path)
         XCTAssertEqual(result["approvalPolicy"] as? String, "never")
+        XCTAssertEqual(result["approvalsReviewer"] as? String, "user")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspace-write")
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
         let threadID = try XCTUnwrap(thread["id"] as? String)
