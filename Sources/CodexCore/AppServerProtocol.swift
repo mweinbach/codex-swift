@@ -376,7 +376,7 @@ public enum AppServerProtocol {
     }
 
     public enum McpServerElicitationRequest: Equatable, Codable, Sendable {
-        case form(meta: JSONValue?, message: String, requestedSchema: JSONValue)
+        case form(meta: JSONValue?, message: String, requestedSchema: McpElicitationSchema)
         case url(meta: JSONValue?, message: String, url: String, elicitationID: String)
 
         private enum CodingKeys: String, CodingKey {
@@ -400,7 +400,7 @@ public enum AppServerProtocol {
                 self = .form(
                     meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
                     message: try container.decode(String.self, forKey: .message),
-                    requestedSchema: try container.decode(JSONValue.self, forKey: .requestedSchema)
+                    requestedSchema: try container.decode(McpElicitationSchema.self, forKey: .requestedSchema)
                 )
             case .url:
                 self = .url(
@@ -477,7 +477,7 @@ public enum AppServerProtocol {
                 request = .form(
                     meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
                     message: try container.decode(String.self, forKey: .message),
-                    requestedSchema: try container.decode(JSONValue.self, forKey: .requestedSchema)
+                    requestedSchema: try container.decode(McpElicitationSchema.self, forKey: .requestedSchema)
                 )
             case .url:
                 request = .url(
@@ -532,6 +532,658 @@ public enum AppServerProtocol {
             try container.encode(action, forKey: .action)
             try container.encodeNilOrValue(content, forKey: .content)
             try container.encodeNilOrValue(meta, forKey: .meta)
+        }
+    }
+
+    public struct McpElicitationSchema: Equatable, Codable, Sendable {
+        public let schemaURI: String?
+        public let properties: [String: McpElicitationPrimitiveSchema]
+        public let required: [String]?
+
+        private enum CodingKeys: String, CodingKey {
+            case schemaURI = "$schema"
+            case type
+            case properties
+            case required
+        }
+
+        public init(
+            schemaURI: String? = nil,
+            properties: [String: McpElicitationPrimitiveSchema],
+            required: [String]? = nil
+        ) {
+            self.schemaURI = schemaURI
+            self.properties = properties
+            self.required = required
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "object" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation schema type: \(type)"
+                )
+            }
+            schemaURI = try container.decodeIfPresent(String.self, forKey: .schemaURI)
+            properties = try container.decode([String: McpElicitationPrimitiveSchema].self, forKey: .properties)
+            required = try container.decodeIfPresent([String].self, forKey: .required)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(schemaURI, forKey: .schemaURI)
+            try container.encode("object", forKey: .type)
+            try container.encode(properties, forKey: .properties)
+            try container.encodeIfPresent(required, forKey: .required)
+        }
+    }
+
+    public enum McpElicitationPrimitiveSchema: Equatable, Codable, Sendable {
+        case enumSchema(McpElicitationEnumSchema)
+        case string(McpElicitationStringSchema)
+        case number(McpElicitationNumberSchema)
+        case boolean(McpElicitationBooleanSchema)
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case `enum`
+            case enumNames
+            case oneOf
+            case anyOf
+            case items
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .type) {
+            case "string":
+                if container.contains(.oneOf) {
+                    self = .enumSchema(.singleSelect(.titled(try McpElicitationTitledSingleSelectEnumSchema(
+                        from: decoder
+                    ))))
+                } else if container.contains(.enumNames) {
+                    self = .enumSchema(.legacy(try McpElicitationLegacyTitledEnumSchema(from: decoder)))
+                } else if container.contains(.enum) {
+                    self = .enumSchema(.singleSelect(.untitled(try McpElicitationUntitledSingleSelectEnumSchema(
+                        from: decoder
+                    ))))
+                } else {
+                    self = .string(try McpElicitationStringSchema(from: decoder))
+                }
+            case "array":
+                let items = try container.nestedContainer(keyedBy: CodingKeys.self, forKey: .items)
+                if items.contains(.anyOf) || items.contains(.oneOf) {
+                    self = .enumSchema(.multiSelect(.titled(try McpElicitationTitledMultiSelectEnumSchema(
+                        from: decoder
+                    ))))
+                } else {
+                    self = .enumSchema(.multiSelect(.untitled(try McpElicitationUntitledMultiSelectEnumSchema(
+                        from: decoder
+                    ))))
+                }
+            case "number", "integer":
+                self = .number(try McpElicitationNumberSchema(from: decoder))
+            case "boolean":
+                self = .boolean(try McpElicitationBooleanSchema(from: decoder))
+            case let type:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation primitive schema type: \(type)"
+                )
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .enumSchema(schema):
+                try schema.encode(to: encoder)
+            case let .string(schema):
+                try schema.encode(to: encoder)
+            case let .number(schema):
+                try schema.encode(to: encoder)
+            case let .boolean(schema):
+                try schema.encode(to: encoder)
+            }
+        }
+    }
+
+    public enum McpElicitationEnumSchema: Equatable, Codable, Sendable {
+        case singleSelect(McpElicitationSingleSelectEnumSchema)
+        case multiSelect(McpElicitationMultiSelectEnumSchema)
+        case legacy(McpElicitationLegacyTitledEnumSchema)
+
+        public init(from decoder: Decoder) throws {
+            if let schema = try? McpElicitationLegacyTitledEnumSchema(from: decoder) {
+                self = .legacy(schema)
+            } else if let schema = try? McpElicitationSingleSelectEnumSchema(from: decoder) {
+                self = .singleSelect(schema)
+            } else {
+                self = .multiSelect(try McpElicitationMultiSelectEnumSchema(from: decoder))
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .singleSelect(schema):
+                try schema.encode(to: encoder)
+            case let .multiSelect(schema):
+                try schema.encode(to: encoder)
+            case let .legacy(schema):
+                try schema.encode(to: encoder)
+            }
+        }
+    }
+
+    public enum McpElicitationSingleSelectEnumSchema: Equatable, Codable, Sendable {
+        case untitled(McpElicitationUntitledSingleSelectEnumSchema)
+        case titled(McpElicitationTitledSingleSelectEnumSchema)
+
+        private enum CodingKeys: String, CodingKey {
+            case oneOf
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.oneOf) {
+                self = .titled(try McpElicitationTitledSingleSelectEnumSchema(from: decoder))
+            } else {
+                self = .untitled(try McpElicitationUntitledSingleSelectEnumSchema(from: decoder))
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .untitled(schema):
+                try schema.encode(to: encoder)
+            case let .titled(schema):
+                try schema.encode(to: encoder)
+            }
+        }
+    }
+
+    public enum McpElicitationMultiSelectEnumSchema: Equatable, Codable, Sendable {
+        case untitled(McpElicitationUntitledMultiSelectEnumSchema)
+        case titled(McpElicitationTitledMultiSelectEnumSchema)
+
+        private enum CodingKeys: String, CodingKey {
+            case items
+            case anyOf
+            case oneOf
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let items = try container.nestedContainer(keyedBy: CodingKeys.self, forKey: .items)
+            if items.contains(.anyOf) || items.contains(.oneOf) {
+                self = .titled(try McpElicitationTitledMultiSelectEnumSchema(from: decoder))
+            } else {
+                self = .untitled(try McpElicitationUntitledMultiSelectEnumSchema(from: decoder))
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .untitled(schema):
+                try schema.encode(to: encoder)
+            case let .titled(schema):
+                try schema.encode(to: encoder)
+            }
+        }
+    }
+
+    public enum McpElicitationStringFormat: String, Codable, Equatable, Sendable {
+        case email
+        case uri
+        case date
+        case dateTime = "date-time"
+    }
+
+    public enum McpElicitationNumberType: String, Codable, Equatable, Sendable {
+        case number
+        case integer
+    }
+
+    public struct McpElicitationStringSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let minLength: UInt32?
+        public let maxLength: UInt32?
+        public let format: McpElicitationStringFormat?
+        public let defaultValue: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case minLength
+            case maxLength
+            case format
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            minLength: UInt32? = nil,
+            maxLength: UInt32? = nil,
+            format: McpElicitationStringFormat? = nil,
+            defaultValue: String? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.minLength = minLength
+            self.maxLength = maxLength
+            self.format = format
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            minLength = try container.decodeIfPresent(UInt32.self, forKey: .minLength)
+            maxLength = try container.decodeIfPresent(UInt32.self, forKey: .maxLength)
+            format = try container.decodeIfPresent(McpElicitationStringFormat.self, forKey: .format)
+            defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("string", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(minLength, forKey: .minLength)
+            try container.encodeIfPresent(maxLength, forKey: .maxLength)
+            try container.encodeIfPresent(format, forKey: .format)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationNumberSchema: Equatable, Codable, Sendable {
+        public let type: McpElicitationNumberType
+        public let title: String?
+        public let description: String?
+        public let minimum: Double?
+        public let maximum: Double?
+        public let defaultValue: Double?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case minimum
+            case maximum
+            case defaultValue = "default"
+        }
+
+        public init(
+            type: McpElicitationNumberType,
+            title: String? = nil,
+            description: String? = nil,
+            minimum: Double? = nil,
+            maximum: Double? = nil,
+            defaultValue: Double? = nil
+        ) {
+            self.type = type
+            self.title = title
+            self.description = description
+            self.minimum = minimum
+            self.maximum = maximum
+            self.defaultValue = defaultValue
+        }
+    }
+
+    public struct McpElicitationBooleanSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let defaultValue: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case defaultValue = "default"
+        }
+
+        public init(title: String? = nil, description: String? = nil, defaultValue: Bool? = nil) {
+            self.title = title
+            self.description = description
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            defaultValue = try container.decodeIfPresent(Bool.self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("boolean", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationUntitledSingleSelectEnumSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let values: [String]
+        public let defaultValue: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case values = "enum"
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            values: [String],
+            defaultValue: String? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.values = values
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            values = try container.decode([String].self, forKey: .values)
+            defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("string", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encode(values, forKey: .values)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationTitledSingleSelectEnumSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let oneOf: [McpElicitationConstOption]
+        public let defaultValue: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case oneOf
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            oneOf: [McpElicitationConstOption],
+            defaultValue: String? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.oneOf = oneOf
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            oneOf = try container.decode([McpElicitationConstOption].self, forKey: .oneOf)
+            defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("string", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encode(oneOf, forKey: .oneOf)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationLegacyTitledEnumSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let values: [String]
+        public let enumNames: [String]?
+        public let defaultValue: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case values = "enum"
+            case enumNames
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            values: [String],
+            enumNames: [String]? = nil,
+            defaultValue: String? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.values = values
+            self.enumNames = enumNames
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            values = try container.decode([String].self, forKey: .values)
+            enumNames = try container.decodeIfPresent([String].self, forKey: .enumNames)
+            defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("string", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encode(values, forKey: .values)
+            try container.encodeIfPresent(enumNames, forKey: .enumNames)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationUntitledMultiSelectEnumSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let minItems: UInt64?
+        public let maxItems: UInt64?
+        public let items: McpElicitationUntitledEnumItems
+        public let defaultValue: [String]?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case minItems
+            case maxItems
+            case items
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            minItems: UInt64? = nil,
+            maxItems: UInt64? = nil,
+            items: McpElicitationUntitledEnumItems,
+            defaultValue: [String]? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.minItems = minItems
+            self.maxItems = maxItems
+            self.items = items
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            minItems = try container.decodeIfPresent(UInt64.self, forKey: .minItems)
+            maxItems = try container.decodeIfPresent(UInt64.self, forKey: .maxItems)
+            items = try container.decode(McpElicitationUntitledEnumItems.self, forKey: .items)
+            defaultValue = try container.decodeIfPresent([String].self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("array", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(minItems, forKey: .minItems)
+            try container.encodeIfPresent(maxItems, forKey: .maxItems)
+            try container.encode(items, forKey: .items)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationTitledMultiSelectEnumSchema: Equatable, Codable, Sendable {
+        public let title: String?
+        public let description: String?
+        public let minItems: UInt64?
+        public let maxItems: UInt64?
+        public let items: McpElicitationTitledEnumItems
+        public let defaultValue: [String]?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case title
+            case description
+            case minItems
+            case maxItems
+            case items
+            case defaultValue = "default"
+        }
+
+        public init(
+            title: String? = nil,
+            description: String? = nil,
+            minItems: UInt64? = nil,
+            maxItems: UInt64? = nil,
+            items: McpElicitationTitledEnumItems,
+            defaultValue: [String]? = nil
+        ) {
+            self.title = title
+            self.description = description
+            self.minItems = minItems
+            self.maxItems = maxItems
+            self.items = items
+            self.defaultValue = defaultValue
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            minItems = try container.decodeIfPresent(UInt64.self, forKey: .minItems)
+            maxItems = try container.decodeIfPresent(UInt64.self, forKey: .maxItems)
+            items = try container.decode(McpElicitationTitledEnumItems.self, forKey: .items)
+            defaultValue = try container.decodeIfPresent([String].self, forKey: .defaultValue)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("array", forKey: .type)
+            try container.encodeIfPresent(title, forKey: .title)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(minItems, forKey: .minItems)
+            try container.encodeIfPresent(maxItems, forKey: .maxItems)
+            try container.encode(items, forKey: .items)
+            try container.encodeIfPresent(defaultValue, forKey: .defaultValue)
+        }
+    }
+
+    public struct McpElicitationUntitledEnumItems: Equatable, Codable, Sendable {
+        public let values: [String]
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case values = "enum"
+        }
+
+        public init(values: [String]) {
+            self.values = values
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            values = try container.decode([String].self, forKey: .values)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("string", forKey: .type)
+            try container.encode(values, forKey: .values)
+        }
+    }
+
+    public struct McpElicitationTitledEnumItems: Equatable, Codable, Sendable {
+        public let anyOf: [McpElicitationConstOption]
+
+        private enum CodingKeys: String, CodingKey {
+            case anyOf
+            case oneOf
+        }
+
+        public init(anyOf: [McpElicitationConstOption]) {
+            self.anyOf = anyOf
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let anyOf = try container.decodeIfPresent([McpElicitationConstOption].self, forKey: .anyOf) {
+                self.anyOf = anyOf
+            } else {
+                anyOf = try container.decode([McpElicitationConstOption].self, forKey: .oneOf)
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(anyOf, forKey: .anyOf)
+        }
+    }
+
+    public struct McpElicitationConstOption: Equatable, Codable, Sendable {
+        public let constValue: String
+        public let title: String
+
+        private enum CodingKeys: String, CodingKey {
+            case constValue = "const"
+            case title
+        }
+
+        public init(constValue: String, title: String) {
+            self.constValue = constValue
+            self.title = title
         }
     }
 

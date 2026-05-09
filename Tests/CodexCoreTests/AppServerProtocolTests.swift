@@ -839,15 +839,13 @@ final class AppServerProtocolTests: XCTestCase {
                 request: .form(
                     meta: .object(["source": .string("mcp")]),
                     message: "Choose an issue",
-                    requestedSchema: .object([
-                        "type": .string("object"),
-                        "properties": .object([
-                            "issueId": .object([
-                                "type": .string("string"),
-                                "title": .string("Issue ID")
-                            ])
-                        ])
-                    ])
+                    requestedSchema: AppServerProtocol.McpElicitationSchema(
+                        properties: [
+                            "issueId": .string(AppServerProtocol.McpElicitationStringSchema(
+                                title: "Issue ID"
+                            ))
+                        ]
+                    )
                 )
             )
         )
@@ -881,6 +879,121 @@ final class AppServerProtocolTests: XCTestCase {
             from: Data(#"{"method":"mcpServer/elicitation/request","id":11,"params":{"threadId":"thr_123","turnId":"turn_123","serverName":"linear","mode":"form","_meta":{"source":"mcp"},"message":"Choose an issue","requestedSchema":{"type":"object","properties":{"issueId":{"type":"string","title":"Issue ID"}}}}}"#.utf8)
         )
         XCTAssertEqual(decoded, request)
+    }
+
+    func testMcpElicitationSchemaPrimitiveVariantsMatchRustWireShape() throws {
+        let schema = AppServerProtocol.McpElicitationSchema(
+            schemaURI: "https://json-schema.org/draft/2020-12/schema",
+            properties: [
+                "email": .string(AppServerProtocol.McpElicitationStringSchema(
+                    title: "Email",
+                    minLength: 3,
+                    maxLength: 80,
+                    format: .email,
+                    defaultValue: "agent@example.test"
+                )),
+                "count": .number(AppServerProtocol.McpElicitationNumberSchema(
+                    type: .integer,
+                    minimum: 1,
+                    maximum: 5,
+                    defaultValue: 2
+                )),
+                "enabled": .boolean(AppServerProtocol.McpElicitationBooleanSchema(
+                    defaultValue: true
+                )),
+                "color": .enumSchema(.singleSelect(.untitled(
+                    AppServerProtocol.McpElicitationUntitledSingleSelectEnumSchema(
+                        values: ["red", "blue"],
+                        defaultValue: "red"
+                    )
+                ))),
+                "mode": .enumSchema(.singleSelect(.titled(
+                    AppServerProtocol.McpElicitationTitledSingleSelectEnumSchema(
+                        oneOf: [
+                            AppServerProtocol.McpElicitationConstOption(constValue: "auto", title: "Auto"),
+                            AppServerProtocol.McpElicitationConstOption(constValue: "manual", title: "Manual")
+                        ]
+                    )
+                ))),
+                "legacy": .enumSchema(.legacy(AppServerProtocol.McpElicitationLegacyTitledEnumSchema(
+                    values: ["small", "large"],
+                    enumNames: ["Small", "Large"]
+                ))),
+                "tags": .enumSchema(.multiSelect(.titled(
+                    AppServerProtocol.McpElicitationTitledMultiSelectEnumSchema(
+                        minItems: 1,
+                        maxItems: 2,
+                        items: AppServerProtocol.McpElicitationTitledEnumItems(anyOf: [
+                            AppServerProtocol.McpElicitationConstOption(constValue: "ios", title: "iOS"),
+                            AppServerProtocol.McpElicitationConstOption(constValue: "macos", title: "macOS")
+                        ]),
+                        defaultValue: ["ios"]
+                    )
+                )))
+            ],
+            required: ["email", "mode"]
+        )
+
+        try XCTAssertJSONObjectEqual(schema, [
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": [
+                "email": [
+                    "type": "string",
+                    "title": "Email",
+                    "minLength": 3,
+                    "maxLength": 80,
+                    "format": "email",
+                    "default": "agent@example.test"
+                ],
+                "count": [
+                    "type": "integer",
+                    "minimum": 1.0,
+                    "maximum": 5.0,
+                    "default": 2.0
+                ],
+                "enabled": [
+                    "type": "boolean",
+                    "default": true
+                ],
+                "color": [
+                    "type": "string",
+                    "enum": ["red", "blue"],
+                    "default": "red"
+                ],
+                "mode": [
+                    "type": "string",
+                    "oneOf": [
+                        ["const": "auto", "title": "Auto"],
+                        ["const": "manual", "title": "Manual"]
+                    ]
+                ],
+                "legacy": [
+                    "type": "string",
+                    "enum": ["small", "large"],
+                    "enumNames": ["Small", "Large"]
+                ],
+                "tags": [
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": [
+                        "anyOf": [
+                            ["const": "ios", "title": "iOS"],
+                            ["const": "macos", "title": "macOS"]
+                        ]
+                    ],
+                    "default": ["ios"]
+                ]
+            ],
+            "required": ["email", "mode"]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.McpElicitationSchema.self,
+            from: Data(#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"email":{"type":"string","title":"Email","minLength":3,"maxLength":80,"format":"email","default":"agent@example.test"},"count":{"type":"integer","minimum":1,"maximum":5,"default":2},"enabled":{"type":"boolean","default":true},"color":{"type":"string","enum":["red","blue"],"default":"red"},"mode":{"type":"string","oneOf":[{"const":"auto","title":"Auto"},{"const":"manual","title":"Manual"}]},"legacy":{"type":"string","enum":["small","large"],"enumNames":["Small","Large"]},"tags":{"type":"array","minItems":1,"maxItems":2,"items":{"oneOf":[{"const":"ios","title":"iOS"},{"const":"macos","title":"macOS"}]},"default":["ios"]}},"required":["email","mode"]}"#.utf8)
+        )
+        XCTAssertEqual(decoded, schema)
     }
 
     func testMcpServerElicitationServerResponseMatchesRustWireShape() throws {
