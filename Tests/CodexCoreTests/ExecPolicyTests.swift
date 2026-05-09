@@ -996,6 +996,41 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkLengthComparisonsAndMembership() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log"]
+        HOSTS = {"github": "api.github.com", "npm": "registry.npmjs.org"}
+        MESSAGE = "inspect git history"
+
+        if len(COMMANDS) >= 3 and len(HOSTS) == 2 and "git" in MESSAGE:
+            prefix_rule([TOOL, COMMANDS[0]], "allow")
+
+        if len(COMMANDS) > 4:
+            prefix_rule([TOOL, "too-many"], "forbidden")
+        elif "missing" not in HOSTS and len(TOOL) < 4 and "svn" not in MESSAGE:
+            prefix_rule([TOOL, COMMANDS[-1]], "prompt", justification = MESSAGE)
+
+        if len(COMMANDS) <= 3 and "github" in HOSTS:
+            network_rule(HOSTS["github"], "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .prompt,
+                justification: "inspect git history"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

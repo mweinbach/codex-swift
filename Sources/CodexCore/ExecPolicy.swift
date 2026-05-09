@@ -1518,6 +1518,9 @@ public final class PolicyParser {
         if let constant = constants[trimmed] {
             return constant
         }
+        if let length = try parseStarlarkLenCall(trimmed, constants: constants, functions: functions) {
+            return length
+        }
         if let functionCall = try parseStarlarkFunctionCall(trimmed, constants: constants, functions: functions) {
             return functionCall
         }
@@ -1733,6 +1736,46 @@ public final class PolicyParser {
             return "\t"
         default:
             return character
+        }
+    }
+
+    private static func parseStarlarkLenCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name == "len" else {
+            return nil
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard rawArguments.count == 1,
+              let argument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let value = try parsePolicyLiteral(argument, constants: constants, functions: functions)
+        switch value {
+        case let .string(value):
+            return .integer(Int64(value.count))
+        case let .array(items):
+            return .integer(Int64(items.count))
+        case let .table(items):
+            return .integer(Int64(items.count))
+        default:
+            throw ConfigOverrideError.invalidLiteral(text)
         }
     }
 
@@ -2179,23 +2222,84 @@ public final class PolicyParser {
             let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
             return lhs != rhs
         }
+        if let range = topLevelOperatorRange("<=", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
+            return try compareStarlarkValues(lhs, rhs, expression: condition) <= 0
+        }
+        if let range = topLevelOperatorRange(">=", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
+            return try compareStarlarkValues(lhs, rhs, expression: condition) >= 0
+        }
+        if let range = topLevelOperatorRange("<", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
+            return try compareStarlarkValues(lhs, rhs, expression: condition) < 0
+        }
+        if let range = topLevelOperatorRange(">", in: trimmed) {
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
+            return try compareStarlarkValues(lhs, rhs, expression: condition) > 0
+        }
+        if let range = topLevelKeywordRange("not in", in: trimmed) {
+            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
+            return try !containsStarlarkValue(needle, in: haystack, expression: condition)
+        }
         if let range = topLevelKeywordRange("in", in: trimmed) {
             let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
             let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            switch haystack {
-            case let .array(items):
-                return items.contains(needle)
-            case let .table(items):
-                guard case let .string(key) = needle else {
-                    throw ConfigOverrideError.invalidLiteral(condition)
-                }
-                return items[key] != nil
-            default:
-                throw ConfigOverrideError.invalidLiteral(condition)
-            }
+            return try containsStarlarkValue(needle, in: haystack, expression: condition)
         }
 
         return try truthy(parsePolicyLiteral(trimmed, constants: constants, functions: functions))
+    }
+
+    private static func compareStarlarkValues(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> Int {
+        switch (lhs, rhs) {
+        case let (.integer(lhs), .integer(rhs)):
+            return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.double(lhs), .double(rhs)):
+            return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.integer(lhs), .double(rhs)):
+            let lhs = Double(lhs)
+            return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.double(lhs), .integer(rhs)):
+            let rhs = Double(rhs)
+            return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.string(lhs), .string(rhs)):
+            return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func containsStarlarkValue(
+        _ needle: ConfigValue,
+        in haystack: ConfigValue,
+        expression: String
+    ) throws -> Bool {
+        switch haystack {
+        case let .array(items):
+            return items.contains(needle)
+        case let .table(items):
+            guard case let .string(key) = needle else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return items[key] != nil
+        case let .string(value):
+            guard case let .string(needle) = needle else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return value.contains(needle)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
     }
 
     private static func splitTopLevelKeywordExpression(_ text: String, keyword: String) -> [String] {
