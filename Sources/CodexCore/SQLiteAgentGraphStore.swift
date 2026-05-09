@@ -363,6 +363,36 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return sqlite3_changes(database) > 0
     }
 
+    public func listThreadIDs(
+        limit: Int,
+        anchor: ThreadListAnchor?,
+        sortKey: ThreadListSortKey,
+        allowedSources: [String],
+        modelProviders: [String]?,
+        archivedOnly: Bool
+    ) async throws -> [ThreadId] {
+        var query = "SELECT threads.id FROM threads WHERE 1 = 1"
+        var bindings: [SQLiteBinding] = []
+        query += archivedOnly ? " AND threads.archived = 1" : " AND threads.archived = 0"
+        query += " AND threads.first_user_message <> ''"
+        if !allowedSources.isEmpty {
+            query += " AND threads.source IN (\(Self.placeholders(count: allowedSources.count)))"
+            bindings.append(contentsOf: allowedSources.map(SQLiteBinding.text))
+        }
+        if let modelProviders, !modelProviders.isEmpty {
+            query += " AND threads.model_provider IN (\(Self.placeholders(count: modelProviders.count)))"
+            bindings.append(contentsOf: modelProviders.map(SQLiteBinding.text))
+        }
+        if let anchor {
+            query += " AND \(sortKey.sqlColumn) < ?"
+            bindings.append(.int(Self.epochMilliseconds(anchor.timestamp)))
+        }
+        query += " ORDER BY \(sortKey.sqlColumn) DESC LIMIT ?"
+        bindings.append(.int(Int64(limit)))
+
+        return try threadIDs(query: query, bindings: bindings)
+    }
+
     public func updateThreadTitle(threadID: ThreadId, title: String) async throws -> Bool {
         let database = handle.database
         try Self.execute(
@@ -569,10 +599,14 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
     }
 
     private func threadIDs(query: String, bindings: [String]) throws -> [ThreadId] {
+        try threadIDs(query: query, bindings: bindings.map(SQLiteBinding.text))
+    }
+
+    private func threadIDs(query: String, bindings: [SQLiteBinding]) throws -> [ThreadId] {
         let database = handle.database
         return try Self.withStatement(
             query: query,
-            bindings: bindings.map(SQLiteBinding.text),
+            bindings: bindings,
             database: database
         ) { statement in
             var threadIDs: [ThreadId] = []
@@ -692,6 +726,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return attributes[.modificationDate] as? Date
     }
 
+    private static func placeholders(count: Int) -> String {
+        Array(repeating: "?", count: count).joined(separator: ", ")
+    }
+
     private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {
         let result = value.addingReportingOverflow(increment)
         return result.overflow ? Int64.max : result.partialValue
@@ -713,6 +751,28 @@ public enum ThreadArchiveFilter: Equatable, Sendable {
     case all
     case archivedOnly
     case unarchivedOnly
+}
+
+public struct ThreadListAnchor: Equatable, Sendable {
+    public let timestamp: Date
+
+    public init(timestamp: Date) {
+        self.timestamp = timestamp
+    }
+}
+
+public enum ThreadListSortKey: Equatable, Sendable {
+    case createdAt
+    case updatedAt
+
+    fileprivate var sqlColumn: String {
+        switch self {
+        case .createdAt:
+            return "threads.created_at_ms"
+        case .updatedAt:
+            return "threads.updated_at_ms"
+        }
+    }
 }
 
 public enum ThreadGitInfoPatchValue: Equatable, Sendable {

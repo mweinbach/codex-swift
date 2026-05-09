@@ -894,6 +894,163 @@ final class AgentGraphStoreTests: XCTestCase {
         ))
     }
 
+    func testSQLiteStoreListsThreadIDsWithRustFiltersAndUpdatedAtAnchor() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let newestThreadID = try threadID(99)
+        let olderThreadID = try threadID(100)
+        let emptyMessageThreadID = try threadID(101)
+        let archivedThreadID = try threadID(102)
+        let otherSourceThreadID = try threadID(103)
+        let otherProviderThreadID = try threadID(104)
+        try insertRawSQLiteThread(
+            id: olderThreadID,
+            agentPath: try AgentPath(validating: "/root/list_older"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_000_100,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_001, milliseconds: 1_700_000_001_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: newestThreadID,
+            agentPath: try AgentPath(validating: "/root/list_newest"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_000_200,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_002, milliseconds: 1_700_000_002_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: emptyMessageThreadID,
+            agentPath: try AgentPath(validating: "/root/list_empty"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_003, milliseconds: 1_700_000_003_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: archivedThreadID,
+            agentPath: try AgentPath(validating: "/root/list_archived"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            archived: true,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_004, milliseconds: 1_700_000_004_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: otherSourceThreadID,
+            agentPath: try AgentPath(validating: "/root/list_source"),
+            source: "vscode",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_005, milliseconds: 1_700_000_005_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: otherProviderThreadID,
+            agentPath: try AgentPath(validating: "/root/list_provider"),
+            source: "cli",
+            modelProvider: "mock",
+            firstUserMessage: "hello",
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_006, milliseconds: 1_700_000_006_000),
+            databaseURL: databaseURL
+        )
+
+        let filteredIDs = try await store.listThreadIDs(
+            limit: 10,
+            anchor: nil,
+            sortKey: .updatedAt,
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: false
+        )
+        let anchoredIDs = try await store.listThreadIDs(
+            limit: 10,
+            anchor: ThreadListAnchor(timestamp: date(milliseconds: 1_700_000_002_000)),
+            sortKey: .updatedAt,
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: false
+        )
+        let archivedIDs = try await store.listThreadIDs(
+            limit: 10,
+            anchor: nil,
+            sortKey: .updatedAt,
+            allowedSources: ["cli"],
+            modelProviders: ["openai"],
+            archivedOnly: true
+        )
+        let noProviderFilterIDs = try await store.listThreadIDs(
+            limit: 2,
+            anchor: nil,
+            sortKey: .updatedAt,
+            allowedSources: ["cli"],
+            modelProviders: [],
+            archivedOnly: false
+        )
+
+        XCTAssertEqual(filteredIDs, [newestThreadID, olderThreadID])
+        XCTAssertEqual(anchoredIDs, [olderThreadID])
+        XCTAssertEqual(archivedIDs, [archivedThreadID])
+        XCTAssertEqual(noProviderFilterIDs, [otherProviderThreadID, newestThreadID])
+    }
+
+    func testSQLiteStoreListsThreadIDsCanSortByCreatedAt() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let firstCreatedThreadID = try threadID(105)
+        let secondCreatedThreadID = try threadID(106)
+        try insertRawSQLiteThread(
+            id: firstCreatedThreadID,
+            agentPath: try AgentPath(validating: "/root/created_first"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_010_000,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_020, milliseconds: 1_700_000_020_000),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: secondCreatedThreadID,
+            agentPath: try AgentPath(validating: "/root/created_second"),
+            source: "cli",
+            modelProvider: "openai",
+            firstUserMessage: "hello",
+            createdAtMilliseconds: 1_700_000_030_000,
+            updatedAt: ThreadUpdatedAt(seconds: 1_700_000_015, milliseconds: 1_700_000_015_000),
+            databaseURL: databaseURL
+        )
+
+        let createdIDs = try await store.listThreadIDs(
+            limit: 10,
+            anchor: nil,
+            sortKey: .createdAt,
+            allowedSources: [],
+            modelProviders: nil,
+            archivedOnly: false
+        )
+        let anchoredCreatedIDs = try await store.listThreadIDs(
+            limit: 10,
+            anchor: ThreadListAnchor(timestamp: date(milliseconds: 1_700_000_030_000)),
+            sortKey: .createdAt,
+            allowedSources: [],
+            modelProviders: nil,
+            archivedOnly: false
+        )
+
+        XCTAssertEqual(createdIDs, [secondCreatedThreadID, firstCreatedThreadID])
+        XCTAssertEqual(anchoredCreatedIDs, [firstCreatedThreadID])
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -955,8 +1112,12 @@ final class AgentGraphStoreTests: XCTestCase {
                     agent_path TEXT,
                     memory_mode TEXT,
                     rollout_path TEXT,
+                    created_at_ms INTEGER,
                     archived INTEGER NOT NULL DEFAULT 0,
                     archived_at INTEGER,
+                    source TEXT NOT NULL DEFAULT 'cli',
+                    model_provider TEXT NOT NULL DEFAULT 'openai',
+                    first_user_message TEXT NOT NULL DEFAULT '',
                     title TEXT,
                     updated_at INTEGER,
                     updated_at_ms INTEGER,
@@ -979,6 +1140,10 @@ final class AgentGraphStoreTests: XCTestCase {
         agentPath: AgentPath,
         memoryMode: String? = nil,
         rolloutPath: String? = nil,
+        source: String = "cli",
+        modelProvider: String = "openai",
+        firstUserMessage: String = "hello",
+        createdAtMilliseconds: Int64 = 0,
         archived: Bool = false,
         archivedAt: Int64? = nil,
         title: String? = nil,
@@ -995,15 +1160,19 @@ final class AgentGraphStoreTests: XCTestCase {
                     agent_path,
                     memory_mode,
                     rollout_path,
+                    created_at_ms,
                     archived,
                     archived_at,
+                    source,
+                    model_provider,
+                    first_user_message,
                     title,
                     updated_at,
                     updated_at_ms,
                     git_sha,
                     git_branch,
                     git_origin_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
@@ -1022,22 +1191,26 @@ final class AgentGraphStoreTests: XCTestCase {
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 4), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int(preparedStatement, 5, archived ? 1 : 0), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 5, createdAtMilliseconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int(preparedStatement, 6, archived ? 1 : 0), SQLITE_OK)
             if let archivedAt {
-                XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 6, archivedAt), SQLITE_OK)
-            } else {
-                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 6), SQLITE_OK)
-            }
-            if let title {
-                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 7, title, -1, testSQLiteTransient), SQLITE_OK)
+                XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 7, archivedAt), SQLITE_OK)
             } else {
                 XCTAssertEqual(sqlite3_bind_null(preparedStatement, 7), SQLITE_OK)
             }
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 8, updatedAt.seconds), SQLITE_OK)
-            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 9, updatedAt.milliseconds), SQLITE_OK)
-            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 10)
-            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 11)
-            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 12)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 8, source, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 9, modelProvider, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 10, firstUserMessage, -1, testSQLiteTransient), SQLITE_OK)
+            if let title {
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 11, title, -1, testSQLiteTransient), SQLITE_OK)
+            } else {
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 11), SQLITE_OK)
+            }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 12, updatedAt.seconds), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 13, updatedAt.milliseconds), SQLITE_OK)
+            bindOptionalText(gitInfo.sha, to: preparedStatement, at: 14)
+            bindOptionalText(gitInfo.branch, to: preparedStatement, at: 15)
+            bindOptionalText(gitInfo.originURL, to: preparedStatement, at: 16)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }

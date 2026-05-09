@@ -857,6 +857,8 @@ Source baseline inspected for this scaffold:
   - added SQLite thread metadata deletion by id with Rust's row-count reporting: deleting an existing row returns `1`, repeated or missing deletes return `0`, and the row is no longer discoverable by rollout-path lookup.
 - `codex-rs/state/src/runtime/threads.rs` thread archive state updates
   - added SQLite archive/unarchive metadata updates that mirror Rust's stored archive flag, `archived_at` seconds, moved rollout path, missing-row no-op behavior, and file-modified-time refresh for `updated_at`/`updated_at_ms` when the rollout file is readable.
+- `codex-rs/state/src/runtime/threads.rs` thread id listing
+  - added SQLite thread-id listing with Rust's `archived` partitioning, non-empty `first_user_message` requirement, optional allowed-source/model-provider filters, created/updated timestamp sort keys, timestamp anchor pagination, and limit handling.
 
 ## Known Gaps
 
