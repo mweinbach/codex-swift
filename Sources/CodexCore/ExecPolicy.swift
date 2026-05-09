@@ -650,6 +650,11 @@ public final class PolicyParser {
         case representation
     }
 
+    private enum StarlarkPercentArgumentSource {
+        case positional([ConfigValue])
+        case mapping([String: ConfigValue])
+    }
+
     private enum StarlarkStatementFlow: Equatable {
         case none
         case continueLoop
@@ -4036,6 +4041,156 @@ public final class PolicyParser {
         return result
     }
 
+    private static func formattingStarlarkPercentString(
+        _ format: String,
+        argument: ConfigValue,
+        expression: String
+    ) throws -> String {
+        let captureCount = try starlarkPercentCaptureCount(in: format, expression: expression)
+        let source: StarlarkPercentArgumentSource
+        if case let .table(items) = argument {
+            source = .mapping(items)
+        } else if case let .array(items) = argument, captureCount != 1 {
+            source = .positional(items)
+        } else {
+            source = .positional([argument])
+        }
+
+        var nextPositionalIndex = 0
+        var result = ""
+        var index = format.startIndex
+        while index < format.endIndex {
+            guard format[index] == "%" else {
+                result.append(format[index])
+                index = format.index(after: index)
+                continue
+            }
+
+            let markerIndex = format.index(after: index)
+            guard markerIndex < format.endIndex else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if format[markerIndex] == "%" {
+                result.append("%")
+                index = format.index(after: markerIndex)
+                continue
+            }
+
+            var key: String?
+            var conversionIndex = markerIndex
+            if format[markerIndex] == "(" {
+                guard let closeIndex = format[markerIndex...].firstIndex(of: ")"),
+                      closeIndex > markerIndex
+                else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let keyStart = format.index(after: markerIndex)
+                key = String(format[keyStart..<closeIndex])
+                conversionIndex = format.index(after: closeIndex)
+            }
+
+            guard conversionIndex < format.endIndex else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            let conversion = format[conversionIndex]
+            let value: ConfigValue
+            if let key {
+                guard case let .mapping(items) = source,
+                      let mappedValue = items[key]
+                else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                value = mappedValue
+            } else {
+                guard case let .positional(items) = source,
+                      nextPositionalIndex < items.count
+                else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                value = items[nextPositionalIndex]
+                nextPositionalIndex += 1
+            }
+            result += try starlarkPercentFormat(value, conversion: conversion, expression: expression)
+            index = format.index(after: conversionIndex)
+        }
+
+        if case let .positional(items) = source,
+           nextPositionalIndex != items.count {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return result
+    }
+
+    private static func starlarkPercentCaptureCount(in format: String, expression: String) throws -> Int {
+        var count = 0
+        var index = format.startIndex
+        while index < format.endIndex {
+            guard format[index] == "%" else {
+                index = format.index(after: index)
+                continue
+            }
+            let markerIndex = format.index(after: index)
+            guard markerIndex < format.endIndex else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            if format[markerIndex] == "%" {
+                index = format.index(after: markerIndex)
+                continue
+            }
+            count += 1
+            if format[markerIndex] == "(" {
+                guard let closeIndex = format[markerIndex...].firstIndex(of: ")"),
+                      closeIndex > markerIndex
+                else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                index = format.index(after: closeIndex)
+            } else {
+                index = markerIndex
+            }
+            guard index < format.endIndex else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            index = format.index(after: index)
+        }
+        return count
+    }
+
+    private static func starlarkPercentFormat(
+        _ value: ConfigValue,
+        conversion: Character,
+        expression: String
+    ) throws -> String {
+        switch conversion {
+        case "s":
+            return starlarkString(value)
+        case "r":
+            return starlarkRepresentation(value)
+        case "d", "i":
+            guard case let .integer(value) = value else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return String(value)
+        case "o":
+            guard case let .integer(value) = value else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return String(value, radix: 8)
+        case "x":
+            guard case let .integer(value) = value else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return String(value, radix: 16)
+        case "X":
+            guard case let .integer(value) = value else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return String(value, radix: 16).uppercased()
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
     private static func parseStarlarkFormatCapture(
         in format: String,
         startingAt start: String.Index,
@@ -6431,6 +6586,8 @@ public final class PolicyParser {
         expression: String
     ) throws -> ConfigValue {
         switch (lhs, rhs) {
+        case let (.string(format), rhs):
+            return .string(try formattingStarlarkPercentString(format, argument: rhs, expression: expression))
         case let (.integer(lhs), .integer(rhs)):
             guard rhs != 0 else {
                 throw ConfigOverrideError.invalidLiteral(expression)

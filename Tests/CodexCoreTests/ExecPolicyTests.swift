@@ -2826,6 +2826,50 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkPercentStringFormatting() throws {
+        let policy = try parsePolicy("""
+        TOOL = "%s" % "git"
+        COMMAND = "%s-%s" % (TOOL, "status")
+        JUSTIFICATION = "%r:%d:%%:%x:%X:%o" % ("zero", 7, 31, 31, 8)
+        HOST = "api.%(name)s.com" % {"name": "github"}
+        PATH = "/opt/%s" % TOOL
+
+        if COMMAND == "git-status" and JUSTIFICATION == "\\"zero\\":7:%:1f:1F:10":
+            prefix_rule([TOOL, COMMAND], "allow", justification = JUSTIFICATION)
+            network_rule(HOST, "https", "allow")
+            host_executable(TOOL, [PATH])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("git-status")]),
+                decision: .allow,
+                justification: "\"zero\":7:%:1f:1F:10"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "%s %s" % ("git",) == "git git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "%(missing)s" % {"tool": "git"} == "git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "%q" % "git" == "git":
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "%d" % "git" == "git":
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "
