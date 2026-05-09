@@ -2873,6 +2873,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
     }
 
+    func testExternalAgentConfigDetectAndImportAgentsMdUsesRepoSourcePriority() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".claude", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "nested Claude Code".write(
+            to: repo.url.appendingPathComponent(".claude/CLAUDE.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "root CLAUDE.md for Claude".write(
+            to: repo.url.appendingPathComponent("CLAUDE.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["AGENTS_MD"])
+        XCTAssertEqual(items[0]["cwd"] as? String, repo.url.path)
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate \(repo.url.path)/CLAUDE.md to \(repo.url.path)/AGENTS.md"
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"AGENTS_MD","description":"AGENTS","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+        XCTAssertEqual(
+            try String(contentsOf: repo.url.appendingPathComponent("AGENTS.md", isDirectory: false), encoding: .utf8),
+            "root AGENTS.md for Codex"
+        )
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
     func testMcpResourceAndToolCallsValidateThreadBeforeLiveDispatch() throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description

@@ -2879,6 +2879,10 @@ public enum CodexAppServer {
            let item = try detectExternalAgentSkills(cwd: nil, configuration: configuration) {
             items.append(item)
         }
+        if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentAgentsMd(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
         for cwd in params?["cwds"] as? [String] ?? [] {
             guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
                 continue
@@ -2887,6 +2891,9 @@ public enum CodexAppServer {
                 items.append(item)
             }
             if let item = try detectExternalAgentSkills(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentAgentsMd(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
         }
@@ -2910,6 +2917,8 @@ public enum CodexAppServer {
             }
             let cwd = stringParam(item["cwd"])
             switch itemType {
+            case "AGENTS_MD":
+                try importExternalAgentAgentsMd(cwd: cwd, configuration: configuration)
             case "CONFIG":
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
             case "SKILLS":
@@ -2962,6 +2971,24 @@ public enum CodexAppServer {
         var item: [String: Any] = [
             "itemType": "CONFIG",
             "description": "Migrate \(paths.sourceSettings.path) into \(paths.targetConfig.path)",
+            "details": NSNull()
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
+    private static func detectExternalAgentAgentsMd(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        guard let paths = try externalAgentAgentsMdPaths(cwd: cwd, configuration: configuration),
+              try isMissingOrEmptyTextFile(paths.targetAgentsMd)
+        else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "AGENTS_MD",
+            "description": "Migrate \(paths.sourceAgentsMd.path) to \(paths.targetAgentsMd.path)",
             "details": NSNull()
         ]
         item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
@@ -3028,6 +3055,24 @@ public enum CodexAppServer {
         try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
     }
 
+    private static func importExternalAgentAgentsMd(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        guard let paths = try externalAgentAgentsMdPaths(cwd: cwd, configuration: configuration),
+              try isMissingOrEmptyTextFile(paths.targetAgentsMd)
+        else {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: paths.targetAgentsMd.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let contents = try String(contentsOf: paths.sourceAgentsMd, encoding: .utf8)
+        try rewriteExternalAgentTerms(contents).write(to: paths.targetAgentsMd, atomically: true, encoding: .utf8)
+    }
+
     private static func importExternalAgentSkills(cwd: String?, configuration: CodexAppServerConfiguration) throws {
         if let cwd, !cwd.isEmpty,
            gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
@@ -3077,6 +3122,68 @@ public enum CodexAppServer {
             targetConfig: configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false),
             cwd: nil
         )
+    }
+
+    private static func externalAgentAgentsMdPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (sourceAgentsMd: URL, targetAgentsMd: URL, cwd: String?)? {
+        if let cwd, !cwd.isEmpty,
+           let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) {
+            guard let source = try findRepoExternalAgentAgentsMdSource(repoRoot: repoRoot) else {
+                return nil
+            }
+            return (
+                sourceAgentsMd: source,
+                targetAgentsMd: repoRoot.appendingPathComponent("AGENTS.md", isDirectory: false),
+                cwd: repoRoot.path
+            )
+        }
+        let home = configuration.environment["HOME"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+        } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let source = home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("CLAUDE.md", isDirectory: false)
+        guard try isNonEmptyTextFile(source) else {
+            return nil
+        }
+        return (
+            sourceAgentsMd: source,
+            targetAgentsMd: configuration.codexHome.appendingPathComponent("AGENTS.md", isDirectory: false),
+            cwd: nil
+        )
+    }
+
+    private static func findRepoExternalAgentAgentsMdSource(repoRoot: URL) throws -> URL? {
+        for candidate in [
+            repoRoot.appendingPathComponent("CLAUDE.md", isDirectory: false),
+            repoRoot
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("CLAUDE.md", isDirectory: false)
+        ] {
+            if try isNonEmptyTextFile(candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func isMissingOrEmptyTextFile(_ path: URL) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return true
+        }
+        guard isRegularFile(path: path.path) else {
+            return false
+        }
+        return try String(contentsOf: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func isNonEmptyTextFile(_ path: URL) throws -> Bool {
+        guard isRegularFile(path: path.path) else {
+            return false
+        }
+        return try !String(contentsOf: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func externalAgentSkillsPaths(
