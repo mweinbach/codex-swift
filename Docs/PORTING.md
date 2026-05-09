@@ -842,6 +842,8 @@ Source baseline inspected for this scaffold:
   - added `SQLiteAgentGraphStore` with Rust's `thread_spawn_edges` schema/index, child-id upsert behavior, missing-child status no-op, open/closed status filtering, future-status inclusion for unfiltered child lists, reopen persistence, and recursive breadth-first descendant ordering.
 - `codex-rs/state/src/runtime/threads.rs` thread-spawn path lookup
   - added SQLite thread-spawn direct-child and descendant lookup by canonical `agent_path`, including Rust's `threads` join, `ORDER BY threads.id LIMIT 2`, missing result, and duplicate canonical-path error behavior.
+- `codex-rs/state/src/runtime/threads.rs` thread dynamic tools
+  - added SQLite `thread_dynamic_tools` persistence and retrieval for Rust's position-ordered dynamic tool specs, including namespace, JSON input schema, `defer_loading`, nil/empty no-op writes, no-row `nil` reads, and `ON CONFLICT(thread_id, position) DO NOTHING` no-overwrite behavior.
 
 ## Known Gaps
 

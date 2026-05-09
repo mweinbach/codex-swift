@@ -506,6 +506,66 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    func testSQLiteStorePersistsDynamicToolsInPositionOrderWithoutOverwriting() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(80)
+        try insertRawSQLiteThread(
+            id: threadID,
+            agentPath: try AgentPath(validating: "/root/tools"),
+            databaseURL: databaseURL
+        )
+
+        let missingTools = try await store.getDynamicTools(threadID: threadID)
+        XCTAssertNil(missingTools)
+        try await store.persistDynamicTools(threadID: threadID, tools: nil)
+        try await store.persistDynamicTools(threadID: threadID, tools: [])
+        let stillMissingTools = try await store.getDynamicTools(threadID: threadID)
+        XCTAssertNil(stillMissingTools)
+
+        let firstTools = [
+            DynamicToolSpec(
+                namespace: "mcp_server",
+                name: "lookup",
+                description: "Look up a record",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object(["type": .string("string")])
+                    ])
+                ]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                name: "summarize",
+                description: "Summarize content",
+                inputSchema: .object(["type": .string("object")])
+            ),
+        ]
+        let replacementTools = [
+            DynamicToolSpec(
+                name: "replacement",
+                description: "Should not overwrite position zero",
+                inputSchema: .object(["type": .string("object")])
+            ),
+            DynamicToolSpec(
+                namespace: "later",
+                name: "also-replacement",
+                description: "Should not overwrite position one",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            ),
+        ]
+
+        try await store.persistDynamicTools(threadID: threadID, tools: firstTools)
+        try await store.persistDynamicTools(threadID: threadID, tools: replacementTools)
+
+        let storedTools = try await store.getDynamicTools(threadID: threadID)
+        XCTAssertEqual(storedTools, firstTools)
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
