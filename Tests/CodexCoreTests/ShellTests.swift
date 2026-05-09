@@ -1,4 +1,9 @@
 import XCTest
+#if os(Linux)
+import Glibc
+#elseif os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+import Darwin
+#endif
 @testable import CodexCore
 
 final class ShellTests: XCTestCase {
@@ -126,6 +131,24 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual((shell?.shellPath as NSString?)?.lastPathComponent, "bash")
     }
 
+    #if os(Linux) || os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+    func testDefaultUserShellUsesUnixAccountShellLikeRust() throws {
+        guard let accountShellPath = currentAccountShellPathForTest(),
+              let accountShellType = ShellResolver.detectShellType(accountShellPath)
+        else {
+            throw XCTSkip("current account shell is unavailable or not recognized by Codex")
+        }
+        guard FileManager.default.fileExists(atPath: accountShellPath) else {
+            throw XCTSkip("current account shell path does not exist")
+        }
+
+        XCTAssertEqual(
+            ShellResolver.defaultUserShell(),
+            Shell(shellType: accountShellType, shellPath: accountShellPath)
+        )
+    }
+    #endif
+
     #if os(macOS)
     func testMacOSFishFallbackPrefersZsh() {
         let shell = ShellResolver.defaultUserShell(userShellPath: "/bin/fish")
@@ -140,3 +163,31 @@ final class ShellTests: XCTestCase {
     }
     #endif
 }
+
+#if os(Linux) || os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+private func currentAccountShellPathForTest() -> String? {
+    var passwdEntry = passwd()
+    var bufferLength = Int(sysconf(Int32(_SC_GETPW_R_SIZE_MAX)))
+    if bufferLength <= 0 {
+        bufferLength = 1024
+    }
+
+    while bufferLength <= 1024 * 1024 {
+        var buffer = [CChar](repeating: 0, count: bufferLength)
+        var result: UnsafeMutablePointer<passwd>?
+        let status = getpwuid_r(getuid(), &passwdEntry, &buffer, buffer.count, &result)
+        if status == 0 {
+            guard result != nil, let shell = passwdEntry.pw_shell else {
+                return nil
+            }
+            return String(cString: shell)
+        }
+        guard status == ERANGE else {
+            return nil
+        }
+        bufferLength *= 2
+    }
+
+    return nil
+}
+#endif

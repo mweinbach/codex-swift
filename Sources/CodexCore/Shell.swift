@@ -1,4 +1,9 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#elseif os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+import Darwin
+#endif
 
 public enum ShellType: String, Codable, CaseIterable, Equatable, Sendable {
     case zsh = "Zsh"
@@ -234,8 +239,40 @@ public enum ShellResolver {
     }
 
     private static func currentUserShellPath() -> String? {
+        #if os(Linux) || os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+        return unixUserShellPath()
+        #else
         ProcessInfo.processInfo.environment["SHELL"]
+        #endif
     }
+
+    #if os(Linux) || os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+    private static func unixUserShellPath() -> String? {
+        var passwdEntry = passwd()
+        var bufferLength = Int(sysconf(Int32(_SC_GETPW_R_SIZE_MAX)))
+        if bufferLength <= 0 {
+            bufferLength = 1024
+        }
+
+        while bufferLength <= 1024 * 1024 {
+            var buffer = [CChar](repeating: 0, count: bufferLength)
+            var result: UnsafeMutablePointer<passwd>?
+            let status = getpwuid_r(getuid(), &passwdEntry, &buffer, buffer.count, &result)
+            if status == 0 {
+                guard result != nil, let shell = passwdEntry.pw_shell else {
+                    return nil
+                }
+                return String(cString: shell)
+            }
+            guard status == ERANGE else {
+                return nil
+            }
+            bufferLength *= 2
+        }
+
+        return nil
+    }
+    #endif
 
     private static func which(_ binaryName: String) -> String? {
         guard !binaryName.contains("/") else {
