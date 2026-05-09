@@ -1804,7 +1804,7 @@ final class ExecPolicyTests: XCTestCase {
             ("jj", "log", "allow"),
         ]
         COMMANDS.remove(("hg", "status", "forbidden"))
-        COMMANDS.pop(-1)
+        COMMANDS.pop()
         COMMANDS.append(("node", "test", "prompt"))
         COMMANDS.pop(1)
 
@@ -1860,6 +1860,59 @@ final class ExecPolicyTests: XCTestCase {
             "git": ["/usr/bin/git"],
             "pnpm": ["/usr/local/bin/pnpm"]
         ])
+    }
+
+    func testParserEvaluatesRustStarlarkListPopReturnValues() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = ["status", "diff", "log", "show"]
+        FIRST = COMMANDS.pop(0)
+        LAST = COMMANDS.pop()
+
+        def choose_command(commands):
+            picked = commands.pop(1)
+            return picked
+
+        PICKED = choose_command(COMMANDS)
+
+        prefix_rule(["git", FIRST], "allow", justification = "first " + FIRST)
+        prefix_rule(["git", LAST], "prompt", justification = "last " + LAST)
+        prefix_rule(["git", PICKED], "forbidden", justification = "picked " + PICKED)
+        prefix_rule(["git", COMMANDS[0]], "allow", justification = "remaining")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "first status"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .prompt,
+                justification: "last show"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .forbidden,
+                justification: "picked log"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .allow,
+                justification: "remaining"
+            )
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        COMMANDS = ["status"]
+        COMMANDS.pop(-1)
+        prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        COMMANDS = ["status"]
+        ITEM = COMMANDS.pop(-1)
+        prefix_rule(["git", ITEM], "allow")
+        """))
     }
 
     func testParserEvaluatesRustStarlarkListOrderingMethods() throws {
