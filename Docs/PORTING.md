@@ -865,6 +865,8 @@ Source baseline inspected for this scaffold:
   - added SQLite metadata page listing with Rust's page-size-plus-one scan, `num_scanned_rows`, next-anchor derivation from the last returned item, created/updated sort keys, ascending/descending anchor operators, cwd filter handling including empty-filter no-match behavior, source/provider filters, title substring search, and non-empty first-user-message filtering.
 - `codex-rs/state/src/runtime/threads.rs` thread metadata upsert/insert/get helpers
   - added SQLite `get_thread`, `upsert_thread`, and `insert_thread_if_absent` equivalents with Rust's full metadata column bindings, created/updated second-plus-millisecond persistence, first-message empty-string fallback, default `"enabled"` memory mode on insert, conflict upsert preservation for existing git fields and memory mode, no-overwrite insert semantics, and thread-spawn edge materialization from persisted session source strings.
+- `codex-rs/state/src/runtime/threads.rs` rollout metadata application
+  - added SQLite `apply_rollout_items` equivalent with a Swift `ThreadMetadataBuilder`, existing-row fallback vs. builder-created metadata, rollout-path refresh, session-meta/turn-context/token-count/user-message mutation, existing-git preference, override-or-file-mtime updated-at refresh, new-thread memory-mode initialization, session-meta memory-mode restore, and dynamic-tool extraction after thread upsert.
 
 ## Known Gaps
 

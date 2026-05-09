@@ -7,9 +7,10 @@ import SQLite3
 /// thread-scoped dynamic tools, preserving Rust's ordering, upsert, and status-filter semantics.
 public actor SQLiteAgentGraphStore: AgentGraphStore {
     private let handle: SQLiteDatabaseHandle
+    private let defaultProvider: String
     private var threadUpdatedAtMilliseconds: Int64 = 0
 
-    public init(databaseURL: URL) throws {
+    public init(databaseURL: URL, defaultProvider: String = "openai") throws {
         var openedDatabase: OpaquePointer?
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         let result = sqlite3_open_v2(databaseURL.path, &openedDatabase, flags, nil)
@@ -67,6 +68,7 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             throw error
         }
 
+        self.defaultProvider = defaultProvider
         handle = SQLiteDatabaseHandle(database: openedDatabase)
     }
 
@@ -301,6 +303,49 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             source: metadata.source
         )
         return inserted
+    }
+
+    public func applyRolloutItems(
+        builder: ThreadMetadataBuilder,
+        items: [RolloutRecordItem],
+        newThreadMemoryMode: String? = nil,
+        updatedAtOverride: Date? = nil
+    ) async throws {
+        guard !items.isEmpty else {
+            return
+        }
+
+        let existingMetadata = try await getThread(threadID: builder.id)
+        var draft = existingMetadata
+            .map(ThreadMetadataDraft.init(metadata:))
+            ?? ThreadMetadataDraft(metadata: builder.build(defaultProvider: defaultProvider))
+        draft.rolloutPath = builder.rolloutPath.path
+
+        for item in items {
+            Self.applyRolloutItem(item, to: &draft, defaultProvider: defaultProvider)
+        }
+        if let existingMetadata {
+            draft.preferExistingGitInfo(existingMetadata)
+        }
+
+        let updatedAt = updatedAtOverride ?? Self.fileModificationDate(builder.rolloutPath)
+        if let updatedAt {
+            draft.updatedAt = updatedAt
+        }
+
+        let metadata = draft.metadata
+        if existingMetadata == nil {
+            try await upsertThread(metadata, creationMemoryMode: newThreadMemoryMode)
+        } else {
+            try await upsertThread(metadata)
+        }
+
+        if let memoryMode = Self.extractMemoryMode(from: items) {
+            _ = try await setThreadMemoryMode(threadID: builder.id, memoryMode: memoryMode)
+        }
+        if let dynamicTools = Self.extractDynamicTools(from: items) {
+            try await persistDynamicTools(threadID: builder.id, tools: dynamicTools)
+        }
     }
 
     public func setThreadMemoryMode(threadID: ThreadId, memoryMode: String) async throws -> Bool {
@@ -998,6 +1043,145 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
 
+    private static func applyRolloutItem(
+        _ item: RolloutRecordItem,
+        to metadata: inout ThreadMetadataDraft,
+        defaultProvider: String
+    ) {
+        switch item {
+        case let .sessionMeta(metaLine):
+            applySessionMeta(metaLine, to: &metadata)
+        case let .turnContext(turnContext):
+            applyTurnContext(turnContext, to: &metadata)
+        case let .eventMsg(event):
+            applyEventMessage(event, to: &metadata)
+        case .responseItem, .compacted:
+            break
+        }
+        if metadata.modelProvider.isEmpty {
+            metadata.modelProvider = defaultProvider
+        }
+    }
+
+    private static func applySessionMeta(
+        _ metaLine: SessionMetaLine,
+        to metadata: inout ThreadMetadataDraft
+    ) {
+        guard metaLine.meta.id.description == metadata.id.description else {
+            return
+        }
+        metadata.source = metaLine.meta.source.description
+        metadata.threadSource = metaLine.meta.threadSource
+        metadata.agentNickname = metaLine.meta.agentNickname
+        metadata.agentRole = metaLine.meta.agentRole
+        metadata.agentPath = metaLine.meta.agentPath
+        if let modelProvider = metaLine.meta.modelProvider {
+            metadata.modelProvider = modelProvider
+        }
+        if !metaLine.meta.cliVersion.isEmpty {
+            metadata.cliVersion = metaLine.meta.cliVersion
+        }
+        if !metaLine.meta.cwd.isEmpty {
+            metadata.cwd = metaLine.meta.cwd
+        }
+        if let git = metaLine.git {
+            metadata.gitSHA = git.commitHash
+            metadata.gitBranch = git.branch
+            metadata.gitOriginURL = git.repositoryURL
+        }
+    }
+
+    private static func applyTurnContext(
+        _ turnContext: TurnContextItem,
+        to metadata: inout ThreadMetadataDraft
+    ) {
+        if metadata.cwd.isEmpty {
+            metadata.cwd = turnContext.cwd
+        }
+        metadata.model = turnContext.model
+        metadata.reasoningEffort = turnContext.effort
+        metadata.sandboxPolicy = persistedSandboxPolicy(turnContext.sandboxPolicy)
+        metadata.approvalMode = turnContext.approvalPolicy.rawValue
+    }
+
+    private static func applyEventMessage(
+        _ event: EventMessage,
+        to metadata: inout ThreadMetadataDraft
+    ) {
+        switch event {
+        case let .tokenCount(tokenCount):
+            if let info = tokenCount.info {
+                metadata.tokensUsed = max(info.totalTokenUsage.totalTokens, 0)
+            }
+        case let .userMessage(userMessage):
+            if metadata.firstUserMessage == nil {
+                metadata.firstUserMessage = userMessagePreview(userMessage)
+            }
+            if metadata.title.isEmpty {
+                let title = strippedUserMessagePrefix(userMessage.message)
+                if !title.isEmpty {
+                    metadata.title = title
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private static func extractMemoryMode(from items: [RolloutRecordItem]) -> String? {
+        for item in items.reversed() {
+            guard case let .sessionMeta(metaLine) = item,
+                  let memoryMode = metaLine.meta.memoryMode
+            else {
+                continue
+            }
+            return memoryMode
+        }
+        return nil
+    }
+
+    private static func extractDynamicTools(from items: [RolloutRecordItem]) -> [DynamicToolSpec]?? {
+        for item in items {
+            guard case let .sessionMeta(metaLine) = item else {
+                continue
+            }
+            return metaLine.meta.dynamicTools
+        }
+        return nil
+    }
+
+    private static func userMessagePreview(_ userMessage: UserMessageEvent) -> String? {
+        let message = strippedUserMessagePrefix(userMessage.message)
+        if !message.isEmpty {
+            return message
+        }
+        if userMessage.images?.isEmpty == false || !userMessage.localImages.isEmpty {
+            return "[Image]"
+        }
+        return nil
+    }
+
+    private static func strippedUserMessagePrefix(_ text: String) -> String {
+        let prefix = "## My request for Codex:"
+        if let range = text.range(of: prefix) {
+            return String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func persistedSandboxPolicy(_ policy: SandboxPolicy) -> String {
+        switch policy {
+        case .dangerFullAccess:
+            return "danger-full-access"
+        case .readOnly:
+            return "read-only"
+        case .externalSandbox:
+            return "external-sandbox"
+        case .workspaceWrite:
+            return "workspace-write"
+        }
+    }
+
     private static func threadMetadataBindings(
         _ metadata: ThreadMetadata,
         updatedAtMilliseconds: Int64,
@@ -1172,6 +1356,81 @@ public enum ThreadArchiveFilter: Equatable, Sendable {
     case unarchivedOnly
 }
 
+public struct ThreadMetadataBuilder: Equatable, Sendable {
+    public var id: ThreadId
+    public var rolloutPath: URL
+    public var createdAt: Date
+    public var updatedAt: Date?
+    public var source: SessionSource
+    public var threadSource: ThreadSource?
+    public var agentNickname: String?
+    public var agentRole: String?
+    public var agentPath: String?
+    public var modelProvider: String?
+    public var cwd: String
+    public var cliVersion: String?
+    public var sandboxPolicy: SandboxPolicy
+    public var approvalMode: AskForApproval
+    public var archivedAt: Date?
+    public var gitSHA: String?
+    public var gitBranch: String?
+    public var gitOriginURL: String?
+
+    public init(
+        id: ThreadId,
+        rolloutPath: URL,
+        createdAt: Date,
+        source: SessionSource
+    ) {
+        self.id = id
+        self.rolloutPath = rolloutPath
+        self.createdAt = createdAt
+        self.updatedAt = nil
+        self.source = source
+        self.threadSource = nil
+        self.agentNickname = nil
+        self.agentRole = nil
+        self.agentPath = nil
+        self.modelProvider = nil
+        self.cwd = ""
+        self.cliVersion = nil
+        self.sandboxPolicy = .newReadOnlyPolicy()
+        self.approvalMode = .onRequest
+        self.archivedAt = nil
+        self.gitSHA = nil
+        self.gitBranch = nil
+        self.gitOriginURL = nil
+    }
+
+    public func build(defaultProvider: String) -> ThreadMetadata {
+        ThreadMetadata(
+            id: id,
+            rolloutPath: rolloutPath.path,
+            createdAt: createdAt,
+            updatedAt: updatedAt ?? createdAt,
+            source: source.description,
+            threadSource: threadSource,
+            agentNickname: agentNickname,
+            agentRole: agentRole,
+            agentPath: agentPath ?? source.agentPath?.description,
+            modelProvider: modelProvider ?? defaultProvider,
+            model: nil,
+            reasoningEffort: nil,
+            cwd: cwd,
+            cliVersion: cliVersion ?? "",
+            title: "",
+            sandboxPolicy: SQLiteAgentGraphStore.persistedSandboxPolicy(sandboxPolicy),
+            approvalMode: approvalMode.rawValue,
+            tokensUsed: 0,
+            firstUserMessage: nil,
+            archivedAt: archivedAt,
+            gitSHA: gitSHA,
+            gitBranch: gitBranch,
+            gitOriginURL: gitOriginURL
+        )
+    }
+}
+
 public struct ThreadMetadata: Equatable, Sendable {
     public let id: ThreadId
     public let rolloutPath: String
@@ -1245,6 +1504,98 @@ public struct ThreadMetadata: Equatable, Sendable {
         self.gitSHA = gitSHA
         self.gitBranch = gitBranch
         self.gitOriginURL = gitOriginURL
+    }
+}
+
+private struct ThreadMetadataDraft {
+    var id: ThreadId
+    var rolloutPath: String
+    var createdAt: Date
+    var updatedAt: Date
+    var source: String
+    var threadSource: ThreadSource?
+    var agentNickname: String?
+    var agentRole: String?
+    var agentPath: String?
+    var modelProvider: String
+    var model: String?
+    var reasoningEffort: ReasoningEffort?
+    var cwd: String
+    var cliVersion: String
+    var title: String
+    var sandboxPolicy: String
+    var approvalMode: String
+    var tokensUsed: Int64
+    var firstUserMessage: String?
+    var archivedAt: Date?
+    var gitSHA: String?
+    var gitBranch: String?
+    var gitOriginURL: String?
+
+    init(metadata: ThreadMetadata) {
+        self.id = metadata.id
+        self.rolloutPath = metadata.rolloutPath
+        self.createdAt = metadata.createdAt
+        self.updatedAt = metadata.updatedAt
+        self.source = metadata.source
+        self.threadSource = metadata.threadSource
+        self.agentNickname = metadata.agentNickname
+        self.agentRole = metadata.agentRole
+        self.agentPath = metadata.agentPath
+        self.modelProvider = metadata.modelProvider
+        self.model = metadata.model
+        self.reasoningEffort = metadata.reasoningEffort
+        self.cwd = metadata.cwd
+        self.cliVersion = metadata.cliVersion
+        self.title = metadata.title
+        self.sandboxPolicy = metadata.sandboxPolicy
+        self.approvalMode = metadata.approvalMode
+        self.tokensUsed = metadata.tokensUsed
+        self.firstUserMessage = metadata.firstUserMessage
+        self.archivedAt = metadata.archivedAt
+        self.gitSHA = metadata.gitSHA
+        self.gitBranch = metadata.gitBranch
+        self.gitOriginURL = metadata.gitOriginURL
+    }
+
+    var metadata: ThreadMetadata {
+        ThreadMetadata(
+            id: id,
+            rolloutPath: rolloutPath,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            source: source,
+            threadSource: threadSource,
+            agentNickname: agentNickname,
+            agentRole: agentRole,
+            agentPath: agentPath,
+            modelProvider: modelProvider,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            cwd: cwd,
+            cliVersion: cliVersion,
+            title: title,
+            sandboxPolicy: sandboxPolicy,
+            approvalMode: approvalMode,
+            tokensUsed: tokensUsed,
+            firstUserMessage: firstUserMessage,
+            archivedAt: archivedAt,
+            gitSHA: gitSHA,
+            gitBranch: gitBranch,
+            gitOriginURL: gitOriginURL
+        )
+    }
+
+    mutating func preferExistingGitInfo(_ existing: ThreadMetadata) {
+        if let gitSHA = existing.gitSHA {
+            self.gitSHA = gitSHA
+        }
+        if let gitBranch = existing.gitBranch {
+            self.gitBranch = gitBranch
+        }
+        if let gitOriginURL = existing.gitOriginURL {
+            self.gitOriginURL = gitOriginURL
+        }
     }
 }
 

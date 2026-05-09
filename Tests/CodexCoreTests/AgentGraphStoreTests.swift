@@ -1360,6 +1360,134 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(inferredChildren, [existingThreadID, newThreadID])
     }
 
+    func testSQLiteStoreApplyRolloutItemsRestoresMemoryModeAndPreservesExistingGitInfo() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL, defaultProvider: "test-provider")
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(124)
+        let createdAt = date(milliseconds: 1_700_000_120_000)
+        let existingMetadata = try threadMetadata(
+            id: threadID,
+            rolloutPath: "/tmp/apply-existing.jsonl",
+            createdAt: createdAt,
+            updatedAt: date(milliseconds: 1_700_000_121_000),
+            title: "Existing",
+            gitInfo: ThreadGitInfo(branch: "sqlite-branch")
+        )
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "search",
+                name: "lookup",
+                description: "Look things up",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            ),
+        ]
+        let metaLine = SessionMetaLine(
+            meta: SessionMeta(
+                id: ConversationId(uuid: threadID.uuid),
+                timestamp: ISO8601DateFormatter().string(from: createdAt),
+                cwd: "/repo/from-rollout",
+                originator: "",
+                cliVersion: "1.2.3",
+                source: .cli,
+                threadSource: .user,
+                agentNickname: "agent",
+                agentRole: "reviewer",
+                agentPath: "/root/apply",
+                modelProvider: "rollout-provider",
+                dynamicTools: dynamicTools,
+                memoryMode: "polluted"
+            ),
+            git: GitInfo(
+                commitHash: "rollout-sha",
+                branch: "rollout-branch",
+                repositoryURL: "git@example.com:openai/codex.git"
+            )
+        )
+        let builder = ThreadMetadataBuilder(
+            id: threadID,
+            rolloutPath: URL(fileURLWithPath: "/tmp/apply-rollout.jsonl"),
+            createdAt: createdAt,
+            source: .cli
+        )
+
+        try await store.upsertThread(existingMetadata)
+        try await store.applyRolloutItems(
+            builder: builder,
+            items: [.sessionMeta(metaLine)]
+        )
+
+        let loadedPersisted = try await store.getThread(threadID: threadID)
+        let persisted = try XCTUnwrap(loadedPersisted)
+        let memoryMode = try await store.getThreadMemoryMode(threadID: threadID)
+        let storedTools = try await store.getDynamicTools(threadID: threadID)
+        XCTAssertEqual(memoryMode, "polluted")
+        XCTAssertEqual(storedTools, dynamicTools)
+        XCTAssertEqual(persisted.rolloutPath, "/tmp/apply-rollout.jsonl")
+        XCTAssertEqual(persisted.source, "cli")
+        XCTAssertEqual(persisted.threadSource, .user)
+        XCTAssertEqual(persisted.agentNickname, "agent")
+        XCTAssertEqual(persisted.agentRole, "reviewer")
+        XCTAssertEqual(persisted.agentPath, "/root/apply")
+        XCTAssertEqual(persisted.modelProvider, "rollout-provider")
+        XCTAssertEqual(persisted.cwd, "/repo/from-rollout")
+        XCTAssertEqual(persisted.cliVersion, "1.2.3")
+        XCTAssertEqual(persisted.gitSHA, "rollout-sha")
+        XCTAssertEqual(persisted.gitBranch, "sqlite-branch")
+        XCTAssertEqual(persisted.gitOriginURL, "git@example.com:openai/codex.git")
+    }
+
+    func testSQLiteStoreApplyRolloutItemsCreatesThreadWithOverrideUpdatedAtAndEventMetadata() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL, defaultProvider: "test-provider")
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let threadID = try threadID(125)
+        let createdAt = date(milliseconds: 1_700_000_130_000)
+        let overrideUpdatedAt = date(milliseconds: 1_700_001_234_000)
+        let builder = ThreadMetadataBuilder(
+            id: threadID,
+            rolloutPath: URL(fileURLWithPath: "/tmp/apply-new.jsonl"),
+            createdAt: createdAt,
+            source: .cli
+        )
+        let tokenCount = EventMessage.tokenCount(TokenCountEvent(
+            info: TokenUsageInfo(
+                totalTokenUsage: TokenUsage(totalTokens: 321),
+                lastTokenUsage: TokenUsage()
+            ),
+            rateLimits: nil
+        ))
+        let userMessage = EventMessage.userMessage(UserMessageEvent(
+            message: "prefix\n## My request for Codex: actual user request",
+            images: nil
+        ))
+
+        try await store.applyRolloutItems(
+            builder: builder,
+            items: [
+                .eventMsg(tokenCount),
+                .eventMsg(userMessage),
+            ],
+            newThreadMemoryMode: "disabled",
+            updatedAtOverride: overrideUpdatedAt
+        )
+
+        let loadedPersisted = try await store.getThread(threadID: threadID)
+        let persisted = try XCTUnwrap(loadedPersisted)
+        let memoryMode = try await store.getThreadMemoryMode(threadID: threadID)
+        XCTAssertEqual(memoryMode, "disabled")
+        XCTAssertEqual(persisted.rolloutPath, "/tmp/apply-new.jsonl")
+        XCTAssertEqual(persisted.createdAt, createdAt)
+        XCTAssertEqual(persisted.updatedAt, overrideUpdatedAt)
+        XCTAssertEqual(persisted.modelProvider, "test-provider")
+        XCTAssertEqual(persisted.tokensUsed, 321)
+        XCTAssertEqual(persisted.firstUserMessage, "actual user request")
+        XCTAssertEqual(persisted.title, "actual user request")
+    }
+
     func testSQLiteStoreFindsNewestThreadByExactTitleWithRustFilters() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
