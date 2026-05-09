@@ -6470,6 +6470,70 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(stored.tokens?.accountID, "org-refreshed")
     }
 
+    func testSendAddCreditsNudgeEmailRefreshesExternalAuthOnUnauthorized() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let initialAccessToken = try fakeJWT(email: "initial@example.com", plan: "pro", accountID: "org-initial")
+        let refreshedAccessToken = try fakeJWT(email: "refreshed@example.com", plan: "pro", accountID: "org-refreshed")
+        let backend = AppServerSequentialAccountBackend(responses: [
+            AccountRateLimitsHTTPResponse(statusCode: 401, body: Data()),
+            AccountRateLimitsHTTPResponse(statusCode: 200, body: Data())
+        ])
+        let sender = URLSessionAddCreditsNudgeEmailSender { request in
+            await backend.respond(to: request)
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, addCreditsNudgeEmailSender: sender),
+            notificationSink: { data in await notificationCapture.append(data) },
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decodeMessages(processor.processLine(Data("""
+        {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(initialAccessToken)","chatgptAccountId":"org-initial","chatgptPlanType":"pro"}}
+        """.utf8)))
+
+        let processorBox = AppServerUncheckedSendableBox(processor)
+        let nudgeTask = Task {
+            processorBox.value.processLine(Data(#"{"id":2,"method":"account/sendAddCreditsNudgeEmail","params":{"creditType":"usage_limit"}}"#.utf8))
+        }
+
+        let refreshRequestData = try await nextNotificationPayload(notificationCapture)
+        let refreshRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: refreshRequestData) as? [String: Any])
+        XCTAssertEqual(refreshRequest["method"] as? String, "account/chatgptAuthTokens/refresh")
+        let refreshParams = try XCTUnwrap(refreshRequest["params"] as? [String: Any])
+        XCTAssertEqual(refreshParams["reason"] as? String, "unauthorized")
+        XCTAssertEqual(refreshParams["previousAccountId"] as? String, "org-initial")
+        let refreshRequestID = try XCTUnwrap(refreshRequest["id"])
+
+        let refreshResponse = try JSONSerialization.data(withJSONObject: [
+            "id": refreshRequestID,
+            "result": [
+                "accessToken": refreshedAccessToken,
+                "chatgptAccountId": "org-refreshed",
+                "chatgptPlanType": "pro"
+            ]
+        ])
+        XCTAssertNil(processor.processLine(refreshResponse))
+
+        let response = try decode(await nudgeTask.value)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "sent")
+
+        let requests = await backend.requests
+        XCTAssertEqual(requests.map { $0.headers["Authorization"] }, [
+            "Bearer \(initialAccessToken)",
+            "Bearer \(refreshedAccessToken)"
+        ])
+        XCTAssertEqual(requests.map { $0.headers["chatgpt-account-id"] }, ["org-initial", "org-refreshed"])
+        XCTAssertEqual(requests.map(\.body), [
+            #"{"credit_type":"usage_limit"}"#,
+            #"{"credit_type":"usage_limit"}"#
+        ])
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
+        XCTAssertEqual(stored.tokens?.accessToken, refreshedAccessToken)
+        XCTAssertEqual(stored.tokens?.accountID, "org-refreshed")
+    }
+
     func testURLSessionAccountRateLimitsFetcherUsesCodexAPIUsagePath() async throws {
         let capture = AppServerRequestCapture()
         let fetcher = URLSessionAccountRateLimitsFetcher { request in
