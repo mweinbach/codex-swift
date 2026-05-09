@@ -8023,6 +8023,9 @@ public enum CodexAppServer {
         guard let apiKey = stringParam(params?["apiKey"]) else {
             throw AppServerError.invalidRequest("missing apiKey")
         }
+        if try externalChatGPTAuthActive(configuration: configuration) {
+            throw externalAuthActiveError()
+        }
         if try forcedLoginMethod(configuration: configuration) == "chatgpt" {
             throw AppServerError.invalidRequest("API key login is disabled. Use ChatGPT login instead.")
         }
@@ -8084,6 +8087,23 @@ public enum CodexAppServer {
         }
         _ = try loginApiKeyResult(params: params, configuration: configuration, cancelActiveLogin: cancelActiveLogin)
         return ["type": "apiKey"]
+    }
+
+    fileprivate static func externalAuthActiveError() -> AppServerError {
+        .invalidRequest(
+            "External auth is active. Use account/login/start (chatgptAuthTokens) to update it or account/logout to clear it."
+        )
+    }
+
+    fileprivate static func externalChatGPTAuthActive(configuration: CodexAppServerConfiguration) throws -> Bool {
+        do {
+            return try CodexAuthStorage.loadAuthDotJSON(
+                codexHome: configuration.codexHome,
+                mode: configuration.authCredentialsStoreMode
+            )?.authMode == .chatGPTAuthTokens
+        } catch {
+            throw AppServerError.internalError("failed to read auth state: \(error)")
+        }
     }
 
     fileprivate static func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
@@ -12495,6 +12515,9 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func startChatGptLogin(codexStreamlinedLogin: Bool = false) throws -> (loginID: UUID, authURL: String) {
+        if try CodexAppServer.externalChatGPTAuthActive(configuration: configuration) {
+            throw CodexAppServer.externalAuthActiveError()
+        }
         if try CodexAppServer.forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }
@@ -12523,6 +12546,9 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func chatGPTDeviceCodeLoginOptions() throws -> ChatGPTDeviceCodeLoginOptions {
+        if try CodexAppServer.externalChatGPTAuthActive(configuration: configuration) {
+            throw CodexAppServer.externalAuthActiveError()
+        }
         if try CodexAppServer.forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }

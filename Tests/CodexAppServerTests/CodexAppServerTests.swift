@@ -5093,6 +5093,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(accountPayload["planType"] as? String, "pro")
     }
 
+    func testAccountLoginManagedAuthRejectedWhenExternalAuthActive() throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: accessToken,
+            chatGPTAccountID: "org-embedded",
+            chatGPTPlanType: "pro"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let expectedMessage = "External auth is active. Use account/login/start (chatgptAuthTokens) to update it or account/logout to clear it."
+
+        let apiKey = try decode(
+            processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"apiKey","apiKey":"sk-test-key"}}"#.utf8))
+        )
+        let apiKeyError = try XCTUnwrap(apiKey["error"] as? [String: Any])
+        XCTAssertEqual(apiKeyError["code"] as? Int, -32600)
+        XCTAssertEqual(apiKeyError["message"] as? String, expectedMessage)
+
+        let chatGPT = try decode(
+            processor.processLine(Data(#"{"id":2,"method":"account/login/start","params":{"type":"chatgpt"}}"#.utf8))
+        )
+        let chatGPTError = try XCTUnwrap(chatGPT["error"] as? [String: Any])
+        XCTAssertEqual(chatGPTError["code"] as? Int, -32600)
+        XCTAssertEqual(chatGPTError["message"] as? String, expectedMessage)
+
+        let deviceCode = try decode(
+            processor.processLine(Data(#"{"id":3,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8))
+        )
+        let deviceCodeError = try XCTUnwrap(deviceCode["error"] as? [String: Any])
+        XCTAssertEqual(deviceCodeError["code"] as? Int, -32600)
+        XCTAssertEqual(deviceCodeError["message"] as? String, expectedMessage)
+
+        let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
+        XCTAssertEqual(stored.authMode, .chatGPTAuthTokens)
+        XCTAssertNil(stored.openAIAPIKey)
+    }
+
     func testAccountLoginChatGPTAuthTokensHonorsForcedWorkspaceAndForcedAPI() throws {
         let temp = try TemporaryDirectory()
         try """
