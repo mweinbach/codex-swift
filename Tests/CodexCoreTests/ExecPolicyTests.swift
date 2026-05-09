@@ -2273,6 +2273,44 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkStringPartitionMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        BEFORE, SEP, AFTER = "status:short".partition(":")
+        RB, RSEP, RA = "one/two/three".rpartition("/")
+        MISSING = "plain".partition("/")
+        RMISSING = "plain".rpartition("/")
+
+        if BEFORE == "status" and SEP == ":" and AFTER == "short":
+            prefix_rule([TOOL, BEFORE], "allow", justification = RB + RSEP + RA)
+
+        if MISSING[0] == "plain" and MISSING[1] == "" and MISSING[2] == "" and RMISSING[0] == "" and RMISSING[2] == "plain":
+            network_rule(RB.replace("/", "-") + ".example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "one/two/three"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "one-two.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "plain".partition("") == ["plain", "", ""]:
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "plain".rpartition("") == ["", "", "plain"]:
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "

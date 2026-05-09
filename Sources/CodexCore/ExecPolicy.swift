@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "partition", "rpartition", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2823,6 +2823,12 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             return .integer(Int64(foundIndex))
+        case "partition":
+            let separator = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .array(try partitioningStarlarkString(receiver, separator: separator, direction: .forward, expression: text).map(ConfigValue.string))
+        case "rpartition":
+            let separator = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .array(try partitioningStarlarkString(receiver, separator: separator, direction: .reverse, expression: text).map(ConfigValue.string))
         case "isalnum":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .bool(starlarkStringIsAlphanumeric(receiver))
@@ -3219,6 +3225,37 @@ public final class PolicyParser {
             return nil
         }
         return window.start + window.haystack.distance(from: window.haystack.startIndex, to: range.lowerBound)
+    }
+
+    private static func partitioningStarlarkString(
+        _ string: String,
+        separator: String,
+        direction: StarlarkStringSearchDirection,
+        expression: String
+    ) throws -> [String] {
+        guard !separator.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let range: Range<String.Index>?
+        switch direction {
+        case .forward:
+            range = string.range(of: separator)
+        case .reverse:
+            range = string.range(of: separator, options: .backwards)
+        }
+        guard let range else {
+            switch direction {
+            case .forward:
+                return [string, "", ""]
+            case .reverse:
+                return ["", "", string]
+            }
+        }
+        return [
+            String(string[..<range.lowerBound]),
+            separator,
+            String(string[range.upperBound...])
+        ]
     }
 
     private static func starlarkStringIsAlphanumeric(_ string: String) -> Bool {
