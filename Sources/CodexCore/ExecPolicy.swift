@@ -814,6 +814,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkDictMutationStatement(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if try Self.parseStarlarkListMutationStatement(
             statement,
             constants: &constants,
@@ -1184,6 +1192,57 @@ public final class PolicyParser {
         return true
     }
 
+    private static func parseStarlarkDictMutationStatement(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: trimmed)
+        else {
+            return false
+        }
+
+        let callee = String(trimmed[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return false
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard methodName == "update" else {
+            return false
+        }
+        guard isStarlarkIdentifier(receiverText),
+              case var .table(items) = constants[receiverText]
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let bodyStart = trimmed.index(after: openIndex)
+        let body = String(trimmed[bodyStart..<trimmed.index(before: trimmed.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .table(updateItems) = argument else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        for (key, value) in updateItems {
+            items[key] = value
+        }
+        constants[receiverText] = .table(items)
+        return true
+    }
+
     private static func parseStarlarkListMutationStatement(
         _ statement: String,
         constants: inout [String: ConfigValue],
@@ -1204,7 +1263,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["append", "extend"].contains(methodName) else {
+        guard ["append", "extend", "insert"].contains(methodName) else {
             return false
         }
         guard isStarlarkIdentifier(receiverText),
@@ -1218,21 +1277,44 @@ public final class PolicyParser {
         let rawArguments = splitTopLevel(body, separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard rawArguments.count == 1,
-              let rawArgument = rawArguments.first
-        else {
-            throw ConfigOverrideError.invalidLiteral(trimmed)
-        }
-
-        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         switch methodName {
         case "append":
+            guard rawArguments.count == 1,
+                  let rawArgument = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
             items.append(argument)
         case "extend":
+            guard rawArguments.count == 1,
+                  let rawArgument = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
             guard case let .array(extensionItems) = argument else {
                 throw ConfigOverrideError.invalidLiteral(trimmed)
             }
             items.append(contentsOf: extensionItems)
+        case "insert":
+            guard rawArguments.count == 2 else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            let insertionIndex = try parseStarlarkInteger(
+                rawArguments[0],
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
+            let argument = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+            let clampedIndex: Int
+            if insertionIndex < 0 {
+                clampedIndex = max(items.count + insertionIndex, 0)
+            } else {
+                clampedIndex = min(insertionIndex, items.count)
+            }
+            items.insert(argument, at: clampedIndex)
         default:
             return false
         }

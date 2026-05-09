@@ -1411,6 +1411,64 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkCollectionMutationMethods() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = [("jj", "log", "allow")]
+        COMMANDS.insert(0, ("git", "status", "prompt"))
+        COMMANDS.insert(-1, ("hg", "status", "forbidden"))
+        COMMANDS.insert(99, ("pnpm", "install", "prompt"))
+
+        SETTINGS = {"git": {"path": "/bin/git", "host": "old.example.com"}}
+        SETTINGS.update({
+            "git": {"path": "/usr/bin/git", "host": "api.github.com"},
+            "pnpm": {"path": "/usr/local/bin/pnpm"},
+        })
+
+        for tool, subcommand, decision in COMMANDS:
+            prefix_rule([tool, subcommand], decision, justification = "collection mutation " + tool)
+
+        network_rule(SETTINGS["git"]["host"], "https", "allow")
+        host_executable("git", [SETTINGS["git"]["path"]])
+        host_executable("pnpm", [SETTINGS["pnpm"]["path"]])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "collection mutation git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.single("status")]),
+                decision: .forbidden,
+                justification: "collection mutation hg"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "collection mutation jj"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .prompt,
+                justification: "collection mutation pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "pnpm": ["/usr/local/bin/pnpm"]
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
         let policy = try parsePolicy("""
         COMMANDS = [("git", "status")]
