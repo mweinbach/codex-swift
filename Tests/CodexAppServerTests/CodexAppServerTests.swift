@@ -5261,6 +5261,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLogoutCancelsActiveChatGPTDeviceCodeLogin() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let probe = AppServerDeviceCodeProbe(scenario: .pending)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authDeviceCodeTransport: { request in try await probe.handle(request) },
+                environment: ["CODEX_APP_SERVER_LOGIN_ISSUER": "https://issuer.example"]
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+
+        let logoutMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"account/logout"}"#.utf8)))
+        XCTAssertEqual(logoutMessages.count, 2)
+        XCTAssertNotNil(logoutMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(logoutMessages[1]["method"] as? String, "account/updated")
+        XCTAssertTrue(((logoutMessages[1]["params"] as? [String: Any])?["authMode"]) is NSNull)
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, false)
+        XCTAssertEqual(completedParams["error"] as? String, "Login was not completed")
+    }
+
     func testLegacyLoginChatGPTStartsServerWithForcedWorkspaceAndCanCancel() throws {
         let temp = try TemporaryDirectory()
         try #"forced_chatgpt_workspace_id = "ws-forced""#.write(

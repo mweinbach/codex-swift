@@ -12639,6 +12639,14 @@ final class CodexAppServerMessageProcessor {
         return [:]
     }
 
+    private func cancelActiveAccountLogins() {
+        for server in activeChatGPTLogins.values {
+            server.cancel()
+        }
+        activeChatGPTLogins.removeAll()
+        activeDeviceCodeLogins.cancelAll()
+    }
+
     private func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
         guard let loginIDString = CodexAppServer.stringParam(params?["loginId"]) else {
             throw AppServerError.invalidRequest("missing loginId")
@@ -13471,6 +13479,7 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.feedbackUploadResult(params: params, configuration: configuration)
                     )
                 case "account/logout":
+                    cancelActiveAccountLogins()
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.logoutResult(configuration: configuration)
