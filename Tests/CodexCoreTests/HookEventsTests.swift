@@ -175,6 +175,103 @@ final class HookEventsTests: XCTestCase {
         XCTAssertNil(HooksProtocol.parsePostCompactOutput(#"{"stopReason":7}"#))
     }
 
+    func testPermissionRequestOutputParsesAllowAndDenyDecisionsLikeRust() throws {
+        let allowed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow"}
+          }
+        }
+        """))
+        XCTAssertEqual(allowed.universal, HookUniversalOutput())
+        XCTAssertEqual(allowed.decision, .allow)
+        XCTAssertNil(allowed.invalidReason)
+
+        let denied = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "deny", "message": "  no thanks  "}
+          }
+        }
+        """))
+        XCTAssertEqual(denied.decision, .deny(message: "no thanks"))
+        XCTAssertNil(denied.invalidReason)
+    }
+
+    func testPermissionRequestOutputUsesRustDenyDefaultMessage() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "deny", "message": "  "}
+          }
+        }
+        """))
+        XCTAssertEqual(parsed.decision, .deny(message: "PermissionRequest hook denied approval"))
+        XCTAssertNil(parsed.invalidReason)
+    }
+
+    func testPermissionRequestOutputReportsUnsupportedUniversalFieldsLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "continue": false,
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow"}
+          }
+        }
+        """))
+        XCTAssertNil(parsed.decision)
+        XCTAssertEqual(parsed.invalidReason, "PermissionRequest hook returned unsupported continue:false")
+    }
+
+    func testPermissionRequestOutputReportsUnsupportedReservedFieldsLikeRust() throws {
+        let updatedInput = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow", "updatedInput": {}}
+          }
+        }
+        """))
+        XCTAssertEqual(updatedInput.invalidReason, "PermissionRequest hook returned unsupported updatedInput")
+        XCTAssertNil(updatedInput.decision)
+
+        let updatedPermissions = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow", "updatedPermissions": {}}
+          }
+        }
+        """))
+        XCTAssertEqual(updatedPermissions.invalidReason, "PermissionRequest hook returned unsupported updatedPermissions")
+        XCTAssertNil(updatedPermissions.decision)
+
+        let interrupt = try XCTUnwrap(HooksProtocol.parsePermissionRequestOutput("""
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow", "interrupt": true}
+          }
+        }
+        """))
+        XCTAssertEqual(interrupt.invalidReason, "PermissionRequest hook returned unsupported interrupt:true")
+        XCTAssertNil(interrupt.decision)
+    }
+
+    func testPermissionRequestOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"decision":{"behavior":"allow"}}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","extra":1}}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"ask"}}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","interrupt":null}}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","extra":1}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":{"hookEventName":"Nope"}}"#))
+        XCTAssertNil(HooksProtocol.parsePermissionRequestOutput(#"{"hookSpecificOutput":1}"#))
+    }
+
     func testLooksLikeJSONMatchesRustTrimStartHeuristic() {
         XCTAssertTrue(HooksProtocol.looksLikeJSON("  {\"continue\":false}"))
         XCTAssertTrue(HooksProtocol.looksLikeJSON("\n[1,2]"))

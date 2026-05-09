@@ -259,6 +259,27 @@ public struct HookStatelessOutput: Equatable, Sendable {
     }
 }
 
+public enum HookPermissionRequestDecision: Equatable, Sendable {
+    case allow
+    case deny(message: String)
+}
+
+public struct HookPermissionRequestOutput: Equatable, Sendable {
+    public let universal: HookUniversalOutput
+    public let decision: HookPermissionRequestDecision?
+    public let invalidReason: String?
+
+    public init(
+        universal: HookUniversalOutput,
+        decision: HookPermissionRequestDecision?,
+        invalidReason: String? = nil
+    ) {
+        self.universal = universal
+        self.decision = decision
+        self.invalidReason = invalidReason
+    }
+}
+
 public enum HooksProtocol {
     public static let eventNames: [String] = HookEventName.allCases.map(\.configLabel)
 
@@ -292,6 +313,28 @@ public enum HooksProtocol {
         parseCompactOutput(stdout)
     }
 
+    public static func parsePermissionRequestOutput(_ stdout: String) -> HookPermissionRequestOutput? {
+        guard let object = parseJSONObject(stdout),
+              let universal = parseUniversalOutput(object, extraAllowedKeys: ["hookSpecificOutput"])
+        else {
+            return nil
+        }
+
+        let hookSpecific = parsePermissionRequestHookSpecificOutput(object["hookSpecificOutput"])
+        guard hookSpecific.valid else {
+            return nil
+        }
+
+        let invalidReason = unsupportedPermissionRequestUniversal(universal)
+            ?? hookSpecific.invalidReason
+        let decision = invalidReason == nil ? hookSpecific.decision : nil
+        return HookPermissionRequestOutput(
+            universal: universal,
+            decision: decision,
+            invalidReason: invalidReason
+        )
+    }
+
     public static func looksLikeJSON(_ stdout: String) -> Bool {
         guard let first = stdout.first(where: { !$0.isWhitespace }) else {
             return false
@@ -318,8 +361,17 @@ public enum HooksProtocol {
         return object
     }
 
-    private static func parseUniversalOutput(_ object: [String: Any]) -> HookUniversalOutput? {
-        let allowedKeys: Set<String> = ["continue", "stopReason", "suppressOutput", "systemMessage"]
+    private static func parseUniversalOutput(
+        _ object: [String: Any],
+        extraAllowedKeys: Set<String> = []
+    ) -> HookUniversalOutput? {
+        let universalKeys: Set<String> = [
+            "continue",
+            "stopReason",
+            "suppressOutput",
+            "systemMessage",
+        ]
+        let allowedKeys = universalKeys.union(extraAllowedKeys)
         guard Set(object.keys).isSubset(of: allowedKeys),
               let continueProcessing = boolValue(object["continue"], defaultValue: true),
               let suppressOutput = boolValue(object["suppressOutput"], defaultValue: false),
@@ -343,6 +395,127 @@ public enum HooksProtocol {
         }
         return value as? Bool
     }
+
+    private static func parsePermissionRequestHookSpecificOutput(_ value: Any?) -> (
+        valid: Bool,
+        decision: HookPermissionRequestDecision?,
+        invalidReason: String?
+    ) {
+        guard let value else {
+            return (true, nil, nil)
+        }
+        if value is NSNull {
+            return (true, nil, nil)
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).isSubset(of: ["hookEventName", "decision"]),
+              let eventName = object["hookEventName"] as? String,
+              allHookEventWireNames.contains(eventName)
+        else {
+            return (false, nil, nil)
+        }
+
+        return parsePermissionRequestDecision(object["decision"])
+    }
+
+    private static func parsePermissionRequestDecision(_ value: Any?) -> (
+        valid: Bool,
+        decision: HookPermissionRequestDecision?,
+        invalidReason: String?
+    ) {
+        guard let value else {
+            return (true, nil, nil)
+        }
+        if value is NSNull {
+            return (true, nil, nil)
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).isSubset(of: [
+                "behavior",
+                "updatedInput",
+                "updatedPermissions",
+                "message",
+                "interrupt",
+              ]),
+              let behavior = object["behavior"] as? String,
+              ["allow", "deny"].contains(behavior),
+              let interrupt = boolValue(object["interrupt"], defaultValue: false),
+              let message = optionalStringValue(object["message"])
+        else {
+            return (false, nil, nil)
+        }
+
+        let invalidReason = unsupportedPermissionRequestDecision(
+            updatedInput: object["updatedInput"],
+            updatedPermissions: object["updatedPermissions"],
+            interrupt: interrupt
+        )
+        guard invalidReason == nil else {
+            return (true, nil, invalidReason)
+        }
+
+        if behavior == "allow" {
+            return (true, .allow, nil)
+        }
+
+        return (true, .deny(message: trimmedReason(message) ?? "PermissionRequest hook denied approval"), nil)
+    }
+
+    private static func unsupportedPermissionRequestUniversal(_ universal: HookUniversalOutput) -> String? {
+        if !universal.continueProcessing {
+            return "PermissionRequest hook returned unsupported continue:false"
+        }
+        if universal.stopReason != nil {
+            return "PermissionRequest hook returned unsupported stopReason"
+        }
+        if universal.suppressOutput {
+            return "PermissionRequest hook returned unsupported suppressOutput"
+        }
+        return nil
+    }
+
+    private static func unsupportedPermissionRequestDecision(
+        updatedInput: Any?,
+        updatedPermissions: Any?,
+        interrupt: Bool
+    ) -> String? {
+        if isNonNullJSONValue(updatedInput) {
+            return "PermissionRequest hook returned unsupported updatedInput"
+        }
+        if isNonNullJSONValue(updatedPermissions) {
+            return "PermissionRequest hook returned unsupported updatedPermissions"
+        }
+        if interrupt {
+            return "PermissionRequest hook returned unsupported interrupt:true"
+        }
+        return nil
+    }
+
+    private static func trimmedReason(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func isNonNullJSONValue(_ value: Any?) -> Bool {
+        guard let value else {
+            return false
+        }
+        return !(value is NSNull)
+    }
+
+    private static let allHookEventWireNames: Set<String> = [
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PreCompact",
+        "PostCompact",
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+    ]
 
     private static func optionalStringValue(_ value: Any?) -> String?? {
         guard let value else {
