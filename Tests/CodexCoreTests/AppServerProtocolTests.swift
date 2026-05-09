@@ -475,6 +475,81 @@ final class AppServerProtocolTests: XCTestCase {
         ])
     }
 
+    func testCommandExecutionRequestApprovalRedactsAdditionalPermissionsWithoutExperimentalAPI() throws {
+        let params = AppServerProtocol.CommandExecutionRequestApprovalParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "call_123",
+            startedAtMilliseconds: 0,
+            reason: "Need extra read access",
+            command: "cat file",
+            cwd: "/tmp",
+            additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
+                fileSystem: FileSystemPermissions(read: ["/tmp/allowed"])
+            )
+        )
+        let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
+            requestID: .integer(1),
+            params: params
+        )
+
+        let redacted = request.redactingExperimentalFields(experimentalAPIEnabled: false)
+
+        try XCTAssertJSONObjectEqual(redacted, [
+            "method": "item/commandExecution/requestApproval",
+            "id": 1,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "call_123",
+                "startedAtMs": 0,
+                "reason": "Need extra read access",
+                "command": "cat file",
+                "cwd": "/tmp"
+            ]
+        ])
+    }
+
+    func testCommandExecutionRequestApprovalKeepsAdditionalPermissionsWithExperimentalAPI() throws {
+        let params = AppServerProtocol.CommandExecutionRequestApprovalParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "call_123",
+            startedAtMilliseconds: 0,
+            reason: "Need extra read access",
+            command: "cat file",
+            cwd: "/tmp",
+            additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
+                fileSystem: FileSystemPermissions(read: ["/tmp/allowed"])
+            )
+        )
+        let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
+            requestID: .integer(1),
+            params: params
+        )
+
+        let preserved = request.redactingExperimentalFields(experimentalAPIEnabled: true)
+
+        try XCTAssertJSONObjectEqual(preserved, [
+            "method": "item/commandExecution/requestApproval",
+            "id": 1,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "call_123",
+                "startedAtMs": 0,
+                "reason": "Need extra read access",
+                "command": "cat file",
+                "cwd": "/tmp",
+                "additionalPermissions": [
+                    "fileSystem": [
+                        "read": ["/tmp/allowed"]
+                    ]
+                ]
+            ]
+        ])
+    }
+
     func testCommandExecutionRequestApprovalServerResponseMatchesRustWireShape() throws {
         let response = AppServerProtocol.ServerResponse.commandExecutionRequestApproval(
             requestID: .integer(8),

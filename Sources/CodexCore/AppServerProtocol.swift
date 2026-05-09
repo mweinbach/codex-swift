@@ -132,6 +132,18 @@ public enum AppServerProtocol {
             }
         }
 
+        public func redactingExperimentalFields(experimentalAPIEnabled: Bool) -> ServerRequest {
+            switch self {
+            case let .commandExecutionRequestApproval(requestID, params):
+                .commandExecutionRequestApproval(
+                    requestID: requestID,
+                    params: params.redactingExperimentalFields(experimentalAPIEnabled: experimentalAPIEnabled)
+                )
+            default:
+                self
+            }
+        }
+
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(method, forKey: .method)
@@ -1643,6 +1655,28 @@ public enum AppServerProtocol {
             self.proposedExecPolicyAmendment = proposedExecPolicyAmendment
             self.proposedNetworkPolicyAmendments = proposedNetworkPolicyAmendments
             self.availableDecisions = availableDecisions
+        }
+
+        public func redactingExperimentalFields(experimentalAPIEnabled: Bool) -> Self {
+            guard !experimentalAPIEnabled, additionalPermissions != nil else {
+                return self
+            }
+            return Self(
+                threadID: threadID,
+                turnID: turnID,
+                itemID: itemID,
+                startedAtMilliseconds: startedAtMilliseconds,
+                approvalID: approvalID,
+                reason: reason,
+                networkApprovalContext: networkApprovalContext,
+                command: command,
+                cwd: cwd,
+                commandActions: commandActions,
+                additionalPermissions: nil,
+                proposedExecPolicyAmendment: proposedExecPolicyAmendment,
+                proposedNetworkPolicyAmendments: proposedNetworkPolicyAmendments,
+                availableDecisions: availableDecisions
+            )
         }
 
         private enum CodingKeys: String, CodingKey {
