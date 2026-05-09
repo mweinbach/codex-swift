@@ -328,50 +328,67 @@ public extension ResponseInputItem {
     }
 
     init(userInputs: [UserInput]) {
-        let content = userInputs.compactMap(Self.contentItem)
+        var imageIndex = 0
+        let content = userInputs.flatMap { input in
+            Self.contentItems(from: input, imageIndex: &imageIndex)
+        }
         self = .message(role: "user", content: content)
     }
 
-    private static func contentItem(from input: UserInput) -> ContentItem? {
+    private static func contentItems(from input: UserInput, imageIndex: inout Int) -> [ContentItem] {
         switch input {
         case let .text(text):
-            return .inputText(text: text)
+            return [.inputText(text: text)]
         case let .image(imageURL):
-            return .inputImage(imageURL: imageURL, detail: defaultImageDetail)
+            imageIndex += 1
+            return [
+                .inputText(text: imageOpenTagText),
+                .inputImage(imageURL: imageURL, detail: defaultImageDetail),
+                .inputText(text: imageCloseTagText)
+            ]
         case let .localImage(path):
-            return localImageContentItem(path: path)
+            imageIndex += 1
+            return localImageContentItems(path: path, labelNumber: imageIndex)
         case .skill:
-            return nil
+            return []
         }
     }
 
-    private static func localImageContentItem(path: String) -> ContentItem {
+    private static let imageOpenTagText = "<image>"
+    private static let imageCloseTagText = "</image>"
+
+    private static func localImageOpenTagText(labelNumber: Int) -> String {
+        "<image name=[Image #\(labelNumber)]>"
+    }
+
+    private static func localImageContentItems(path: String, labelNumber: Int) -> [ContentItem] {
         do {
             let image = try LocalImageProcessor.loadAndResizeToFit(path: URL(fileURLWithPath: path))
-            return .inputImage(imageURL: image.dataURL, detail: defaultImageDetail)
+            return [
+                .inputText(text: localImageOpenTagText(labelNumber: labelNumber)),
+                .inputImage(imageURL: image.dataURL, detail: defaultImageDetail),
+                .inputText(text: imageCloseTagText)
+            ]
         } catch let error as ImageProcessingError {
             if case .read = error {
-                return localImageErrorPlaceholder(path: path, error: error.description)
+                return [localImageErrorPlaceholder(path: path, error: error.description)]
             }
             if error.isInvalidImage {
-                return invalidImageErrorPlaceholder(path: path, error: error.description)
+                return [invalidImageErrorPlaceholder(path: path, error: error.description)]
             }
 
             guard let mime = LocalImageProcessor.mimeType(forPath: path) else {
-                return localImageErrorPlaceholder(
+                return [localImageErrorPlaceholder(
                     path: path,
                     error: "unsupported MIME type (unknown)"
-                )
+                )]
             }
             if !mime.hasPrefix("image/") {
-                return localImageErrorPlaceholder(
-                    path: path,
-                    error: "unsupported MIME type `\(mime)`"
-                )
+                return [unsupportedImageErrorPlaceholder(path: path, mime: mime)]
             }
-            return unsupportedImageErrorPlaceholder(path: path, mime: mime)
+            return [unsupportedImageErrorPlaceholder(path: path, mime: mime)]
         } catch {
-            return localImageErrorPlaceholder(path: path, error: String(describing: error))
+            return [localImageErrorPlaceholder(path: path, error: String(describing: error))]
         }
     }
 
@@ -384,7 +401,7 @@ public extension ResponseInputItem {
     }
 
     private static func unsupportedImageErrorPlaceholder(path: String, mime: String) -> ContentItem {
-        .inputText(text: "Codex cannot attach image at `\(path)`: unsupported image format `\(mime)`.")
+        .inputText(text: "Codex cannot attach image at `\(path)`: unsupported image `\(mime)`.")
     }
 }
 

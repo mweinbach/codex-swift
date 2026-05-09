@@ -202,8 +202,35 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(role, "user")
         XCTAssertEqual(content, [
             .inputText(text: "hello"),
-            .inputImage(imageURL: "data:image/png;base64,abc", detail: defaultImageDetail)
+            .inputText(text: "<image>"),
+            .inputImage(imageURL: "data:image/png;base64,abc", detail: defaultImageDetail),
+            .inputText(text: "</image>")
         ])
+    }
+
+    func testMixedRemoteAndLocalImagesShareLabelSequenceLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("local.png")
+        _ = try writePNG(width: 1, height: 1, to: path)
+
+        let item = ResponseInputItem(userInputs: [
+            .image(imageURL: "data:image/png;base64,remote"),
+            .localImage(path: path.path)
+        ])
+
+        guard case let .message(_, content, _) = item else {
+            return XCTFail("expected user message")
+        }
+
+        XCTAssertEqual(content[0], .inputText(text: "<image>"))
+        XCTAssertEqual(content[1], .inputImage(imageURL: "data:image/png;base64,remote", detail: defaultImageDetail))
+        XCTAssertEqual(content[2], .inputText(text: "</image>"))
+        XCTAssertEqual(content[3], .inputText(text: "<image name=[Image #2]>"))
+        guard case let .inputImage(_, detail) = content[4] else {
+            return XCTFail("expected local image at index 4")
+        }
+        XCTAssertEqual(detail, defaultImageDetail)
+        XCTAssertEqual(content[5], .inputText(text: "</image>"))
     }
 
     func testLocalImagePNGBecomesDataURLAndKeepsOriginalWhenSmall() throws {
@@ -214,11 +241,13 @@ final class ResponseModelsTests: XCTestCase {
         let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
 
         guard case let .message(_, content, _) = item,
-              case let .inputImage(imageURL, detail) = content.first
+              case let .inputImage(imageURL, detail) = content.dropFirst().first
         else {
             return XCTFail("expected local image to become an input image")
         }
 
+        XCTAssertEqual(content.first, .inputText(text: "<image name=[Image #1]>"))
+        XCTAssertEqual(content.last, .inputText(text: "</image>"))
         XCTAssertEqual(detail, defaultImageDetail)
         let prefix = "data:image/png;base64,"
         XCTAssertTrue(imageURL.hasPrefix(prefix))
@@ -288,7 +317,7 @@ final class ResponseModelsTests: XCTestCase {
             return XCTFail("expected non-image file to become placeholder text")
         }
 
-        XCTAssertTrue(text.contains("unsupported MIME type `application/json`"))
+        XCTAssertTrue(text.contains("unsupported image `application/json`"))
         XCTAssertTrue(text.contains(path.path))
     }
 
@@ -308,7 +337,7 @@ final class ResponseModelsTests: XCTestCase {
 
         XCTAssertEqual(
             text,
-            "Codex cannot attach image at `\(path.path)`: unsupported image format `image/svg+xml`."
+            "Codex cannot attach image at `\(path.path)`: unsupported image `image/svg+xml`."
         )
     }
 

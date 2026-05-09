@@ -499,6 +499,8 @@ Source baseline inspected for this scaffold:
   - `ContentItem.inputImage` now preserves Rust's optional `detail` field, and user/local image inputs attach `defaultImageDetail` (`high`) to match Rust's `DEFAULT_IMAGE_DETAIL` request payloads.
 - `codex-rs/protocol/src/models.rs` sandbox permission overrides
   - `SandboxPermissions` now decodes Rust's `with_additional_permissions` wire value and exposes helper semantics for escalated execution, any explicit sandbox override, and sandboxed additional-permission widening.
+- `codex-rs/protocol/src/models.rs` user image input conversion
+  - `ResponseInputItem(userInputs:)` now wraps remote image inputs with Rust's `<image>` markers, emits numbered local-image labels, shares the remote/local image counter, and uses Rust's unsupported-image placeholder wording.
 
 ## Known Gaps
 
