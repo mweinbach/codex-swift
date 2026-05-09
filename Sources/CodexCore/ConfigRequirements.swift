@@ -8,6 +8,9 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
     case invalidWebSearchMode(String)
     case invalidFeatureRequirements(String)
     case invalidResidencyRequirement(String)
+    case invalidNetworkRequirements(String)
+    case invalidNetworkDomainPermission(String)
+    case invalidNetworkUnixSocketPermission(String)
     case invalidArray(String)
 
     public var description: String {
@@ -26,6 +29,12 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
             return "Invalid feature requirements: \(value)"
         case let .invalidResidencyRequirement(value):
             return "Invalid residency requirement: \(value)"
+        case let .invalidNetworkRequirements(value):
+            return "Invalid network requirements: \(value)"
+        case let .invalidNetworkDomainPermission(value):
+            return "Invalid network domain permission: \(value)"
+        case let .invalidNetworkUnixSocketPermission(value):
+            return "Invalid network unix socket permission: \(value)"
         case let .invalidArray(key):
             return "Invalid array for \(key)"
         }
@@ -125,6 +134,53 @@ public enum ResidencyRequirement: String, Equatable, Sendable {
     case us
 }
 
+public enum NetworkDomainPermissionRequirement: String, Equatable, Sendable {
+    case allow
+    case deny
+}
+
+public enum NetworkUnixSocketPermissionRequirement: String, Equatable, Sendable {
+    case allow
+    case none
+}
+
+public struct NetworkRequirementsToml: Equatable, Sendable {
+    public var enabled: Bool?
+    public var httpPort: UInt16?
+    public var socksPort: UInt16?
+    public var allowUpstreamProxy: Bool?
+    public var dangerouslyAllowNonLoopbackProxy: Bool?
+    public var dangerouslyAllowAllUnixSockets: Bool?
+    public var domains: [String: NetworkDomainPermissionRequirement]?
+    public var managedAllowedDomainsOnly: Bool?
+    public var unixSockets: [String: NetworkUnixSocketPermissionRequirement]?
+    public var allowLocalBinding: Bool?
+
+    public init(
+        enabled: Bool? = nil,
+        httpPort: UInt16? = nil,
+        socksPort: UInt16? = nil,
+        allowUpstreamProxy: Bool? = nil,
+        dangerouslyAllowNonLoopbackProxy: Bool? = nil,
+        dangerouslyAllowAllUnixSockets: Bool? = nil,
+        domains: [String: NetworkDomainPermissionRequirement]? = nil,
+        managedAllowedDomainsOnly: Bool? = nil,
+        unixSockets: [String: NetworkUnixSocketPermissionRequirement]? = nil,
+        allowLocalBinding: Bool? = nil
+    ) {
+        self.enabled = enabled
+        self.httpPort = httpPort
+        self.socksPort = socksPort
+        self.allowUpstreamProxy = allowUpstreamProxy
+        self.dangerouslyAllowNonLoopbackProxy = dangerouslyAllowNonLoopbackProxy
+        self.dangerouslyAllowAllUnixSockets = dangerouslyAllowAllUnixSockets
+        self.domains = domains
+        self.managedAllowedDomainsOnly = managedAllowedDomainsOnly
+        self.unixSockets = unixSockets
+        self.allowLocalBinding = allowLocalBinding
+    }
+}
+
 public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedApprovalPolicies: [AskForApproval]?
     public var allowedApprovalsReviewers: [ApprovalsReviewer]?
@@ -135,6 +191,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var hooksSource: HookSource
     public var hooksSourceDescription: String
     public var enforceResidency: ResidencyRequirement?
+    public var network: NetworkRequirementsToml?
 
     public init(
         allowedApprovalPolicies: [AskForApproval]? = nil,
@@ -145,7 +202,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements",
-        enforceResidency: ResidencyRequirement? = nil
+        enforceResidency: ResidencyRequirement? = nil,
+        network: NetworkRequirementsToml? = nil
     ) {
         self.allowedApprovalPolicies = allowedApprovalPolicies
         self.allowedApprovalsReviewers = allowedApprovalsReviewers
@@ -156,6 +214,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.hooksSource = hooksSource
         self.hooksSourceDescription = hooksSourceDescription
         self.enforceResidency = enforceResidency
+        self.network = network
     }
 
     public var isEmpty: Bool {
@@ -165,7 +224,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             allowedWebSearchModes == nil &&
             featureRequirements == nil &&
             hooks == nil &&
-            enforceResidency == nil
+            enforceResidency == nil &&
+            network == nil
     }
 
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
@@ -191,6 +251,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if enforceResidency == nil, let value = other.enforceResidency {
             enforceResidency = value
+        }
+        if network == nil, let value = other.network {
+            network = value
         }
     }
 
@@ -278,6 +341,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if let residencyValue = table["enforce_residency"] {
             result.enforceResidency = try parseResidencyRequirement(residencyValue)
         }
+        if let networkValue = table["experimental_network"] {
+            result.network = try parseNetworkRequirements(networkValue)
+        }
 
         return result
     }
@@ -345,6 +411,131 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         return requirement
     }
 
+    private static func parseNetworkRequirements(_ value: ConfigValue) throws -> NetworkRequirementsToml {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidNetworkRequirements("experimental_network")
+        }
+
+        if table["domains"] != nil && (table["allowed_domains"] != nil || table["denied_domains"] != nil) {
+            throw ConfigRequirementsParseError.invalidNetworkRequirements(
+                "`experimental_network.domains` cannot be combined with legacy `allowed_domains` or `denied_domains`"
+            )
+        }
+        if table["unix_sockets"] != nil && table["allow_unix_sockets"] != nil {
+            throw ConfigRequirementsParseError.invalidNetworkRequirements(
+                "`experimental_network.unix_sockets` cannot be combined with legacy `allow_unix_sockets`"
+            )
+        }
+
+        return NetworkRequirementsToml(
+            enabled: try optionalBool(table["enabled"], key: "experimental_network.enabled"),
+            httpPort: try optionalPort(table["http_port"], key: "experimental_network.http_port"),
+            socksPort: try optionalPort(table["socks_port"], key: "experimental_network.socks_port"),
+            allowUpstreamProxy: try optionalBool(
+                table["allow_upstream_proxy"],
+                key: "experimental_network.allow_upstream_proxy"
+            ),
+            dangerouslyAllowNonLoopbackProxy: try optionalBool(
+                table["dangerously_allow_non_loopback_proxy"],
+                key: "experimental_network.dangerously_allow_non_loopback_proxy"
+            ),
+            dangerouslyAllowAllUnixSockets: try optionalBool(
+                table["dangerously_allow_all_unix_sockets"],
+                key: "experimental_network.dangerously_allow_all_unix_sockets"
+            ),
+            domains: try parseNetworkDomains(table),
+            managedAllowedDomainsOnly: try optionalBool(
+                table["managed_allowed_domains_only"],
+                key: "experimental_network.managed_allowed_domains_only"
+            ),
+            unixSockets: try parseNetworkUnixSockets(table),
+            allowLocalBinding: try optionalBool(
+                table["allow_local_binding"],
+                key: "experimental_network.allow_local_binding"
+            )
+        )
+    }
+
+    private static func parseNetworkDomains(_ table: [String: ConfigValue]) throws
+        -> [String: NetworkDomainPermissionRequirement]?
+    {
+        if let domainsValue = table["domains"] {
+            guard case let .table(domainsTable) = domainsValue else {
+                throw ConfigRequirementsParseError.invalidNetworkRequirements("experimental_network.domains")
+            }
+            var domains: [String: NetworkDomainPermissionRequirement] = [:]
+            for (pattern, value) in domainsTable {
+                guard case let .string(rawValue) = value,
+                      let permission = NetworkDomainPermissionRequirement(rawValue: rawValue)
+                else {
+                    throw ConfigRequirementsParseError.invalidNetworkDomainPermission(pattern)
+                }
+                domains[pattern] = permission
+            }
+            return domains
+        }
+
+        var domains: [String: NetworkDomainPermissionRequirement] = [:]
+        for pattern in try stringArray(table["allowed_domains"] ?? .array([]), key: "allowed_domains") {
+            domains[pattern] = .allow
+        }
+        for pattern in try stringArray(table["denied_domains"] ?? .array([]), key: "denied_domains") {
+            domains[pattern] = .deny
+        }
+        return domains.isEmpty ? nil : domains
+    }
+
+    private static func parseNetworkUnixSockets(_ table: [String: ConfigValue]) throws
+        -> [String: NetworkUnixSocketPermissionRequirement]?
+    {
+        if let socketsValue = table["unix_sockets"] {
+            guard case let .table(socketsTable) = socketsValue else {
+                throw ConfigRequirementsParseError.invalidNetworkRequirements("experimental_network.unix_sockets")
+            }
+            var sockets: [String: NetworkUnixSocketPermissionRequirement] = [:]
+            for (path, value) in socketsTable {
+                guard case let .string(rawValue) = value,
+                      let permission = NetworkUnixSocketPermissionRequirement(rawValue: rawValue)
+                else {
+                    throw ConfigRequirementsParseError.invalidNetworkUnixSocketPermission(path)
+                }
+                sockets[path] = permission
+            }
+            return sockets
+        }
+
+        let sockets = try stringArray(
+            table["allow_unix_sockets"] ?? .array([]),
+            key: "allow_unix_sockets"
+        ).reduce(into: [String: NetworkUnixSocketPermissionRequirement]()) { result, path in
+            result[path] = .allow
+        }
+        return sockets.isEmpty ? nil : sockets
+    }
+
+    private static func optionalBool(_ value: ConfigValue?, key: String) throws -> Bool? {
+        guard let value else {
+            return nil
+        }
+        guard case let .bool(boolValue) = value else {
+            throw ConfigRequirementsParseError.invalidNetworkRequirements(key)
+        }
+        return boolValue
+    }
+
+    private static func optionalPort(_ value: ConfigValue?, key: String) throws -> UInt16? {
+        guard let value else {
+            return nil
+        }
+        guard case let .integer(port) = value,
+              port >= 0,
+              port <= Int64(UInt16.max)
+        else {
+            throw ConfigRequirementsParseError.invalidNetworkRequirements(key)
+        }
+        return UInt16(port)
+    }
+
     private static func stringArray(_ value: ConfigValue, key: String) throws -> [String] {
         guard case let .array(values) = value else {
             throw ConfigRequirementsParseError.invalidArray(key)
@@ -402,8 +593,73 @@ extension ConfigRequirementsToml {
             "featureRequirements": featureRequirements as Any? ?? NSNull(),
             "hooks": hooks.map { $0.appServerObject() } as Any? ?? NSNull(),
             "enforceResidency": enforceResidency?.rawValue as Any? ?? NSNull(),
-            "network": NSNull()
+            "network": network.map { $0.appServerObject() } as Any? ?? NSNull()
         ]
+    }
+}
+
+extension NetworkRequirementsToml {
+    public func appServerObject() -> [String: Any] {
+        [
+            "enabled": enabled as Any? ?? NSNull(),
+            "httpPort": httpPort.map { Int($0) } as Any? ?? NSNull(),
+            "socksPort": socksPort.map { Int($0) } as Any? ?? NSNull(),
+            "allowUpstreamProxy": allowUpstreamProxy as Any? ?? NSNull(),
+            "dangerouslyAllowNonLoopbackProxy": dangerouslyAllowNonLoopbackProxy as Any? ?? NSNull(),
+            "dangerouslyAllowAllUnixSockets": dangerouslyAllowAllUnixSockets as Any? ?? NSNull(),
+            "domains": domains.map { domainObject($0) } as Any? ?? NSNull(),
+            "managedAllowedDomainsOnly": managedAllowedDomainsOnly as Any? ?? NSNull(),
+            "allowedDomains": allowedDomains as Any? ?? NSNull(),
+            "deniedDomains": deniedDomains as Any? ?? NSNull(),
+            "unixSockets": unixSockets.map { unixSocketObject($0) } as Any? ?? NSNull(),
+            "allowUnixSockets": allowUnixSockets as Any? ?? NSNull(),
+            "allowLocalBinding": allowLocalBinding as Any? ?? NSNull()
+        ]
+    }
+
+    private var allowedDomains: [String]? {
+        guard let domains else {
+            return nil
+        }
+        let values = domains
+            .filter { $0.value == .allow }
+            .map(\.key)
+            .sorted()
+        return values.isEmpty ? nil : values
+    }
+
+    private var deniedDomains: [String]? {
+        guard let domains else {
+            return nil
+        }
+        let values = domains
+            .filter { $0.value == .deny }
+            .map(\.key)
+            .sorted()
+        return values.isEmpty ? nil : values
+    }
+
+    private var allowUnixSockets: [String]? {
+        guard let unixSockets else {
+            return nil
+        }
+        let values = unixSockets
+            .filter { $0.value == .allow }
+            .map(\.key)
+            .sorted()
+        return values.isEmpty ? nil : values
+    }
+
+    private func domainObject(_ domains: [String: NetworkDomainPermissionRequirement]) -> [String: Any] {
+        domains.reduce(into: [String: Any]()) { result, entry in
+            result[entry.key] = entry.value.rawValue
+        }
+    }
+
+    private func unixSocketObject(_ sockets: [String: NetworkUnixSocketPermissionRequirement]) -> [String: Any] {
+        sockets.reduce(into: [String: Any]()) { result, entry in
+            result[entry.key] = entry.value.rawValue
+        }
     }
 }
 

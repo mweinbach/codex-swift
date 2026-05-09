@@ -11,6 +11,9 @@ final class ConfigRequirementsTests: XCTestCase {
 
         [features]
         tool_search = true
+
+        [experimental_network]
+        enabled = true
         """)
 
         var emptyTarget = try ConfigRequirementsToml.parse("""
@@ -22,6 +25,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(emptyTarget.allowedWebSearchModes, [.cached])
         XCTAssertEqual(emptyTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(emptyTarget.enforceResidency, .us)
+        XCTAssertEqual(emptyTarget.network?.enabled, true)
 
         var populatedTarget = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
@@ -33,6 +37,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(populatedTarget.allowedWebSearchModes, [.live])
         XCTAssertEqual(populatedTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(populatedTarget.enforceResidency, .us)
+        XCTAssertEqual(populatedTarget.network?.enabled, true)
     }
 
     func testDeserializeAllowedApprovalPolicies() throws {
@@ -115,6 +120,121 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(object["featureRequirements"] as? [String: Bool], ["tool_search": true, "plugins": false])
     }
 
+    func testDeserializeExperimentalNetworkRequirements() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [experimental_network]
+        enabled = true
+        http_port = 8080
+        socks_port = 9090
+        allow_upstream_proxy = false
+        dangerously_allow_non_loopback_proxy = true
+        dangerously_allow_all_unix_sockets = false
+        managed_allowed_domains_only = true
+        allow_local_binding = true
+
+        [experimental_network.domains]
+        "api.openai.com" = "allow"
+        "blocked.example.com" = "deny"
+
+        [experimental_network.unix_sockets]
+        "/tmp/codex.sock" = "allow"
+        "/tmp/deny.sock" = "none"
+        """)
+
+        let network = try XCTUnwrap(config.network)
+        XCTAssertEqual(network.enabled, true)
+        XCTAssertEqual(network.httpPort, 8080)
+        XCTAssertEqual(network.socksPort, 9090)
+        XCTAssertEqual(network.allowUpstreamProxy, false)
+        XCTAssertEqual(network.dangerouslyAllowNonLoopbackProxy, true)
+        XCTAssertEqual(network.dangerouslyAllowAllUnixSockets, false)
+        XCTAssertEqual(network.managedAllowedDomainsOnly, true)
+        XCTAssertEqual(network.allowLocalBinding, true)
+        XCTAssertEqual(network.domains, [
+            "api.openai.com": .allow,
+            "blocked.example.com": .deny
+        ])
+        XCTAssertEqual(network.unixSockets, [
+            "/tmp/codex.sock": .allow,
+            "/tmp/deny.sock": .none
+        ])
+
+        let object = network.appServerObject()
+        XCTAssertEqual(object["enabled"] as? Bool, true)
+        XCTAssertEqual(object["httpPort"] as? Int, 8080)
+        XCTAssertEqual(object["socksPort"] as? Int, 9090)
+        XCTAssertEqual(object["allowUpstreamProxy"] as? Bool, false)
+        XCTAssertEqual(object["dangerouslyAllowNonLoopbackProxy"] as? Bool, true)
+        XCTAssertEqual(object["dangerouslyAllowAllUnixSockets"] as? Bool, false)
+        XCTAssertEqual(object["domains"] as? [String: String], [
+            "api.openai.com": "allow",
+            "blocked.example.com": "deny"
+        ])
+        XCTAssertEqual(object["managedAllowedDomainsOnly"] as? Bool, true)
+        XCTAssertEqual(object["allowedDomains"] as? [String], ["api.openai.com"])
+        XCTAssertEqual(object["deniedDomains"] as? [String], ["blocked.example.com"])
+        XCTAssertEqual(object["unixSockets"] as? [String: String], [
+            "/tmp/codex.sock": "allow",
+            "/tmp/deny.sock": "none"
+        ])
+        XCTAssertEqual(object["allowUnixSockets"] as? [String], ["/tmp/codex.sock"])
+        XCTAssertEqual(object["allowLocalBinding"] as? Bool, true)
+    }
+
+    func testExperimentalNetworkLegacyListsNormalizeToCanonicalMaps() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [experimental_network]
+        allowed_domains = ["api.openai.com", "same.example.com"]
+        denied_domains = ["blocked.example.com", "same.example.com"]
+        allow_unix_sockets = ["/tmp/codex.sock"]
+        """)
+
+        let network = try XCTUnwrap(config.network)
+        XCTAssertEqual(network.domains, [
+            "api.openai.com": .allow,
+            "blocked.example.com": .deny,
+            "same.example.com": .deny
+        ])
+        XCTAssertEqual(network.unixSockets, ["/tmp/codex.sock": .allow])
+
+        let object = network.appServerObject()
+        XCTAssertEqual(object["allowedDomains"] as? [String], ["api.openai.com"])
+        XCTAssertEqual(object["deniedDomains"] as? [String], ["blocked.example.com", "same.example.com"])
+        XCTAssertEqual(object["allowUnixSockets"] as? [String], ["/tmp/codex.sock"])
+    }
+
+    func testExperimentalNetworkRejectsCanonicalAndLegacyConflicts() {
+        XCTAssertThrowsError(try ConfigRequirementsToml.parse("""
+        [experimental_network]
+        allowed_domains = ["api.openai.com"]
+
+        [experimental_network.domains]
+        "api.openai.com" = "allow"
+        """)) { error in
+            XCTAssertEqual(
+                error as? ConfigRequirementsParseError,
+                .invalidNetworkRequirements(
+                    "`experimental_network.domains` cannot be combined with legacy `allowed_domains` or `denied_domains`"
+                )
+            )
+        }
+
+        XCTAssertThrowsError(try ConfigRequirementsToml.parse("""
+        [experimental_network]
+        allow_unix_sockets = ["/tmp/codex.sock"]
+
+        [experimental_network.unix_sockets]
+        "/tmp/codex.sock" = "allow"
+        """)) { error in
+            XCTAssertEqual(
+                error as? ConfigRequirementsParseError,
+                .invalidNetworkRequirements(
+                    "`experimental_network.unix_sockets` cannot be combined with legacy `allow_unix_sockets`"
+                )
+            )
+        }
+    }
+
     func testDeserializeManagedHookRequirementsMatchesRustFlattenedShape() throws {
         let config = try ConfigRequirementsToml.parse("""
         [hooks]
@@ -191,6 +311,9 @@ final class ConfigRequirementsTests: XCTestCase {
 
         [features]
         remote_control = true
+
+        [experimental_network]
+        enabled = true
         """)
 
         XCTAssertFalse(config.isEmpty)
@@ -201,6 +324,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(object["allowedWebSearchModes"] as? [String], ["live", "disabled"])
         XCTAssertEqual(object["featureRequirements"] as? [String: Bool], ["remote_control": true])
         XCTAssertEqual(object["enforceResidency"] as? String, "us")
+        XCTAssertEqual((object["network"] as? [String: Any])?["enabled"] as? Bool, true)
         XCTAssertTrue(ConfigRequirementsToml().isEmpty)
     }
 }

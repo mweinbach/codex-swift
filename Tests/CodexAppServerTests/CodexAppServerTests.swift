@@ -7931,6 +7931,24 @@ final class CodexAppServerTests: XCTestCase {
         [features]
         tool_search = true
         plugins = false
+
+        [experimental_network]
+        enabled = true
+        http_port = 8123
+        socks_port = 9123
+        allow_upstream_proxy = false
+        dangerously_allow_non_loopback_proxy = true
+        dangerously_allow_all_unix_sockets = false
+        managed_allowed_domains_only = true
+        allow_local_binding = true
+
+        [experimental_network.domains]
+        "api.openai.com" = "allow"
+        "blocked.example.com" = "deny"
+
+        [experimental_network.unix_sockets]
+        "/tmp/codex.sock" = "allow"
+        "/tmp/disabled.sock" = "none"
         """.write(to: requirementsPath, atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
@@ -7949,7 +7967,26 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requirements["featureRequirements"] as? [String: Bool], ["tool_search": true, "plugins": false])
         XCTAssertTrue(requirements["hooks"] is NSNull)
         XCTAssertEqual(requirements["enforceResidency"] as? String, "us")
-        XCTAssertTrue(requirements["network"] is NSNull)
+        let network = try XCTUnwrap(requirements["network"] as? [String: Any])
+        XCTAssertEqual(network["enabled"] as? Bool, true)
+        XCTAssertEqual(network["httpPort"] as? Int, 8123)
+        XCTAssertEqual(network["socksPort"] as? Int, 9123)
+        XCTAssertEqual(network["allowUpstreamProxy"] as? Bool, false)
+        XCTAssertEqual(network["dangerouslyAllowNonLoopbackProxy"] as? Bool, true)
+        XCTAssertEqual(network["dangerouslyAllowAllUnixSockets"] as? Bool, false)
+        XCTAssertEqual(network["domains"] as? [String: String], [
+            "api.openai.com": "allow",
+            "blocked.example.com": "deny"
+        ])
+        XCTAssertEqual(network["managedAllowedDomainsOnly"] as? Bool, true)
+        XCTAssertEqual(network["allowedDomains"] as? [String], ["api.openai.com"])
+        XCTAssertEqual(network["deniedDomains"] as? [String], ["blocked.example.com"])
+        XCTAssertEqual(network["unixSockets"] as? [String: String], [
+            "/tmp/codex.sock": "allow",
+            "/tmp/disabled.sock": "none"
+        ])
+        XCTAssertEqual(network["allowUnixSockets"] as? [String], ["/tmp/codex.sock"])
+        XCTAssertEqual(network["allowLocalBinding"] as? Bool, true)
     }
 
     func testConfigValueWriteReplacesValueAndReturnsRustShape() throws {
