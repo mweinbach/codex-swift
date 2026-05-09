@@ -2648,6 +2648,9 @@ public final class PolicyParser {
         if let length = try parseStarlarkLenCall(trimmed, constants: constants, functions: functions) {
             return length
         }
+        if let getattrMethodCall = try parseStarlarkGetAttributeMethodCall(trimmed, constants: constants, functions: functions) {
+            return getattrMethodCall
+        }
         if let dictMethodCall = try parseStarlarkDictMethodCall(trimmed, constants: constants, functions: functions) {
             return dictMethodCall
         }
@@ -3213,6 +3216,62 @@ public final class PolicyParser {
         default:
             return nil
         }
+    }
+
+    private static func parseStarlarkGetAttributeMethodCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let callee = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard callee.hasSuffix(")"),
+              let getattrOpenIndex = matchingTopLevelCallOpen(in: callee)
+        else {
+            return nil
+        }
+
+        let calleeName = String(callee[..<getattrOpenIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard calleeName == "getattr" else {
+            return nil
+        }
+
+        let getattrBodyStart = callee.index(after: getattrOpenIndex)
+        let getattrBody = String(callee[getattrBodyStart..<callee.index(before: callee.endIndex)])
+        let getattrArguments = splitTopLevel(getattrBody, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard getattrArguments.count == 2 || getattrArguments.count == 3 else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let receiverText = getattrArguments[0]
+        let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
+        let attribute = try parsePolicyLiteral(getattrArguments[1], constants: constants, functions: functions)
+        guard case let .string(attributeName) = attribute,
+              starlarkAttributeNames(for: receiver).contains(attributeName)
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let callBodyStart = text.index(after: openIndex)
+        let callBody = String(text[callBodyStart..<text.index(before: text.endIndex)])
+        let methodCall = "(\(receiverText)).\(attributeName)(\(callBody))"
+        if let dictMethodCall = try parseStarlarkDictMethodCall(methodCall, constants: constants, functions: functions) {
+            return dictMethodCall
+        }
+        if let listMethodCall = try parseStarlarkListMethodCall(methodCall, constants: constants, functions: functions) {
+            return listMethodCall
+        }
+        if let stringMethodCall = try parseStarlarkStringMethodCall(methodCall, constants: constants, functions: functions) {
+            return stringMethodCall
+        }
+        throw ConfigOverrideError.invalidLiteral(text)
     }
 
     private static func parseStarlarkListMethodCall(

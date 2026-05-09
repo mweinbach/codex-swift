@@ -3436,6 +3436,33 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkGetAttributeMethodCalls() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff"]
+        METADATA = {"host": "api.github.com", "path": "/usr/bin/git"}
+        JOINED = getattr(",", "join")(COMMANDS)
+        LOWERED = getattr("Status", "lower")()
+        KEYS = sorted(getattr(METADATA, "keys")())
+
+        prefix_rule([TOOL, LOWERED + "-" + JOINED], "allow", justification = getattr("/", "join")(KEYS))
+        network_rule(getattr(METADATA, "get")("host"), "https", "allow")
+        host_executable(TOOL, [getattr(METADATA, "get")("path")])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status-status,diff")]),
+                decision: .allow,
+                justification: "host/path"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
