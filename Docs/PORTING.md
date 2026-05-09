@@ -631,6 +631,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `len(...)` over strings/lists/dicts, ordered comparisons over strings and numbers, `not in`, and string membership checks in supported policy conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string methods
   - Added Swift execpolicy parser support for string `.join(...)`, `.startswith(...)`, and `.endswith(...)` method calls across supported policy literals and conditions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark list-comprehension filters
+  - Added Swift execpolicy parser support for simple list-comprehension `if` filters evaluated with the same supported condition expressions as top-level branches.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity

@@ -2124,10 +2124,22 @@ public final class PolicyParser {
         let expression = String(body[..<forRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         let variable = String(body[forRange.upperBound..<inRange.lowerBound])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let iterableText = String(body[inRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableAndFilter = String(body[inRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableText: String
+        let filterCondition: String?
+        if let ifRange = topLevelKeywordRange("if", in: iterableAndFilter) {
+            iterableText = String(iterableAndFilter[..<ifRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            filterCondition = String(iterableAndFilter[ifRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            iterableText = iterableAndFilter
+            filterCondition = nil
+        }
         guard !expression.isEmpty,
               isStarlarkIdentifier(variable),
-              !iterableText.isEmpty
+              !iterableText.isEmpty,
+              filterCondition?.isEmpty != true
         else {
             throw ConfigOverrideError.invalidLiteral("[\(body)]")
         }
@@ -2137,11 +2149,17 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral("[\(body)]")
         }
 
-        return try items.map { item in
+        var result: [ConfigValue] = []
+        for item in items {
             var scopedConstants = constants
             scopedConstants[variable] = item
-            return try parsePolicyLiteral(expression, constants: scopedConstants, functions: functions)
+            if let filterCondition,
+               try !evaluateStarlarkCondition(filterCondition, constants: scopedConstants, functions: functions) {
+                continue
+            }
+            result.append(try parsePolicyLiteral(expression, constants: scopedConstants, functions: functions))
         }
+        return result
     }
 
     private static func parseStarlarkDictLiteral(
