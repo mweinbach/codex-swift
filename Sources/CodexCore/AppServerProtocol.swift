@@ -8,6 +8,7 @@ public enum AppServerProtocol {
         case applyPatchApproval(requestID: RequestID, params: ApplyPatchApprovalParams)
         case fileChangeRequestApproval(requestID: RequestID, params: FileChangeRequestApprovalParams)
         case commandExecutionRequestApproval(requestID: RequestID, params: CommandExecutionRequestApprovalParams)
+        case toolRequestUserInput(requestID: RequestID, params: ToolRequestUserInputParams)
 
         public var id: RequestID {
             switch self {
@@ -22,6 +23,8 @@ public enum AppServerProtocol {
             case let .fileChangeRequestApproval(requestID, _):
                 requestID
             case let .commandExecutionRequestApproval(requestID, _):
+                requestID
+            case let .toolRequestUserInput(requestID, _):
                 requestID
             }
         }
@@ -40,6 +43,8 @@ public enum AppServerProtocol {
                 FileChangeRequestApprovalParams.method
             case .commandExecutionRequestApproval:
                 CommandExecutionRequestApprovalParams.method
+            case .toolRequestUserInput:
+                ToolRequestUserInputParams.method
             }
         }
 
@@ -83,6 +88,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(CommandExecutionRequestApprovalParams.self, forKey: .params)
                 )
+            case ToolRequestUserInputParams.method:
+                self = .toolRequestUserInput(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(ToolRequestUserInputParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -109,6 +119,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .commandExecutionRequestApproval(_, params):
                 try container.encode(params, forKey: .params)
+            case let .toolRequestUserInput(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -120,6 +132,7 @@ public enum AppServerProtocol {
         case applyPatchApproval(ApplyPatchApprovalParams)
         case fileChangeRequestApproval(FileChangeRequestApprovalParams)
         case commandExecutionRequestApproval(CommandExecutionRequestApprovalParams)
+        case toolRequestUserInput(ToolRequestUserInputParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -139,6 +152,8 @@ public enum AppServerProtocol {
                 .fileChangeRequestApproval(requestID: id, params: params)
             case let .commandExecutionRequestApproval(params):
                 .commandExecutionRequestApproval(requestID: id, params: params)
+            case let .toolRequestUserInput(params):
+                .toolRequestUserInput(requestID: id, params: params)
             }
         }
     }
@@ -153,6 +168,7 @@ public enum AppServerProtocol {
             requestID: RequestID,
             response: CommandExecutionRequestApprovalResponse
         )
+        case toolRequestUserInput(requestID: RequestID, response: ToolRequestUserInputResponse)
 
         public var id: RequestID {
             switch self {
@@ -167,6 +183,8 @@ public enum AppServerProtocol {
             case let .fileChangeRequestApproval(requestID, _):
                 requestID
             case let .commandExecutionRequestApproval(requestID, _):
+                requestID
+            case let .toolRequestUserInput(requestID, _):
                 requestID
             }
         }
@@ -185,6 +203,8 @@ public enum AppServerProtocol {
                 FileChangeRequestApprovalParams.method
             case .commandExecutionRequestApproval:
                 CommandExecutionRequestApprovalParams.method
+            case .toolRequestUserInput:
+                ToolRequestUserInputParams.method
             }
         }
 
@@ -228,6 +248,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(CommandExecutionRequestApprovalResponse.self, forKey: .response)
                 )
+            case ToolRequestUserInputParams.method:
+                self = .toolRequestUserInput(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(ToolRequestUserInputResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -254,7 +279,45 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .commandExecutionRequestApproval(_, response):
                 try container.encode(response, forKey: .response)
+            case let .toolRequestUserInput(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public struct ToolRequestUserInputParams: Equatable, Codable, Sendable {
+        public static let method = "item/tool/requestUserInput"
+
+        public let threadID: String
+        public let turnID: String
+        public let itemID: String
+        public let questions: [RequestUserInputQuestion]
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case itemID = "itemId"
+            case questions
+        }
+
+        public init(
+            threadID: String,
+            turnID: String,
+            itemID: String,
+            questions: [RequestUserInputQuestion]
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.itemID = itemID
+            self.questions = questions
+        }
+    }
+
+    public struct ToolRequestUserInputResponse: Equatable, Codable, Sendable {
+        public let answers: [String: RequestUserInputAnswer]
+
+        public init(answers: [String: RequestUserInputAnswer]) {
+            self.answers = answers
         }
     }
 

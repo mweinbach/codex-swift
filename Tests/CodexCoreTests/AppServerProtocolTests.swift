@@ -498,6 +498,96 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testToolRequestUserInputServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.ToolRequestUserInputParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "item_123",
+            questions: [
+                RequestUserInputQuestion(
+                    id: "choice",
+                    header: "Pick",
+                    question: "Which mode?",
+                    options: [
+                        RequestUserInputQuestionOption(label: "Auto", description: "Let Codex decide")
+                    ]
+                )
+            ]
+        )
+        let request = AppServerProtocol.ServerRequest.toolRequestUserInput(
+            requestID: .integer(3),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(3))
+        XCTAssertEqual(request.method, "item/tool/requestUserInput")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/tool/requestUserInput",
+            "id": 3,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "item_123",
+                "questions": [
+                    [
+                        "id": "choice",
+                        "header": "Pick",
+                        "question": "Which mode?",
+                        "isOther": false,
+                        "isSecret": false,
+                        "options": [
+                            [
+                                "label": "Auto",
+                                "description": "Let Codex decide"
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.toolRequestUserInput(params).request(withID: .integer(3)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"item/tool/requestUserInput","id":3,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","questions":[{"id":"choice","header":"Pick","question":"Which mode?","options":[{"label":"Auto","description":"Let Codex decide"}]}]}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testToolRequestUserInputServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.toolRequestUserInput(
+            requestID: .integer(3),
+            response: AppServerProtocol.ToolRequestUserInputResponse(
+                answers: [
+                    "choice": RequestUserInputAnswer(answers: ["Auto"])
+                ]
+            )
+        )
+
+        XCTAssertEqual(response.id, .integer(3))
+        XCTAssertEqual(response.method, "item/tool/requestUserInput")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/tool/requestUserInput",
+            "id": 3,
+            "response": [
+                "answers": [
+                    "choice": [
+                        "answers": ["Auto"]
+                    ]
+                ]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"item/tool/requestUserInput","id":3,"response":{"answers":{"choice":{"answers":["Auto"]}}}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
