@@ -850,6 +850,14 @@ private func runNonInteractiveExec(
                 )
             )
         },
+        stopHookContext: NonInteractiveExec.StopHookContext(
+            handlers: hookHandlers,
+            conversationID: conversationID,
+            turnID: "turn-1",
+            cwd: cwd,
+            model: resolvedModel,
+            approvalPolicy: approvalPolicy
+        ),
         executeFunctionCall: { item in
             await NonInteractiveExec.executeFunctionCallWithHooks(
                 item,

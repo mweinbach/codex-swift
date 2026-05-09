@@ -158,6 +158,31 @@ public enum NonInteractiveExec {
         }
     }
 
+    public struct StopHookContext: Equatable, Sendable {
+        public var handlers: [ConfiguredHookHandler]
+        public var conversationID: ConversationId
+        public var turnID: String
+        public var cwd: URL
+        public var model: String
+        public var approvalPolicy: AskForApproval
+
+        public init(
+            handlers: [ConfiguredHookHandler],
+            conversationID: ConversationId,
+            turnID: String,
+            cwd: URL,
+            model: String,
+            approvalPolicy: AskForApproval
+        ) {
+            self.handlers = handlers
+            self.conversationID = conversationID
+            self.turnID = turnID
+            self.cwd = cwd
+            self.model = model
+            self.approvalPolicy = approvalPolicy
+        }
+    }
+
     public static func runResponsesLoop(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
@@ -192,11 +217,13 @@ public enum NonInteractiveExec {
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
         streamPrompt: ResponseStreamer,
+        stopHookContext: StopHookContext? = nil,
         executeFunctionCall: FunctionCallResultExecutor
     ) async -> NonInteractiveExecLoopResult {
         var prompt = initialPrompt
         var allEvents: ResponseEventResults = []
         var transcriptItems: [ResponseItem] = []
+        var stopHookActive = false
 
         for _ in 0..<maxToolIterations {
             let streamResult = await streamPrompt(prompt)
@@ -219,6 +246,23 @@ public enum NonInteractiveExec {
 
             let toolCalls = toolCalls(from: completedItems)
             if toolCalls.isEmpty {
+                if let stopHookContext {
+                    let stopOutcome = await runStopHooks(
+                        context: stopHookContext,
+                        stopHookActive: stopHookActive,
+                        lastAssistantMessage: lastAssistantMessage(from: transcriptItems)
+                    )
+                    if stopOutcome.shouldBlock {
+                        let continuationItems = stopContinuationItems(stopOutcome.continuationFragments)
+                        prompt.input.append(contentsOf: continuationItems)
+                        transcriptItems.append(contentsOf: continuationItems)
+                        stopHookActive = true
+                        continue
+                    }
+                    if stopOutcome.shouldStop {
+                        return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
+                    }
+                }
                 return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
             }
 
@@ -320,6 +364,48 @@ public enum NonInteractiveExec {
             ResponseInputItem(userInputs: [.text(context)]).responseItem()
         })
         return outcome
+    }
+
+    private static func runStopHooks(
+        context: StopHookContext,
+        stopHookActive: Bool,
+        lastAssistantMessage: String?
+    ) async -> HookStopOutcome {
+        do {
+            let request = try HookStopRequest(
+                sessionID: ThreadId(uuid: context.conversationID.uuid),
+                turnID: context.turnID,
+                cwd: AbsolutePath(absolutePath: context.cwd.standardizedFileURL.path),
+                model: context.model,
+                permissionMode: hookPermissionMode(context.approvalPolicy),
+                stopHookActive: stopHookActive,
+                lastAssistantMessage: lastAssistantMessage
+            )
+            return await HookStop.run(
+                handlers: context.handlers,
+                shell: HookCommandShell(),
+                request: request
+            )
+        } catch {
+            return HookStopOutcome(
+                hookEvents: [],
+                shouldStop: false,
+                stopReason: nil,
+                shouldBlock: false,
+                blockReason: nil,
+                continuationFragments: []
+            )
+        }
+    }
+
+    private static func stopContinuationItems(_ fragments: [HookPromptFragment]) -> [ResponseItem] {
+        fragments.map { fragment in
+            ResponseInputItem(userInputs: [.text(fragment.text)]).responseItem()
+        }
+    }
+
+    private static func lastAssistantMessage(from items: [ResponseItem]) -> String? {
+        items.reversed().compactMap(StreamEventUtils.lastAssistantMessage(from:)).first
     }
 
     public static func executeFunctionCall(

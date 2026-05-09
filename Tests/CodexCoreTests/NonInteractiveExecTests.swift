@@ -483,6 +483,71 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("allowed"), payload.content)
     }
 
+    func testStopHookContinuationAppendsPromptAndRerunsModel() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let marker = temp.url.appendingPathComponent("blocked-once")
+        let log = temp.url.appendingPathComponent("stop-hook-inputs.jsonl")
+        let continuation = "retry with tests"
+        let command = """
+        cat >> '\(log.path)'; printf '\\n' >> '\(log.path)'; if [ -f '\(marker.path)' ]; then :; else touch '\(marker.path)'; printf %s '{"decision":"block","reason":"\(continuation)"}'; fi
+        """
+        let script = StopHookLoopScript(messages: ["draft one", "final draft"])
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [
+                .message(role: "user", content: [.inputText(text: "start")])
+            ]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            stopHookContext: NonInteractiveExec.StopHookContext(
+                handlers: [
+                    ConfiguredHookHandler(
+                        eventName: .stop,
+                        matcher: nil,
+                        command: command,
+                        timeoutSec: 5,
+                        sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                        displayOrder: 0
+                    )
+                ],
+                conversationID: ConversationId(),
+                turnID: "turn-1",
+                cwd: temp.url,
+                model: "gpt-test",
+                approvalPolicy: .never
+            ),
+            executeFunctionCall: { _ in
+                NonInteractiveExec.FunctionCallExecutionResult(
+                    output: .functionCallOutput(
+                        callID: "unused",
+                        output: FunctionCallOutputPayload(content: "unused", success: true)
+                    )
+                )
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].input.contains { item in
+            if case let .message(_, role, content, _) = item {
+                return role == "user" && content == [.inputText(text: continuation)]
+            }
+            return false
+        })
+        XCTAssertEqual(result.transcriptItems, [
+            .message(role: "assistant", content: [.outputText(text: "draft one")]),
+            ResponseInputItem(userInputs: [.text(continuation)]).responseItem(),
+            .message(role: "assistant", content: [.outputText(text: "final draft")])
+        ])
+
+        let hookInputs = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertTrue(hookInputs.contains(#""stop_hook_active":false"#), hookInputs)
+        XCTAssertTrue(hookInputs.contains(#""stop_hook_active":true"#), hookInputs)
+        XCTAssertTrue(hookInputs.contains(#""last_assistant_message":"draft one""#), hookInputs)
+        XCTAssertTrue(hookInputs.contains(#""last_assistant_message":"final draft""#), hookInputs)
+    }
+
     func testResponsesLoopExecutesCustomToolCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "patch")])
@@ -1187,6 +1252,30 @@ private actor ToolSearchLoopScript {
         return [
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
             .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor StopHookLoopScript {
+    private let messages: [String]
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+
+    init(messages: [String]) {
+        self.messages = messages
+    }
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        recordedPrompts.append(prompt)
+        let index = min(calls, messages.count - 1)
+        calls += 1
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: messages[index])]))),
+            .success(.completed(responseID: "resp-\(calls)", tokenUsage: nil))
         ]
     }
 
