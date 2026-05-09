@@ -2670,12 +2670,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(emptyImportResult.isEmpty)
 
         let unsupportedImport = try appServerResponse(
-            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"PLUGINS","description":"Plugins","cwd":null}]}}"#,
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null}]}}"#,
             codexHome: temp.url
         )
         let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
         XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
-        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for PLUGINS is not implemented")
+        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for SESSIONS is not implemented")
     }
 
     func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
@@ -2899,6 +2899,85 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(migrated.contains(#"STATIC = "yes""#))
         XCTAssertFalse(migrated.contains("bad-env"))
         XCTAssertFalse(migrated.contains("disabled"))
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
+    func testExternalAgentConfigDetectAndImportPluginsInstallsLocalMarketplacePlugins() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let marketplaceRoot = try makeLocalMarketplaceRootWithPlugin(
+            named: "debug",
+            pluginName: "weather",
+            in: repo.url
+        )
+        let claude = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
+        try """
+        {
+          "enabledPlugins": {
+            "weather@debug": true,
+            "disabled@debug": false
+          },
+          "extraKnownMarketplaces": {
+            "debug": {
+              "source": "directory",
+              "path": "./marketplace-debug"
+            }
+          }
+        }
+        """.write(
+            to: claude.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["PLUGINS"])
+        XCTAssertEqual(items[0]["cwd"] as? String, repo.url.path)
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate enabled plugins from \(repo.url.path)/.claude/settings.json"
+        )
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        let plugins = try XCTUnwrap(details["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(plugins[0]["pluginNames"] as? [String], ["weather"])
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"PLUGINS","description":"Plugins","cwd":"\#(repo.url.path)","details":{"plugins":[{"marketplaceName":"debug","pluginNames":["weather"]}]}}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let config = try String(
+            contentsOf: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(config.contains("[marketplaces.debug]"))
+        XCTAssertTrue(config.contains(#"source = "\#(marketplaceRoot.path)""#))
+        XCTAssertTrue(config.contains(#"[plugins."weather@debug"]"#))
+        XCTAssertTrue(config.contains("enabled = true"))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: codexHome.url
+                .appendingPathComponent("plugins/cache/debug/weather/local/.codex-plugin/plugin.json", isDirectory: false)
+                .path
+        ))
 
         let afterImport = try appServerResponse(
             #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,

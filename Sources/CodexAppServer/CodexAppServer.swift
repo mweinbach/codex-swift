@@ -2880,6 +2880,10 @@ public enum CodexAppServer {
             items.append(item)
         }
         if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentPlugins(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        if params?["includeHome"] as? Bool == true,
            let item = try detectExternalAgentHooks(cwd: nil, configuration: configuration) {
             items.append(item)
         }
@@ -2907,6 +2911,9 @@ public enum CodexAppServer {
                 items.append(item)
             }
             if let item = try detectExternalAgentMcpServerConfig(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentPlugins(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
             if let item = try detectExternalAgentHooks(cwd: repoRoot.path, configuration: configuration) {
@@ -2955,6 +2962,8 @@ public enum CodexAppServer {
                 try importExternalAgentHooks(cwd: cwd, configuration: configuration)
             case "MCP_SERVER_CONFIG":
                 try importExternalAgentMcpServerConfig(cwd: cwd, configuration: configuration)
+            case "PLUGINS":
+                try importExternalAgentPlugins(item: item, cwd: cwd, configuration: configuration)
             case "SKILLS":
                 try importExternalAgentSkills(cwd: cwd, configuration: configuration)
             case "SUBAGENTS":
@@ -3074,6 +3083,38 @@ public enum CodexAppServer {
             "description": "Migrate MCP servers from \(paths.sourceRoot.path) into \(paths.targetConfig.path)",
             "details": [
                 "mcp_servers": servers.keys.sorted().map { ["name": $0] }
+            ]
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
+    private static func detectExternalAgentPlugins(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = try externalAgentMcpServerConfigPaths(cwd: cwd, configuration: configuration)
+        guard let settings = try effectiveExternalAgentSettings(at: paths.sourceSettings) else {
+            return nil
+        }
+        let details = try externalAgentPluginMigrationDetails(
+            settings: settings,
+            sourceRoot: paths.sourceRoot,
+            configuration: configuration
+        )
+        guard !details.isEmpty else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "PLUGINS",
+            "description": "Migrate enabled plugins from \(paths.sourceSettings.path)",
+            "details": [
+                "plugins": details.map {
+                    [
+                        "marketplaceName": $0.marketplaceName,
+                        "pluginNames": $0.pluginNames
+                    ] as [String: Any]
+                }
             ]
         ]
         item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
@@ -3266,6 +3307,39 @@ public enum CodexAppServer {
             withIntermediateDirectories: true
         )
         try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
+    }
+
+    private static func importExternalAgentPlugins(
+        item: [String: Any],
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = try externalAgentMcpServerConfigPaths(cwd: cwd, configuration: configuration)
+        guard let details = externalAgentPluginMigrationDetails(from: item["details"]) else {
+            throw AppServerError.invalidRequest("plugins migration item is missing details")
+        }
+        guard let settings = try effectiveExternalAgentSettings(at: paths.sourceSettings) else {
+            return
+        }
+        let importSources = externalAgentMarketplaceImportSources(settings: settings, sourceRoot: paths.sourceRoot)
+        for group in details {
+            guard let source = importSources[group.marketplaceName],
+                  let marketplacePath = try addExternalAgentLocalMarketplace(source: source, configuration: configuration)
+            else {
+                continue
+            }
+            for pluginName in group.pluginNames {
+                _ = try? localPluginInstallResult(
+                    marketplacePath: marketplacePath.path,
+                    pluginName: pluginName,
+                    configuration: configuration
+                )
+            }
+        }
     }
 
     private static func importExternalAgentAgentsMd(cwd: String?, configuration: CodexAppServerConfiguration) throws {
@@ -4308,6 +4382,208 @@ public enum CodexAppServer {
                 existing[key] = incomingValue
             }
         }
+    }
+
+    private struct ExternalAgentPluginMigration {
+        var marketplaceName: String
+        var pluginNames: [String]
+    }
+
+    private struct ExternalAgentPluginID {
+        var pluginName: String
+        var marketplaceName: String
+
+        var key: String {
+            "\(pluginName)@\(marketplaceName)"
+        }
+    }
+
+    private struct ExternalAgentMarketplaceImportSource {
+        var source: String
+        var refName: String?
+    }
+
+    private static func externalAgentPluginMigrationDetails(
+        settings: [String: Any],
+        sourceRoot: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [ExternalAgentPluginMigration] {
+        let importSources = externalAgentMarketplaceImportSources(settings: settings, sourceRoot: sourceRoot)
+        let loadableMarketplaces = Set(importSources.compactMap { name, source in
+            (try? externalAgentLocalMarketplaceURL(source)) == nil ? nil : name
+        })
+        let configuredPluginIDs = try configuredExternalAgentPluginIDs(configuration: configuration)
+        let configuredMarketplacePlugins = try configuredExternalAgentMarketplacePlugins(configuration: configuration)
+        var groups: [String: Set<String>] = [:]
+
+        for pluginID in externalAgentEnabledPluginIDs(settings) where !configuredPluginIDs.contains(pluginID.key) {
+            if let installablePlugins = configuredMarketplacePlugins[pluginID.marketplaceName] {
+                guard installablePlugins.contains(pluginID.pluginName) else {
+                    continue
+                }
+            } else {
+                guard loadableMarketplaces.contains(pluginID.marketplaceName) else {
+                    continue
+                }
+            }
+            groups[pluginID.marketplaceName, default: []].insert(pluginID.pluginName)
+        }
+
+        return groups.keys.sorted().compactMap { marketplaceName in
+            let pluginNames = Array(groups[marketplaceName] ?? []).sorted()
+            guard !pluginNames.isEmpty else {
+                return nil
+            }
+            return ExternalAgentPluginMigration(marketplaceName: marketplaceName, pluginNames: pluginNames)
+        }
+    }
+
+    private static func externalAgentPluginMigrationDetails(from value: Any?) -> [ExternalAgentPluginMigration]? {
+        guard let details = value as? [String: Any],
+              let plugins = details["plugins"] as? [[String: Any]]
+        else {
+            return nil
+        }
+        return plugins.compactMap { plugin in
+            guard let marketplaceName = plugin["marketplaceName"] as? String,
+                  let pluginNames = plugin["pluginNames"] as? [String],
+                  !marketplaceName.isEmpty,
+                  !pluginNames.isEmpty
+            else {
+                return nil
+            }
+            return ExternalAgentPluginMigration(marketplaceName: marketplaceName, pluginNames: pluginNames)
+        }
+    }
+
+    private static func externalAgentEnabledPluginIDs(_ settings: [String: Any]) -> [ExternalAgentPluginID] {
+        guard let enabledPlugins = settings["enabledPlugins"] as? [String: Any] else {
+            return []
+        }
+        return enabledPlugins.keys.sorted().compactMap { key in
+            guard enabledPlugins[key] as? Bool == true else {
+                return nil
+            }
+            return parseExternalAgentPluginID(key)
+        }
+    }
+
+    private static func parseExternalAgentPluginID(_ raw: String) -> ExternalAgentPluginID? {
+        let parts = raw.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty
+        else {
+            return nil
+        }
+        return ExternalAgentPluginID(pluginName: parts[0], marketplaceName: parts[1])
+    }
+
+    private static func externalAgentMarketplaceImportSources(
+        settings: [String: Any],
+        sourceRoot: URL
+    ) -> [String: ExternalAgentMarketplaceImportSource] {
+        var sources: [String: ExternalAgentMarketplaceImportSource] = [:]
+        let marketplaces = settings["extraKnownMarketplaces"] as? [String: Any] ?? [:]
+        for name in marketplaces.keys.sorted() {
+            guard let value = marketplaces[name] as? [String: Any] else {
+                continue
+            }
+            let sourceFields = (value["source"] as? [String: Any]) ?? value
+            let source = (sourceFields["repo"] as? String)
+                ?? (sourceFields["url"] as? String)
+                ?? (sourceFields["path"] as? String)
+                ?? (value["source"] as? String)
+            guard let source = source?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !source.isEmpty
+            else {
+                continue
+            }
+            let resolvedSource = resolveExternalAgentMarketplaceSource(source, sourceRoot: sourceRoot)
+            let refName = ((sourceFields["ref"] as? String) ?? (value["ref"] as? String))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            sources[name] = ExternalAgentMarketplaceImportSource(
+                source: resolvedSource,
+                refName: refName?.isEmpty == true ? nil : refName
+            )
+        }
+        return sources
+    }
+
+    private static func resolveExternalAgentMarketplaceSource(_ source: String, sourceRoot: URL) -> String {
+        guard looksLikeExternalAgentRelativeLocalPath(source) else {
+            return source
+        }
+        return sourceRoot.appendingPathComponent(source, isDirectory: true)
+            .standardizedFileURL
+            .path
+    }
+
+    private static func looksLikeExternalAgentRelativeLocalPath(_ source: String) -> Bool {
+        source.hasPrefix("./") || source.hasPrefix("../") || source == "." || source == ".."
+    }
+
+    private static func externalAgentLocalMarketplaceURL(_ source: ExternalAgentMarketplaceImportSource) throws -> URL? {
+        guard source.refName == nil,
+              looksLikeLocalMarketplacePath(source.source)
+        else {
+            return nil
+        }
+        return try resolveLocalMarketplaceSourcePath(source.source)
+    }
+
+    private static func configuredExternalAgentPluginIDs(configuration: CodexAppServerConfiguration) throws -> Set<String> {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        guard let root = configTable(config),
+              let plugins = root["plugins"].flatMap(configTable)
+        else {
+            return []
+        }
+        return Set(plugins.keys)
+    }
+
+    private static func configuredExternalAgentMarketplacePlugins(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Set<String>] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let roots = configuredMarketplaceRoots(in: config, codexHome: configuration.codexHome)
+        var pluginsByMarketplace: [String: Set<String>] = [:]
+        for manifestPath in localMarketplaceManifestPaths(from: roots) {
+            let marketplace = try pluginMarketplaceEntry(
+                manifestPath: manifestPath,
+                config: config,
+                codexHome: configuration.codexHome
+            )
+            guard let marketplaceName = marketplace["name"] as? String,
+                  let plugins = marketplace["plugins"] as? [[String: Any]]
+            else {
+                continue
+            }
+            let installable = plugins.compactMap { plugin -> String? in
+                guard plugin["installPolicy"] as? String != "NOT_AVAILABLE" else {
+                    return nil
+                }
+                return plugin["name"] as? String
+            }
+            pluginsByMarketplace[marketplaceName] = Set(installable)
+        }
+        return pluginsByMarketplace
+    }
+
+    private static func addExternalAgentLocalMarketplace(
+        source: ExternalAgentMarketplaceImportSource,
+        configuration: CodexAppServerConfiguration
+    ) throws -> URL? {
+        guard let sourcePath = try externalAgentLocalMarketplaceURL(source) else {
+            return nil
+        }
+        _ = try marketplaceAddResult(
+            params: ["source": sourcePath.path],
+            configuration: configuration
+        )
+        return localMarketplaceManifestPath(in: sourcePath)
     }
 
     private static func externalAgentMcpConfigValue(
