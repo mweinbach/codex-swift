@@ -29,7 +29,8 @@ let package = Package(
             resources: [.process("Resources")],
             linkerSettings: [
                 .linkedFramework("CryptoKit"),
-                .linkedFramework("Security")
+                .linkedFramework("Security"),
+                .linkedLibrary("sqlite3")
             ]
         ),
         .target(
