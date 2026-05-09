@@ -784,6 +784,134 @@ final class AppServerProtocolTests: XCTestCase {
         ])
     }
 
+    func testMcpServerElicitationUrlRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.McpServerElicitationRequestParams(
+            threadID: "thr_123",
+            turnID: nil,
+            serverName: "github",
+            request: .url(
+                meta: nil,
+                message: "Finish GitHub sign-in",
+                url: "https://example.test/device",
+                elicitationID: "elicitation_123"
+            )
+        )
+        let request = AppServerProtocol.ServerRequest.mcpServerElicitationRequest(
+            requestID: .integer(10),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(10))
+        XCTAssertEqual(request.method, "mcpServer/elicitation/request")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "mcpServer/elicitation/request",
+            "id": 10,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": NSNull(),
+                "serverName": "github",
+                "mode": "url",
+                "_meta": NSNull(),
+                "message": "Finish GitHub sign-in",
+                "url": "https://example.test/device",
+                "elicitationId": "elicitation_123"
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.mcpServerElicitationRequest(params).request(withID: .integer(10)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"mcpServer/elicitation/request","id":10,"params":{"threadId":"thr_123","turnId":null,"serverName":"github","mode":"url","_meta":null,"message":"Finish GitHub sign-in","url":"https://example.test/device","elicitationId":"elicitation_123"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testMcpServerElicitationFormRequestMatchesRustWireShape() throws {
+        let request = AppServerProtocol.ServerRequest.mcpServerElicitationRequest(
+            requestID: .integer(11),
+            params: AppServerProtocol.McpServerElicitationRequestParams(
+                threadID: "thr_123",
+                turnID: "turn_123",
+                serverName: "linear",
+                request: .form(
+                    meta: .object(["source": .string("mcp")]),
+                    message: "Choose an issue",
+                    requestedSchema: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "issueId": .object([
+                                "type": .string("string"),
+                                "title": .string("Issue ID")
+                            ])
+                        ])
+                    ])
+                )
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "mcpServer/elicitation/request",
+            "id": 11,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "serverName": "linear",
+                "mode": "form",
+                "_meta": [
+                    "source": "mcp"
+                ],
+                "message": "Choose an issue",
+                "requestedSchema": [
+                    "type": "object",
+                    "properties": [
+                        "issueId": [
+                            "type": "string",
+                            "title": "Issue ID"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"mcpServer/elicitation/request","id":11,"params":{"threadId":"thr_123","turnId":"turn_123","serverName":"linear","mode":"form","_meta":{"source":"mcp"},"message":"Choose an issue","requestedSchema":{"type":"object","properties":{"issueId":{"type":"string","title":"Issue ID"}}}}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testMcpServerElicitationServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.mcpServerElicitationRequest(
+            requestID: .integer(10),
+            response: AppServerProtocol.McpServerElicitationRequestResponse(
+                action: .decline,
+                content: nil,
+                meta: nil
+            )
+        )
+
+        XCTAssertEqual(response.id, .integer(10))
+        XCTAssertEqual(response.method, "mcpServer/elicitation/request")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "mcpServer/elicitation/request",
+            "id": 10,
+            "response": [
+                "action": "decline",
+                "content": NSNull(),
+                "_meta": NSNull()
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"mcpServer/elicitation/request","id":10,"response":{"action":"decline","content":null,"_meta":null}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,

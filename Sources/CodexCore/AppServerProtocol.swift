@@ -11,6 +11,7 @@ public enum AppServerProtocol {
         case toolRequestUserInput(requestID: RequestID, params: ToolRequestUserInputParams)
         case dynamicToolCall(requestID: RequestID, params: DynamicToolCallParams)
         case permissionsRequestApproval(requestID: RequestID, params: PermissionsRequestApprovalParams)
+        case mcpServerElicitationRequest(requestID: RequestID, params: McpServerElicitationRequestParams)
 
         public var id: RequestID {
             switch self {
@@ -31,6 +32,8 @@ public enum AppServerProtocol {
             case let .dynamicToolCall(requestID, _):
                 requestID
             case let .permissionsRequestApproval(requestID, _):
+                requestID
+            case let .mcpServerElicitationRequest(requestID, _):
                 requestID
             }
         }
@@ -55,6 +58,8 @@ public enum AppServerProtocol {
                 DynamicToolCallParams.method
             case .permissionsRequestApproval:
                 PermissionsRequestApprovalParams.method
+            case .mcpServerElicitationRequest:
+                McpServerElicitationRequestParams.method
             }
         }
 
@@ -113,6 +118,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(PermissionsRequestApprovalParams.self, forKey: .params)
                 )
+            case McpServerElicitationRequestParams.method:
+                self = .mcpServerElicitationRequest(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(McpServerElicitationRequestParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -145,6 +155,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .permissionsRequestApproval(_, params):
                 try container.encode(params, forKey: .params)
+            case let .mcpServerElicitationRequest(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -159,6 +171,7 @@ public enum AppServerProtocol {
         case toolRequestUserInput(ToolRequestUserInputParams)
         case dynamicToolCall(DynamicToolCallParams)
         case permissionsRequestApproval(PermissionsRequestApprovalParams)
+        case mcpServerElicitationRequest(McpServerElicitationRequestParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -184,6 +197,8 @@ public enum AppServerProtocol {
                 .dynamicToolCall(requestID: id, params: params)
             case let .permissionsRequestApproval(params):
                 .permissionsRequestApproval(requestID: id, params: params)
+            case let .mcpServerElicitationRequest(params):
+                .mcpServerElicitationRequest(requestID: id, params: params)
             }
         }
     }
@@ -201,6 +216,10 @@ public enum AppServerProtocol {
         case toolRequestUserInput(requestID: RequestID, response: ToolRequestUserInputResponse)
         case dynamicToolCall(requestID: RequestID, response: DynamicToolCallResponse)
         case permissionsRequestApproval(requestID: RequestID, response: PermissionsRequestApprovalResponse)
+        case mcpServerElicitationRequest(
+            requestID: RequestID,
+            response: McpServerElicitationRequestResponse
+        )
 
         public var id: RequestID {
             switch self {
@@ -221,6 +240,8 @@ public enum AppServerProtocol {
             case let .dynamicToolCall(requestID, _):
                 requestID
             case let .permissionsRequestApproval(requestID, _):
+                requestID
+            case let .mcpServerElicitationRequest(requestID, _):
                 requestID
             }
         }
@@ -245,6 +266,8 @@ public enum AppServerProtocol {
                 DynamicToolCallParams.method
             case .permissionsRequestApproval:
                 PermissionsRequestApprovalParams.method
+            case .mcpServerElicitationRequest:
+                McpServerElicitationRequestParams.method
             }
         }
 
@@ -303,6 +326,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(PermissionsRequestApprovalResponse.self, forKey: .response)
                 )
+            case McpServerElicitationRequestParams.method:
+                self = .mcpServerElicitationRequest(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(McpServerElicitationRequestResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -335,7 +363,175 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .permissionsRequestApproval(_, response):
                 try container.encode(response, forKey: .response)
+            case let .mcpServerElicitationRequest(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public enum McpServerElicitationAction: String, Codable, Equatable, Sendable {
+        case accept
+        case decline
+        case cancel
+    }
+
+    public enum McpServerElicitationRequest: Equatable, Codable, Sendable {
+        case form(meta: JSONValue?, message: String, requestedSchema: JSONValue)
+        case url(meta: JSONValue?, message: String, url: String, elicitationID: String)
+
+        private enum CodingKeys: String, CodingKey {
+            case mode
+            case meta = "_meta"
+            case message
+            case requestedSchema
+            case url
+            case elicitationID = "elicitationId"
+        }
+
+        private enum Mode: String, Codable {
+            case form
+            case url
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(Mode.self, forKey: .mode) {
+            case .form:
+                self = .form(
+                    meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
+                    message: try container.decode(String.self, forKey: .message),
+                    requestedSchema: try container.decode(JSONValue.self, forKey: .requestedSchema)
+                )
+            case .url:
+                self = .url(
+                    meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
+                    message: try container.decode(String.self, forKey: .message),
+                    url: try container.decode(String.self, forKey: .url),
+                    elicitationID: try container.decode(String.self, forKey: .elicitationID)
+                )
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case let .form(meta, message, requestedSchema):
+                try container.encode(Mode.form, forKey: .mode)
+                try container.encodeNilOrValue(meta, forKey: .meta)
+                try container.encode(message, forKey: .message)
+                try container.encode(requestedSchema, forKey: .requestedSchema)
+            case let .url(meta, message, url, elicitationID):
+                try container.encode(Mode.url, forKey: .mode)
+                try container.encodeNilOrValue(meta, forKey: .meta)
+                try container.encode(message, forKey: .message)
+                try container.encode(url, forKey: .url)
+                try container.encode(elicitationID, forKey: .elicitationID)
+            }
+        }
+    }
+
+    public struct McpServerElicitationRequestParams: Equatable, Codable, Sendable {
+        public static let method = "mcpServer/elicitation/request"
+
+        public let threadID: String
+        public let turnID: String?
+        public let serverName: String
+        public let request: McpServerElicitationRequest
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case serverName
+            case mode
+            case meta = "_meta"
+            case message
+            case requestedSchema
+            case url
+            case elicitationID = "elicitationId"
+        }
+
+        private enum Mode: String, Codable {
+            case form
+            case url
+        }
+
+        public init(
+            threadID: String,
+            turnID: String?,
+            serverName: String,
+            request: McpServerElicitationRequest
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.serverName = serverName
+            self.request = request
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            threadID = try container.decode(String.self, forKey: .threadID)
+            turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+            serverName = try container.decode(String.self, forKey: .serverName)
+            switch try container.decode(Mode.self, forKey: .mode) {
+            case .form:
+                request = .form(
+                    meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
+                    message: try container.decode(String.self, forKey: .message),
+                    requestedSchema: try container.decode(JSONValue.self, forKey: .requestedSchema)
+                )
+            case .url:
+                request = .url(
+                    meta: try container.decodeIfPresent(JSONValue.self, forKey: .meta),
+                    message: try container.decode(String.self, forKey: .message),
+                    url: try container.decode(String.self, forKey: .url),
+                    elicitationID: try container.decode(String.self, forKey: .elicitationID)
+                )
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(threadID, forKey: .threadID)
+            try container.encodeNilOrValue(turnID, forKey: .turnID)
+            try container.encode(serverName, forKey: .serverName)
+            switch request {
+            case let .form(meta, message, requestedSchema):
+                try container.encode(Mode.form, forKey: .mode)
+                try container.encodeNilOrValue(meta, forKey: .meta)
+                try container.encode(message, forKey: .message)
+                try container.encode(requestedSchema, forKey: .requestedSchema)
+            case let .url(meta, message, url, elicitationID):
+                try container.encode(Mode.url, forKey: .mode)
+                try container.encodeNilOrValue(meta, forKey: .meta)
+                try container.encode(message, forKey: .message)
+                try container.encode(url, forKey: .url)
+                try container.encode(elicitationID, forKey: .elicitationID)
+            }
+        }
+    }
+
+    public struct McpServerElicitationRequestResponse: Equatable, Codable, Sendable {
+        public let action: McpServerElicitationAction
+        public let content: JSONValue?
+        public let meta: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case action
+            case content
+            case meta = "_meta"
+        }
+
+        public init(action: McpServerElicitationAction, content: JSONValue?, meta: JSONValue?) {
+            self.action = action
+            self.content = content
+            self.meta = meta
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(action, forKey: .action)
+            try container.encodeNilOrValue(content, forKey: .content)
+            try container.encodeNilOrValue(meta, forKey: .meta)
         }
     }
 
