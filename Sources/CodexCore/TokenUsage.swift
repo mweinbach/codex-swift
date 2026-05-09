@@ -111,6 +111,9 @@ public struct TokenUsageInfo: Equatable, Codable, Sendable {
         if let last {
             result.appendLastUsage(last)
         }
+        if let modelContextWindow {
+            result.modelContextWindow = modelContextWindow
+        }
         return result
     }
 

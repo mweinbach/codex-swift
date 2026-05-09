@@ -104,6 +104,11 @@ final class TokenUsageTests: XCTestCase {
         XCTAssertEqual(appended?.totalTokenUsage, TokenUsage(inputTokens: 13, outputTokens: 6, totalTokens: 19))
         XCTAssertEqual(appended?.lastTokenUsage, next)
         XCTAssertEqual(appended?.modelContextWindow, 4_096)
+
+        let updatedWindow = TokenUsageInfo.newOrAppend(info: appended, last: nil, modelContextWindow: 8_192)
+        XCTAssertEqual(updatedWindow?.totalTokenUsage, appended?.totalTokenUsage)
+        XCTAssertEqual(updatedWindow?.lastTokenUsage, next)
+        XCTAssertEqual(updatedWindow?.modelContextWindow, 8_192)
     }
 
     func testTokenUsageInfoFillToContextWindow() {
