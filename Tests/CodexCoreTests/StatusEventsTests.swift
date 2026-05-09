@@ -95,6 +95,26 @@ final class StatusEventsTests: XCTestCase {
         ])
     }
 
+    func testErrorEventAffectsTurnStatusMatchesRust() {
+        XCTAssertFalse(ErrorEvent(
+            message: "rollback failed",
+            codexErrorInfo: .threadRollbackFailed
+        ).affectsTurnStatus)
+        XCTAssertFalse(ErrorEvent(
+            message: "active turn is not steerable",
+            codexErrorInfo: .activeTurnNotSteerable(turnKind: .review)
+        ).affectsTurnStatus)
+        XCTAssertTrue(ErrorEvent(message: "failed").affectsTurnStatus)
+        XCTAssertTrue(ErrorEvent(
+            message: "failed",
+            codexErrorInfo: .other
+        ).affectsTurnStatus)
+        XCTAssertTrue(ErrorEvent(
+            message: "limited",
+            codexErrorInfo: .usageLimitExceeded
+        ).affectsTurnStatus)
+    }
+
     func testTaskEventsIncludeNullOptionalsLikeRust() throws {
         try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: nil), [
             "model_context_window": NSNull()

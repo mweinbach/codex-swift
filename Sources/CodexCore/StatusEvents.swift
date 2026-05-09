@@ -22,6 +22,28 @@ public enum CodexErrorInfo: Equatable, Codable, Sendable {
     case threadRollbackFailed
     case other
 
+    /// Whether this error should mark the current turn as failed when replaying history.
+    public var affectsTurnStatus: Bool {
+        switch self {
+        case .activeTurnNotSteerable, .threadRollbackFailed:
+            return false
+        case .contextWindowExceeded,
+             .usageLimitExceeded,
+             .serverOverloaded,
+             .cyberPolicy,
+             .httpConnectionFailed,
+             .responseStreamConnectionFailed,
+             .internalServerError,
+             .unauthorized,
+             .badRequest,
+             .sandboxError,
+             .responseStreamDisconnected,
+             .responseTooManyFailedAttempts,
+             .other:
+            return true
+        }
+    }
+
     fileprivate enum UnitVariant: String, Codable {
         case contextWindowExceeded = "context_window_exceeded"
         case usageLimitExceeded = "usage_limit_exceeded"
@@ -220,6 +242,11 @@ public struct ErrorEvent: Equatable, Codable, Sendable {
     public init(message: String, codexErrorInfo: CodexErrorInfo? = nil) {
         self.message = message
         self.codexErrorInfo = codexErrorInfo
+    }
+
+    /// Whether this error should mark the current turn as failed when replaying history.
+    public var affectsTurnStatus: Bool {
+        codexErrorInfo?.affectsTurnStatus ?? true
     }
 
     public init(from decoder: Decoder) throws {
