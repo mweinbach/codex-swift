@@ -2282,6 +2282,37 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkConversionBuiltins() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        INDEX = int("2")
+        HOST = "api" + str(INDEX) + ".github.com"
+
+        if bool([TOOL]) and not bool([]) and bool("x") and not bool("") and int(True) == 1 and int(False) == 0 and int(2.9) == 2 and str(True) == "True":
+            prefix_rule([TOOL, "status-" + str(INDEX)], "allow", justification = str(["conv", INDEX]))
+            network_rule(HOST, "https", "allow")
+
+        if bool():
+            prefix_rule(["bad"], "allow")
+
+        if str() == "" and int() == 0:
+            host_executable(name = TOOL, paths = ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status-2")]),
+                decision: .allow,
+                justification: #"["conv", 2]"#
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "bad"), [])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api2.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

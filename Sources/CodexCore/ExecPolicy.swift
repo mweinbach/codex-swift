@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "sorted", "reversed"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "sorted", "reversed", "str", "int", "bool"].contains(name) else {
             return nil
         }
 
@@ -3443,6 +3443,27 @@ public final class PolicyParser {
             )
         case "reversed":
             return try parseStarlarkReversedCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "str":
+            return try parseStarlarkStringConversionCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "int":
+            return try parseStarlarkIntegerConversionCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "bool":
+            return try parseStarlarkBooleanConversionCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3588,6 +3609,118 @@ public final class PolicyParser {
 
         let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         return try .array(starlarkIterableItems(iterable, expression: expression).reversed())
+    }
+
+    private static func parseStarlarkStringConversionCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        switch rawArguments.count {
+        case 0:
+            return .string("")
+        case 1:
+            let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+            return .string(starlarkString(value))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func parseStarlarkIntegerConversionCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        switch rawArguments.count {
+        case 0:
+            return .integer(0)
+        case 1:
+            let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+            return try .integer(starlarkInteger(value, expression: expression))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func parseStarlarkBooleanConversionCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        switch rawArguments.count {
+        case 0:
+            return .bool(false)
+        case 1:
+            let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+            return .bool(truthy(value))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkInteger(_ value: ConfigValue, expression: String) throws -> Int64 {
+        switch value {
+        case let .integer(value):
+            return value
+        case let .double(value):
+            guard value.isFinite,
+                  value >= Double(Int64.min),
+                  value <= Double(Int64.max)
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return Int64(value.rounded(.towardZero))
+        case let .bool(value):
+            return value ? 1 : 0
+        case let .string(value):
+            guard let integer = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return integer
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkString(_ value: ConfigValue) -> String {
+        switch value {
+        case let .string(value):
+            return value
+        case let .integer(value):
+            return String(value)
+        case let .double(value):
+            return String(value)
+        case let .bool(value):
+            return value ? "True" : "False"
+        case let .array(items):
+            return "[" + items.map(starlarkRepresentation).joined(separator: ", ") + "]"
+        case let .table(items):
+            return "{" + items.keys.sorted().map { key in
+                "\(starlarkQuotedString(key)): \(starlarkRepresentation(items[key]!))"
+            }.joined(separator: ", ") + "}"
+        }
+    }
+
+    private static func starlarkRepresentation(_ value: ConfigValue) -> String {
+        switch value {
+        case let .string(value):
+            return starlarkQuotedString(value)
+        default:
+            return starlarkString(value)
+        }
+    }
+
+    private static func starlarkQuotedString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "\"\(escaped)\""
     }
 
     private static func starlarkIterableItems(_ value: ConfigValue, expression: String) throws -> [ConfigValue] {
