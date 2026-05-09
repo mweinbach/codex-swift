@@ -426,6 +426,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
     }
 
+    func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let steer = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"Steer"},{"type":"image","url":"https://example.test/two.png"}]}}"#.utf8)))
+
+        let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
+        XCTAssertEqual(steerResult["turnId"] as? String, turnID)
+
+        let resume = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 2)
+        let steeredItems = try XCTUnwrap(turns[1]["items"] as? [[String: Any]])
+        XCTAssertEqual(steeredItems.count, 1)
+        let steeredContent = try XCTUnwrap(steeredItems[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(steeredContent[0]["text"] as? String, "Steer")
+        XCTAssertEqual(steeredContent[1]["url"] as? String, "https://example.test/two.png")
+    }
+
+    func testTurnSteerRejectsNoActiveMismatchedAndEmptyInputs() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let noActive = try decode(processor.processLine(Data(#"{"id":2,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"turn-does-not-exist","input":[{"type":"text","text":"Steer"}]}}"#.utf8)))
+        let noActiveError = try XCTUnwrap(noActive["error"] as? [String: Any])
+        XCTAssertEqual(noActiveError["code"] as? Int, -32600)
+        XCTAssertEqual(noActiveError["message"] as? String, "no active turn to steer")
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let mismatch = try decode(processor.processLine(Data(#"{"id":4,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"wrong-turn","input":[{"type":"text","text":"Steer"}]}}"#.utf8)))
+        let mismatchError = try XCTUnwrap(mismatch["error"] as? [String: Any])
+        XCTAssertEqual(mismatchError["code"] as? Int, -32600)
+        XCTAssertEqual(mismatchError["message"] as? String, "expected active turn id `wrong-turn` but found `\(turnID)`")
+
+        let empty = try decode(processor.processLine(Data(#"{"id":5,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[]}}"#.utf8)))
+        let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
+        XCTAssertEqual(emptyError["code"] as? Int, -32600)
+        XCTAssertEqual(emptyError["message"] as? String, "input must not be empty")
+    }
+
+    func testTurnSteerExperimentalMetadataRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"turn/steer","params":{"threadId":"00000000-0000-0000-0000-000000000000","expectedTurnId":"turn-id","input":[{"type":"text","text":"Steer"}],"responsesapiClientMetadata":{"k":"v"}}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "turn/steer.responsesapiClientMetadata requires experimentalApi capability")
+    }
+
     func testTurnInterruptRecordsAbortAndEmitsCompletedNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

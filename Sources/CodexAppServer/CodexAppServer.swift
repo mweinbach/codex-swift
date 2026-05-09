@@ -1262,6 +1262,60 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func turnSteerResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        activeTurnID: String?
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        guard let expectedTurnID = stringParam(params?["expectedTurnId"]) else {
+            throw AppServerError.invalidRequest("missing expectedTurnId")
+        }
+        guard !expectedTurnID.isEmpty else {
+            throw AppServerError.invalidRequest("expectedTurnId must not be empty")
+        }
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        guard let activeTurnID else {
+            throw AppServerError.invalidRequest("no active turn to steer")
+        }
+        guard activeTurnID == expectedTurnID else {
+            throw AppServerError.invalidRequest(
+                "expected active turn id `\(expectedTurnID)` but found `\(activeTurnID)`"
+            )
+        }
+        let input = v2UserInputs(params?["input"])
+        guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) else {
+            throw AppServerError.invalidRequest("input must not be empty")
+        }
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images)))
+        ])
+        try recorder.shutdown()
+        return ["turnId": activeTurnID]
+    }
+
+    fileprivate static func requireTurnSteerResponsesAPIMetadataExperimentalAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled,
+              let metadata = params?["responsesapiClientMetadata"],
+              !(metadata is NSNull)
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("turn/steer.responsesapiClientMetadata requires experimentalApi capability")
+    }
+
     fileprivate static func turnInterruptResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -13155,6 +13209,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
+    private var activeTurnIDs: [String: String] = [:]
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
 
@@ -13897,9 +13952,26 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,
                        let turn = result["turn"] as? [String: Any] {
+                        if let turnID = turn["id"] as? String {
+                            activeTurnIDs[threadID] = turnID
+                        }
                         trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
                     }
+                case "turn/steer":
+                    try CodexAppServer.requireTurnSteerResponsesAPIMetadataExperimentalAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    let threadID = CodexAppServer.stringParam(params?["threadId"])
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.turnSteerResult(
+                            params: params,
+                            configuration: configuration,
+                            activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
+                        )
+                    )
                 case "turn/interrupt":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -13907,6 +13979,7 @@ final class CodexAppServerMessageProcessor {
                     )
                     if let threadID = params?["threadId"] as? String,
                        let turnID = params?["turnId"] as? String {
+                        activeTurnIDs.removeValue(forKey: threadID)
                         notifications.append(CodexAppServer.turnCompletedNotification(
                             threadID: threadID,
                             turnID: turnID,

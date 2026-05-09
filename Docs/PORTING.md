@@ -622,6 +622,8 @@ Source baseline inspected for this scaffold:
   - added v2 `fuzzyFileSearch/sessionStart`, `fuzzyFileSearch/sessionUpdate`, and `fuzzyFileSearch/sessionStop` routes with Rust's experimental API guard, per-session roots, missing-session errors, update/completed notification shapes, blank snapshots for empty queries, and stop removal behavior.
 - `codex-rs/app-server` realtime route surface
   - added Rust's experimental API guards for `thread/realtime/start`, `thread/realtime/appendAudio`, `thread/realtime/appendText`, `thread/realtime/stop`, and `thread/realtime/listVoices`; ported the deterministic `thread/realtime/listVoices` response with the built-in v1/v2 voice lists and defaults.
+- `codex-rs/app-server` turn steer route
+  - added v2 `turn/steer` with active-turn id validation, no-active/mismatched/empty-input errors, rollout persistence for steer input, Rust's `turnId` response shape, and the experimental API guard for `responsesapiClientMetadata`.
 
 ## Known Gaps
 
