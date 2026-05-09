@@ -619,6 +619,50 @@ final class ExecPolicyTests: XCTestCase {
         }
     }
 
+    func testParserEvaluatesRustStarlarkStringAndListAdditionExpressions() throws {
+        let policy = try parsePolicy("""
+        GIT = "g" + "it"
+        STATUS = ["st" + "atus"]
+        PATTERN = [GIT] + STATUS
+        EXAMPLES = [["git"] + STATUS] + ["git status"]
+        HOST = "api." + "github.com"
+        PATHS = ["/usr/bin/" + GIT] + ["/opt/homebrew/bin/" + GIT]
+
+        prefix_rule(
+            PATTERN,
+            "prompt",
+            match = EXAMPLES,
+            not_match = [["git"] + ["commit"]],
+            justification = "review " + "git status",
+        )
+        network_rule(HOST, "https", "allow", justification = "allow " + HOST)
+        host_executable(GIT, PATHS)
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt,
+                    justification: "review git status"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(
+                host: "api.github.com",
+                protocol: .https,
+                decision: .allow,
+                justification: "allow api.github.com"
+            )
+        ])
+        XCTAssertEqual(
+            policy.hostExecutables(),
+            ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]]
+        )
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

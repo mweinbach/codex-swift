@@ -1146,6 +1146,11 @@ public final class PolicyParser {
         constants: [String: ConfigValue] = [:]
     ) throws -> ConfigValue {
         let trimmed = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if additivePieces.count > 1 {
+            return try evaluateStarlarkAddition(additivePieces, constants: constants)
+        }
         if let constant = constants[trimmed] {
             return constant
         }
@@ -1167,6 +1172,33 @@ public final class PolicyParser {
         } catch {
             return try ConfigValueParser.parseTomlLiteral(removingTrailingArrayCommas(from: trimmed))
         }
+    }
+
+    private static func evaluateStarlarkAddition(
+        _ pieces: [String],
+        constants: [String: ConfigValue]
+    ) throws -> ConfigValue {
+        guard let first = pieces.first, !first.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+        }
+
+        var result = try parsePolicyLiteral(first, constants: constants)
+        for piece in pieces.dropFirst() {
+            guard !piece.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+            }
+            let next = try parsePolicyLiteral(piece, constants: constants)
+            switch (result, next) {
+            case let (.string(lhs), .string(rhs)):
+                result = .string(lhs + rhs)
+            case let (.array(lhs), .array(rhs)):
+                result = .array(lhs + rhs)
+            default:
+                throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
+            }
+        }
+
+        return result
     }
 
     private static func removingTrailingArrayCommas(from text: String) -> String {
@@ -1333,9 +1365,14 @@ public final class PolicyParser {
     }
 
     private static func splitTopLevel(_ text: String, separator: Character) -> [String] {
+        splitTopLevelExpression(text, separator: separator)
+    }
+
+    private static func splitTopLevelExpression(_ text: String, separator: Character) -> [String] {
         var pieces: [String] = []
         var current = ""
-        var bracketDepth = 0
+        var squareDepth = 0
+        var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
 
@@ -1357,12 +1394,18 @@ public final class PolicyParser {
                 quote = character
                 current.append(character)
             case "[":
-                bracketDepth += 1
+                squareDepth += 1
                 current.append(character)
             case "]":
-                bracketDepth -= 1
+                squareDepth -= 1
                 current.append(character)
-            case separator where bracketDepth == 0:
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+            case separator where squareDepth == 0 && parenDepth == 0:
                 pieces.append(current)
                 current = ""
             default:
