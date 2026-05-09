@@ -680,6 +680,56 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return !isMetadataWriteDenied(path, cwd: cwd)
     }
 
+    public func getReadableRootsWithCwd(_ cwd: String) -> [AbsolutePath] {
+        guard case let .restricted(entries, _) = self,
+              !hasFullDiskReadAccess
+        else {
+            return []
+        }
+
+        let roots = resolvedEntriesWithCwd(entries, cwd: cwd)
+            .filter { $0.access.canRead }
+            .filter { canReadPathWithCwd($0.path.path, cwd: cwd) }
+            .map(\.path)
+        return Self.deduplicated(roots)
+    }
+
+    public func getUnreadableRootsWithCwd(_ cwd: String) -> [AbsolutePath] {
+        guard case let .restricted(entries, _) = self else {
+            return []
+        }
+
+        let root = try? AbsolutePath(absolutePath: "/")
+        let roots = resolvedEntriesWithCwd(entries, cwd: cwd)
+            .filter { $0.access == .none }
+            .filter { !canReadPathWithCwd($0.path.path, cwd: cwd) }
+            .filter { root != $0.path }
+            .map(\.path)
+        return Self.deduplicated(roots)
+    }
+
+    public func getUnreadableGlobsWithCwd(_ cwd: String) -> [String] {
+        guard case let .restricted(entries, _) = self else {
+            return []
+        }
+
+        var patterns = entries.compactMap { entry -> String? in
+            guard entry.access == .none,
+                  case let .globPattern(pattern) = entry.path,
+                  let resolved = try? AbsolutePath.resolve(pattern, against: cwd)
+            else {
+                return nil
+            }
+            return resolved.path
+        }
+        patterns.sort()
+        return patterns.reduce(into: []) { result, pattern in
+            if result.last != pattern {
+                result.append(pattern)
+            }
+        }
+    }
+
     public func withAdditionalReadableRoots(
         _ additionalReadableRoots: [AbsolutePath],
         cwd: String

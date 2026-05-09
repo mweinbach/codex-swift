@@ -909,6 +909,48 @@ final class SubmissionTests: XCTestCase {
         XCTAssertFalse(FileSystemSandboxPolicy.unrestricted.includePlatformDefaults)
     }
 
+    func testFileSystemSandboxPolicyReadableAndUnreadableRootsMatchRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let docs = try cwd.join("docs")
+        let docsPrivate = try docs.join("private")
+        let rootDenyPolicy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .none),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .read)
+        ])
+        let nestedDenyPolicy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .path(docsPrivate.path), access: .none)
+        ])
+        let fullReadPolicy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ])
+
+        XCTAssertEqual(rootDenyPolicy.getReadableRootsWithCwd(cwd.path), [docs])
+        XCTAssertEqual(rootDenyPolicy.getUnreadableRootsWithCwd(cwd.path), [])
+        XCTAssertEqual(nestedDenyPolicy.getUnreadableRootsWithCwd(cwd.path), [docsPrivate])
+        XCTAssertEqual(fullReadPolicy.getReadableRootsWithCwd(cwd.path), [])
+        XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getUnreadableRootsWithCwd(cwd.path), [])
+    }
+
+    func testFileSystemSandboxPolicyUnreadableGlobsResolveSortAndDedupLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .globPattern("z/**/*.env"), access: .none),
+            FileSystemSandboxEntry(path: .globPattern("a/*.secret"), access: .none),
+            FileSystemSandboxEntry(path: .globPattern("a/*.secret"), access: .none),
+            FileSystemSandboxEntry(path: .globPattern("readable/*"), access: .read),
+            FileSystemSandboxEntry(path: .path(cwd.path + "/literal"), access: .none)
+        ])
+
+        XCTAssertEqual(policy.getUnreadableGlobsWithCwd(cwd.path), [
+            cwd.path + "/a/*.secret",
+            cwd.path + "/z/**/*.env"
+        ])
+        XCTAssertEqual(FileSystemSandboxPolicy.externalSandbox.getUnreadableGlobsWithCwd(cwd.path), [])
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
