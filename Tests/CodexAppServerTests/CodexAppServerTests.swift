@@ -1822,6 +1822,48 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadReturnsConfiguredLocalPluginDetail() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        try """
+        [plugins."weather@debug"]
+        enabled = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(plugin["marketplacePath"] as? String, marketplacePath)
+        XCTAssertEqual(plugin["description"] as? String, "Reads local weather")
+        XCTAssertEqual((plugin["skills"] as? [Any])?.count, 0)
+        XCTAssertEqual((plugin["hooks"] as? [Any])?.count, 0)
+        XCTAssertEqual((plugin["apps"] as? [Any])?.count, 0)
+        XCTAssertEqual((plugin["mcpServers"] as? [Any])?.count, 0)
+
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        XCTAssertEqual(summary["id"] as? String, "weather@debug")
+        XCTAssertEqual(summary["enabled"] as? Bool, true)
+        XCTAssertEqual(summary["keywords"] as? [String], ["forecast", "local"])
+        let source = try XCTUnwrap(summary["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "local")
+
+        let missing = try appServerResponse(
+            #"{"id":2,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"missing"}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            missingError["message"] as? String,
+            "plugin `missing` was not found in marketplace `debug`"
+        )
+    }
+
     func testPluginReadValidatesSourceAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path

@@ -2016,6 +2016,40 @@ public enum CodexAppServer {
         }
     }
 
+    private static func localPluginReadResult(
+        marketplacePath: String,
+        pluginName: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let manifestPath = URL(fileURLWithPath: marketplacePath, isDirectory: false)
+        let marketplace = try pluginMarketplaceEntry(manifestPath: manifestPath, config: config)
+        let marketplaceName = marketplace["name"] as? String ?? ""
+        let summaries = marketplace["plugins"] as? [[String: Any]] ?? []
+        guard let summary = summaries.first(where: { $0["name"] as? String == pluginName }) else {
+            throw AppServerError.invalidRequest(
+                "plugin `\(pluginName)` was not found in marketplace `\(marketplaceName)`"
+            )
+        }
+        let source = summary["source"] as? [String: Any]
+        let sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let manifest = sourcePath.map(localPluginManifest(root:)) ?? (interface: NSNull(), keywords: [], description: nil)
+
+        return [
+            "plugin": [
+                "marketplaceName": marketplaceName,
+                "marketplacePath": marketplacePath,
+                "summary": summary,
+                "description": manifest.description ?? NSNull(),
+                "skills": [],
+                "hooks": [],
+                "apps": [],
+                "mcpServers": []
+            ].nullStripped(keepNulls: true)
+        ]
+    }
+
     private static func localPluginSourcePath(_ value: Any?, marketplaceRoot: URL) -> URL? {
         let rawPath: String?
         if let path = value as? String {
@@ -2043,7 +2077,7 @@ public enum CodexAppServer {
         }.standardizedFileURL
     }
 
-    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String]) {
+    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String], description: String?) {
         let candidates = [
             root.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
             root.appendingPathComponent(".claude-plugin/plugin.json", isDirectory: false)
@@ -2052,10 +2086,14 @@ public enum CodexAppServer {
               let data = try? Data(contentsOf: path),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return (NSNull(), [])
+            return (NSNull(), [], nil)
         }
         let keywords = object["keywords"] as? [String] ?? []
-        return (pluginInterfaceObject(object["interface"], pluginRoot: root), keywords)
+        return (
+            pluginInterfaceObject(object["interface"], pluginRoot: root),
+            keywords,
+            object["description"] as? String
+        )
     }
 
     private static func marketplaceInterfaceObject(_ value: Any?) -> Any {
@@ -2126,15 +2164,22 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: marketplace file is not in a supported location")
     }
 
-    fileprivate static func pluginReadResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginReadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
         let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
-        _ = stringParam(params?["pluginName"]) ?? ""
+        let pluginName = stringParam(params?["pluginName"]) ?? ""
         switch (marketplacePath, remoteMarketplaceName) {
         case (.some, .some), (.none, .none):
             throw AppServerError.invalidRequest("plugin/read requires exactly one of marketplacePath or remoteMarketplaceName")
-        case (.some, .none):
-            throw AppServerError.invalidRequest("local plugin read is not implemented")
+        case (.some(let marketplacePath), .none):
+            return try localPluginReadResult(
+                marketplacePath: marketplacePath,
+                pluginName: pluginName,
+                configuration: configuration
+            )
         case (.none, .some(let remoteMarketplaceName)):
             throw AppServerError.invalidRequest("remote plugin read is not enabled for marketplace \(remoteMarketplaceName)")
         }
@@ -6853,7 +6898,7 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginReadResult(params: params)
+                        result: try CodexAppServer.pluginReadResult(params: params, configuration: configuration)
                     )
                 case "plugin/skill/read":
                     response = CodexAppServer.responseObject(
