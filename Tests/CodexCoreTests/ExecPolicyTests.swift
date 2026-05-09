@@ -842,9 +842,11 @@ final class ExecPolicyTests: XCTestCase {
         SELECTED = [COMMANDS[index] for index in range(len(COMMANDS)) if index != 1]
         LAST_INDEX = len(COMMANDS) - 1
         STEP = 1 + 1
-        REVERSED = [COMMANDS[index] for index in range(LAST_INDEX, 0, -STEP)]
+        REVERSED = [COMMANDS[index] for index in range(LAST_INDEX, 0, -(STEP * 1))]
+        EVEN_COMMANDS = [COMMANDS[index] for index in range(len(COMMANDS)) if index % 2 == 0]
+        HALF = len(COMMANDS) // 2
 
-        for index in range(0, len(SELECTED), 2):
+        for index in range(0, len(SELECTED), HALF):
             prefix_rule(
                 [TOOL, SELECTED[index]],
                 "prompt",
@@ -857,6 +859,9 @@ final class ExecPolicyTests: XCTestCase {
 
         if REVERSED[0] == "show" and REVERSED[1] == "diff":
             host_executable(TOOL, ["/usr/bin/" + TOOL])
+
+        if EVEN_COMMANDS[1] == "log" and len(COMMANDS) / 2 == 2.0:
+            prefix_rule([TOOL, "math"], "allow")
         """)
 
         XCTAssertEqual(policy.rules(for: "git"), [
@@ -869,6 +874,10 @@ final class ExecPolicyTests: XCTestCase {
                 pattern: PrefixPattern(first: "git", rest: [.single("show")]),
                 decision: .prompt,
                 justification: "range index show"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("math")]),
+                decision: .allow
             )
         ])
         XCTAssertEqual(policy.networkRules(), [

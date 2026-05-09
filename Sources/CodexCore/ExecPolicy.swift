@@ -1567,11 +1567,14 @@ public final class PolicyParser {
         ) {
             return boolean
         }
-        if let unary = try parseStarlarkUnaryNumericExpression(trimmed, constants: constants, functions: functions) {
-            return unary
-        }
         if let additive = try parseStarlarkAdditiveExpression(trimmed, constants: constants, functions: functions) {
             return additive
+        }
+        if let multiplicative = try parseStarlarkMultiplicativeExpression(trimmed, constants: constants, functions: functions) {
+            return multiplicative
+        }
+        if let unary = try parseStarlarkUnaryNumericExpression(trimmed, constants: constants, functions: functions) {
+            return unary
         }
         if let constant = constants[trimmed] {
             return constant
@@ -2832,6 +2835,47 @@ public final class PolicyParser {
         }
     }
 
+    private static func parseStarlarkMultiplicativeExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelMultiplicativeExpression(text)
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
+        for piece in pieces.dropFirst() {
+            guard let operatorText = piece.operator,
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            switch operatorText {
+            case "*":
+                result = try evaluateStarlarkMultiplication(result, next, expression: text)
+            case "/":
+                result = try evaluateStarlarkDivision(result, next, expression: text)
+            case "//":
+                result = try evaluateStarlarkFloorDivision(result, next, expression: text)
+            case "%":
+                result = try evaluateStarlarkModulo(result, next, expression: text)
+            default:
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+        }
+
+        return result
+    }
+
     private static func evaluateStarlarkAddition(
         _ lhs: ConfigValue,
         _ rhs: ConfigValue,
@@ -2869,6 +2913,98 @@ public final class PolicyParser {
             return .double(Double(lhs) - rhs)
         case let (.double(lhs), .integer(rhs)):
             return .double(lhs - Double(rhs))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func evaluateStarlarkMultiplication(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        switch (lhs, rhs) {
+        case let (.integer(lhs), .integer(rhs)):
+            return .integer(lhs * rhs)
+        case let (.double(lhs), .double(rhs)):
+            return .double(lhs * rhs)
+        case let (.integer(lhs), .double(rhs)):
+            return .double(Double(lhs) * rhs)
+        case let (.double(lhs), .integer(rhs)):
+            return .double(lhs * Double(rhs))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func evaluateStarlarkDivision(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        let denominator = try numericDouble(rhs, expression: expression)
+        guard denominator != 0 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .double(try numericDouble(lhs, expression: expression) / denominator)
+    }
+
+    private static func evaluateStarlarkFloorDivision(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        switch (lhs, rhs) {
+        case let (.integer(lhs), .integer(rhs)):
+            guard rhs != 0 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return .integer(floorDividing(lhs, by: rhs))
+        default:
+            let denominator = try numericDouble(rhs, expression: expression)
+            guard denominator != 0 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return .double(floor(try numericDouble(lhs, expression: expression) / denominator))
+        }
+    }
+
+    private static func evaluateStarlarkModulo(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        expression: String
+    ) throws -> ConfigValue {
+        switch (lhs, rhs) {
+        case let (.integer(lhs), .integer(rhs)):
+            guard rhs != 0 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return .integer(lhs - floorDividing(lhs, by: rhs) * rhs)
+        default:
+            let denominator = try numericDouble(rhs, expression: expression)
+            guard denominator != 0 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            let numerator = try numericDouble(lhs, expression: expression)
+            return .double(numerator - floor(numerator / denominator) * denominator)
+        }
+    }
+
+    private static func floorDividing(_ lhs: Int64, by rhs: Int64) -> Int64 {
+        let quotient = lhs / rhs
+        let remainder = lhs % rhs
+        if remainder != 0, (remainder > 0) != (rhs > 0) {
+            return quotient - 1
+        }
+        return quotient
+    }
+
+    private static func numericDouble(_ value: ConfigValue, expression: String) throws -> Double {
+        switch value {
+        case let .integer(value):
+            return Double(value)
+        case let .double(value):
+            return value
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -3123,6 +3259,84 @@ public final class PolicyParser {
             return false
         }
         return !["+", "-", "*", "/", "%", "(", "[", "{", ",", ":", "<", ">", "=", "!"].contains(previous)
+    }
+
+    private static func splitTopLevelMultiplicativeExpression(_ text: String) -> [(operator: String?, text: String)] {
+        var pieces: [(operator: String?, text: String)] = []
+        var current = ""
+        var currentOperator: String?
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "[":
+                squareDepth += 1
+                current.append(character)
+            case "]":
+                squareDepth -= 1
+                current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth -= 1
+                current.append(character)
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+            case "*" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = "*"
+            case "/" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                let operatorText: String
+                let nextIndex = text.index(after: index)
+                if nextIndex < text.endIndex, text[nextIndex] == "/" {
+                    operatorText = "//"
+                    index = nextIndex
+                } else {
+                    operatorText = "/"
+                }
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = operatorText
+            case "%" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                current = ""
+                currentOperator = "%"
+            default:
+                current.append(character)
+            }
+            index = text.index(after: index)
+        }
+
+        pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+        return pieces
     }
 
     private static func splitTopLevelExpression(_ text: String, separator: Character) -> [String] {
