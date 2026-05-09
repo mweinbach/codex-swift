@@ -30,6 +30,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case error(ErrorEvent)
     case warning(WarningEvent)
     case guardianWarning(WarningEvent)
+    case realtimeConversationStarted(RealtimeConversationStartedEvent)
+    case realtimeConversationRealtime(RealtimeConversationRealtimeEvent)
+    case realtimeConversationClosed(RealtimeConversationClosedEvent)
+    case realtimeConversationSdp(RealtimeConversationSdpEvent)
     case modelReroute(ModelRerouteEvent)
     case modelVerification(ModelVerificationEvent)
     case contextCompacted(ContextCompactedEvent)
@@ -87,6 +91,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case agentMessageContentDelta(AgentMessageContentDeltaEvent)
     case reasoningContentDelta(ReasoningContentDeltaEvent)
     case reasoningRawContentDelta(ReasoningRawContentDeltaEvent)
+    case realtimeConversationListVoicesResponse(RealtimeConversationListVoicesResponseEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -96,6 +101,10 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case error
         case warning
         case guardianWarning = "guardian_warning"
+        case realtimeConversationStarted = "realtime_conversation_started"
+        case realtimeConversationRealtime = "realtime_conversation_realtime"
+        case realtimeConversationClosed = "realtime_conversation_closed"
+        case realtimeConversationSdp = "realtime_conversation_sdp"
         case modelReroute = "model_reroute"
         case modelVerification = "model_verification"
         case contextCompacted = "context_compacted"
@@ -153,6 +162,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case agentMessageContentDelta = "agent_message_content_delta"
         case reasoningContentDelta = "reasoning_content_delta"
         case reasoningRawContentDelta = "reasoning_raw_content_delta"
+        case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
 
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
@@ -188,6 +198,14 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .warning(try WarningEvent(from: decoder))
         case .guardianWarning:
             self = .guardianWarning(try WarningEvent(from: decoder))
+        case .realtimeConversationStarted:
+            self = .realtimeConversationStarted(try RealtimeConversationStartedEvent(from: decoder))
+        case .realtimeConversationRealtime:
+            self = .realtimeConversationRealtime(try RealtimeConversationRealtimeEvent(from: decoder))
+        case .realtimeConversationClosed:
+            self = .realtimeConversationClosed(try RealtimeConversationClosedEvent(from: decoder))
+        case .realtimeConversationSdp:
+            self = .realtimeConversationSdp(try RealtimeConversationSdpEvent(from: decoder))
         case .modelReroute:
             self = .modelReroute(try ModelRerouteEvent(from: decoder))
         case .modelVerification:
@@ -302,6 +320,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .reasoningContentDelta(try ReasoningContentDeltaEvent(from: decoder))
         case .reasoningRawContentDelta:
             self = .reasoningRawContentDelta(try ReasoningRawContentDeltaEvent(from: decoder))
+        case .realtimeConversationListVoicesResponse:
+            self = .realtimeConversationListVoicesResponse(try RealtimeConversationListVoicesResponseEvent(from: decoder))
         }
     }
 
@@ -316,6 +336,18 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .guardianWarning(event):
             try container.encode(EventType.guardianWarning, forKey: .type)
+            try event.encode(to: encoder)
+        case let .realtimeConversationStarted(event):
+            try container.encode(EventType.realtimeConversationStarted, forKey: .type)
+            try event.encode(to: encoder)
+        case let .realtimeConversationRealtime(event):
+            try container.encode(EventType.realtimeConversationRealtime, forKey: .type)
+            try event.encode(to: encoder)
+        case let .realtimeConversationClosed(event):
+            try container.encode(EventType.realtimeConversationClosed, forKey: .type)
+            try event.encode(to: encoder)
+        case let .realtimeConversationSdp(event):
+            try container.encode(EventType.realtimeConversationSdp, forKey: .type)
             try event.encode(to: encoder)
         case let .modelReroute(event):
             try container.encode(EventType.modelReroute, forKey: .type)
@@ -485,6 +517,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .reasoningRawContentDelta(event):
             try container.encode(EventType.reasoningRawContentDelta, forKey: .type)
+            try event.encode(to: encoder)
+        case let .realtimeConversationListVoicesResponse(event):
+            try container.encode(EventType.realtimeConversationListVoicesResponse, forKey: .type)
             try event.encode(to: encoder)
         }
     }

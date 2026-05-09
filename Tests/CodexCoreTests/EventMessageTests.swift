@@ -120,6 +120,59 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), reroute)
     }
 
+    func testEventMessageCoversRealtimeConversationEventsLikeRust() throws {
+        let started = EventMessage.realtimeConversationStarted(RealtimeConversationStartedEvent(
+            realtimeSessionID: nil,
+            version: .v2
+        ))
+        try XCTAssertJSONObjectEqual(started, [
+            "type": "realtime_conversation_started",
+            "realtime_session_id": NSNull(),
+            "version": "v2"
+        ])
+
+        let realtime = EventMessage.realtimeConversationRealtime(RealtimeConversationRealtimeEvent(
+            payload: .inputAudioSpeechStarted(RealtimeInputAudioSpeechStarted(itemID: "item-1"))
+        ))
+        try XCTAssertJSONObjectEqual(realtime, [
+            "type": "realtime_conversation_realtime",
+            "payload": [
+                "InputAudioSpeechStarted": [
+                    "item_id": "item-1"
+                ]
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(EventMessage.realtimeConversationSdp(RealtimeConversationSdpEvent(
+            sdp: "v=0"
+        )), [
+            "type": "realtime_conversation_sdp",
+            "sdp": "v=0"
+        ])
+
+        try XCTAssertJSONObjectEqual(EventMessage.realtimeConversationClosed(RealtimeConversationClosedEvent()), [
+            "type": "realtime_conversation_closed"
+        ])
+
+        let voices = EventMessage.realtimeConversationListVoicesResponse(RealtimeConversationListVoicesResponseEvent(
+            voices: .builtin()
+        ))
+        try XCTAssertJSONObjectEqual(voices, [
+            "type": "realtime_conversation_list_voices_response",
+            "voices": [
+                "v1": ["juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"],
+                "v2": ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"],
+                "defaultV1": "cove",
+                "defaultV2": "marin"
+            ]
+        ])
+
+        for event in [started, realtime, voices] {
+            let data = try JSONEncoder().encode(event)
+            XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), event)
+        }
+    }
+
     func testUnitEventMessagesUseTypeOnlyRustShape() throws {
         try XCTAssertJSONObjectEqual(EventMessage.contextCompacted(ContextCompactedEvent()), [
             "type": "context_compacted"

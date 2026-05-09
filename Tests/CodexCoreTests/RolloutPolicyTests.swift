@@ -143,6 +143,26 @@ final class RolloutPolicyTests: XCTestCase {
             .guardianWarning
         )
         XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .realtimeConversationStarted(RealtimeConversationStartedEvent(
+                realtimeSessionID: "conv-1"
+            ))),
+            .realtimeConversationStarted
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .realtimeConversationRealtime(RealtimeConversationRealtimeEvent(
+                payload: .conversationItemDone(itemID: "item-1")
+            ))),
+            .realtimeConversationRealtime
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .realtimeConversationClosed(RealtimeConversationClosedEvent(reason: "done"))),
+            .realtimeConversationClosed
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .realtimeConversationSdp(RealtimeConversationSdpEvent(sdp: "v=0"))),
+            .realtimeConversationSdp
+        )
+        XCTAssertEqual(
             RolloutPolicy.eventKind(for: .modelReroute(ModelRerouteEvent(
                 fromModel: "gpt-5.4",
                 toModel: "gpt-5.4-cyber",
@@ -155,6 +175,12 @@ final class RolloutPolicyTests: XCTestCase {
                 verifications: [.trustedAccessForCyber]
             ))),
             .modelVerification
+        )
+        XCTAssertEqual(
+            RolloutPolicy.eventKind(for: .realtimeConversationListVoicesResponse(
+                RealtimeConversationListVoicesResponseEvent(voices: .builtin())
+            )),
+            .realtimeConversationListVoicesResponse
         )
         XCTAssertEqual(RolloutPolicy.eventKind(for: .userMessage(UserMessageEvent(message: "hello"))), .userMessage)
         XCTAssertEqual(
@@ -171,6 +197,18 @@ final class RolloutPolicyTests: XCTestCase {
         )
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.guardianWarning(WarningEvent(message: "careful"))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationStarted(
+            RealtimeConversationStartedEvent(realtimeSessionID: "conv-1")
+        )))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationRealtime(
+            RealtimeConversationRealtimeEvent(payload: .conversationItemDone(itemID: "item-1"))
+        )))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationClosed(
+            RealtimeConversationClosedEvent(reason: "done")
+        )))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationSdp(
+            RealtimeConversationSdpEvent(sdp: "v=0")
+        )))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.modelReroute(ModelRerouteEvent(
             fromModel: "gpt-5.4",
             toModel: "gpt-5.4-cyber",
@@ -179,6 +217,9 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.modelVerification(ModelVerificationEvent(
             verifications: [.trustedAccessForCyber]
         ))))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.realtimeConversationListVoicesResponse(
+            RealtimeConversationListVoicesResponseEvent(voices: .builtin())
+        )))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.threadRolledBack(ThreadRolledBackEvent(numTurns: 1))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))

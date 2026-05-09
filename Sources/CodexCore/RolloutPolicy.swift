@@ -4,6 +4,10 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case error
     case warning
     case guardianWarning = "guardian_warning"
+    case realtimeConversationStarted = "realtime_conversation_started"
+    case realtimeConversationRealtime = "realtime_conversation_realtime"
+    case realtimeConversationClosed = "realtime_conversation_closed"
+    case realtimeConversationSdp = "realtime_conversation_sdp"
     case modelReroute = "model_reroute"
     case modelVerification = "model_verification"
     case contextCompacted = "context_compacted"
@@ -61,6 +65,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case agentMessageContentDelta = "agent_message_content_delta"
     case reasoningContentDelta = "reasoning_content_delta"
     case reasoningRawContentDelta = "reasoning_raw_content_delta"
+    case realtimeConversationListVoicesResponse = "realtime_conversation_list_voices_response"
 }
 
 public enum RolloutItem: Equatable, Sendable {
@@ -85,6 +90,14 @@ public enum RolloutPolicy {
             return .warning
         case .guardianWarning:
             return .guardianWarning
+        case .realtimeConversationStarted:
+            return .realtimeConversationStarted
+        case .realtimeConversationRealtime:
+            return .realtimeConversationRealtime
+        case .realtimeConversationClosed:
+            return .realtimeConversationClosed
+        case .realtimeConversationSdp:
+            return .realtimeConversationSdp
         case .modelReroute:
             return .modelReroute
         case .modelVerification:
@@ -199,6 +212,8 @@ public enum RolloutPolicy {
             return .reasoningContentDelta
         case .reasoningRawContentDelta:
             return .reasoningRawContentDelta
+        case .realtimeConversationListVoicesResponse:
+            return .realtimeConversationListVoicesResponse
         }
     }
 
@@ -313,6 +328,10 @@ public enum RolloutPolicy {
             return .extended
         case .warning,
              .guardianWarning,
+             .realtimeConversationStarted,
+             .realtimeConversationRealtime,
+             .realtimeConversationClosed,
+             .realtimeConversationSdp,
              .modelReroute,
              .modelVerification,
              .agentMessageDelta,
@@ -349,6 +368,7 @@ public enum RolloutPolicy {
              .agentMessageContentDelta,
              .reasoningContentDelta,
              .reasoningRawContentDelta,
+             .realtimeConversationListVoicesResponse,
              .skillsUpdateAvailable:
             return nil
         }
