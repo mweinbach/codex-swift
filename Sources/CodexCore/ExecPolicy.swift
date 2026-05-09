@@ -1154,8 +1154,14 @@ public final class PolicyParser {
         if let constant = constants[trimmed] {
             return constant
         }
+        if let indexed = try parseStarlarkIndexExpression(trimmed, constants: constants) {
+            return indexed
+        }
         if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
             let body = String(trimmed.dropFirst().dropLast())
+            if let comprehension = try parseStarlarkListComprehension(body, constants: constants) {
+                return .array(comprehension)
+            }
             if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return .array([])
             }
@@ -1348,6 +1354,178 @@ public final class PolicyParser {
         default:
             return character
         }
+    }
+
+    private static func parseStarlarkIndexExpression(
+        _ text: String,
+        constants: [String: ConfigValue]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix("]"),
+              let openIndex = matchingTopLevelIndexOpen(in: text)
+        else {
+            return nil
+        }
+
+        let baseText = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !baseText.isEmpty else {
+            return nil
+        }
+        let indexStart = text.index(after: openIndex)
+        let indexText = String(text[indexStart..<text.index(before: text.endIndex)])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let itemIndex = Int(indexText) else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let base = try parsePolicyLiteral(baseText, constants: constants)
+        guard case let .array(items) = base else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+        let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
+        guard items.indices.contains(resolvedIndex) else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+        return items[resolvedIndex]
+    }
+
+    private static func matchingTopLevelIndexOpen(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var candidate: String.Index?
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                if squareDepth == 0, parenDepth == 0 {
+                    candidate = index
+                }
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+                if squareDepth == 0,
+                   parenDepth == 0,
+                   text.index(after: index) != text.endIndex {
+                    candidate = nil
+                }
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            default:
+                break
+            }
+
+            index = text.index(after: index)
+        }
+
+        return squareDepth == 0 && parenDepth == 0 ? candidate : nil
+    }
+
+    private static func parseStarlarkListComprehension(
+        _ body: String,
+        constants: [String: ConfigValue]
+    ) throws -> [ConfigValue]? {
+        guard let forRange = topLevelKeywordRange("for", in: body),
+              let inRange = topLevelKeywordRange("in", in: body, startingAt: forRange.upperBound)
+        else {
+            return nil
+        }
+
+        let expression = String(body[..<forRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let variable = String(body[forRange.upperBound..<inRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let iterableText = String(body[inRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty,
+              isStarlarkIdentifier(variable),
+              !iterableText.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral("[\(body)]")
+        }
+
+        let iterable = try parsePolicyLiteral(iterableText, constants: constants)
+        guard case let .array(items) = iterable else {
+            throw ConfigOverrideError.invalidLiteral("[\(body)]")
+        }
+
+        return try items.map { item in
+            var scopedConstants = constants
+            scopedConstants[variable] = item
+            return try parsePolicyLiteral(expression, constants: scopedConstants)
+        }
+    }
+
+    private static func topLevelKeywordRange(
+        _ keyword: String,
+        in text: String,
+        startingAt start: String.Index? = nil
+    ) -> Range<String.Index>? {
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = start ?? text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            default:
+                break
+            }
+
+            if squareDepth == 0,
+               parenDepth == 0,
+               text[index...].hasPrefix(keyword) {
+                let end = text.index(index, offsetBy: keyword.count)
+                if isIdentifierBoundaryBefore(index, in: text),
+                   isIdentifierBoundaryAfter(end, in: text) {
+                    return index..<end
+                }
+            }
+
+            index = text.index(after: index)
+        }
+
+        return nil
     }
 
     private static func evaluateStarlarkAddition(

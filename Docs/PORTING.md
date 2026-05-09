@@ -615,6 +615,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for Starlark string and list `+` expressions in supported policy literals, including constants, builtin arguments, nested patterns, host paths, and examples. Full Starlark evaluation remains a known gap.
 - `codex-rs/execpolicy/src/parser.rs` Starlark f-strings and grouping
   - Added Swift execpolicy parser support for simple Starlark f-string interpolation of supported string expressions plus parenthesized literal expressions in constants and builtin arguments.
+- `codex-rs/execpolicy/src/parser.rs` Starlark list comprehensions and indexing
+  - Added Swift execpolicy parser support for simple list comprehensions over supported literal arrays and integer indexing of generated arrays, covering constants and builtin arguments for rules, examples, network hosts, and host executable paths.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity

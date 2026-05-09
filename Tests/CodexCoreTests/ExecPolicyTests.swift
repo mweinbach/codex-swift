@@ -699,6 +699,54 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkListComprehensions() throws {
+        let policy = try parsePolicy("""
+        TOOLS = ["git", "jj"]
+        SUBCOMMANDS = ["status", "log"]
+        HOST_PARTS = ["api", "github", "com"]
+        PATH_TOOLS = ["git"]
+        PATTERN = [[tool for tool in TOOLS], [subcommand for subcommand in SUBCOMMANDS]]
+        EXAMPLES = [f"git {subcommand}" for subcommand in SUBCOMMANDS]
+        GIT_PATHS = ["/usr/bin/" + tool for tool in PATH_TOOLS]
+        DECISIONS = ["allow", "prompt"]
+
+        prefix_rule(
+            PATTERN,
+            DECISIONS[-1],
+            match = EXAMPLES,
+            not_match = [[tool, "commit"] for tool in TOOLS],
+            justification = "inspect generated rules",
+        )
+        network_rule([part for part in HOST_PARTS][0] + ".github.com", "https", "allow")
+        host_executable("git", GIT_PATHS)
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.alts(["status", "log"])]),
+                    decision: .prompt,
+                    justification: "inspect generated rules"
+                )
+            ]
+        )
+        XCTAssertEqual(
+            policy.rules(for: "jj"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "jj", rest: [.alts(["status", "log"])]),
+                    decision: .prompt,
+                    justification: "inspect generated rules"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
