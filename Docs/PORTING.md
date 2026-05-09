@@ -620,6 +620,8 @@ Source baseline inspected for this scaffold:
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/core/src/thread_rollout_truncation.rs`
   - added Swift rollout truncation helpers for detecting prior user turns, cutting before the nth real user message, keeping the last N fork turns, applying thread rollback markers, and treating assistant inter-agent `trigger_turn` envelopes as fork-turn boundaries while non-trigger envelopes only participate in rollback accounting.
+- `codex-rs/core/src/agent/control.rs` forked rollout filtering
+  - added Swift fork-history filtering that keeps stable system/developer/user messages, final assistant messages, compacted records, event messages, and session metadata while dropping turn contexts, runtime/tool response items, non-final assistant messages, unknown roles, known-persisted placeholders, and parent MultiAgentV2 developer usage hints.
 - `codex-rs/app-server-protocol` experimental `command/exec.permissionProfile` gating
   - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled.
 - `codex-rs/app-server-protocol` experimental `account/login/start.chatgptAuthTokens` gating
