@@ -3652,6 +3652,146 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(contents[0]["text"] as? String, "passed-value:inline-value")
     }
 
+    func testMcpServerToolCallCallsConfiguredStreamableHTTPServer() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "call mcp",
+            provider: nil
+        )
+        try """
+        [mcp_servers.tools]
+        url = "https://mcp.example.test/mcp"
+        bearer_token_env_var = "MCP_TOKEN"
+
+        [mcp_servers.tools.http_headers]
+        XStatic = "static-value"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "MCP_TOKEN": "token-value",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "session-456"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"tools","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/call":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"echo: hello from app"}],"structuredContent":{"echoed":"hello from app"},"isError":false,"_meta":{"calledBy":"mcp-app"}}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"tools","tool":"echo_tool","arguments":{"message":"hello from app"},"_meta":{"source":"mcp-app"}}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "text")
+        XCTAssertEqual(content.first?["text"] as? String, "echo: hello from app")
+        XCTAssertEqual((result["structuredContent"] as? [String: Any])?["echoed"] as? String, "hello from app")
+        XCTAssertEqual(result["isError"] as? Bool, false)
+        XCTAssertEqual((result["_meta"] as? [String: Any])?["calledBy"] as? String, "mcp-app")
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Authorization"), "Bearer token-value")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "XStatic"), "static-value")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Mcp-Session-Id"), "session-456")
+        let callBody = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[1].httpBody)) as? [String: Any])
+        XCTAssertEqual(callBody["method"] as? String, "tools/call")
+        let params = try XCTUnwrap(callBody["params"] as? [String: Any])
+        XCTAssertEqual(params["name"] as? String, "echo_tool")
+        XCTAssertEqual((params["arguments"] as? [String: Any])?["message"] as? String, "hello from app")
+        XCTAssertEqual((params["_meta"] as? [String: Any])?["source"] as? String, "mcp-app")
+        XCTAssertEqual((params["_meta"] as? [String: Any])?["threadId"] as? String, threadID)
+    }
+
+    func testMcpServerToolCallCallsConfiguredStdioServer() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-06",
+            timestamp: "2025-01-02T03:04:06Z",
+            preview: "call stdio mcp",
+            provider: nil
+        )
+        let script = temp.url.appendingPathComponent("stdio-tool-mcp.sh", isDirectory: false)
+        try """
+        #!/bin/sh
+        count=0
+        while IFS= read -r line; do
+          count=$((count + 1))
+          case "$count" in
+            1)
+              printf '%s\\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"stdio","version":"1.0.0"}}}'
+              ;;
+            2)
+              printf '%s\\n' "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"result\\":{\\"content\\":[{\\"type\\":\\"text\\",\\"text\\":\\"$MCP_ENV:$INLINE\\"}],\\"structuredContent\\":{\\"transport\\":\\"stdio\\"},\\"isError\\":false,\\"_meta\\":{\\"calledBy\\":\\"stdio\\"}}}"
+              exit 0
+              ;;
+          esac
+        done
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try """
+        [mcp_servers.stdio_tool]
+        command = "\(script.path)"
+        env_vars = ["MCP_ENV"]
+        tool_timeout_sec = 10
+
+        [mcp_servers.stdio_tool.env]
+        INLINE = "inline-value"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "MCP_ENV": "passed-value",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"stdio_tool","tool":"echo_tool","arguments":{"message":"hello"}}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "text")
+        XCTAssertEqual(content.first?["text"] as? String, "passed-value:inline-value")
+        XCTAssertEqual((result["structuredContent"] as? [String: Any])?["transport"] as? String, "stdio")
+        XCTAssertEqual(result["isError"] as? Bool, false)
+        XCTAssertEqual((result["_meta"] as? [String: Any])?["calledBy"] as? String, "stdio")
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

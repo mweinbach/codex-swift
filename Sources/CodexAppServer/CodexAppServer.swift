@@ -211,6 +211,64 @@ private struct AppServerJSONObject: @unchecked Sendable {
     let object: [String: Any]
 }
 
+private final class AppServerStdioResponseCapture: @unchecked Sendable {
+    private let id: Int
+    private let lock = NSLock()
+    private var stdoutData = Data()
+    private var stderrData = Data()
+    private var storedResponse: [String: Any]?
+
+    init(id: Int) {
+        self.id = id
+    }
+
+    var response: [String: Any]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedResponse
+    }
+
+    var stderrText: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: stderrData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func appendStdout(_ data: Data) {
+        guard !data.isEmpty else {
+            return
+        }
+        lock.lock()
+        stdoutData.append(data)
+        if storedResponse == nil {
+            storedResponse = Self.response(id: id, from: stdoutData)
+        }
+        lock.unlock()
+    }
+
+    func appendStderr(_ data: Data) {
+        guard !data.isEmpty else {
+            return
+        }
+        lock.lock()
+        stderrData.append(data)
+        lock.unlock()
+    }
+
+    private static func response(id: Int, from data: Data) -> [String: Any]? {
+        let text = String(decoding: data, as: UTF8.self)
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let lineData = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  (object["id"] as? Int) == id else {
+                continue
+            }
+            return object
+        }
+        return nil
+    }
+}
+
 public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
     public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
 
@@ -5860,19 +5918,14 @@ public enum CodexAppServer {
             ]
         ], to: stdin.fileHandleForWriting, server: server)
         stdin.fileHandleForWriting.closeFile()
-        let waitSemaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            process.waitUntilExit()
-            waitSemaphore.signal()
-        }
-        if waitSemaphore.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            throw AppServerError.internalError("timed out reading MCP server \(server) response")
-        }
-        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let stderrText = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resourceResponse = try mcpStdioResponse(id: 1, from: stdoutData, stderr: stderrText, server: server)
+        let resourceResponse = try mcpReadStdioResponse(
+            id: 1,
+            stdout: stdout,
+            stderr: stderr,
+            process: process,
+            timeout: timeout,
+            server: server
+        )
         guard let result = resourceResponse["result"] as? [String: Any] else {
             if let error = resourceResponse["error"] as? [String: Any],
                let message = error["message"] as? String {
@@ -5884,6 +5937,90 @@ public enum CodexAppServer {
             throw AppServerError.internalError("MCP server \(server) returned a resource read result without contents")
         }
         return AppServerJSONObject(object: result)
+    }
+
+    fileprivate static func mcpStdioToolCallResult(
+        server: String,
+        command: String,
+        args: [String],
+        env: [String: String]?,
+        envVars: [String],
+        cwd: String?,
+        params: [String: Any],
+        timeoutSeconds: Double?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerJSONObject {
+        let process = Process()
+        if command.contains("/") {
+            process.executableURL = URL(fileURLWithPath: command)
+            process.arguments = args
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + args
+        }
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        var environment = configuration.environment
+        for name in envVars {
+            if let value = configuration.environment[name] {
+                environment[name] = value
+            }
+        }
+        for (name, value) in env ?? [:] {
+            environment[name] = value
+        }
+        process.environment = environment
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to start MCP server \(server): \(error)")
+        }
+        let timeout = timeoutSeconds.map { max($0, 0.1) } ?? 10
+        defer {
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+
+        try mcpWriteStdioRequest([
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": [
+                "protocolVersion": "2025-06-18",
+                "capabilities": [:],
+                "clientInfo": [
+                    "name": "codex-swift",
+                    "version": configuration.version
+                ]
+            ]
+        ], to: stdin.fileHandleForWriting, server: server)
+
+        try mcpWriteStdioRequest([
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": params
+        ], to: stdin.fileHandleForWriting, server: server)
+        stdin.fileHandleForWriting.closeFile()
+        let toolResponse = try mcpReadStdioResponse(
+            id: 1,
+            stdout: stdout,
+            stderr: stderr,
+            process: process,
+            timeout: timeout,
+            server: server
+        )
+        return try mcpToolCallResult(from: toolResponse, server: server)
     }
 
     fileprivate static func mcpWriteStdioRequest(
@@ -5899,26 +6036,66 @@ public enum CodexAppServer {
         handle.write(data)
     }
 
-    fileprivate static func mcpStdioResponse(
+    fileprivate static func mcpReadStdioResponse(
         id: Int,
-        from data: Data,
-        stderr: String,
+        stdout: Pipe,
+        stderr: Pipe,
+        process: Process,
+        timeout: Double,
         server: String
     ) throws -> [String: Any] {
-        let text = String(decoding: data, as: UTF8.self)
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let lineData = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                continue
+        let capture = AppServerStdioResponseCapture(id: id)
+        let semaphore = DispatchSemaphore(value: 0)
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                semaphore.signal()
+                return
             }
-            if (object["id"] as? Int) == id {
-                return object
+            capture.appendStdout(data)
+            if capture.response != nil {
+                semaphore.signal()
             }
         }
-        if !stderr.isEmpty {
-            throw AppServerError.internalError("MCP server \(server) produced no response: \(stderr)")
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                capture.appendStderr(data)
+            }
         }
-        throw AppServerError.internalError("MCP server \(server) produced no response")
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            process.terminationHandler = nil
+        }
+
+        let deadline = DispatchTime.now() + timeout
+        while true {
+            if let response = capture.response {
+                return response
+            }
+            if !process.isRunning {
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
+                capture.appendStdout(stdout.fileHandleForReading.readDataToEndOfFile())
+                capture.appendStderr(stderr.fileHandleForReading.readDataToEndOfFile())
+                if let response = capture.response {
+                    return response
+                }
+                let stderrText = capture.stderrText
+                if !stderrText.isEmpty {
+                    throw AppServerError.internalError("MCP server \(server) produced no response: \(stderrText)")
+                }
+                throw AppServerError.internalError("MCP server \(server) produced no response")
+            }
+            if semaphore.wait(timeout: deadline) == .timedOut {
+                process.terminate()
+                throw AppServerError.internalError("timed out reading MCP server \(server) response")
+            }
+        }
     }
 
     fileprivate static func mcpStreamableHTTPResourceReadResult(
@@ -5985,6 +6162,95 @@ public enum CodexAppServer {
         }
         guard result["contents"] is [Any] else {
             throw AppServerError.internalError("MCP server \(server) returned a resource read result without contents")
+        }
+        return AppServerJSONObject(object: result)
+    }
+
+    fileprivate static func mcpStreamableHTTPToolCallResult(
+        server: String,
+        url: String,
+        paramsData: Data,
+        bearerTokenEnvVar: String?,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        configuration: CodexAppServerConfiguration
+    ) async throws -> AppServerJSONObject {
+        let initializeResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: mcpHTTPHeaders(
+                bearerTokenEnvVar: bearerTokenEnvVar,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: configuration.environment
+            ),
+            sessionID: nil,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": [
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": [:],
+                    "clientInfo": [
+                        "name": "codex-swift",
+                        "version": configuration.version
+                    ]
+                ]
+            ],
+            transport: configuration.mcpHTTPTransport,
+            server: server
+        )
+        let sessionID = mcpSessionID(from: initializeResponse.headers)
+        let params = try mcpJSONObject(from: paramsData, server: server)
+        let toolResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: mcpHTTPHeaders(
+                bearerTokenEnvVar: bearerTokenEnvVar,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                environment: configuration.environment
+            ),
+            sessionID: sessionID,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": params
+            ],
+            transport: configuration.mcpHTTPTransport,
+            server: server
+        )
+        return try mcpToolCallResult(from: toolResponse.object, server: server)
+    }
+
+    fileprivate static func mcpToolCallRequestParams(tool: String, arguments: Any?, meta: Any) -> [String: Any] {
+        var params: [String: Any] = [
+            "name": tool,
+            "_meta": meta
+        ]
+        if let arguments {
+            params["arguments"] = arguments
+        }
+        return params
+    }
+
+    fileprivate static func mcpToolCallRequestParamsData(_ params: [String: Any], server: String) throws -> Data {
+        guard JSONSerialization.isValidJSONObject(params) else {
+            throw AppServerError.internalError("invalid MCP tool call params for \(server)")
+        }
+        return try JSONSerialization.data(withJSONObject: params)
+    }
+
+    fileprivate static func mcpToolCallResult(from response: [String: Any], server: String) throws -> AppServerJSONObject {
+        guard let result = response["result"] as? [String: Any] else {
+            if let error = response["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw AppServerError.internalError(message)
+            }
+            throw AppServerError.internalError("MCP server \(server) returned a response without result")
+        }
+        guard result["content"] is [Any] else {
+            throw AppServerError.internalError("MCP server \(server) returned a tool call result without content")
         }
         return AppServerJSONObject(object: result)
     }
@@ -6096,14 +6362,70 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        _ = try materializedThreadID(params: params, configuration: configuration)
+        let threadID = try materializedThreadID(params: params, configuration: configuration)
         guard let server = stringParam(params?["server"]), !server.isEmpty else {
             throw AppServerError.invalidRequest("missing server")
         }
         guard let tool = stringParam(params?["tool"]), !tool.isEmpty else {
             throw AppServerError.invalidRequest("missing tool")
         }
-        throw AppServerError.internalError("MCP tool call is not implemented for server \(server) tool \(tool)")
+        let arguments = params?["arguments"]
+        let meta = mcpToolCallMeta(params?["_meta"], threadID: threadID)
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to load MCP server config: \(error)")
+        }
+        guard let serverConfig = runtimeConfig.mcpServers[server] else {
+            throw AppServerError.invalidRequest("No MCP server named '\(server)' found.")
+        }
+        guard serverConfig.enabled else {
+            throw AppServerError.internalError("MCP server '\(server)' is disabled.")
+        }
+        let toolCallParams = mcpToolCallRequestParams(tool: tool, arguments: arguments, meta: meta)
+        let toolCallParamsData = try mcpToolCallRequestParamsData(toolCallParams, server: server)
+        switch serverConfig.transport {
+        case let .stdio(command, args, env, envVars, cwd):
+            return try mcpStdioToolCallResult(
+                server: server,
+                command: command,
+                args: args,
+                env: env,
+                envVars: envVars,
+                cwd: cwd,
+                params: toolCallParams,
+                timeoutSeconds: serverConfig.toolTimeoutSec ?? serverConfig.startupTimeoutSec,
+                configuration: configuration
+            ).object
+        case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
+            return try runAsyncBlocking {
+                try await mcpStreamableHTTPToolCallResult(
+                    server: server,
+                    url: url,
+                    paramsData: toolCallParamsData,
+                    bearerTokenEnvVar: bearerTokenEnvVar,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    configuration: configuration
+                )
+            }.object
+        }
+    }
+
+    fileprivate static func mcpToolCallMeta(_ rawMeta: Any?, threadID: String) -> Any {
+        if var meta = rawMeta as? [String: Any] {
+            meta["threadId"] = threadID
+            return meta
+        }
+        if let rawMeta {
+            return rawMeta
+        }
+        return ["threadId": threadID]
     }
 
     fileprivate static func mcpServerOAuthLoginResult(
