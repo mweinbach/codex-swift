@@ -707,7 +707,12 @@ public final class PolicyParser {
 
                 var loopConstants = constants
                 for item in items {
-                    loopConstants[forLoop.variable] = item
+                    try Self.bindStarlarkLoopTargets(
+                        forLoop.targets,
+                        to: item,
+                        constants: &loopConstants,
+                        expression: statement.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
                     try parseStatements(
                         body,
                         identifier: identifier,
@@ -1208,7 +1213,7 @@ public final class PolicyParser {
     }
 
     private static func parseTopLevelForHeader(_ statement: String) throws -> (
-        variable: String,
+        targets: [String],
         iterableText: String
     )? {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1220,17 +1225,55 @@ public final class PolicyParser {
             return nil
         }
 
-        let variable = String(trimmed[forRange.upperBound..<inRange.lowerBound])
+        let targetText = String(trimmed[forRange.upperBound..<inRange.lowerBound])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let iterableEnd = trimmed.index(before: trimmed.endIndex)
         let iterableText = String(trimmed[inRange.upperBound..<iterableEnd])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isStarlarkIdentifier(variable),
-              !iterableText.isEmpty
-        else {
+        let targets = try parseStarlarkLoopTargets(targetText, expression: trimmed)
+        guard !iterableText.isEmpty else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
-        return (variable, iterableText)
+        return (targets, iterableText)
+    }
+
+    private static func parseStarlarkLoopTargets(_ text: String, expression: String) throws -> [String] {
+        var trimmed = strippingEnclosingParentheses(from: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        if trimmed.hasPrefix("["),
+           trimmed.hasSuffix("]"),
+           enclosesWholeExpression(trimmed) {
+            trimmed = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let targetPieces = splitTopLevel(trimmed, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !targetPieces.isEmpty,
+              targetPieces.allSatisfy(isStarlarkIdentifier)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return targetPieces
+    }
+
+    private static func bindStarlarkLoopTargets(
+        _ targets: [String],
+        to item: ConfigValue,
+        constants: inout [String: ConfigValue],
+        expression: String
+    ) throws {
+        if targets.count == 1 {
+            constants[targets[0]] = item
+            return
+        }
+
+        guard case let .array(values) = item,
+              values.count == targets.count
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        for (target, value) in zip(targets, values) {
+            constants[target] = value
+        }
     }
 
     private static func parseTopLevelIfHeader(_ statement: String) throws -> String? {
@@ -2136,7 +2179,7 @@ public final class PolicyParser {
         }
 
         let expression = String(body[..<forRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let variable = String(body[forRange.upperBound..<inRange.lowerBound])
+        let targetText = String(body[forRange.upperBound..<inRange.lowerBound])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let iterableAndFilter = String(body[inRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         let iterableText: String
@@ -2150,8 +2193,8 @@ public final class PolicyParser {
             iterableText = iterableAndFilter
             filterCondition = nil
         }
+        let targets = try parseStarlarkLoopTargets(targetText, expression: "[\(body)]")
         guard !expression.isEmpty,
-              isStarlarkIdentifier(variable),
               !iterableText.isEmpty,
               filterCondition?.isEmpty != true
         else {
@@ -2166,7 +2209,7 @@ public final class PolicyParser {
         var result: [ConfigValue] = []
         for item in items {
             var scopedConstants = constants
-            scopedConstants[variable] = item
+            try bindStarlarkLoopTargets(targets, to: item, constants: &scopedConstants, expression: "[\(body)]")
             if let filterCondition,
                try !evaluateStarlarkCondition(filterCondition, constants: scopedConstants, functions: functions) {
                 continue

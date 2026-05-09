@@ -789,6 +789,52 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkLoopTargetDestructuring() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = [["git", "status"], ["jj", "log"]]
+        HOSTS = [["github", "api.github.com"], ["npm", "registry.npmjs.org"]]
+        PATHS = [["git", "/usr/bin/git"]]
+        EXAMPLES = [f"{tool} {subcommand}" for tool, subcommand in COMMANDS if tool == "git"]
+        SELECTED = [tool for [tool, subcommand] in COMMANDS if subcommand != "log"]
+
+        for tool, subcommand in COMMANDS:
+            prefix_rule(
+                [tool, subcommand],
+                "prompt" if tool == "git" else "allow",
+                match = [f"{tool} {subcommand}"],
+                not_match = EXAMPLES if tool == "jj" else [],
+                justification = f"inspect {tool} {subcommand}",
+            )
+
+        for name, host in HOSTS:
+            if name == "github":
+                network_rule(host, "https", "allow")
+
+        for [tool, path] in PATHS:
+            if tool in SELECTED:
+                host_executable(tool, [path])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "inspect git status"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
+                decision: .allow,
+                justification: "inspect jj log"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkTopLevelForLoops() throws {
         let policy = try parsePolicy("""
         TOOLS = ["git", "jj"]
