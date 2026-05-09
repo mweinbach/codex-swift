@@ -341,8 +341,26 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["du", "-d", "2", "."]), [
             .listFiles(cmd: "du -d 2 .", path: ".")
         ])
+        XCTAssertEqual(parseCommand(["ag", "TODO", "src"]), [
+            .search(cmd: "ag TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["ack", "TODO", "src"]), [
+            .search(cmd: "ack TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["pt", "TODO", "src"]), [
+            .search(cmd: "pt TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rga", "TODO", "src"]), [
+            .search(cmd: "rga TODO src", query: "TODO", path: "src")
+        ])
         XCTAssertEqual(parseCommand(["ag", "-l", "TODO", "src"]), [
             .search(cmd: "ag -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["ack", "-l", "TODO", "src"]), [
+            .search(cmd: "ack -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["pt", "-l", "TODO", "src"]), [
+            .search(cmd: "pt -l TODO src", query: "TODO", path: "src")
         ])
         XCTAssertEqual(parseCommand(["rg", "-l", "TODO", "src"]), [
             .search(cmd: "rg -l TODO src", query: "TODO", path: "src")

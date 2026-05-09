@@ -670,6 +670,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/shell-command` command parser
   - matched Rust's tree-sitter Bash rejection for malformed connector layouts, including leading operators, trailing operators, doubled semicolons, and empty pipeline segments, so Swift now collapses these shell scripts to a whole-script `unknown` instead of salvaging known commands.
   - mirrored Rust's word-only Bash parser fixtures for double-quoted arguments containing newlines, mixed single/double quote concatenation, and empty command positions so Swift keeps those edge cases pinned to upstream parser behavior.
+  - mirrored Rust's `ag`, `ack`, `pt`, and `rga` parser fixtures for normal search invocations plus `ack -l` and `pt -l` files-with-matches forms.
 - `codex-rs/shell-command` Bash word-only parser integration
   - routed shell-wrapped command summaries through Swift's Rust-shaped Bash word-only parser so escaped expansion characters inside double-quoted search arguments preserve their backslashes in summaries and query text, matching Rust tree-sitter parsing.
 - `codex-rs/shell-command` Bash escaped plain words
