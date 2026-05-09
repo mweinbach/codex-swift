@@ -282,6 +282,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
     case imageGenerationBegin(ImageGenerationBeginEvent)
     case imageGenerationEnd(ImageGenerationEndEvent)
     case contextCompacted(ContextCompactedEvent)
+    case patchApplyBegin(PatchApplyBeginEvent)
+    case patchApplyEnd(PatchApplyEndEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -302,6 +304,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case imageGenerationBegin = "image_generation_begin"
         case imageGenerationEnd = "image_generation_end"
         case contextCompacted = "context_compacted"
+        case patchApplyBegin = "patch_apply_begin"
+        case patchApplyEnd = "patch_apply_end"
     }
 
     public init(from decoder: Decoder) throws {
@@ -335,6 +339,10 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             self = .imageGenerationEnd(try ImageGenerationEndEvent(from: decoder))
         case .contextCompacted:
             self = .contextCompacted(try ContextCompactedEvent(from: decoder))
+        case .patchApplyBegin:
+            self = .patchApplyBegin(try PatchApplyBeginEvent(from: decoder))
+        case .patchApplyEnd:
+            self = .patchApplyEnd(try PatchApplyEndEvent(from: decoder))
         }
     }
 
@@ -382,6 +390,12 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .contextCompacted(event):
             try container.encode(EventType.contextCompacted, forKey: .type)
+            try event.encode(to: encoder)
+        case let .patchApplyBegin(event):
+            try container.encode(EventType.patchApplyBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .patchApplyEnd(event):
+            try container.encode(EventType.patchApplyEnd, forKey: .type)
             try event.encode(to: encoder)
         }
     }

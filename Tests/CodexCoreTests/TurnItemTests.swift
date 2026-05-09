@@ -310,6 +310,67 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
     }
 
+    func testFileChangeTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.fileChange(FileChangeItem(
+            id: "patch-1",
+            changes: [
+                "Sources/New.swift": .add(content: "let x = 1\n")
+            ],
+            status: .completed,
+            autoApproved: true,
+            stdout: "Done",
+            stderr: ""
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "FileChange",
+            "id": "patch-1",
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ],
+            "status": "completed",
+            "auto_approved": true,
+            "stdout": "Done",
+            "stderr": ""
+        ])
+        XCTAssertEqual(item.id, "patch-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .patchApplyEnd(PatchApplyEndEvent(
+                callID: "patch-1",
+                stdout: "Done",
+                stderr: "",
+                success: true,
+                changes: ["Sources/New.swift": .add(content: "let x = 1\n")],
+                status: .completed
+            ))
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
+    func testFileChangeTurnItemOmitsNilOptionalsAndPendingLegacyEnd() throws {
+        let item = TurnItem.fileChange(FileChangeItem(
+            id: "patch-1",
+            changes: ["Sources/New.swift": .add(content: "let x = 1\n")]
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "FileChange",
+            "id": "patch-1",
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ]
+        ])
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [])
+    }
+
     func testLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
         let event = LegacyEventMessage.webSearchEnd(WebSearchEndEvent(callID: "search-1", query: "docs"))
 
@@ -351,6 +412,62 @@ final class TurnItemTests: XCTestCase {
             LegacyEventMessage.self,
             from: try JSONEncoder().encode(contextCompacted)
         ), contextCompacted)
+    }
+
+    func testPatchApplyLegacyEventWireShapesUseRustTags() throws {
+        let changes = ["Sources/New.swift": FileChange.add(content: "let x = 1\n")]
+        let begin = LegacyEventMessage.patchApplyBegin(PatchApplyBeginEvent(
+            callID: "patch-1",
+            turnID: "turn-1",
+            autoApproved: true,
+            changes: changes
+        ))
+        let end = LegacyEventMessage.patchApplyEnd(PatchApplyEndEvent(
+            callID: "patch-1",
+            turnID: "turn-1",
+            stdout: "Done",
+            stderr: "",
+            success: true,
+            changes: changes,
+            status: .completed
+        ))
+
+        try XCTAssertJSONObjectEqual(begin, [
+            "type": "patch_apply_begin",
+            "call_id": "patch-1",
+            "turn_id": "turn-1",
+            "auto_approved": true,
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(end, [
+            "type": "patch_apply_end",
+            "call_id": "patch-1",
+            "turn_id": "turn-1",
+            "stdout": "Done",
+            "stderr": "",
+            "success": true,
+            "changes": [
+                "Sources/New.swift": [
+                    "type": "add",
+                    "content": "let x = 1\n"
+                ]
+            ],
+            "status": "completed"
+        ])
+
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(begin)
+        ), begin)
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(end)
+        ), end)
     }
 
     func testImageGenerationLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
@@ -408,6 +525,16 @@ final class TurnItemTests: XCTestCase {
             )),
             startedAtMilliseconds: 126
         )
+        let fileChange = ItemStartedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .fileChange(FileChangeItem(
+                id: "patch-1",
+                changes: ["Sources/New.swift": .add(content: "let x = 1\n")],
+                autoApproved: true
+            )),
+            startedAtMilliseconds: 127
+        )
 
         XCTAssertEqual(webSearch.asLegacyEvents(), [
             .webSearchBegin(WebSearchBeginEvent(callID: "search-1"))
@@ -417,6 +544,14 @@ final class TurnItemTests: XCTestCase {
         ])
         XCTAssertEqual(userMessage.asLegacyEvents(), [])
         XCTAssertEqual(imageView.asLegacyEvents(), [])
+        XCTAssertEqual(fileChange.asLegacyEvents(), [
+            .patchApplyBegin(PatchApplyBeginEvent(
+                callID: "patch-1",
+                turnID: "turn-1",
+                autoApproved: true,
+                changes: ["Sources/New.swift": .add(content: "let x = 1\n")]
+            ))
+        ])
     }
 
     func testItemLifecycleEventsCarryRustTimingFields() throws {
@@ -481,6 +616,33 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(completed.asLegacyEvents(showRawAgentReasoning: true), [
             .agentReasoning(AgentReasoningEvent(text: "summary")),
             .agentReasoningRawContent(AgentReasoningRawContentEvent(text: "raw"))
+        ])
+    }
+
+    func testItemCompletedEventUsesTurnIDForFileChangeLegacyEnd() throws {
+        let threadID = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let completed = ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .fileChange(FileChangeItem(
+                id: "patch-1",
+                changes: ["Sources/New.swift": .add(content: "let x = 1\n")],
+                status: .failed,
+                stdout: "",
+                stderr: "nope"
+            ))
+        )
+
+        XCTAssertEqual(completed.asLegacyEvents(showRawAgentReasoning: true), [
+            .patchApplyEnd(PatchApplyEndEvent(
+                callID: "patch-1",
+                turnID: "turn-1",
+                stdout: "",
+                stderr: "nope",
+                success: false,
+                changes: ["Sources/New.swift": .add(content: "let x = 1\n")],
+                status: .failed
+            ))
         ])
     }
 }

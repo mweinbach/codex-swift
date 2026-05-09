@@ -50,6 +50,12 @@ public enum FileChange: Equatable, Codable, Sendable {
     }
 }
 
+public enum PatchApplyStatus: String, Codable, Equatable, Sendable {
+    case completed
+    case failed
+    case declined
+}
+
 public struct PatchApplyBeginEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let turnID: String
@@ -91,6 +97,7 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
     public let stderr: String
     public let success: Bool
     public let changes: [String: FileChange]
+    public let status: PatchApplyStatus
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
@@ -99,6 +106,7 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
         case stderr
         case success
         case changes
+        case status
     }
 
     public init(
@@ -107,7 +115,8 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
         stdout: String,
         stderr: String,
         success: Bool,
-        changes: [String: FileChange] = [:]
+        changes: [String: FileChange] = [:],
+        status: PatchApplyStatus? = nil
     ) {
         self.callID = callID
         self.turnID = turnID
@@ -115,6 +124,7 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
         self.stderr = stderr
         self.success = success
         self.changes = changes
+        self.status = status ?? (success ? .completed : .failed)
     }
 
     public init(from decoder: Decoder) throws {
@@ -125,6 +135,8 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
         self.stderr = try container.decode(String.self, forKey: .stderr)
         self.success = try container.decode(Bool.self, forKey: .success)
         self.changes = try container.decodeIfPresent([String: FileChange].self, forKey: .changes) ?? [:]
+        self.status = try container.decodeIfPresent(PatchApplyStatus.self, forKey: .status)
+            ?? (success ? .completed : .failed)
     }
 }
 

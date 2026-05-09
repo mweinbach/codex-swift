@@ -9,6 +9,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
     case webSearch(WebSearchItem)
     case imageView(ImageViewItem)
     case imageGeneration(ImageGenerationItem)
+    case fileChange(FileChangeItem)
     case contextCompaction(ContextCompactionItem)
 
     private enum CodingKeys: String, CodingKey {
@@ -24,6 +25,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case webSearch = "WebSearch"
         case imageView = "ImageView"
         case imageGeneration = "ImageGeneration"
+        case fileChange = "FileChange"
         case contextCompaction = "ContextCompaction"
     }
 
@@ -44,6 +46,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .imageView(item):
             return item.id
         case let .imageGeneration(item):
+            return item.id
+        case let .fileChange(item):
             return item.id
         case let .contextCompaction(item):
             return item.id
@@ -69,6 +73,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .imageView(try ImageViewItem(from: decoder))
         case .imageGeneration:
             self = .imageGeneration(try ImageGenerationItem(from: decoder))
+        case .fileChange:
+            self = .fileChange(try FileChangeItem(from: decoder))
         case .contextCompaction:
             self = .contextCompaction(try ContextCompactionItem(from: decoder))
         }
@@ -101,6 +107,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .imageGeneration(item):
             try container.encode(ItemType.imageGeneration, forKey: .type)
             try item.encode(to: encoder)
+        case let .fileChange(item):
+            try container.encode(ItemType.fileChange, forKey: .type)
+            try item.encode(to: encoder)
         case let .contextCompaction(item):
             try container.encode(ItemType.contextCompaction, forKey: .type)
             try item.encode(to: encoder)
@@ -125,6 +134,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return [item.asLegacyEvent()]
         case let .imageGeneration(item):
             return [item.asLegacyEvent()]
+        case let .fileChange(item):
+            return item.asLegacyEndEvent(turnID: "").map { [$0] } ?? []
         case let .contextCompaction(item):
             return [item.asLegacyEvent()]
         }
@@ -407,6 +418,65 @@ public struct ImageGenerationItem: Equatable, Codable, Sendable {
     }
 }
 
+public struct FileChangeItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let changes: [String: FileChange]
+    public let status: PatchApplyStatus?
+    public let autoApproved: Bool?
+    public let stdout: String?
+    public let stderr: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case changes
+        case status
+        case autoApproved = "auto_approved"
+        case stdout
+        case stderr
+    }
+
+    public init(
+        id: String,
+        changes: [String: FileChange],
+        status: PatchApplyStatus? = nil,
+        autoApproved: Bool? = nil,
+        stdout: String? = nil,
+        stderr: String? = nil
+    ) {
+        self.id = id
+        self.changes = changes
+        self.status = status
+        self.autoApproved = autoApproved
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+
+    public func asLegacyBeginEvent(turnID: String) -> LegacyEventMessage {
+        .patchApplyBegin(PatchApplyBeginEvent(
+            callID: id,
+            turnID: turnID,
+            autoApproved: autoApproved ?? false,
+            changes: changes
+        ))
+    }
+
+    public func asLegacyEndEvent(turnID: String) -> LegacyEventMessage? {
+        guard let status else {
+            return nil
+        }
+
+        return .patchApplyEnd(PatchApplyEndEvent(
+            callID: id,
+            turnID: turnID,
+            stdout: stdout ?? "",
+            stderr: stderr ?? "",
+            success: status == .completed,
+            changes: changes,
+            status: status
+        ))
+    }
+}
+
 public struct ContextCompactionItem: Equatable, Codable, Sendable {
     public let id: String
 
@@ -447,6 +517,8 @@ public struct ItemStartedEvent: Equatable, Codable, Sendable {
             return []
         case let .imageGeneration(item):
             return [.imageGenerationBegin(ImageGenerationBeginEvent(callID: item.id))]
+        case let .fileChange(item):
+            return [item.asLegacyBeginEvent(turnID: turnID)]
         default:
             return []
         }
@@ -482,6 +554,9 @@ public struct ItemCompletedEvent: Equatable, Codable, Sendable {
     }
 
     public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
-        item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
+        if case let .fileChange(fileChangeItem) = item {
+            return fileChangeItem.asLegacyEndEvent(turnID: turnID).map { [$0] } ?? []
+        }
+        return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
     }
 }

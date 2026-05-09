@@ -101,7 +101,8 @@ final class PatchEventsTests: XCTestCase {
             stdout: "Done",
             stderr: "",
             success: true,
-            changes: [:]
+            changes: [:],
+            status: .completed
         ))
         try XCTAssertJSONObjectEqual(event, [
             "call_id": "patch-1",
@@ -109,7 +110,8 @@ final class PatchEventsTests: XCTestCase {
             "stdout": "Done",
             "stderr": "",
             "success": true,
-            "changes": [:]
+            "changes": [:],
+            "status": "completed"
         ])
     }
 
