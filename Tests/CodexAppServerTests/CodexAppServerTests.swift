@@ -2578,6 +2578,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(uninstalledSummary["installed"] as? Bool, false)
     }
 
+    func testPluginInstallMaterializesGitSubdirPluginSource() throws {
+        let temp = try TemporaryDirectory()
+        let pluginRepo = temp.url.appendingPathComponent("plugin-repo", isDirectory: true)
+        try writePluginFixture(
+            root: pluginRepo,
+            relativePath: "plugins/toolkit",
+            pluginName: "toolkit",
+            version: "1.2.3",
+            marker: "from-git-install"
+        )
+        try runGit(["init"], cwd: pluginRepo)
+        try runGit(["config", "user.name", "Test User"], cwd: pluginRepo)
+        try runGit(["config", "user.email", "test@example.com"], cwd: pluginRepo)
+        try runGit(["add", "."], cwd: pluginRepo)
+        try runGit(["commit", "-m", "Initial plugin"], cwd: pluginRepo)
+
+        let marketplaceRoot = temp.url.appendingPathComponent("marketplace", isDirectory: true)
+        let manifestDirectory = marketplaceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        let pluginRepoURL = URL(fileURLWithPath: pluginRepo.path, isDirectory: true).absoluteString
+        try """
+        {
+          "name": "debug",
+          "plugins": [
+            {
+              "name": "toolkit",
+              "source": {
+                "source": "git-subdir",
+                "url": "\(pluginRepoURL)",
+                "path": "plugins/toolkit"
+              }
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let marketplacePath = manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false).path
+
+        let install = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"toolkit"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNil(install["error"])
+        let installedRoot = temp.url.appendingPathComponent("plugins/cache/debug/toolkit/1.2.3", isDirectory: true)
+        XCTAssertEqual(
+            try String(contentsOf: installedRoot.appendingPathComponent("marker.txt", isDirectory: false), encoding: .utf8),
+            "from-git-install"
+        )
+        let configAfterInstall = try String(
+            contentsOf: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(configAfterInstall.contains(#"[plugins."toolkit@debug"]"#))
+        XCTAssertTrue(configAfterInstall.contains("enabled = true"))
+        let stagingRoot = temp.url.appendingPathComponent("plugins/.marketplace-plugin-source-staging", isDirectory: true)
+        let leftoverCheckouts = (try? FileManager.default.contentsOfDirectory(
+            at: stagingRoot,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        XCTAssertEqual(leftoverCheckouts, [])
+    }
+
     func testPluginUninstallValidatesIdsAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
 

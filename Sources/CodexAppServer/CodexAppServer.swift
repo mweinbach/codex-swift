@@ -2884,25 +2884,37 @@ public enum CodexAppServer {
         let marketplaceName = marketplace["name"] as? String ?? ""
         let summaries = marketplace["plugins"] as? [[String: Any]] ?? []
         guard let summary = summaries.first(where: { $0["name"] as? String == pluginName }),
-              let source = summary["source"] as? [String: Any],
-              let sourcePath = (source["path"] as? String).map({ URL(fileURLWithPath: $0, isDirectory: true) })
+              let source = summary["source"] as? [String: Any]
         else {
             throw AppServerError.invalidRequest(
                 "plugin `\(pluginName)` was not found in marketplace `\(marketplaceName)`"
             )
         }
-        guard isDirectory(sourcePath) else {
-            throw AppServerError.invalidRequest("path does not exist or is not a directory")
-        }
         do {
+            let materialized = try materializePluginInstallSource(
+                source,
+                codexHome: configuration.codexHome,
+                environment: configuration.environment
+            )
+            defer {
+                if let cleanupRoot = materialized.cleanupRoot,
+                   FileManager.default.fileExists(atPath: cleanupRoot.path) {
+                    try? FileManager.default.removeItem(at: cleanupRoot)
+                }
+            }
+            guard isDirectory(materialized.path) else {
+                throw AppServerError.invalidRequest("path does not exist or is not a directory")
+            }
             _ = try installLocalPluginCacheEntry(
-                sourcePath: sourcePath,
+                sourcePath: materialized.path,
                 pluginName: pluginName,
                 marketplaceName: marketplaceName,
                 codexHome: configuration.codexHome
             )
             setLocalPluginEnabled(id: "\(pluginName)@\(marketplaceName)", enabled: true, in: &config)
             try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+        } catch let error as AppServerError {
+            throw error
         } catch {
             throw AppServerError.internalError("failed to install local plugin: \(error)")
         }
@@ -2912,6 +2924,35 @@ public enum CodexAppServer {
             "authPolicy": summaryPolicy ?? "ON_INSTALL",
             "appsNeedingAuth": []
         ]
+    }
+
+    private static func materializePluginInstallSource(
+        _ source: [String: Any],
+        codexHome: URL,
+        environment: [String: String]
+    ) throws -> MaterializedMarketplacePluginSource {
+        let sourceType = source["type"] as? String
+        if sourceType == "local",
+           let path = source["path"] as? String {
+            return MaterializedMarketplacePluginSource(
+                path: URL(fileURLWithPath: path, isDirectory: true),
+                cleanupRoot: nil
+            )
+        }
+        if sourceType == "git",
+           let url = source["url"] as? String {
+            return try materializeMarketplacePluginSource(
+                .git(
+                    url: url,
+                    path: source["path"] as? String,
+                    refName: source["refName"] as? String,
+                    sha: source["sha"] as? String
+                ),
+                codexHome: codexHome,
+                environment: environment
+            )
+        }
+        throw AppServerError.invalidRequest("path does not exist or is not a directory")
     }
 
     private struct ConfiguredLocalPluginID {
