@@ -665,7 +665,8 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server-protocol` thread-resume response shape
   - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile.
 - `AGENTS.md` and `Docs/SwiftPort` Swift guidance
-  - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` optional/null semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
+  - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` omitted/null/value semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
+  - tightened the SwiftPort agent and contributing docs so upstream Rust lint guidance is rewritten into concrete Swift review rules: prefer labels/enums/options over opaque literals, match Swift argument-comment text to the callee label/local name when unavoidable, avoid broad concurrency escape annotations, and model Rust `Option` wire behavior explicitly when plain Swift optionals would lose information.
 - `codex-rs/shell-command` command parser
   - matched Rust's tree-sitter Bash rejection for malformed connector layouts, including leading operators, trailing operators, doubled semicolons, and empty pipeline segments, so Swift now collapses these shell scripts to a whole-script `unknown` instead of salvaging known commands.
 - `codex-rs/shell-command` Bash word-only parser integration

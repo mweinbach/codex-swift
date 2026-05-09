@@ -23,21 +23,35 @@ explicitly records an intentional Swift limitation.
 ## Swift API Style
 
 - Avoid ambiguous `Bool`, numeric, or optional parameters that make call sites
-  read like `foo(false)` or `bar(nil)`. Prefer enums, option structs, named
-  methods, or other Swift API shapes that make the call site self-documenting.
+  read like `foo(false)`, `bar(nil)`, or `load(0)`. Prefer enums, option
+  structs, named methods, labeled overloads, or small value types that make the
+  call site self-documenting.
+- Prefer external argument labels that describe the decision being made, not the
+  storage detail. For example, prefer
+  `loadHistory(limit: .unbounded)` or `setExpanded(false, animated: false)`
+  over unlabeled sentinels or positional `nil` values.
 - Avoid unlabeled parameters except for conventional first arguments where the
-  call site remains clear, such as collection transforms or XCTest assertions.
-  If an existing positional API forces an opaque literal, use a short argument
-  comment such as `setExpanded(/* animated: */ false)` or
-  `loadHistory(/* limit: */ 0)`.
-- Keep argument comments exact and useful. Match the callee's semantic
-  parameter label or local parameter name, and do not add comments for obvious
-  string literals or values that are already clear from labels. Prefer fixing
-  the API shape over adding comments when the API is local to the Swift port.
+  call site remains clear, such as collection transforms, `XCTAssertEqual`, or
+  domain APIs that read naturally as a sentence.
+- When an existing unlabeled or weakly labeled API cannot be changed and an
+  opaque literal is unavoidable, add an exact Swift argument comment before the
+  literal: `setExpanded(/* animated: */ false)`,
+  `loadHistory(/* limit: */ 0)`, or
+  `decode(/* allowUnknownVariants: */ true)`.
+- The comment text should match the callee's external argument label. If the
+  argument is intentionally unlabeled, match the local parameter name from the
+  function declaration. Do not invent a friendlier alias; the point is to make
+  review catch drift between the call site and the signature.
+- Do not add argument comments for string literals, enum cases, static members,
+  or values that are already clear from labels unless the comment adds real
+  clarity. Prefer improving the API shape over adding comments when the API is
+  local to the Swift port.
 - Prefer Swift string interpolation over `String(format:)` when no fixed
   locale, numeric precision, or C-format compatibility is required.
-- Prefer exhaustive `switch` statements for enums. Avoid `default` unless the
-  enum is intentionally open-ended or forward-compatible decoding requires it.
+- Prefer exhaustive `switch` statements for Swift enums. Avoid `default` and
+  `@unknown default` unless the enum is intentionally open-ended, imported from
+  an Apple framework, or forward-compatible decoding explicitly needs an
+  unknown bucket to match Rust behavior.
 - Newly added protocols should include doc comments explaining the protocol's
   role, who implements it, and what invariants callers may rely on.
 - Avoid boolean state pairs when a single enum models the state more accurately.
@@ -50,8 +64,8 @@ explicitly records an intentional Swift limitation.
 
 ## Swift Concurrency
 
-- Prefer native Swift `async` protocol requirements, for example
-  `func load(...) async throws -> Value`.
+- Prefer native Swift `async` protocol requirements for asynchronous contracts,
+  for example `func load(...) async throws -> Value`.
 - Add `Sendable` conformance to value types that cross task, actor, or callback
   boundaries.
 - Mark escaping concurrent closures as `@Sendable` when they can run across
@@ -59,6 +73,9 @@ explicitly records an intentional Swift limitation.
 - Avoid `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency`
   unless there is a specific interoperability reason. If one is necessary, keep
   the scope small and document the invariant in code or tests.
+- Do not use broad annotations to silence concurrency checking around protocol
+  requirements. Spell actor isolation, `Sendable` constraints, and async
+  ownership in the protocol or wrapper type that defines the contract.
 - Do not use detached tasks as a shortcut around ownership or lifetime problems.
   Prefer structured tasks, explicit cancellation paths, and injected clocks or
   transports in tests.
@@ -76,6 +93,10 @@ explicitly records an intentional Swift limitation.
   config TOML compatibility requires snake_case.
 - Preserve Rust optional behavior exactly: distinguish omitted fields from
   explicit `null` where Rust does.
+- Swift `nil` is not automatically equivalent to Rust `None`. Check the Rust
+  `serde` attributes before choosing between `encodeIfPresent`, explicit
+  `null`, a default value, or a custom tri-state wrapper for omitted/null/value
+  semantics.
 - For tagged unions, keep the Rust tag names, variant names, defaults, and
   unknown-variant behavior.
 - Prefer whole-object encode/decode assertions over field-by-field checks when
@@ -83,9 +104,6 @@ explicitly records an intentional Swift limitation.
 - When adding app-server v2 request/response/notification models, keep method
   names in `<resource>/<method>` form and use singular resource names.
 - Config RPC payloads may use snake_case when mirroring `config.toml` keys.
-- Swift optionals must preserve the Rust wire contract. Use `encodeIfPresent`
-  only for fields Rust omits when absent; explicitly encode `null` for fields
-  Rust serializes as `null`.
 - Decode unknown or future variants only where Rust accepts them. If Rust rejects
   a malformed or unknown value, preserve the rejection and error text where the
   Swift surface exposes that text.
@@ -128,6 +146,7 @@ explicitly records an intentional Swift limitation.
 Common verification commands:
 
 ```shell
+swift test --filter ResponseModelsTests
 swift test --filter ConfigRequirementsTests
 swift test --filter CodexAppServerTests
 swift test

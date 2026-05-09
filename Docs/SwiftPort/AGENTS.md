@@ -21,27 +21,40 @@ commit.
 ## Call-Site Clarity
 
 - Avoid ambiguous `Bool`, numeric, and optional parameters that force call sites
-  such as `foo(false)` or `bar(nil)`. Prefer Swift argument labels, enums,
-  option structs, named methods, or small value types that make the call site
-  self-documenting.
+  such as `foo(false)`, `bar(nil)`, or `load(0)`. Prefer Swift argument labels,
+  enums, option structs, named methods, labeled overloads, or small value types
+  that make the call site self-documenting.
+- Prefer labels and value types that describe intent instead of storage. For
+  example, prefer `readRollout(limit: .all)` or
+  `setExpanded(false, animated: false)` over positional sentinels.
 - Do not add unlabeled parameters unless they are conventional and clear at the
-  call site. When an existing positional API cannot be changed and an opaque
-  literal is unavoidable, use an exact argument comment such as
-  `setExpanded(/* animated: */ false)` or `load(/* retryLimit: */ 0)`.
-- The argument comment should match the callee's external argument label, or the
-  local parameter name when the argument is intentionally unlabeled. Do not add
-  comments for obvious string literals or already-labeled arguments.
+  call site, such as `XCTAssertEqual`, collection transforms, or an API whose
+  first argument reads naturally with the base name.
+- When an existing positional API cannot be changed and an opaque literal is
+  unavoidable, use an exact Swift argument comment immediately before the
+  literal: `setExpanded(/* animated: */ false)`,
+  `load(/* retryLimit: */ 0)`, or
+  `parse(/* allowUnknownVariants: */ true)`.
+- The argument comment must match the callee's external argument label. If the
+  argument is intentionally unlabeled, match the local parameter name from the
+  function declaration. Do not substitute a friendlier alias, because exactness
+  lets review catch signature drift.
+- Do not add comments for string literals, enum cases, static members, or
+  already-labeled arguments unless the comment adds real clarity.
 - There is no Rust `argument-comment-lint` equivalent in this Swift port today.
-  Prefer improving the API shape, then rely on review and focused tests for
-  unavoidable positional literals.
+  Treat exact argument comments as a review convention for unavoidable
+  positional literals; prefer improving the API shape first.
 - Prefer a small enum or options struct over multiple optional parameters when
   nil combinations would be hard to read or would admit impossible states.
 
 ## Swift Control Flow
 
 - Make `switch` statements over local enums exhaustive. Avoid `default` unless
-  the enum intentionally accepts future cases or the decoding logic is explicitly
-  preserving Rust's unknown-variant behavior.
+  the enum intentionally accepts future cases, the enum comes from a framework
+  that may add cases, or the decoding logic is explicitly preserving Rust's
+  unknown-variant behavior.
+- Avoid using `@unknown default` as a blanket escape hatch for first-party enums.
+  Add the new case and let the compiler show every affected decision point.
 - Model state with a single enum when paired booleans or several optionals would
   allow impossible states.
 - Keep helpers small and named for the Rust parity rule they protect when the
@@ -62,6 +75,10 @@ commit.
 - Avoid broad `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency`
   annotations. If interoperability requires one, keep it narrowly scoped and
   document the invariant in code or a test.
+- Do not use concurrency escape annotations as the Swift equivalent of Rust's
+  discouraged async-trait shortcuts. Put the actor isolation, `async`/`throws`,
+  and `Sendable` requirements on the protocol or adapter that owns the
+  contract.
 - Prefer structured tasks, explicit cancellation, and injected clocks or
   transports over `Task.detached` shortcuts.
 - Store long-lived tasks explicitly and make cancellation observable in tests
@@ -75,6 +92,10 @@ commit.
 - Swift optionals are not automatically equivalent to Rust `Option`. Use
   `encodeIfPresent` only when Rust omits the field when absent; explicitly
   encode `null` when Rust serializes `None` as `null`.
+- When Rust distinguishes omitted, `null`, and value, model that explicitly in
+  Swift instead of collapsing it to a plain optional. Use a small tri-state enum
+  or raw JSON inspection when request validation needs to know whether the
+  client set a field.
 - For tagged unions, prefer explicit `init(from:)` and `encode(to:)` paths when
   synthesis cannot preserve Rust's exact shape.
 - Prefer whole-object JSON fixture assertions for wire shapes. Field-by-field
@@ -87,6 +108,10 @@ commit.
 
 - Run the focused SwiftPM test first, then adjacent tests for the touched
   target, then `swift test` before calling the slice complete.
+- For wire-shape or call-site guidance changes, useful focused lanes include
+  `swift test --filter ResponseModelsTests`,
+  `swift test --filter RolloutModelsTests`, and the app-server route test that
+  owns the changed protocol shape.
 - If a SwiftPM command fails because the local sandbox blocks manifest or cache
   access, rerun the same command with the required permission. Do not change the
   implementation to fit that local sandbox failure.
