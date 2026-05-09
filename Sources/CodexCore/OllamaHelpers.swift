@@ -2,6 +2,7 @@ import Foundation
 
 public enum OllamaHelpers {
     public static let minimumResponsesVersion = OllamaVersion(major: 0, minor: 13, patch: 4)
+    public static let connectionErrorMessage = "No running Ollama server detected. Start it with: `ollama serve` (after installing). Install instructions: https://github.com/ollama/ollama?tab=readme-ov-file#ollama"
 
     public static func isOpenAICompatibleBaseURL(_ baseURL: String) -> Bool {
         trimTrailingSlashes(baseURL).hasSuffix("/v1")
@@ -63,6 +64,163 @@ public enum OllamaHelpers {
         }
         return result
     }
+}
+
+public struct OllamaHTTPResponse: Equatable, Sendable {
+    public let statusCode: Int
+    public let data: Data
+
+    public init(statusCode: Int, data: Data = Data()) {
+        self.statusCode = statusCode
+        self.data = data
+    }
+
+    public var isSuccess: Bool {
+        (200..<300).contains(statusCode)
+    }
+}
+
+public enum OllamaClientError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
+    case connectionUnavailable
+    case missingBaseURL
+    case unsupportedResponsesVersion(OllamaVersion)
+
+    public var description: String {
+        switch self {
+        case .connectionUnavailable:
+            return OllamaHelpers.connectionErrorMessage
+        case .missingBaseURL:
+            return "Ollama provider must have a base_url"
+        case let .unsupportedResponsesVersion(version):
+            return OllamaHelpers.unsupportedResponsesVersionMessage(for: version)
+        }
+    }
+
+    public var errorDescription: String? {
+        description
+    }
+}
+
+public struct OllamaClient {
+    public typealias Send = (URLRequest) async throws -> OllamaHTTPResponse
+
+    public let hostRoot: String
+    public let usesOpenAICompatibleAPI: Bool
+    private let send: Send
+
+    init(
+        hostRoot: String,
+        usesOpenAICompatibleAPI: Bool,
+        send: @escaping Send = OllamaClient.urlSessionSend
+    ) {
+        self.hostRoot = OllamaHelpers.baseURLToHostRoot(hostRoot)
+        self.usesOpenAICompatibleAPI = usesOpenAICompatibleAPI
+        self.send = send
+    }
+
+    public static func tryFromProvider(
+        _ provider: ModelProviderInfo,
+        send: @escaping Send = OllamaClient.urlSessionSend
+    ) async throws -> OllamaClient {
+        guard let baseURL = provider.baseURL else {
+            throw OllamaClientError.missingBaseURL
+        }
+        let client = OllamaClient(
+            hostRoot: OllamaHelpers.baseURLToHostRoot(baseURL),
+            usesOpenAICompatibleAPI: OllamaHelpers.isOpenAICompatibleBaseURL(baseURL),
+            send: send
+        )
+        try await client.probeServer()
+        return client
+    }
+
+    public func probeServer() async throws {
+        let path = usesOpenAICompatibleAPI ? "/v1/models" : "/api/tags"
+        do {
+            let response = try await send(URLRequest(url: try endpointURL(path)))
+            guard response.isSuccess else {
+                throw OllamaClientError.connectionUnavailable
+            }
+        } catch let error as OllamaClientError {
+            throw error
+        } catch {
+            throw OllamaClientError.connectionUnavailable
+        }
+    }
+
+    public func fetchModels() async throws -> [String] {
+        let response = try await send(URLRequest(url: try endpointURL("/api/tags")))
+        guard response.isSuccess else {
+            return []
+        }
+        let decoded = try JSONDecoder().decode(OllamaTagsResponse.self, from: response.data)
+        return decoded.models.compactMap(\.name)
+    }
+
+    public func fetchVersion() async throws -> OllamaVersion? {
+        let response = try await send(URLRequest(url: try endpointURL("/api/version")))
+        guard response.isSuccess else {
+            return nil
+        }
+        let decoded = try JSONDecoder().decode(OllamaVersionResponse.self, from: response.data)
+        guard let version = decoded.version?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        return OllamaHelpers.parseVersion(version)
+    }
+
+    public static func ensureResponsesSupported(
+        provider: ModelProviderInfo,
+        send: @escaping Send = OllamaClient.urlSessionSend
+    ) async throws {
+        let client = try await tryFromProvider(provider, send: send)
+        guard let version = try await client.fetchVersion() else {
+            return
+        }
+        guard OllamaHelpers.supportsResponses(version: version) else {
+            throw OllamaClientError.unsupportedResponsesVersion(version)
+        }
+    }
+
+    private func endpointURL(_ path: String) throws -> URL {
+        var root = hostRoot
+        while root.hasSuffix("/") {
+            root.removeLast()
+        }
+        guard let url = URL(string: root + path) else {
+            throw OllamaClientError.connectionUnavailable
+        }
+        return url
+    }
+
+    public static func urlSessionSend(_ request: URLRequest) async throws -> OllamaHTTPResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw OllamaClientError.connectionUnavailable
+        }
+        return OllamaHTTPResponse(statusCode: http.statusCode, data: data)
+    }
+}
+
+private struct OllamaTagsResponse: Decodable {
+    struct Model: Decodable {
+        let name: String?
+    }
+
+    let models: [Model]
+
+    private enum CodingKeys: String, CodingKey {
+        case models
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.models = try container.decodeIfPresent([Model].self, forKey: .models) ?? []
+    }
+}
+
+private struct OllamaVersionResponse: Decodable {
+    let version: String?
 }
 
 public struct OllamaVersion: Equatable, Comparable, CustomStringConvertible, Sendable {
