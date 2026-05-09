@@ -81,6 +81,43 @@ public enum FileSystemSpecialPath: Equatable, Sendable {
     case slashTmp
     case unknown(path: String, subpath: String?)
 
+    public init(jsonValue: JSONValue) {
+        guard case let .object(object) = jsonValue,
+              case let .string(kind)? = object["kind"]
+        else {
+            self = .unknown(path: "unknown", subpath: nil)
+            return
+        }
+
+        let subpath: String? = {
+            guard case let .string(value)? = object["subpath"] else {
+                return nil
+            }
+            return value
+        }()
+
+        switch kind {
+        case "root":
+            self = .root
+        case "minimal":
+            self = .minimal
+        case "project_roots", "current_working_directory":
+            self = .projectRoots(subpath: subpath)
+        case "tmpdir":
+            self = .tmpdir
+        case "slash_tmp":
+            self = .slashTmp
+        default:
+            let path: String
+            if case let .string(value)? = object["path"] {
+                path = value
+            } else {
+                path = kind
+            }
+            self = .unknown(path: path, subpath: subpath)
+        }
+    }
+
     public var jsonValue: JSONValue {
         switch self {
         case .root:

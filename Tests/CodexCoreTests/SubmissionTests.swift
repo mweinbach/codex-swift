@@ -432,6 +432,31 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(external.runtimePermissions.network, .restricted)
     }
 
+    func testFileSystemSpecialPathParsesRustAliasesAndUnknowns() {
+        XCTAssertEqual(FileSystemSpecialPath(jsonValue: .object(["kind": .string("root")])), .root)
+        XCTAssertEqual(
+            FileSystemSpecialPath(jsonValue: .object(["kind": .string("current_working_directory")])),
+            .projectRoots(subpath: nil)
+        )
+        XCTAssertEqual(
+            FileSystemSpecialPath(jsonValue: .object([
+                "kind": .string("project_roots"),
+                "subpath": .string("Sources")
+            ])),
+            .projectRoots(subpath: "Sources")
+        )
+        XCTAssertEqual(
+            FileSystemSpecialPath(jsonValue: .object([
+                "kind": .string("future_token"),
+                "subpath": .string("nested")
+            ])),
+            .unknown(path: "future_token", subpath: "nested")
+        )
+        XCTAssertEqual(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue, .object([
+            "kind": .string("project_roots")
+        ]))
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
