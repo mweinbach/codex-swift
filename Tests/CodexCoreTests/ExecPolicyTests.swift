@@ -2226,6 +2226,53 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringSearchMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        TEXT = "bonbon"
+        CYRILLIC = "Троянская война окончена"
+        FIRST = TEXT.find("on")
+        SECOND = TEXT.find("on", 2)
+        MISSING = TEXT.find("on", 2, 5)
+        LAST = TEXT.rfind("on")
+        LIMITED_LAST = TEXT.rfind("on", None, 5)
+        COUNT = "abababa".count("aba")
+        WINDOW_COUNT = "hello, world!".count("o", 7, 12)
+        EMPTY_COUNT = "abc".count("")
+        INDEX = TEXT.index("on", 2)
+        REVERSE_INDEX = TEXT.rindex("on", None, 5)
+        CYRILLIC_INDEX = CYRILLIC.find("война")
+
+        if FIRST == 1 and SECOND == 4 and MISSING == -1 and LAST == 4 and LIMITED_LAST == 1:
+            prefix_rule([TOOL, "search-" + str(INDEX)], "allow", justification = "count " + str(COUNT) + "/" + str(WINDOW_COUNT))
+
+        if EMPTY_COUNT == 4 and REVERSE_INDEX == 1 and CYRILLIC_INDEX == 10:
+            network_rule("search" + str(CYRILLIC_INDEX) + ".example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/search/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("search-4")]),
+                decision: .allow,
+                justification: "count 2/1"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "search10.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/search/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if "bonbon".index("on", 2, 5) == 0:
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if "bonbon".rindex("on", 2, 5) == 0:
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "

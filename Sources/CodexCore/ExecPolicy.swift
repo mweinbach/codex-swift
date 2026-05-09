@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "capitalize", "title", "strip", "lstrip", "rstrip", "split", "replace", "removeprefix", "removesuffix", "count", "find", "index", "rfind", "rindex", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2799,6 +2799,30 @@ public final class PolicyParser {
         case "removesuffix":
             let suffix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
             return .string(removingStarlarkSuffix(suffix, from: receiver))
+        case "count":
+            let arguments = try parseStringSearchMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            guard let window = starlarkStringSearchWindow(receiver, start: arguments.start, end: arguments.end) else {
+                return .integer(0)
+            }
+            return .integer(Int64(countingStarlarkStringMatches(arguments.needle, in: window.haystack)))
+        case "find":
+            let arguments = try parseStringSearchMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            return .integer(Int64(findingStarlarkString(arguments.needle, in: receiver, start: arguments.start, end: arguments.end, direction: .forward) ?? -1))
+        case "index":
+            let arguments = try parseStringSearchMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            guard let foundIndex = findingStarlarkString(arguments.needle, in: receiver, start: arguments.start, end: arguments.end, direction: .forward) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return .integer(Int64(foundIndex))
+        case "rfind":
+            let arguments = try parseStringSearchMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            return .integer(Int64(findingStarlarkString(arguments.needle, in: receiver, start: arguments.start, end: arguments.end, direction: .reverse) ?? -1))
+        case "rindex":
+            let arguments = try parseStringSearchMethodArguments(rawArguments, expression: text, constants: constants, functions: functions)
+            guard let foundIndex = findingStarlarkString(arguments.needle, in: receiver, start: arguments.start, end: arguments.end, direction: .reverse) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return .integer(Int64(foundIndex))
         case "isalnum":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .bool(starlarkStringIsAlphanumeric(receiver))
@@ -2954,6 +2978,52 @@ public final class PolicyParser {
         return value
     }
 
+    private static func parseStringSearchMethodArguments(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> (needle: String, start: Int?, end: Int?) {
+        guard (1...3).contains(rawArguments.count) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let needle = try parseStringMethodArgument(
+            rawArguments[0],
+            expression: expression,
+            constants: constants,
+            functions: functions
+        )
+        let start = try rawArguments.count >= 2
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[1],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            : nil
+        let end = try rawArguments.count == 3
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[2],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            : nil
+        return (needle, start, end)
+    }
+
+    private static func parseOptionalStarlarkSearchBound(
+        _ rawArgument: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> Int? {
+        if rawArgument == "None" {
+            return nil
+        }
+        return try parseStarlarkInteger(rawArgument, constants: constants, functions: functions, expression: expression)
+    }
+
     private static func trimmingStarlarkString(
         _ string: String,
         characters: String?,
@@ -3062,6 +3132,93 @@ public final class PolicyParser {
             return string
         }
         return String(string[..<range.lowerBound])
+    }
+
+    private enum StarlarkStringSearchDirection {
+        case forward
+        case reverse
+    }
+
+    private static func starlarkStringSearchWindow(
+        _ string: String,
+        start rawStart: Int?,
+        end rawEnd: Int?
+    ) -> (start: Int, haystack: String)? {
+        let characters = Array(string)
+        let count = characters.count
+        if rawStart == nil, rawEnd == nil {
+            return (0, string)
+        }
+        if let start = rawStart, rawEnd == nil, start >= 0 {
+            guard start <= count else {
+                return nil
+            }
+            return (start, String(characters[start...]))
+        }
+        if rawStart == nil, let end = rawEnd, end >= 0 {
+            return (0, String(characters[..<min(end, count)]))
+        }
+        if let start = rawStart, let end = rawEnd, start >= 0, end >= start {
+            guard start <= count else {
+                return nil
+            }
+            let relativeEnd = min(end - start, count - start)
+            return (start, String(characters[start..<start + relativeEnd]))
+        }
+        if let start = rawStart, let end = rawEnd, (start >= 0) == (end >= 0), start > end {
+            return nil
+        }
+
+        let start = normalizedStarlarkSearchBound(rawStart ?? 0, count: count)
+        let end = normalizedStarlarkSearchBound(rawEnd ?? count, count: count)
+        guard start <= end else {
+            return nil
+        }
+        return (start, String(characters[start..<end]))
+    }
+
+    private static func normalizedStarlarkSearchBound(_ value: Int, count: Int) -> Int {
+        let resolved = value < 0 ? value + count : value
+        return min(max(resolved, 0), count)
+    }
+
+    private static func countingStarlarkStringMatches(_ needle: String, in haystack: String) -> Int {
+        if needle.isEmpty {
+            return haystack.count + 1
+        }
+        var count = 0
+        var cursor = haystack.startIndex
+        while let range = haystack.range(of: needle, range: cursor..<haystack.endIndex) {
+            count += 1
+            cursor = range.upperBound
+        }
+        return count
+    }
+
+    private static func findingStarlarkString(
+        _ needle: String,
+        in string: String,
+        start: Int?,
+        end: Int?,
+        direction: StarlarkStringSearchDirection
+    ) -> Int? {
+        guard let window = starlarkStringSearchWindow(string, start: start, end: end) else {
+            return nil
+        }
+        if needle.isEmpty {
+            return direction == .forward ? window.start : window.start + window.haystack.count
+        }
+        let range: Range<String.Index>?
+        switch direction {
+        case .forward:
+            range = window.haystack.range(of: needle)
+        case .reverse:
+            range = window.haystack.range(of: needle, options: .backwards)
+        }
+        guard let range else {
+            return nil
+        }
+        return window.start + window.haystack.distance(from: window.haystack.startIndex, to: range.lowerBound)
     }
 
     private static func starlarkStringIsAlphanumeric(_ string: String) -> Bool {

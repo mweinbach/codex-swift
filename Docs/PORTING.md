@@ -665,6 +665,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `.capitalize()` and `.title()` Unicode-aware case conversions across supported policy literals, generated rule values, conditions, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string affix removal methods
   - Added Swift execpolicy parser support for `.removeprefix(...)` and `.removesuffix(...)`, including Rust's empty-affix no-op behavior across supported policy literals, generated rule values, conditions, and host executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string search methods
+  - Added Swift execpolicy parser support for `.count(...)`, `.find(...)`, `.index(...)`, `.rfind(...)`, and `.rindex(...)`, including optional `start`/`end` bounds, `None` bounds, non-overlapping counts, empty-needle behavior, reverse search, and failing index lookups.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string normalization methods
   - Added Swift execpolicy parser support for string `.lower()`, `.upper()`, `.strip(...)`, `.lstrip(...)`, `.rstrip(...)`, and separator-based `.split(...)` method calls across supported policy literals, helper returns, list/loop bodies, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string replacement method
