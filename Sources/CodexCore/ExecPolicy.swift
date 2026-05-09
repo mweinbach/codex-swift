@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "str", "int", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -3487,6 +3487,13 @@ public final class PolicyParser {
             )
         case "int":
             return try parseStarlarkIntegerConversionCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "float":
+            return try parseStarlarkFloatConversionCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3848,6 +3855,23 @@ public final class PolicyParser {
         }
     }
 
+    private static func parseStarlarkFloatConversionCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        switch rawArguments.count {
+        case 0:
+            return .double(0)
+        case 1:
+            let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+            return try .double(starlarkFloat(value, expression: expression))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
     private static func parseStarlarkBooleanConversionCall(
         _ rawArguments: [String],
         expression: String,
@@ -3860,6 +3884,26 @@ public final class PolicyParser {
         case 1:
             let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
             return .bool(truthy(value))
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkFloat(_ value: ConfigValue, expression: String) throws -> Double {
+        switch value {
+        case let .double(value):
+            return value
+        case let .integer(value):
+            return Double(value)
+        case let .bool(value):
+            return value ? 1 : 0
+        case let .string(value):
+            guard let double = Double(value),
+                  !double.isInfinite || value.lowercased().contains("inf")
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            return double
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }

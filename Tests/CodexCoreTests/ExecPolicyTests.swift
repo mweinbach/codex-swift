@@ -2286,31 +2286,33 @@ final class ExecPolicyTests: XCTestCase {
         let policy = try parsePolicy("""
         TOOL = "git"
         INDEX = int("2")
-        HOST = "api" + str(INDEX) + ".github.com"
+        FRACTION = float(".5")
+        TOTAL = float(INDEX) + FRACTION + float(True) - float()
+        HOST = "api" + str(int(TOTAL - FRACTION - 1.0)) + ".github.com"
 
-        if bool([TOOL]) and not bool([]) and bool("x") and not bool("") and int(True) == 1 and int(False) == 0 and int(2.9) == 2 and str(True) == "True":
-            prefix_rule([TOOL, "status-" + str(INDEX)], "allow", justification = str(["conv", INDEX]))
+        if bool([TOOL]) and not bool([]) and bool("x") and not bool("") and int(True) == 1 and int(False) == 0 and int(2.9) == 2 and str(True) == "True" and float("1e2") == 100.0:
+            prefix_rule([TOOL, "status-" + str(int(TOTAL - 1.5))], "allow", justification = str(["conv", INDEX, FRACTION]))
             network_rule(HOST, "https", "allow")
 
         if bool():
             prefix_rule(["bad"], "allow")
 
-        if str() == "" and int() == 0:
-            host_executable(name = TOOL, paths = ["/usr/bin/" + TOOL])
+        if str() == "" and int() == 0 and float() == 0.0 and float(False) == 0.0:
+            host_executable(name = TOOL, paths = ["/opt/" + str(int(float(True))) + "/" + TOOL])
         """)
 
         XCTAssertEqual(policy.rules(for: "git"), [
             PrefixRule(
                 pattern: PrefixPattern(first: "git", rest: [.single("status-2")]),
                 decision: .allow,
-                justification: #"["conv", 2]"#
+                justification: #"["conv", 2, 0.5]"#
             )
         ])
         XCTAssertEqual(policy.rules(for: "bad"), [])
         XCTAssertEqual(policy.networkRules(), [
             NetworkRule(host: "api2.github.com", protocol: .https, decision: .allow)
         ])
-        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/1/git"]])
     }
 
     func testParserEvaluatesRustStarlarkDictBuiltin() throws {
