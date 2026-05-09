@@ -1231,7 +1231,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(notLoadedError["message"] as? String, "thread not found: \(persistedThreadID)")
     }
 
-    func testThreadGoalMethodsReturnRustDisabledFeatureErrorByDefault() throws {
+    func testThreadGoalMethodsRequireExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()
 
@@ -1239,6 +1239,22 @@ final class CodexAppServerTests: XCTestCase {
             let response = try appServerResponse(
                 #"{"id":\#(index + 1),"method":"\#(method)","params":{"threadId":"\#(threadID)"}}"#,
                 codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(method) requires experimentalApi capability")
+        }
+    }
+
+    func testThreadGoalMethodsReturnRustDisabledFeatureErrorWhenExperimentalAPIEnabled() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = UUID().uuidString.lowercased()
+
+        for (index, method) in ["thread/goal/set", "thread/goal/get", "thread/goal/clear"].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(method)","params":{"threadId":"\#(threadID)"}}"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
             )
             let error = try XCTUnwrap(response["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32600)
@@ -1259,7 +1275,10 @@ final class CodexAppServerTests: XCTestCase {
             preview: "goal thread",
             provider: "mock_provider"
         )
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
 
         let setMessages = try decodeMessages(processor.processLine(Data(
             #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"  keep polishing  ","status":"budgetLimited","tokenBudget":10}}"#.utf8
@@ -1331,7 +1350,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let emptyObjective = try appServerResponse(
             #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"   "}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let emptyObjectiveError = try XCTUnwrap(emptyObjective["error"] as? [String: Any])
         XCTAssertEqual(emptyObjectiveError["code"] as? Int, -32600)
@@ -1339,7 +1359,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let zeroBudget = try appServerResponse(
             #"{"id":2,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":0}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let zeroBudgetError = try XCTUnwrap(zeroBudget["error"] as? [String: Any])
         XCTAssertEqual(zeroBudgetError["code"] as? Int, -32600)
@@ -1347,7 +1368,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let missingGoal = try appServerResponse(
             #"{"id":3,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","status":"paused"}}"#,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let missingGoalError = try XCTUnwrap(missingGoal["error"] as? [String: Any])
         XCTAssertEqual(missingGoalError["code"] as? Int, -32600)
@@ -8851,23 +8873,27 @@ final class CodexAppServerTests: XCTestCase {
     private func appServerResponse(
         _ line: String,
         codexHome: URL,
-        initializeFirst: Bool = true
+        initializeFirst: Bool = true,
+        experimentalAPIEnabled: Bool = false
     ) throws -> [String: Any] {
         try appServerResponse(
             line,
             configuration: testConfiguration(codexHome: codexHome),
-            initializeFirst: initializeFirst
+            initializeFirst: initializeFirst,
+            experimentalAPIEnabled: experimentalAPIEnabled
         )
     }
 
     private func appServerResponse(
         _ line: String,
         configuration: CodexAppServerConfiguration,
-        initializeFirst: Bool = true
+        initializeFirst: Bool = true,
+        experimentalAPIEnabled: Bool = false
     ) throws -> [String: Any] {
         let processor = CodexAppServerMessageProcessor(configuration: configuration)
         if initializeFirst {
-            _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8)))
+            let capabilities = experimentalAPIEnabled ? #","capabilities":{"experimentalApi":true}"# : ""
+            _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}\#(capabilities)}}"#.utf8)))
         }
         return try decode(processor.processLine(Data(line.utf8)))
     }

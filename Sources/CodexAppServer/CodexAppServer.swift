@@ -1670,10 +1670,18 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func requireExperimentalAPI(method: String, experimentalAPIEnabled: Bool) throws {
+        guard experimentalAPIEnabled else {
+            throw AppServerError.invalidRequest("\(method) requires experimentalApi capability")
+        }
+    }
+
     fileprivate static func threadGoalSetResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
     ) throws -> (result: [String: Any], threadID: String, goal: [String: Any]) {
+        try requireExperimentalAPI(method: "thread/goal/set", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         var goals = try readThreadGoals(codexHome: configuration.codexHome)
@@ -1729,8 +1737,10 @@ public enum CodexAppServer {
 
     fileprivate static func threadGoalGetResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
+        try requireExperimentalAPI(method: "thread/goal/get", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         let goal = try readThreadGoals(codexHome: configuration.codexHome)[threadID]?.object
@@ -1739,8 +1749,10 @@ public enum CodexAppServer {
 
     fileprivate static func threadGoalClearResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
     ) throws -> (result: [String: Any], threadID: String, cleared: Bool) {
+        try requireExperimentalAPI(method: "thread/goal/clear", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         var goals = try readThreadGoals(codexHome: configuration.codexHome)
@@ -13879,7 +13891,11 @@ final class CodexAppServerMessageProcessor {
                         )
                     )
                 case "thread/goal/set":
-                    let result = try CodexAppServer.threadGoalSetResult(params: params, configuration: configuration)
+                    let result = try CodexAppServer.threadGoalSetResult(
+                        params: params,
+                        configuration: configuration,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: result.result
@@ -13891,10 +13907,18 @@ final class CodexAppServerMessageProcessor {
                 case "thread/goal/get":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadGoalGetResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.threadGoalGetResult(
+                            params: params,
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
+                        )
                     )
                 case "thread/goal/clear":
-                    let result = try CodexAppServer.threadGoalClearResult(params: params, configuration: configuration)
+                    let result = try CodexAppServer.threadGoalClearResult(
+                        params: params,
+                        configuration: configuration,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     response = CodexAppServer.responseObject(id: id, result: result.result)
                     if result.cleared {
                         notifications.append(CodexAppServer.threadGoalClearedNotification(threadID: result.threadID))
