@@ -1313,6 +1313,7 @@ public final class PolicyParser {
         var statements: [String] = []
         var current = ""
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1340,16 +1341,22 @@ public final class PolicyParser {
             case "]":
                 squareDepth -= 1
                 current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth -= 1
+                current.append(character)
             case "(":
                 parenDepth += 1
                 current.append(character)
             case ")":
                 parenDepth -= 1
                 current.append(character)
-            case "\n" where squareDepth == 0 && parenDepth == 0:
+            case "\n" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
                 statements.append(current)
                 current = ""
-            case ";" where squareDepth == 0 && parenDepth == 0:
+            case ";" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
                 statements.append(current)
                 current = ""
             default:
@@ -1412,6 +1419,7 @@ public final class PolicyParser {
 
     private static func topLevelEqualsIndex(in text: String) -> String.Index? {
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1438,11 +1446,15 @@ public final class PolicyParser {
                 squareDepth += 1
             case "]":
                 squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
             case "(":
                 parenDepth += 1
             case ")":
                 parenDepth -= 1
-            case "=" where squareDepth == 0 && parenDepth == 0:
+            case "=" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
                 let previous = index > text.startIndex ? text[text.index(before: index)] : nil
                 let nextIndex = text.index(after: index)
                 let next = nextIndex < text.endIndex ? text[nextIndex] : nil
@@ -1531,6 +1543,9 @@ public final class PolicyParser {
                 return try parsePolicyLiteral(item, constants: constants, functions: functions)
             })
         }
+        if trimmed.hasPrefix("{"), trimmed.hasSuffix("}") {
+            return try parseStarlarkDictLiteral(trimmed, constants: constants, functions: functions)
+        }
         if let interpolated = try parseStarlarkFStringLiteral(trimmed, constants: constants, functions: functions) {
             return .string(interpolated)
         }
@@ -1552,6 +1567,7 @@ public final class PolicyParser {
 
     private static func enclosesWholeExpression(_ text: String) -> Bool {
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1578,6 +1594,10 @@ public final class PolicyParser {
                 squareDepth += 1
             case "]":
                 squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
             case "(":
                 parenDepth += 1
             case ")":
@@ -1589,13 +1609,13 @@ public final class PolicyParser {
                 break
             }
 
-            if squareDepth < 0 || parenDepth < 0 {
+            if squareDepth < 0 || braceDepth < 0 || parenDepth < 0 {
                 return false
             }
             index = text.index(after: index)
         }
 
-        return squareDepth == 0 && parenDepth == 0
+        return squareDepth == 0 && braceDepth == 0 && parenDepth == 0
     }
 
     private static func parseStarlarkFStringLiteral(
@@ -1756,6 +1776,7 @@ public final class PolicyParser {
 
     private static func matchingTopLevelCallOpen(in text: String) -> String.Index? {
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1783,14 +1804,19 @@ public final class PolicyParser {
                 squareDepth += 1
             case "]":
                 squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
             case "(":
-                if squareDepth == 0, parenDepth == 0 {
+                if squareDepth == 0, braceDepth == 0, parenDepth == 0 {
                     candidate = index
                 }
                 parenDepth += 1
             case ")":
                 parenDepth -= 1
                 if squareDepth == 0,
+                   braceDepth == 0,
                    parenDepth == 0,
                    text.index(after: index) != text.endIndex {
                     candidate = nil
@@ -1802,7 +1828,7 @@ public final class PolicyParser {
             index = text.index(after: index)
         }
 
-        return squareDepth == 0 && parenDepth == 0 ? candidate : nil
+        return squareDepth == 0 && braceDepth == 0 && parenDepth == 0 ? candidate : nil
     }
 
     private static func parseStarlarkIndexExpression(
@@ -1823,23 +1849,34 @@ public final class PolicyParser {
         let indexStart = text.index(after: openIndex)
         let indexText = String(text[indexStart..<text.index(before: text.endIndex)])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let itemIndex = Int(indexText) else {
-            throw ConfigOverrideError.invalidLiteral(text)
-        }
 
         let base = try parsePolicyLiteral(baseText, constants: constants, functions: functions)
-        guard case let .array(items) = base else {
+        switch base {
+        case let .array(items):
+            guard let itemIndex = Int(indexText) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
+            guard items.indices.contains(resolvedIndex) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return items[resolvedIndex]
+        case let .table(items):
+            let key = try parsePolicyLiteral(indexText, constants: constants, functions: functions)
+            guard case let .string(key) = key,
+                  let value = items[key]
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return value
+        default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
-        let resolvedIndex = itemIndex >= 0 ? itemIndex : items.count + itemIndex
-        guard items.indices.contains(resolvedIndex) else {
-            throw ConfigOverrideError.invalidLiteral(text)
-        }
-        return items[resolvedIndex]
     }
 
     private static func matchingTopLevelIndexOpen(in text: String) -> String.Index? {
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1864,17 +1901,22 @@ public final class PolicyParser {
             case "\"", "'":
                 quote = character
             case "[":
-                if squareDepth == 0, parenDepth == 0 {
+                if squareDepth == 0, braceDepth == 0, parenDepth == 0 {
                     candidate = index
                 }
                 squareDepth += 1
             case "]":
                 squareDepth -= 1
                 if squareDepth == 0,
+                   braceDepth == 0,
                    parenDepth == 0,
                    text.index(after: index) != text.endIndex {
                     candidate = nil
                 }
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
             case "(":
                 parenDepth += 1
             case ")":
@@ -1886,7 +1928,7 @@ public final class PolicyParser {
             index = text.index(after: index)
         }
 
-        return squareDepth == 0 && parenDepth == 0 ? candidate : nil
+        return squareDepth == 0 && braceDepth == 0 && parenDepth == 0 ? candidate : nil
     }
 
     private static func parseStarlarkListComprehension(
@@ -1923,6 +1965,88 @@ public final class PolicyParser {
         }
     }
 
+    private static func parseStarlarkDictLiteral(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        let body = String(text.dropFirst().dropLast())
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .table([:])
+        }
+
+        var table: [String: ConfigValue] = [:]
+        for pair in splitTopLevel(body, separator: ",") {
+            let trimmed = pair.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            guard let colonIndex = topLevelColonIndex(in: trimmed) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+
+            let rawKey = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueStart = trimmed.index(after: colonIndex)
+            let rawValue = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = try parsePolicyLiteral(rawKey, constants: constants, functions: functions)
+            guard case let .string(key) = key,
+                  !rawValue.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            table[key] = try parsePolicyLiteral(rawValue, constants: constants, functions: functions)
+        }
+        return .table(table)
+    }
+
+    private static func topLevelColonIndex(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            case ":" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                return index
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        return nil
+    }
+
     private static func topLevelKeywordRange(
         _ keyword: String,
         in text: String,
@@ -1946,6 +2070,7 @@ public final class PolicyParser {
         requiresIdentifierBoundaries: Bool
     ) -> Range<String.Index>? {
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -1972,6 +2097,10 @@ public final class PolicyParser {
                 squareDepth += 1
             case "]":
                 squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
             case "(":
                 parenDepth += 1
             case ")":
@@ -1981,6 +2110,7 @@ public final class PolicyParser {
             }
 
             if squareDepth == 0,
+               braceDepth == 0,
                parenDepth == 0,
                text[index...].hasPrefix(token) {
                 let end = text.index(index, offsetBy: token.count)
@@ -2052,10 +2182,17 @@ public final class PolicyParser {
         if let range = topLevelKeywordRange("in", in: trimmed) {
             let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
             let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            guard case let .array(items) = haystack else {
+            switch haystack {
+            case let .array(items):
+                return items.contains(needle)
+            case let .table(items):
+                guard case let .string(key) = needle else {
+                    throw ConfigOverrideError.invalidLiteral(condition)
+                }
+                return items[key] != nil
+            default:
                 throw ConfigOverrideError.invalidLiteral(condition)
             }
-            return items.contains(needle)
         }
 
         return try truthy(parsePolicyLiteral(trimmed, constants: constants, functions: functions))
@@ -2290,6 +2427,7 @@ public final class PolicyParser {
         var pieces: [String] = []
         var current = ""
         var squareDepth = 0
+        var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
@@ -2317,13 +2455,19 @@ public final class PolicyParser {
             case "]":
                 squareDepth -= 1
                 current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth -= 1
+                current.append(character)
             case "(":
                 parenDepth += 1
                 current.append(character)
             case ")":
                 parenDepth -= 1
                 current.append(character)
-            case separator where squareDepth == 0 && parenDepth == 0:
+            case separator where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
                 pieces.append(current)
                 current = ""
             default:

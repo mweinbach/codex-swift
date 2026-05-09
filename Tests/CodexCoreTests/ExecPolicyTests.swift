@@ -954,6 +954,48 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkDictLiteralsAndStringIndexing() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        SETTINGS = {
+            TOOL: {
+                "pattern": [TOOL, "status"],
+                "match": [TOOL, "status"],
+                "host": "api.github.com",
+                "path": "/usr/bin/git",
+            },
+            "npm": {
+                "pattern": ["npm", "publish"],
+            },
+        }
+
+        def setting(tool, name):
+            return SETTINGS[tool][name]
+
+        if TOOL in SETTINGS and "path" in SETTINGS[TOOL]:
+            prefix_rule(
+                setting(TOOL, "pattern"),
+                "prompt",
+                match = [setting(TOOL, "match")],
+                justification = "inspect " + TOOL,
+            )
+            network_rule(setting(TOOL, "host"), "https", "allow")
+            host_executable(TOOL, [setting(TOOL, "path")])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "inspect git"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")
