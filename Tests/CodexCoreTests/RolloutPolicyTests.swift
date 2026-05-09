@@ -113,6 +113,7 @@ final class RolloutPolicyTests: XCTestCase {
             .guardianAssessment,
             .execCommandEnd,
             .viewImageToolCall,
+            .dynamicToolCallRequest,
             .dynamicToolCallResponse,
             .collabAgentSpawnEnd,
             .collabAgentInteractionEnd,
@@ -331,12 +332,14 @@ final class RolloutPolicyTests: XCTestCase {
             callID: "input-1",
             questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick one")]
         ))))
-        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.dynamicToolCallRequest(DynamicToolCallRequest(
+        let dynamicToolCallRequest = EventMessage.dynamicToolCallRequest(DynamicToolCallRequest(
             callID: "dyn-1",
             turnID: "turn-1",
             tool: "lookup",
             arguments: .object([:])
-        ))))
+        ))
+        XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(dynamicToolCallRequest))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(dynamicToolCallRequest, mode: .extended))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.patchApplyUpdated(PatchApplyUpdatedEvent(
             callID: "patch-1",
             changes: [:]

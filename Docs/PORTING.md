@@ -535,7 +535,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` rollout turn context sidecars
   - Expanded Swift `TurnContextItem` rollout serialization with Rust's turn/trace IDs, current date/timezone, permission profile, network, runtime filesystem policy, personality, collaboration mode, realtime-active fields, and fallback permission-profile derivation.
 - `codex-rs/rollout/src/policy.rs` event persistence modes
-  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image/guardian-assessment events, and the stricter memories response-item persistence bucket.
+  - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events, extended-only error/exec/view-image/guardian-assessment/dynamic-tool events, and the stricter memories response-item persistence bucket.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
   - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
 - `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules
