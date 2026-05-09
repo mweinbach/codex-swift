@@ -7440,10 +7440,11 @@ public enum CodexAppServer {
         guard let mergeStrategy = stringParam(params?["mergeStrategy"]) else {
             throw AppServerError.invalidRequest("missing mergeStrategy")
         }
+        let parsedMergeStrategy = try ConfigMergeStrategy(rawValue: mergeStrategy)
         let edit = ConfigWriteEdit(
             keyPath: keyPath,
             value: try configWriteValue(params?["value"]),
-            mergeStrategy: mergeStrategy
+            mergeStrategy: parsedMergeStrategy
         )
         return try configWriteResult(
             edits: [edit],
@@ -7470,7 +7471,7 @@ public enum CodexAppServer {
             return ConfigWriteEdit(
                 keyPath: keyPath,
                 value: try configWriteValue(rawEdit["value"]),
-                mergeStrategy: mergeStrategy
+                mergeStrategy: try ConfigMergeStrategy(rawValue: mergeStrategy)
             )
         }
         return try configWriteResult(
@@ -10694,7 +10695,7 @@ public enum CodexAppServer {
     private static func setConfigValue(
         _ value: ConfigValue,
         at path: [String],
-        mergeStrategy: String,
+        mergeStrategy: ConfigMergeStrategy,
         in target: inout ConfigValue
     ) {
         guard let first = path.first else { return }
@@ -10706,7 +10707,7 @@ public enum CodexAppServer {
         }
 
         if path.count == 1 {
-            if mergeStrategy == "upsert",
+            if mergeStrategy == .upsert,
                case let .table(existingTable)? = table[first],
                case let .table(newTable) = value {
                 var merged = ConfigValue.table(existingTable)
@@ -11264,7 +11265,25 @@ private enum AppServerError: Error, CustomStringConvertible {
 private struct ConfigWriteEdit {
     let keyPath: String
     let value: ConfigValue?
-    let mergeStrategy: String
+    let mergeStrategy: ConfigMergeStrategy
+}
+
+private enum ConfigMergeStrategy {
+    case replace
+    case upsert
+
+    init(rawValue: String) throws {
+        switch rawValue {
+        case "replace":
+            self = .replace
+        case "upsert":
+            self = .upsert
+        default:
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(rawValue)`, expected `replace` or `upsert`"
+            )
+        }
+    }
 }
 
 private enum SkillConfigSelector: Equatable {

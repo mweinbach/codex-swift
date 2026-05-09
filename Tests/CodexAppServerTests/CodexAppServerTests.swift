@@ -6287,6 +6287,24 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(replaced.contains(#"existing = "keep""#))
     }
 
+    func testConfigValueWriteRejectsUnknownMergeStrategyLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"merge"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "Invalid request: unknown variant `merge`, expected `replace` or `upsert`"
+        )
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "gpt-old""#)
+    }
+
     func testConfigValueWriteRejectsVersionConflict() throws {
         let temp = try TemporaryDirectory()
         try #"model = "gpt-old""#.write(
