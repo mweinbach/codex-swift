@@ -310,10 +310,14 @@ public enum NonInteractiveExec {
             )
         }
 
-        let outcome = await HookUserPromptSubmit.run(
+        var outcome = await HookUserPromptSubmit.run(
             handlers: handlers,
             shell: HookCommandShell(),
             request: request
+        )
+        outcome.additionalContexts = HookOutputSpiller().maybeSpillTexts(
+            threadID: ThreadId(uuid: conversationID.uuid),
+            texts: outcome.additionalContexts
         )
         guard !outcome.shouldStop else {
             return outcome
@@ -351,11 +355,15 @@ public enum NonInteractiveExec {
             )
         }
 
-        let outcome = await HookSessionStart.run(
+        var outcome = await HookSessionStart.run(
             handlers: handlers,
             shell: HookCommandShell(),
             request: request,
             turnID: nil
+        )
+        outcome.additionalContexts = HookOutputSpiller().maybeSpillTexts(
+            threadID: ThreadId(uuid: conversationID.uuid),
+            texts: outcome.additionalContexts
         )
         guard !outcome.shouldStop else {
             return outcome
@@ -381,11 +389,16 @@ public enum NonInteractiveExec {
                 stopHookActive: stopHookActive,
                 lastAssistantMessage: lastAssistantMessage
             )
-            return await HookStop.run(
+            var outcome = await HookStop.run(
                 handlers: context.handlers,
                 shell: HookCommandShell(),
                 request: request
             )
+            outcome.continuationFragments = HookOutputSpiller().maybeSpillPromptFragments(
+                threadID: ThreadId(uuid: context.conversationID.uuid),
+                fragments: outcome.continuationFragments
+            )
+            return outcome
         } catch {
             return HookStopOutcome(
                 hookEvents: [],
@@ -1061,7 +1074,16 @@ public enum NonInteractiveExec {
                 toolInput: hookPayload.prePayload.toolInput,
                 toolResponse: hookPayload.toolResponse
             )
-            return await HookPostToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+            var outcome = await HookPostToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+            let threadID = ThreadId(uuid: conversationID.uuid)
+            outcome.additionalContexts = HookOutputSpiller().maybeSpillTexts(
+                threadID: threadID,
+                texts: outcome.additionalContexts
+            )
+            if let feedbackMessage = outcome.feedbackMessage {
+                outcome.feedbackMessage = HookOutputSpiller().maybeSpillText(threadID: threadID, text: feedbackMessage)
+            }
+            return outcome
         } catch {
             return HookPostToolUseOutcome(
                 hookEvents: [],

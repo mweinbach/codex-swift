@@ -159,6 +159,62 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(content, [.inputText(text: "remember hook context")])
     }
 
+    func testUserPromptSubmitHookSpillsLargeAdditionalContext() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let largeContext = String(repeating: "large hook context ", count: 3_000)
+        let hookOutput = try JSONSerialization.data(withJSONObject: [
+            "hookSpecificOutput": [
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": largeContext
+            ]
+        ])
+        let hookOutputPath = temp.url.appendingPathComponent("hook-output.json", isDirectory: false)
+        try String(decoding: hookOutput, as: UTF8.self).write(to: hookOutputPath, atomically: true, encoding: .utf8)
+
+        var prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
+        )
+        let outcome = await NonInteractiveExec.runUserPromptSubmitHooks(
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .userPromptSubmit,
+                    matcher: nil,
+                    command: "cat '\(hookOutputPath.path)'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            prompt: &prompt,
+            userPrompt: "ship it",
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never
+        )
+
+        let spilledContext = try XCTUnwrap(outcome.additionalContexts.first)
+        let marker = "Full hook output saved to: "
+        XCTAssertTrue(spilledContext.contains(marker), spilledContext)
+        XCTAssertNotEqual(spilledContext, largeContext)
+        let savedPath = try XCTUnwrap(spilledContext.components(separatedBy: marker).last)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(try String(contentsOfFile: savedPath, encoding: .utf8), largeContext)
+
+        guard case let .message(_, role, content, _) = prompt.input.last else {
+            return XCTFail("expected spilled hook context message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertEqual(content, [.inputText(text: spilledContext)])
+    }
+
     func testSessionStartHooksAppendAdditionalContextToPrompt() async throws {
         let cwd = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-session-hook-context-\(UUID().uuidString)", isDirectory: true)
