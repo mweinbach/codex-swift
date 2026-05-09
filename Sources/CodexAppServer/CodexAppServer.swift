@@ -2229,6 +2229,7 @@ public enum CodexAppServer {
     }
 
     private struct LocalPluginManifest {
+        let name: String?
         let interface: Any
         let keywords: [String]
         let description: String?
@@ -2241,6 +2242,7 @@ public enum CodexAppServer {
 
         static var empty: LocalPluginManifest {
             LocalPluginManifest(
+                name: nil,
                 interface: NSNull(),
                 keywords: [],
                 description: nil,
@@ -2267,6 +2269,7 @@ public enum CodexAppServer {
         }
         let keywords = object["keywords"] as? [String] ?? []
         return LocalPluginManifest(
+            name: object["name"] as? String,
             interface: pluginInterfaceObject(object["interface"], pluginRoot: root),
             keywords: keywords,
             description: object["description"] as? String,
@@ -2528,9 +2531,13 @@ public enum CodexAppServer {
     }
 
     private static func localPluginInstalled(id: String, codexHome: URL) -> Bool {
+        activeLocalPluginVersion(id: id, codexHome: codexHome) != nil
+    }
+
+    private static func activeLocalPluginVersion(id: String, codexHome: URL) -> String? {
         let parts = id.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
-            return false
+            return nil
         }
         let installRoot = codexHome
             .appendingPathComponent("plugins/cache", isDirectory: true)
@@ -2541,9 +2548,17 @@ public enum CodexAppServer {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return false
+            return nil
         }
-        return entries.contains { isDirectory($0) }
+        let versions = entries
+            .filter { isDirectory($0) }
+            .map { $0.lastPathComponent }
+            .filter(isValidPluginVersionSegment)
+            .sorted()
+        if versions.contains("local") {
+            return "local"
+        }
+        return versions.last
     }
 
     private static func setLocalPluginEnabled(id: String, enabled: Bool, in config: inout ConfigValue) {
@@ -2755,24 +2770,13 @@ public enum CodexAppServer {
         guard isDirectory(sourcePath) else {
             throw AppServerError.invalidRequest("path does not exist or is not a directory")
         }
-        let manifest = localPluginManifest(root: sourcePath)
-        let version = manifest.version?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? manifest.version!
-            : "local"
-        let installedRoot = configuration.codexHome
-            .appendingPathComponent("plugins/cache", isDirectory: true)
-            .appendingPathComponent(marketplaceName, isDirectory: true)
-            .appendingPathComponent(pluginName, isDirectory: true)
-            .appendingPathComponent(version, isDirectory: true)
         do {
-            if FileManager.default.fileExists(atPath: installedRoot.path) {
-                try FileManager.default.removeItem(at: installedRoot)
-            }
-            try FileManager.default.createDirectory(
-                at: installedRoot.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            _ = try installLocalPluginCacheEntry(
+                sourcePath: sourcePath,
+                pluginName: pluginName,
+                marketplaceName: marketplaceName,
+                codexHome: configuration.codexHome
             )
-            try FileManager.default.copyItem(at: sourcePath, to: installedRoot)
             setLocalPluginEnabled(id: "\(pluginName)@\(marketplaceName)", enabled: true, in: &config)
             try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
         } catch {
@@ -2784,6 +2788,181 @@ public enum CodexAppServer {
             "authPolicy": summaryPolicy ?? "ON_INSTALL",
             "appsNeedingAuth": []
         ]
+    }
+
+    private struct ConfiguredLocalPluginID {
+        let key: String
+        let pluginName: String
+        let marketplaceName: String
+    }
+
+    private static func refreshNonCuratedPluginCache(
+        codexHome: URL,
+        roots: [URL],
+        forceReinstall: Bool
+    ) throws -> Bool {
+        let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let configuredPluginIDs = configuredNonCuratedPluginIDs(in: config)
+        guard !configuredPluginIDs.isEmpty else {
+            return false
+        }
+
+        let configuredKeys = Set(configuredPluginIDs.map(\.key))
+        var pluginSources: [String: URL] = [:]
+        for manifestPath in localMarketplaceManifestPaths(from: roots) {
+            let marketplaceRoot = try marketplaceRoot(forManifestPath: manifestPath)
+            let data = try Data(contentsOf: manifestPath)
+            let object = try marketplaceManifestObject(data: data, manifestPath: manifestPath)
+            guard let marketplaceName = object["name"] as? String,
+                  marketplaceName != "openai-curated",
+                  let plugins = object["plugins"] as? [[String: Any]]
+            else {
+                continue
+            }
+            for plugin in plugins {
+                guard let pluginName = plugin["name"] as? String else {
+                    continue
+                }
+                let key = "\(pluginName)@\(marketplaceName)"
+                guard configuredKeys.contains(key),
+                      pluginSources[key] == nil,
+                      let sourcePath = localPluginSourcePath(plugin["source"], marketplaceRoot: marketplaceRoot)
+                else {
+                    continue
+                }
+                pluginSources[key] = sourcePath
+            }
+        }
+
+        var refreshed = false
+        for pluginID in configuredPluginIDs {
+            guard let sourcePath = pluginSources[pluginID.key] else {
+                continue
+            }
+            let version = try localPluginCacheVersion(
+                sourcePath: sourcePath,
+                pluginName: pluginID.pluginName
+            )
+            if !forceReinstall,
+               activeLocalPluginVersion(id: pluginID.key, codexHome: codexHome) == version {
+                continue
+            }
+            _ = try installLocalPluginCacheEntry(
+                sourcePath: sourcePath,
+                pluginName: pluginID.pluginName,
+                marketplaceName: pluginID.marketplaceName,
+                codexHome: codexHome,
+                version: version
+            )
+            refreshed = true
+        }
+        return refreshed
+    }
+
+    private static func configuredNonCuratedPluginIDs(in config: ConfigValue) -> [ConfiguredLocalPluginID] {
+        guard let root = configTable(config),
+              let plugins = root["plugins"].flatMap(configTable)
+        else {
+            return []
+        }
+        return plugins.keys.sorted().compactMap { key in
+            let parts = key.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 2,
+                  !parts[0].isEmpty,
+                  !parts[1].isEmpty,
+                  parts[1] != "openai-curated"
+            else {
+                return nil
+            }
+            return ConfiguredLocalPluginID(key: key, pluginName: parts[0], marketplaceName: parts[1])
+        }
+    }
+
+    private static func localPluginCacheVersion(sourcePath: URL, pluginName: String) throws -> String {
+        let manifest = localPluginManifest(root: sourcePath)
+        guard manifest.name != nil else {
+            throw AppServerError.invalidRequest("missing or invalid plugin.json")
+        }
+        guard manifest.name == pluginName else {
+            throw AppServerError.invalidRequest(
+                "plugin.json name `\(manifest.name ?? "")` does not match marketplace plugin name `\(pluginName)`"
+            )
+        }
+        let version = manifest.version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if version.isEmpty {
+            return "local"
+        }
+        guard isValidPluginVersionSegment(version) else {
+            throw AppServerError.invalidRequest(
+                "invalid plugin version: only ASCII letters, digits, `.`, `+`, `_`, and `-` are allowed"
+            )
+        }
+        return version
+    }
+
+    private static func installLocalPluginCacheEntry(
+        sourcePath: URL,
+        pluginName: String,
+        marketplaceName: String,
+        codexHome: URL,
+        version: String? = nil
+    ) throws -> URL {
+        let pluginVersion = try version ?? localPluginCacheVersion(sourcePath: sourcePath, pluginName: pluginName)
+        let pluginBaseRoot = codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .appendingPathComponent(pluginName, isDirectory: true)
+        let targetRoot = pluginBaseRoot.appendingPathComponent(pluginVersion, isDirectory: true)
+        let parent = pluginBaseRoot.deletingLastPathComponent()
+        let stagingContainer = parent.appendingPathComponent("plugin-install-\(UUID().uuidString)", isDirectory: true)
+        let stagedRoot = stagingContainer.appendingPathComponent(pluginName, isDirectory: true)
+        let stagedVersionRoot = stagedRoot.appendingPathComponent(pluginVersion, isDirectory: true)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: stagedVersionRoot.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.copyItem(at: sourcePath, to: stagedVersionRoot)
+            if FileManager.default.fileExists(atPath: pluginBaseRoot.path) {
+                let backupContainer = parent.appendingPathComponent("plugin-backup-\(UUID().uuidString)", isDirectory: true)
+                let backupRoot = backupContainer.appendingPathComponent(pluginName, isDirectory: true)
+                try FileManager.default.createDirectory(at: backupContainer, withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: pluginBaseRoot, to: backupRoot)
+                do {
+                    try FileManager.default.moveItem(at: stagedRoot, to: pluginBaseRoot)
+                    try? FileManager.default.removeItem(at: backupContainer)
+                } catch {
+                    try? FileManager.default.moveItem(at: backupRoot, to: pluginBaseRoot)
+                    throw error
+                }
+            } else {
+                try FileManager.default.moveItem(at: stagedRoot, to: pluginBaseRoot)
+            }
+        } catch {
+            if FileManager.default.fileExists(atPath: stagingContainer.path) {
+                try? FileManager.default.removeItem(at: stagingContainer)
+            }
+            throw error
+        }
+        try? FileManager.default.removeItem(at: stagingContainer)
+        return targetRoot
+    }
+
+    private static func isValidPluginVersionSegment(_ version: String) -> Bool {
+        guard !version.isEmpty, version != ".", version != ".." else {
+            return false
+        }
+        return version.allSatisfy { character in
+            character.isASCII
+                && (character.isLetter
+                    || character.isNumber
+                    || character == "."
+                    || character == "+"
+                    || character == "_"
+                    || character == "-")
+        }
     }
 
     fileprivate static func pluginUninstallResult(
@@ -2860,10 +3039,25 @@ public enum CodexAppServer {
             marketplaces: selectedMarketplaces,
             configuration: configuration
         )
+        var errors = outcome.errors
+        if !outcome.upgradedRoots.isEmpty {
+            do {
+                _ = try refreshNonCuratedPluginCache(
+                    codexHome: configuration.codexHome,
+                    roots: outcome.upgradedRoots.map { URL(fileURLWithPath: $0, isDirectory: true) },
+                    forceReinstall: true
+                )
+            } catch {
+                errors.append([
+                    "marketplaceName": marketplaceName ?? "all configured marketplaces",
+                    "message": "failed to refresh installed plugin cache after marketplace upgrade: \(error)"
+                ])
+            }
+        }
         return [
             "selectedMarketplaces": selectedMarketplaces.map(\.name),
             "upgradedRoots": outcome.upgradedRoots,
-            "errors": outcome.errors
+            "errors": errors
         ]
     }
 

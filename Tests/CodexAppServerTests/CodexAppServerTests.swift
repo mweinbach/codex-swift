@@ -2488,6 +2488,18 @@ final class CodexAppServerTests: XCTestCase {
         let installedRoot = temp.url
             .appendingPathComponent(".tmp/marketplaces/debug", isDirectory: true)
             .path
+        let installedMarketplacePath = URL(fileURLWithPath: installedRoot)
+            .appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false)
+            .path
+
+        let installPlugin = try appServerResponse(
+            #"{"id":4,"method":"plugin/install","params":{"marketplacePath":"\#(installedMarketplacePath)","pluginName":"sample"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNil(installPlugin["error"])
+        let cachedPluginMarker = temp.url
+            .appendingPathComponent("plugins/cache/debug/sample/local/marker.txt", isDirectory: false)
+        XCTAssertEqual(try String(contentsOf: cachedPluginMarker, encoding: .utf8), "v1")
 
         try "v2".write(
             to: marketplace.source.appendingPathComponent("plugins/sample/marker.txt", isDirectory: false),
@@ -2513,6 +2525,7 @@ final class CodexAppServerTests: XCTestCase {
             try String(contentsOf: URL(fileURLWithPath: installedRoot).appendingPathComponent("plugins/sample/marker.txt"), encoding: .utf8),
             "v2"
         )
+        XCTAssertEqual(try String(contentsOf: cachedPluginMarker, encoding: .utf8), "v2")
         let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
         XCTAssertTrue(config.contains(#"last_revision = "\#(latestRevision)""#))
         XCTAssertTrue(config.contains(#"ref = "\#(marketplace.branch)""#))
