@@ -1476,6 +1476,39 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkAllAndAnyBuiltins() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log"]
+        SAFE = ["status", "diff", "log", "show"]
+        ALL_SAFE = all([command in SAFE for command in COMMANDS])
+        ANY_DIFF = any([command == "diff" for command in COMMANDS])
+        EMPTY_IS_ALL = all([])
+        EMPTY_IS_NOT_ANY = not any([])
+
+        if ALL_SAFE and ANY_DIFF and EMPTY_IS_ALL and EMPTY_IS_NOT_ANY:
+            prefix_rule([TOOL, COMMANDS[0]], "prompt", justification = f"safe {ALL_SAFE}")
+
+        if all("ok") and any("x"):
+            network_rule("api.github.com", "https", "allow")
+
+        if not any([command == "commit" for command in COMMANDS]):
+            host_executable(TOOL, ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "safe True"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

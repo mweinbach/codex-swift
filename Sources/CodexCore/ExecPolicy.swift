@@ -2234,7 +2234,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard name == "enumerate" || name == "zip" else {
+        guard ["all", "any", "enumerate", "zip"].contains(name) else {
             return nil
         }
 
@@ -2244,6 +2244,20 @@ public final class PolicyParser {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         switch name {
+        case "all":
+            return try parseStarlarkAllCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "any":
+            return try parseStarlarkAnyCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
         case "enumerate":
             return try parseStarlarkEnumerateCall(
                 rawArguments,
@@ -2261,6 +2275,40 @@ public final class PolicyParser {
         default:
             return nil
         }
+    }
+
+    private static func parseStarlarkAllCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: expression)
+        return .bool(items.allSatisfy(truthy))
+    }
+
+    private static func parseStarlarkAnyCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: expression)
+        return .bool(items.contains(where: truthy))
     }
 
     private static func parseStarlarkEnumerateCall(
