@@ -32,6 +32,7 @@ public enum ExecPolicyError: Error, Equatable, CustomStringConvertible, Sendable
     case invalidDecision(String)
     case invalidPattern(String)
     case invalidExample(String)
+    case invalidRule(String)
     case exampleDidNotMatch(rules: [String], examples: [String])
     case exampleDidMatch(rule: String, example: String)
     case invalidSyntax(String)
@@ -44,6 +45,8 @@ public enum ExecPolicyError: Error, Equatable, CustomStringConvertible, Sendable
             return "invalid pattern: \(message)"
         case let .invalidExample(message):
             return "invalid example: \(message)"
+        case let .invalidRule(message):
+            return "invalid rule: \(message)"
         case let .exampleDidNotMatch(rules, examples):
             return "examples did not match rules \(rules): \(examples)"
         case let .exampleDidMatch(rule, example):
@@ -148,10 +151,12 @@ public struct PrefixPattern: Equatable, Sendable {
 public struct PrefixRule: Equatable, Sendable, CustomStringConvertible {
     public let pattern: PrefixPattern
     public let decision: ExecPolicyDecision
+    public let justification: String?
 
-    public init(pattern: PrefixPattern, decision: ExecPolicyDecision) {
+    public init(pattern: PrefixPattern, decision: ExecPolicyDecision, justification: String? = nil) {
         self.pattern = pattern
         self.decision = decision
+        self.justification = justification
     }
 
     public var program: String {
@@ -160,22 +165,78 @@ public struct PrefixRule: Equatable, Sendable, CustomStringConvertible {
 
     public func matches(_ command: [String]) -> RuleMatch? {
         pattern.matchesPrefix(command).map {
-            .prefixRuleMatch(matchedPrefix: $0, decision: decision)
+            .prefixRuleMatch(
+                matchedPrefix: $0,
+                decision: decision,
+                resolvedProgram: nil,
+                justification: justification
+            )
         }
     }
 
     public var description: String {
-        "PrefixRule(pattern: \(pattern), decision: \(decision.rawValue))"
+        if let justification {
+            return "PrefixRule(pattern: \(pattern), decision: \(decision.rawValue), justification: \(justification))"
+        }
+        return "PrefixRule(pattern: \(pattern), decision: \(decision.rawValue))"
+    }
+}
+
+public enum NetworkRuleProtocol: String, Equatable, Sendable {
+    case http
+    case https
+    case socks5Tcp = "socks5_tcp"
+    case socks5Udp = "socks5_udp"
+
+    public static func parse(_ raw: String) throws -> NetworkRuleProtocol {
+        switch raw {
+        case "http":
+            return .http
+        case "https", "https_connect", "http-connect":
+            return .https
+        case "socks5_tcp":
+            return .socks5Tcp
+        case "socks5_udp":
+            return .socks5Udp
+        default:
+            throw ExecPolicyError.invalidRule(
+                "network_rule protocol must be one of http, https, socks5_tcp, socks5_udp (got \(raw))"
+            )
+        }
+    }
+}
+
+public struct NetworkRule: Equatable, Sendable {
+    public let host: String
+    public let `protocol`: NetworkRuleProtocol
+    public let decision: ExecPolicyDecision
+    public let justification: String?
+
+    public init(
+        host: String,
+        protocol: NetworkRuleProtocol,
+        decision: ExecPolicyDecision,
+        justification: String? = nil
+    ) {
+        self.host = host
+        self.protocol = `protocol`
+        self.decision = decision
+        self.justification = justification
     }
 }
 
 public enum RuleMatch: Equatable, Sendable, Encodable {
-    case prefixRuleMatch(matchedPrefix: [String], decision: ExecPolicyDecision)
+    case prefixRuleMatch(
+        matchedPrefix: [String],
+        decision: ExecPolicyDecision,
+        resolvedProgram: String? = nil,
+        justification: String? = nil
+    )
     case heuristicsRuleMatch(command: [String], decision: ExecPolicyDecision)
 
     public var decision: ExecPolicyDecision {
         switch self {
-        case let .prefixRuleMatch(_, decision), let .heuristicsRuleMatch(_, decision):
+        case let .prefixRuleMatch(_, decision, _, _), let .heuristicsRuleMatch(_, decision):
             return decision
         }
     }
@@ -197,6 +258,8 @@ public enum RuleMatch: Equatable, Sendable, Encodable {
     private enum PrefixRuleMatchCodingKeys: String, CodingKey {
         case matchedPrefix
         case decision
+        case resolvedProgram
+        case justification
     }
 
     private enum HeuristicsRuleMatchCodingKeys: String, CodingKey {
@@ -207,13 +270,15 @@ public enum RuleMatch: Equatable, Sendable, Encodable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .prefixRuleMatch(matchedPrefix, decision):
+        case let .prefixRuleMatch(matchedPrefix, decision, resolvedProgram, justification):
             var nested = container.nestedContainer(
                 keyedBy: PrefixRuleMatchCodingKeys.self,
                 forKey: .prefixRuleMatch
             )
             try nested.encode(matchedPrefix, forKey: .matchedPrefix)
             try nested.encode(decision, forKey: .decision)
+            try nested.encodeIfPresent(resolvedProgram, forKey: .resolvedProgram)
+            try nested.encodeIfPresent(justification, forKey: .justification)
         case let .heuristicsRuleMatch(command, decision):
             var nested = container.nestedContainer(
                 keyedBy: HeuristicsRuleMatchCodingKeys.self,
@@ -248,9 +313,14 @@ public struct PolicyEvaluation: Equatable, Sendable {
 
 public struct ExecPolicy: Equatable, Sendable {
     private var rulesByProgram: [String: [PrefixRule]]
+    private var networkRulesStorage: [NetworkRule]
 
-    public init(rulesByProgram: [String: [PrefixRule]] = [:]) {
+    public init(
+        rulesByProgram: [String: [PrefixRule]] = [:],
+        networkRules: [NetworkRule] = []
+    ) {
         self.rulesByProgram = rulesByProgram
+        self.networkRulesStorage = networkRules
     }
 
     public static func empty() -> ExecPolicy {
@@ -259,6 +329,30 @@ public struct ExecPolicy: Equatable, Sendable {
 
     public func rules(for program: String) -> [PrefixRule] {
         rulesByProgram[program] ?? []
+    }
+
+    public func networkRules() -> [NetworkRule] {
+        networkRulesStorage
+    }
+
+    public func compiledNetworkDomains() -> (allowed: [String], denied: [String]) {
+        var allowed: [String] = []
+        var denied: [String] = []
+
+        for rule in networkRulesStorage {
+            switch rule.decision {
+            case .allow:
+                denied.removeAll { $0 == rule.host }
+                Self.upsertDomain(&allowed, rule.host)
+            case .forbidden:
+                allowed.removeAll { $0 == rule.host }
+                Self.upsertDomain(&denied, rule.host)
+            case .prompt:
+                continue
+            }
+        }
+
+        return (allowed, denied)
     }
 
     public mutating func addPrefixRule(_ prefix: [String], decision: ExecPolicyDecision) throws {
@@ -271,9 +365,89 @@ public struct ExecPolicy: Equatable, Sendable {
                 first: firstToken,
                 rest: prefix.dropFirst().map { .single($0) }
             ),
-            decision: decision
+            decision: decision,
+            justification: nil
         )
         rulesByProgram[firstToken, default: []].append(rule)
+    }
+
+    public mutating func addNetworkRule(
+        host rawHost: String,
+        protocol: NetworkRuleProtocol,
+        decision: ExecPolicyDecision,
+        justification: String? = nil
+    ) throws {
+        if let justification, justification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ExecPolicyError.invalidRule("justification cannot be empty")
+        }
+        networkRulesStorage.append(NetworkRule(
+            host: try Self.normalizeNetworkRuleHost(rawHost),
+            protocol: `protocol`,
+            decision: decision,
+            justification: justification
+        ))
+    }
+
+    private static func upsertDomain(_ domains: inout [String], _ host: String) {
+        if !domains.contains(host) {
+            domains.append(host)
+        }
+    }
+
+    private static func normalizeNetworkRuleHost(_ raw: String) throws -> String {
+        var host = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            throw ExecPolicyError.invalidRule("network_rule host cannot be empty")
+        }
+        if host.contains("://") || host.contains("/") || host.contains("?") || host.contains("#") {
+            throw ExecPolicyError.invalidRule(
+                "network_rule host must be a hostname or IP literal (without scheme or path)"
+            )
+        }
+
+        if host.hasPrefix("[") {
+            guard let closeBracket = host.firstIndex(of: "]") else {
+                throw ExecPolicyError.invalidRule("network_rule host has an invalid bracketed IPv6 literal")
+            }
+            let insideStart = host.index(after: host.startIndex)
+            let restStart = host.index(after: closeBracket)
+            let rest = String(host[restStart...])
+            if !rest.isEmpty {
+                guard rest.hasPrefix(":") else {
+                    throw ExecPolicyError.invalidRule("network_rule host contains an unsupported suffix: \(raw)")
+                }
+                let port = rest.dropFirst()
+                guard !port.isEmpty, port.allSatisfy(\.isASCIIWholeNumber) else {
+                    throw ExecPolicyError.invalidRule("network_rule host contains an unsupported suffix: \(raw)")
+                }
+            }
+            host = String(host[insideStart..<closeBracket])
+        } else if host.filter({ $0 == ":" }).count == 1,
+                  let separator = host.lastIndex(of: ":") {
+            let candidate = String(host[..<separator])
+            let port = host[host.index(after: separator)...]
+            if !candidate.isEmpty, !port.isEmpty, port.allSatisfy(\.isASCIIWholeNumber) {
+                host = candidate
+            }
+        }
+
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            throw ExecPolicyError.invalidRule("network_rule host cannot be empty")
+        }
+        if normalized.contains("*") {
+            throw ExecPolicyError.invalidRule(
+                "network_rule host must be a specific host; wildcards are not allowed"
+            )
+        }
+        if normalized.contains(where: \.isWhitespace) {
+            throw ExecPolicyError.invalidRule("network_rule host cannot contain whitespace")
+        }
+
+        return normalized
     }
 
     public func check(
@@ -320,9 +494,21 @@ public final class PolicyParser {
 
     public func parse(_ policyIdentifier: String, _ policyFileContents: String) throws {
         let source = Self.stripLineComments(from: policyFileContents)
-        let bodies = try Self.extractPrefixRuleBodies(source, identifier: policyIdentifier)
-        for body in bodies {
+        let prefixRuleBodies = try Self.extractCallBodies(
+            named: "prefix_rule",
+            from: source,
+            identifier: policyIdentifier
+        )
+        for body in prefixRuleBodies {
             try addPrefixRule(from: body)
+        }
+        let networkRuleBodies = try Self.extractCallBodies(
+            named: "network_rule",
+            from: source,
+            identifier: policyIdentifier
+        )
+        for body in networkRuleBodies {
+            try addNetworkRule(from: body)
         }
     }
 
@@ -346,6 +532,7 @@ public final class PolicyParser {
             decision = .allow
         }
 
+        let justification = try Self.parseOptionalJustification(arguments["justification"])
         let patternTokens = try Self.parsePattern(patternValue)
         let matchExamples = try arguments["match"].map(Self.parseExamples) ?? []
         let notMatchExamples = try arguments["not_match"].map(Self.parseExamples) ?? []
@@ -358,7 +545,8 @@ public final class PolicyParser {
         let rules = firstToken.alternatives.map { head in
             PrefixRule(
                 pattern: PrefixPattern(first: head, rest: rest),
-                decision: decision
+                decision: decision,
+                justification: justification
             )
         }
 
@@ -372,7 +560,24 @@ public final class PolicyParser {
         }
     }
 
-    private static func extractPrefixRuleBodies(_ source: String, identifier: String) throws -> [String] {
+    private func addNetworkRule(from body: String) throws {
+        let arguments = try Self.parseArguments(body)
+        let host = try Self.requireStringArgument(arguments, key: "host", function: "network_rule")
+        let rawProtocol = try Self.requireStringArgument(arguments, key: "protocol", function: "network_rule")
+        let rawDecision = try Self.requireStringArgument(arguments, key: "decision", function: "network_rule")
+        try policy.addNetworkRule(
+            host: host,
+            protocol: NetworkRuleProtocol.parse(rawProtocol),
+            decision: rawDecision == "deny" ? .forbidden : ExecPolicyDecision.parse(rawDecision),
+            justification: try Self.parseOptionalJustification(arguments["justification"])
+        )
+    }
+
+    private static func extractCallBodies(
+        named functionName: String,
+        from source: String,
+        identifier: String
+    ) throws -> [String] {
         var bodies: [String] = []
         var index = source.startIndex
 
@@ -383,14 +588,14 @@ public final class PolicyParser {
                 continue
             }
 
-            guard source[index...].hasPrefix("prefix_rule"),
+            guard source[index...].hasPrefix(functionName),
                   isIdentifierBoundaryBefore(index, in: source)
             else {
                 index = source.index(after: index)
                 continue
             }
 
-            let functionEnd = source.index(index, offsetBy: "prefix_rule".count)
+            let functionEnd = source.index(index, offsetBy: functionName.count)
             guard isIdentifierBoundaryAfter(functionEnd, in: source) else {
                 index = functionEnd
                 continue
@@ -401,7 +606,7 @@ public final class PolicyParser {
                 index = source.index(after: index)
             }
             guard index < source.endIndex, source[index] == "(" else {
-                throw ExecPolicyError.invalidSyntax("\(identifier): expected '(' after prefix_rule")
+                throw ExecPolicyError.invalidSyntax("\(identifier): expected '(' after \(functionName)")
             }
 
             let bodyStart = source.index(after: index)
@@ -439,7 +644,7 @@ public final class PolicyParser {
             }
 
             if depth != 0 {
-                throw ExecPolicyError.invalidSyntax("\(identifier): unterminated prefix_rule")
+                throw ExecPolicyError.invalidSyntax("\(identifier): unterminated \(functionName)")
             }
         }
 
@@ -542,6 +747,33 @@ public final class PolicyParser {
             arguments[key] = try parsePolicyLiteral(valueText)
         }
         return arguments
+    }
+
+    private static func requireStringArgument(
+        _ arguments: [String: ConfigValue],
+        key: String,
+        function: String
+    ) throws -> String {
+        guard let value = arguments[key] else {
+            throw ExecPolicyError.invalidRule("\(function) missing \(key)")
+        }
+        guard case let .string(raw) = value else {
+            throw ExecPolicyError.invalidRule("\(function) \(key) must be a string")
+        }
+        return raw
+    }
+
+    private static func parseOptionalJustification(_ value: ConfigValue?) throws -> String? {
+        guard let value else {
+            return nil
+        }
+        guard case let .string(raw) = value else {
+            throw ExecPolicyError.invalidRule("justification must be a string")
+        }
+        guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ExecPolicyError.invalidRule("justification cannot be empty")
+        }
+        return raw
     }
 
     private static func parsePolicyLiteral(_ valueText: String) throws -> ConfigValue {
@@ -1089,5 +1321,13 @@ private extension URL {
     func deletingLastPathComponentIfPresent() -> URL? {
         let parent = deletingLastPathComponent()
         return parent.path == path ? nil : parent
+    }
+}
+
+private extension Character {
+    var isASCIIWholeNumber: Bool {
+        unicodeScalars.count == 1 && unicodeScalars.first.map { scalar in
+            scalar.value >= 48 && scalar.value <= 57
+        } == true
     }
 }

@@ -47,6 +47,97 @@ final class ExecPolicyTests: XCTestCase {
         }
     }
 
+    func testJustificationIsAttachedToPrefixMatches() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(
+            pattern = ["rm"],
+            decision = "forbidden",
+            justification = "destructive command",
+        )
+        prefix_rule(
+            pattern = ["ls"],
+            decision = "allow",
+            justification = "safe and commonly used",
+        )
+        """)
+
+        XCTAssertEqual(
+            policy.check(tokens("rm", "-rf", "/tmp/work"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .forbidden,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: tokens("rm"),
+                    decision: .forbidden,
+                    justification: "destructive command"
+                )]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(tokens("ls", "-l"), heuristicsFallback: promptAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: tokens("ls"),
+                    decision: .allow,
+                    justification: "safe and commonly used"
+                )]
+            )
+        )
+    }
+
+    func testJustificationCannotBeEmpty() {
+        XCTAssertThrowsError(try parsePolicy("""
+        prefix_rule(
+            pattern = ["ls"],
+            decision = "prompt",
+            justification = "   ",
+        )
+        """)) { error in
+            XCTAssertEqual(error as? ExecPolicyError, .invalidRule("justification cannot be empty"))
+        }
+    }
+
+    func testNetworkRulesCompileIntoDomainLists() throws {
+        let policy = try parsePolicy("""
+        network_rule(host = "google.com", protocol = "http", decision = "allow")
+        network_rule(host = "api.github.com", protocol = "https", decision = "allow")
+        network_rule(host = "blocked.example.com", protocol = "https", decision = "deny")
+        network_rule(host = "prompt-only.example.com", protocol = "https", decision = "prompt")
+        """)
+
+        XCTAssertEqual(policy.networkRules().count, 4)
+        XCTAssertEqual(policy.networkRules()[1].protocol, .https)
+        let domains = policy.compiledNetworkDomains()
+        XCTAssertEqual(domains.allowed, ["google.com", "api.github.com"])
+        XCTAssertEqual(domains.denied, ["blocked.example.com"])
+    }
+
+    func testNetworkRuleNormalizesHostAndProtocolAliases() throws {
+        let policy = try parsePolicy("""
+        network_rule(host = " EXAMPLE.com.:443 ", protocol = "http-connect", decision = "allow")
+        network_rule(host = "[2001:db8::1]:443", protocol = "socks5_tcp", decision = "deny")
+        """)
+
+        XCTAssertEqual(policy.networkRules()[0].host, "example.com")
+        XCTAssertEqual(policy.networkRules()[0].protocol, .https)
+        XCTAssertEqual(policy.networkRules()[1].host, "2001:db8::1")
+        XCTAssertEqual(policy.networkRules()[1].protocol, .socks5Tcp)
+        let domains = policy.compiledNetworkDomains()
+        XCTAssertEqual(domains.allowed, ["example.com"])
+        XCTAssertEqual(domains.denied, ["2001:db8::1"])
+    }
+
+    func testNetworkRuleRejectsWildcardHosts() {
+        XCTAssertThrowsError(try parsePolicy(
+            #"network_rule(host="*", protocol="http", decision="allow")"#
+        )) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyError,
+                .invalidRule("network_rule host must be a specific host; wildcards are not allowed")
+            )
+        }
+    }
+
     func testParsesMultiplePolicyFiles() throws {
         let parser = PolicyParser()
         try parser.parse("first.rules", """

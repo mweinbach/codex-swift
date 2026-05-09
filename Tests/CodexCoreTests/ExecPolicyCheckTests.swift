@@ -23,6 +23,34 @@ final class ExecPolicyCheckTests: XCTestCase {
         )
     }
 
+    func testFormatMatchesJSONIncludesOptionalPrefixMatchFields() throws {
+        let output = try ExecPolicyCheck.formatMatchesJSON(matchedRules: [
+            .prefixRuleMatch(
+                matchedPrefix: ["rm"],
+                decision: .forbidden,
+                resolvedProgram: "/bin/rm",
+                justification: "destructive command"
+            )
+        ])
+
+        XCTAssertEqual(
+            try JSONObjectFromString(output),
+            [
+                "decision": "forbidden",
+                "matchedRules": [
+                    [
+                        "prefixRuleMatch": [
+                            "matchedPrefix": ["rm"],
+                            "decision": "forbidden",
+                            "resolvedProgram": "/bin/rm",
+                            "justification": "destructive command"
+                        ]
+                    ]
+                ]
+            ]
+        )
+    }
+
     func testFormatMatchesJSONOmitsDecisionWhenNoRulesMatch() throws {
         let output = try ExecPolicyCheck.formatMatchesJSON(matchedRules: [])
 
