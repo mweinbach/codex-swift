@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "str", "int", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "str", "int", "bool"].contains(name) else {
             return nil
         }
 
@@ -3454,6 +3454,22 @@ public final class PolicyParser {
                 expression: text,
                 constants: constants,
                 functions: functions
+            )
+        case "min":
+            return try parseStarlarkMinMaxCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions,
+                selectsMinimum: true
+            )
+        case "max":
+            return try parseStarlarkMinMaxCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions,
+                selectsMinimum: false
             )
         case "str":
             return try parseStarlarkStringConversionCall(
@@ -3665,6 +3681,105 @@ public final class PolicyParser {
 
         let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         return try .array(starlarkIterableItems(iterable, expression: expression).reversed())
+    }
+
+    private static func parseStarlarkMinMaxCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        selectsMinimum: Bool
+    ) throws -> ConfigValue {
+        var positionalArguments: [String] = []
+        var rawKeyFunction: String?
+        var sawKeywordArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawKeywordArgument = true
+                let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard rawName == "key",
+                      rawKeyFunction == nil,
+                      isStarlarkIdentifier(rawValue)
+                else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                rawKeyFunction = rawValue
+                continue
+            }
+
+            guard !sawKeywordArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            positionalArguments.append(rawArgument)
+        }
+
+        guard !positionalArguments.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let items: [ConfigValue]
+        if positionalArguments.count == 1 {
+            let iterable = try parsePolicyLiteral(
+                positionalArguments[0],
+                constants: constants,
+                functions: functions
+            )
+            items = try starlarkIterableItems(iterable, expression: expression)
+        } else {
+            items = try positionalArguments.map { rawArgument in
+                try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            }
+        }
+        guard let first = items.first else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        var selected = first
+        var selectedKey = try starlarkComparableKey(
+            for: first,
+            rawKeyFunction: rawKeyFunction,
+            constants: constants,
+            functions: functions,
+            expression: expression
+        )
+        for item in items.dropFirst() {
+            let itemKey = try starlarkComparableKey(
+                for: item,
+                rawKeyFunction: rawKeyFunction,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            let comparison = try compareStarlarkValues(selectedKey, itemKey, expression: expression)
+            if selectsMinimum ? comparison > 0 : comparison < 0 {
+                selected = item
+                selectedKey = itemKey
+            }
+        }
+        return selected
+    }
+
+    private static func starlarkComparableKey(
+        for value: ConfigValue,
+        rawKeyFunction: String?,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> ConfigValue {
+        guard let rawKeyFunction else {
+            return value
+        }
+        var scopedConstants = constants
+        let keyArgumentName = "__codex_starlark_min_max_key_arg"
+        scopedConstants[keyArgumentName] = value
+        return try parsePolicyLiteral(
+            "\(rawKeyFunction)(\(keyArgumentName))",
+            constants: scopedConstants,
+            functions: functions
+        )
     }
 
     private static func parseStarlarkStringConversionCall(

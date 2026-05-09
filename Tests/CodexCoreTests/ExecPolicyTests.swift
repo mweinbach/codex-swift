@@ -2356,6 +2356,45 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkMinAndMaxBuiltins() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log"]
+        LOW = min([3, 1, 4])
+        HIGH = max(1, 3, 2)
+        FIRST = min("two", "three", "four")
+        LONGEST = max("two", "three", "four", key = len)
+
+        def score(command):
+            return len(command)
+
+        SHORTEST_COMMAND = min(COMMANDS, key = score)
+        LONGEST_COMMAND = max(COMMANDS, key = score)
+
+        prefix_rule([TOOL, SHORTEST_COMMAND], "allow", justification = FIRST + " " + str(LOW))
+        prefix_rule([TOOL, LONGEST_COMMAND], "prompt", justification = LONGEST + " " + str(HIGH))
+        network_rule("api" + str(max([1, HIGH])) + ".github.com", "https", "allow")
+        host_executable(TOOL, ["/usr/bin/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .allow,
+                justification: "four 1"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "three 3"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api3.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
