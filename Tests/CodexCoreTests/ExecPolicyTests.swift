@@ -663,6 +663,42 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testParserEvaluatesRustStarlarkFStringsAndParenthesizedExpressions() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        SUBCOMMAND = "status"
+        HOST_PREFIX = "api"
+        DOMAIN = "github.com"
+        GIT_PATH = f"/usr/bin/{TOOL}"
+        PATTERN = ([TOOL] + [f"{SUBCOMMAND}"])
+
+        prefix_rule(
+            (PATTERN),
+            "prompt",
+            match = [(f"{TOOL} {SUBCOMMAND}")],
+            not_match = [[TOOL] + ["commit"]],
+            justification = f"inspect {{literal}} {TOOL} {SUBCOMMAND}",
+        )
+        network_rule(f"{HOST_PREFIX}.{DOMAIN}", "https", "allow")
+        host_executable(TOOL, ([GIT_PATH]))
+        """)
+
+        XCTAssertEqual(
+            policy.rules(for: "git"),
+            [
+                PrefixRule(
+                    pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                    decision: .prompt,
+                    justification: "inspect {literal} git status"
+                )
+            ]
+        )
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

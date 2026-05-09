@@ -1145,7 +1145,7 @@ public final class PolicyParser {
         _ valueText: String,
         constants: [String: ConfigValue] = [:]
     ) throws -> ConfigValue {
-        let trimmed = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = strippingEnclosingParentheses(from: valueText.trimmingCharacters(in: .whitespacesAndNewlines))
         let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         if additivePieces.count > 1 {
@@ -1166,11 +1166,187 @@ public final class PolicyParser {
                 return try parsePolicyLiteral(item, constants: constants)
             })
         }
+        if let interpolated = try parseStarlarkFStringLiteral(trimmed, constants: constants) {
+            return .string(interpolated)
+        }
 
         do {
             return try ConfigValueParser.parseTomlLiteral(trimmed)
         } catch {
             return try ConfigValueParser.parseTomlLiteral(removingTrailingArrayCommas(from: trimmed))
+        }
+    }
+
+    private static func strippingEnclosingParentheses(from text: String) -> String {
+        var result = text
+        while result.hasPrefix("("), result.hasSuffix(")"), enclosesWholeExpression(result) {
+            result = String(result.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+
+    private static func enclosesWholeExpression(_ text: String) -> Bool {
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+                if parenDepth == 0 && text.index(after: index) != text.endIndex {
+                    return false
+                }
+            default:
+                break
+            }
+
+            if squareDepth < 0 || parenDepth < 0 {
+                return false
+            }
+            index = text.index(after: index)
+        }
+
+        return squareDepth == 0 && parenDepth == 0
+    }
+
+    private static func parseStarlarkFStringLiteral(
+        _ text: String,
+        constants: [String: ConfigValue]
+    ) throws -> String? {
+        guard text.count >= 3,
+              let prefix = text.first,
+              prefix == "f" || prefix == "F"
+        else {
+            return nil
+        }
+        let quoteIndex = text.index(after: text.startIndex)
+        let quote = text[quoteIndex]
+        guard quote == "\"" || quote == "'" else {
+            return nil
+        }
+        guard index(afterQuotedStringAt: quoteIndex, in: text) == text.endIndex,
+              text.index(before: text.endIndex) != quoteIndex
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = ""
+        var index = text.index(after: quoteIndex)
+        let end = text.index(before: text.endIndex)
+        while index < end {
+            let character = text[index]
+            if character == "\\" {
+                let nextIndex = text.index(after: index)
+                guard nextIndex < end else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                result.append(unescapedFStringCharacter(text[nextIndex]))
+                index = text.index(after: nextIndex)
+                continue
+            }
+            if character == "{" {
+                let nextIndex = text.index(after: index)
+                if nextIndex < end, text[nextIndex] == "{" {
+                    result.append("{")
+                    index = text.index(after: nextIndex)
+                    continue
+                }
+                guard let closeIndex = matchingFStringExpressionClose(from: nextIndex, end: end, in: text) else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                let expression = String(text[nextIndex..<closeIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !expression.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                let value = try parsePolicyLiteral(expression, constants: constants)
+                guard case let .string(interpolated) = value else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                result.append(interpolated)
+                index = text.index(after: closeIndex)
+                continue
+            }
+            if character == "}" {
+                let nextIndex = text.index(after: index)
+                guard nextIndex < end, text[nextIndex] == "}" else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                result.append("}")
+                index = text.index(after: nextIndex)
+                continue
+            }
+            result.append(character)
+            index = text.index(after: index)
+        }
+
+        return result
+    }
+
+    private static func matchingFStringExpressionClose(
+        from start: String.Index,
+        end: String.Index,
+        in text: String
+    ) -> String.Index? {
+        var index = start
+        var quote: Character?
+        var previousWasBackslash = false
+        while index < end {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "}" {
+                return index
+            }
+            index = text.index(after: index)
+        }
+        return nil
+    }
+
+    private static func unescapedFStringCharacter(_ character: Character) -> Character {
+        switch character {
+        case "n":
+            return "\n"
+        case "r":
+            return "\r"
+        case "t":
+            return "\t"
+        default:
+            return character
         }
     }
 
