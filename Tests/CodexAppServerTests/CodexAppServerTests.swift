@@ -2237,8 +2237,25 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(configAfterInstall.contains(#"[plugins."weather@debug"]"#))
         XCTAssertTrue(configAfterInstall.contains("enabled = true"))
 
+        let installedList = try appServerResponse(
+            #"{"id":2,"method":"plugin/list","params":{"cwds":[\#(jsonString(sourceRoot.path))]}}"#,
+            codexHome: temp.url
+        )
+        let installedMarketplaces = try XCTUnwrap((installedList["result"] as? [String: Any])?["marketplaces"] as? [[String: Any]])
+        let installedPlugins = try XCTUnwrap(installedMarketplaces.first?["plugins"] as? [[String: Any]])
+        XCTAssertEqual(installedPlugins.first?["installed"] as? Bool, true)
+        XCTAssertEqual(installedPlugins.first?["enabled"] as? Bool, true)
+
+        let installedRead = try appServerResponse(
+            #"{"id":3,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let installedPlugin = try XCTUnwrap((installedRead["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let installedSummary = try XCTUnwrap(installedPlugin["summary"] as? [String: Any])
+        XCTAssertEqual(installedSummary["installed"] as? Bool, true)
+
         let uninstall = try appServerResponse(
-            #"{"id":2,"method":"plugin/uninstall","params":{"pluginId":"weather@debug"}}"#,
+            #"{"id":4,"method":"plugin/uninstall","params":{"pluginId":"weather@debug"}}"#,
             codexHome: temp.url
         )
         XCTAssertNotNil(uninstall["result"] as? [String: Any])
@@ -2248,6 +2265,14 @@ final class CodexAppServerTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertFalse(configAfterUninstall.contains(#"[plugins."weather@debug"]"#))
+
+        let uninstalledRead = try appServerResponse(
+            #"{"id":5,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let uninstalledPlugin = try XCTUnwrap((uninstalledRead["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let uninstalledSummary = try XCTUnwrap(uninstalledPlugin["summary"] as? [String: Any])
+        XCTAssertEqual(uninstalledSummary["installed"] as? Bool, false)
     }
 
     func testPluginUninstallValidatesIdsAndReportsRemoteDisabled() throws {

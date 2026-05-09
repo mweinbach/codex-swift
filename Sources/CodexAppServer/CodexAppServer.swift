@@ -1861,7 +1861,11 @@ public enum CodexAppServer {
 
         for manifestPath in manifestPaths {
             do {
-                marketplaces.append(try pluginMarketplaceEntry(manifestPath: manifestPath, config: config))
+                marketplaces.append(try pluginMarketplaceEntry(
+                    manifestPath: manifestPath,
+                    config: config,
+                    codexHome: configuration.codexHome
+                ))
             } catch {
                 loadErrors.append([
                     "marketplacePath": manifestPath.path,
@@ -1944,7 +1948,11 @@ public enum CodexAppServer {
         }
     }
 
-    private static func pluginMarketplaceEntry(manifestPath: URL, config: ConfigValue) throws -> [String: Any] {
+    private static func pluginMarketplaceEntry(
+        manifestPath: URL,
+        config: ConfigValue,
+        codexHome: URL? = nil
+    ) throws -> [String: Any] {
         let marketplaceRoot = try marketplaceRoot(forManifestPath: manifestPath)
         let data = try Data(contentsOf: manifestPath)
         let object = try marketplaceManifestObject(data: data, manifestPath: manifestPath)
@@ -1956,7 +1964,8 @@ public enum CodexAppServer {
             marketplaceName: name,
             marketplaceRoot: marketplaceRoot,
             manifestPath: manifestPath,
-            config: config
+            config: config,
+            codexHome: codexHome
         )
         return [
             "name": name,
@@ -1979,7 +1988,8 @@ public enum CodexAppServer {
         marketplaceName: String,
         marketplaceRoot: URL,
         manifestPath: URL,
-        config: ConfigValue
+        config: ConfigValue,
+        codexHome: URL?
     ) throws -> [[String: Any]] {
         guard let plugins = value as? [[String: Any]] else {
             throw AppServerError.invalidRequest("invalid marketplace file `\(manifestPath.path)`: missing field `plugins`")
@@ -2005,7 +2015,7 @@ public enum CodexAppServer {
                     "type": "local",
                     "path": source.path
                 ],
-                "installed": false,
+                "installed": codexHome.map { localPluginInstalled(id: id, codexHome: $0) } ?? false,
                 "enabled": configuredPluginEnabled(id: id, in: config),
                 "installPolicy": policy["installation"] as? String ?? "AVAILABLE",
                 "authPolicy": policy["authentication"] as? String ?? "ON_INSTALL",
@@ -2024,7 +2034,11 @@ public enum CodexAppServer {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
         let manifestPath = URL(fileURLWithPath: marketplacePath, isDirectory: false)
-        let marketplace = try pluginMarketplaceEntry(manifestPath: manifestPath, config: config)
+        let marketplace = try pluginMarketplaceEntry(
+            manifestPath: manifestPath,
+            config: config,
+            codexHome: configuration.codexHome
+        )
         let marketplaceName = marketplace["name"] as? String ?? ""
         let summaries = marketplace["plugins"] as? [[String: Any]] ?? []
         guard let summary = summaries.first(where: { $0["name"] as? String == pluginName }) else {
@@ -2390,6 +2404,25 @@ public enum CodexAppServer {
             return false
         }
         return boolConfig(entry, "enabled") ?? true
+    }
+
+    private static func localPluginInstalled(id: String, codexHome: URL) -> Bool {
+        let parts = id.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            return false
+        }
+        let installRoot = codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(parts[1], isDirectory: true)
+            .appendingPathComponent(parts[0], isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: installRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        return entries.contains { isDirectory($0) }
     }
 
     private static func setLocalPluginEnabled(id: String, enabled: Bool, in config: inout ConfigValue) {
