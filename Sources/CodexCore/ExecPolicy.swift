@@ -2703,7 +2703,7 @@ public final class PolicyParser {
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !receiverText.isEmpty,
-              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "isupper"].contains(methodName)
+              ["join", "startswith", "endswith", "lower", "upper", "strip", "lstrip", "rstrip", "split", "replace", "isalnum", "isalpha", "isdigit", "islower", "isspace", "istitle", "isupper"].contains(methodName)
         else {
             return nil
         }
@@ -2802,6 +2802,9 @@ public final class PolicyParser {
         case "isspace":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .bool(starlarkStringIsWhitespace(receiver))
+        case "istitle":
+            try requireNoStringMethodArguments(rawArguments, expression: text)
+            return .bool(starlarkStringIsTitlecase(receiver))
         case "isupper":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .bool(starlarkStringIsUppercase(receiver))
@@ -3030,6 +3033,27 @@ public final class PolicyParser {
 
     private static func starlarkStringIsWhitespace(_ string: String) -> Bool {
         !string.isEmpty && string.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
+    }
+
+    private static func starlarkStringIsTitlecase(_ string: String) -> Bool {
+        var lastNonAlphabetic = true
+        var sawAlphabetic = false
+        for scalar in string.unicodeScalars {
+            if !scalar.properties.isAlphabetic {
+                lastNonAlphabetic = true
+            } else {
+                if lastNonAlphabetic {
+                    if scalar.properties.isLowercase {
+                        return false
+                    }
+                } else if scalar.properties.isUppercase {
+                    return false
+                }
+                sawAlphabetic = true
+                lastNonAlphabetic = false
+            }
+        }
+        return sawAlphabetic
     }
 
     private static func starlarkStringIsUppercase(_ string: String) -> Bool {

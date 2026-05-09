@@ -2146,6 +2146,30 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/HAL/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringTitlePredicate() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "commit"
+
+        if "Catch-22".istitle() and not "HAL-9000".istitle() and not "123".istitle():
+            prefix_rule([TOOL, COMMAND], "allow", justification = "title")
+
+        if not "hello, World".istitle():
+            network_rule("title.example.com", "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("commit")]),
+                decision: .allow,
+                justification: "title"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "title.example.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkStringNormalizationMethods() throws {
         let policy = try parsePolicy("""
         RAW_TOOL = " Git "
