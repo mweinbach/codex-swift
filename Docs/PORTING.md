@@ -669,6 +669,7 @@ Source baseline inspected for this scaffold:
   - tightened the SwiftPort agent and contributing docs so upstream Rust lint guidance is rewritten into concrete Swift review rules: prefer labels/enums/options over opaque literals, match Swift argument-comment text to the callee label/local name when unavoidable, avoid broad concurrency escape annotations, and model Rust `Option` wire behavior explicitly when plain Swift optionals would lose information.
 - `codex-rs/shell-command` command parser
   - matched Rust's tree-sitter Bash rejection for malformed connector layouts, including leading operators, trailing operators, doubled semicolons, and empty pipeline segments, so Swift now collapses these shell scripts to a whole-script `unknown` instead of salvaging known commands.
+  - mirrored Rust's word-only Bash parser fixtures for double-quoted arguments containing newlines, mixed single/double quote concatenation, and empty command positions so Swift keeps those edge cases pinned to upstream parser behavior.
 - `codex-rs/shell-command` Bash word-only parser integration
   - routed shell-wrapped command summaries through Swift's Rust-shaped Bash word-only parser so escaped expansion characters inside double-quoted search arguments preserve their backslashes in summaries and query text, matching Rust tree-sitter parsing.
 - `codex-rs/shell-command` Bash escaped plain words

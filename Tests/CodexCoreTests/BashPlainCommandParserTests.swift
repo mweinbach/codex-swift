@@ -34,6 +34,24 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
     }
 
+    func testAcceptsDoubleQuotedStringsWithNewlinesLikeRust() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("git commit -m \"line1\nline2\""),
+            [["git", "commit", "-m", "line1\nline2"]]
+        )
+    }
+
+    func testAcceptsMixedQuoteConcatenationLikeRust() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "/usr"'/'"local"/bin"#),
+            [["echo", "/usr/local/bin"]]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo '/usr'"/"'local'/bin"#),
+            [["echo", "/usr/local/bin"]]
+        )
+    }
+
     func testAcceptsEscapedSpecialsInDoubleQuotedStringsLikeRust() {
         XCTAssertEqual(
             BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "\$HOME" "\`literal\`""#),
@@ -82,6 +100,12 @@ final class BashPlainCommandParserTests: XCTestCase {
 
     func testRejectsTrailingOperatorParseError() {
         XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls &&"))
+    }
+
+    func testRejectsEmptyCommandPositionsLikeRust() {
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("&& ls"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls ;; pwd"))
+        XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence("ls | | wc"))
     }
 
     func testParseZshLcPlainCommands() {
