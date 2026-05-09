@@ -284,13 +284,13 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
-    func testShellCdRebasesSearchAndListPathsLikeRust() {
+    func testShellCdDoesNotRebaseSearchAndListPathsLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && rg -n TODO core/src"]), [
-            .search(cmd: "rg -n TODO core/src", query: "TODO", path: "codex-rs/core")
+            .search(cmd: "rg -n TODO core/src", query: "TODO", path: "core")
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && ls core/src"]), [
-            .listFiles(cmd: "ls core/src", path: "codex-rs/core")
+            .listFiles(cmd: "ls core/src", path: "core")
         ])
     }
 

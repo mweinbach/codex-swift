@@ -188,13 +188,7 @@ private func parseTokenParts(_ parts: [[String]]) -> [ParsedCommand] {
             switch parsed {
             case let .read(cmd, name, path):
                 parsedCommands.append(.read(cmd: cmd, name: name, path: joinPaths(cwd, path)))
-            case let .listFiles(cmd, path):
-                let rebasedPath = path.map { isAbsoluteLike(cwd) ? $0 : joinPaths(cwd, $0) }
-                parsedCommands.append(.listFiles(cmd: cmd, path: rebasedPath))
-            case let .search(cmd, query, path):
-                let rebasedPath = path.map { isAbsoluteLike(cwd) ? $0 : joinPaths(cwd, $0) }
-                parsedCommands.append(.search(cmd: cmd, query: query, path: rebasedPath))
-            case .unknown:
+            default:
                 parsedCommands.append(parsed)
             }
         } else {
