@@ -227,7 +227,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case callID = "call_id"
         case name
         case output
-        case result
+        case legacyResult = "result"
         case status
         case execution
         case tools
@@ -258,7 +258,8 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case .mcpToolCallOutput:
             self = .mcpToolCallOutput(
                 callID: try container.decode(String.self, forKey: .callID),
-                result: try container.decode(McpToolCallResult.self, forKey: .result)
+                result: try container.decodeIfPresent(McpToolCallResult.self, forKey: .output)
+                    ?? container.decode(McpToolCallResult.self, forKey: .legacyResult)
             )
         case .customToolCallOutput:
             self = .customToolCallOutput(
@@ -291,7 +292,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case let .mcpToolCallOutput(callID, result):
             try container.encode(ItemType.mcpToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
-            try container.encode(result, forKey: .result)
+            try container.encode(result, forKey: .output)
         case let .customToolCallOutput(callID, name, output):
             try container.encode(ItemType.customToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)

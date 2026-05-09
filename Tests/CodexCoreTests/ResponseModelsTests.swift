@@ -103,6 +103,33 @@ final class ResponseModelsTests: XCTestCase {
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "mcp_tool_call_output")
         XCTAssertEqual(object["call_id"] as? String, "call-mcp")
+        XCTAssertNotNil(object["output"])
+        XCTAssertNil(object["result"])
+    }
+
+    func testResponseInputItemDecodesMcpToolCallOutputLikeRust() throws {
+        let json = #"""
+        {
+            "type": "mcp_tool_call_output",
+            "call_id": "call-mcp",
+            "output": {
+                "Ok": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "hello"
+                        }
+                    ]
+                }
+            }
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseInputItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .mcpToolCallOutput(
+            callID: "call-mcp",
+            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "hello"))]))
+        ))
     }
 
     func testMessagePhaseRoundTripsOnMessages() throws {
