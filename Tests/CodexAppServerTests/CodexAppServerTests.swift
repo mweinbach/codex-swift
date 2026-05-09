@@ -7925,6 +7925,12 @@ final class CodexAppServerTests: XCTestCase {
         allowed_approval_policies = ["untrusted", "on-request"]
         allowed_approvals_reviewers = ["user", "guardian_subagent"]
         allowed_sandbox_modes = ["read-only", "workspace-write", "external-sandbox"]
+        allowed_web_search_modes = ["cached"]
+        enforce_residency = "us"
+
+        [features]
+        tool_search = true
+        plugins = false
         """.write(to: requirementsPath, atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
@@ -7939,10 +7945,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requirements["allowedApprovalPolicies"] as? [String], ["untrusted", "on-request"])
         XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only", "workspace-write"])
         XCTAssertEqual(requirements["allowedApprovalsReviewers"] as? [String], ["user", "guardian_subagent"])
-        XCTAssertTrue(requirements["allowedWebSearchModes"] is NSNull)
-        XCTAssertTrue(requirements["featureRequirements"] is NSNull)
+        XCTAssertEqual(requirements["allowedWebSearchModes"] as? [String], ["cached", "disabled"])
+        XCTAssertEqual(requirements["featureRequirements"] as? [String: Bool], ["tool_search": true, "plugins": false])
         XCTAssertTrue(requirements["hooks"] is NSNull)
-        XCTAssertTrue(requirements["enforceResidency"] is NSNull)
+        XCTAssertEqual(requirements["enforceResidency"] as? String, "us")
         XCTAssertTrue(requirements["network"] is NSNull)
     }
 

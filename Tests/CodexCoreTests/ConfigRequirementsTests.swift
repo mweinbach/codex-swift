@@ -6,6 +6,11 @@ final class ConfigRequirementsTests: XCTestCase {
         let source = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["on-request"]
         allowed_approvals_reviewers = ["guardian_subagent"]
+        allowed_web_search_modes = ["cached"]
+        enforce_residency = "us"
+
+        [features]
+        tool_search = true
         """)
 
         var emptyTarget = try ConfigRequirementsToml.parse("""
@@ -14,13 +19,20 @@ final class ConfigRequirementsTests: XCTestCase {
         emptyTarget.mergeUnsetFields(from: source)
         XCTAssertEqual(emptyTarget.allowedApprovalPolicies, [.onRequest])
         XCTAssertEqual(emptyTarget.allowedApprovalsReviewers, [.autoReview])
+        XCTAssertEqual(emptyTarget.allowedWebSearchModes, [.cached])
+        XCTAssertEqual(emptyTarget.featureRequirements, ["tool_search": true])
+        XCTAssertEqual(emptyTarget.enforceResidency, .us)
 
         var populatedTarget = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["never"]
+        allowed_web_search_modes = ["live"]
         """)
         populatedTarget.mergeUnsetFields(from: source)
         XCTAssertEqual(populatedTarget.allowedApprovalPolicies, [.never])
         XCTAssertEqual(populatedTarget.allowedApprovalsReviewers, [.autoReview])
+        XCTAssertEqual(populatedTarget.allowedWebSearchModes, [.live])
+        XCTAssertEqual(populatedTarget.featureRequirements, ["tool_search": true])
+        XCTAssertEqual(populatedTarget.enforceResidency, .us)
     }
 
     func testDeserializeAllowedApprovalPolicies() throws {
@@ -72,6 +84,35 @@ final class ConfigRequirementsTests: XCTestCase {
             requirements.sandboxPolicy.canSet(.externalSandbox(networkAccess: .restricted)),
             .invalidValue(candidate: "ExternalSandbox { network_access: Restricted }", allowed: "[ReadOnly, WorkspaceWrite]")
         )
+    }
+
+    func testDeserializeAllowedWebSearchModesAndAppServerNormalization() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        allowed_web_search_modes = ["cached"]
+        """)
+
+        XCTAssertEqual(config.allowedWebSearchModes, [.cached])
+        let object = config.appServerRequirementsObject()
+        XCTAssertEqual(object["allowedWebSearchModes"] as? [String], ["cached", "disabled"])
+
+        let disabledOnly = ConfigRequirementsToml(allowedWebSearchModes: [])
+        XCTAssertEqual(disabledOnly.appServerRequirementsObject()["allowedWebSearchModes"] as? [String], ["disabled"])
+    }
+
+    func testDeserializeFeatureRequirementsAndResidency() throws {
+        let featuresAlias = try ConfigRequirementsToml.parse("""
+        enforce_residency = "us"
+
+        [feature_requirements]
+        tool_search = true
+        plugins = false
+        """)
+
+        XCTAssertEqual(featuresAlias.enforceResidency, .us)
+        XCTAssertEqual(featuresAlias.featureRequirements, ["tool_search": true, "plugins": false])
+        let object = featuresAlias.appServerRequirementsObject()
+        XCTAssertEqual(object["enforceResidency"] as? String, "us")
+        XCTAssertEqual(object["featureRequirements"] as? [String: Bool], ["tool_search": true, "plugins": false])
     }
 
     func testDeserializeManagedHookRequirementsMatchesRustFlattenedShape() throws {
@@ -145,6 +186,11 @@ final class ConfigRequirementsTests: XCTestCase {
         allowed_approval_policies = ["never"]
         allowed_approvals_reviewers = ["user", "guardian_subagent"]
         allowed_sandbox_modes = ["read-only", "danger-full-access", "external-sandbox"]
+        allowed_web_search_modes = ["live"]
+        enforce_residency = "us"
+
+        [features]
+        remote_control = true
         """)
 
         XCTAssertFalse(config.isEmpty)
@@ -152,6 +198,9 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(object["allowedApprovalPolicies"] as? [String], ["never"])
         XCTAssertEqual(object["allowedSandboxModes"] as? [String], ["read-only", "danger-full-access"])
         XCTAssertEqual(object["allowedApprovalsReviewers"] as? [String], ["user", "guardian_subagent"])
+        XCTAssertEqual(object["allowedWebSearchModes"] as? [String], ["live", "disabled"])
+        XCTAssertEqual(object["featureRequirements"] as? [String: Bool], ["remote_control": true])
+        XCTAssertEqual(object["enforceResidency"] as? String, "us")
         XCTAssertTrue(ConfigRequirementsToml().isEmpty)
     }
 }

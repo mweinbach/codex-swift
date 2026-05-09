@@ -5,6 +5,9 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
     case invalidApprovalPolicy(String)
     case invalidApprovalsReviewer(String)
     case invalidSandboxMode(String)
+    case invalidWebSearchMode(String)
+    case invalidFeatureRequirements(String)
+    case invalidResidencyRequirement(String)
     case invalidArray(String)
 
     public var description: String {
@@ -17,6 +20,12 @@ public enum ConfigRequirementsParseError: Error, Equatable, CustomStringConverti
             return "Invalid approvals reviewer requirement: \(value)"
         case let .invalidSandboxMode(value):
             return "Invalid sandbox mode requirement: \(value)"
+        case let .invalidWebSearchMode(value):
+            return "Invalid web search mode requirement: \(value)"
+        case let .invalidFeatureRequirements(value):
+            return "Invalid feature requirements: \(value)"
+        case let .invalidResidencyRequirement(value):
+            return "Invalid residency requirement: \(value)"
         case let .invalidArray(key):
             return "Invalid array for \(key)"
         }
@@ -106,35 +115,57 @@ public struct ManagedHooksRequirementsToml: Equatable, Sendable {
     }
 }
 
+public enum WebSearchModeRequirement: String, Equatable, Sendable, CaseIterable {
+    case disabled
+    case cached
+    case live
+}
+
+public enum ResidencyRequirement: String, Equatable, Sendable {
+    case us
+}
+
 public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedApprovalPolicies: [AskForApproval]?
     public var allowedApprovalsReviewers: [ApprovalsReviewer]?
     public var allowedSandboxModes: [SandboxModeRequirement]?
+    public var allowedWebSearchModes: [WebSearchModeRequirement]?
+    public var featureRequirements: [String: Bool]?
     public var hooks: ManagedHooksRequirementsToml?
     public var hooksSource: HookSource
     public var hooksSourceDescription: String
+    public var enforceResidency: ResidencyRequirement?
 
     public init(
         allowedApprovalPolicies: [AskForApproval]? = nil,
         allowedApprovalsReviewers: [ApprovalsReviewer]? = nil,
         allowedSandboxModes: [SandboxModeRequirement]? = nil,
+        allowedWebSearchModes: [WebSearchModeRequirement]? = nil,
+        featureRequirements: [String: Bool]? = nil,
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
-        hooksSourceDescription: String = "managed requirements"
+        hooksSourceDescription: String = "managed requirements",
+        enforceResidency: ResidencyRequirement? = nil
     ) {
         self.allowedApprovalPolicies = allowedApprovalPolicies
         self.allowedApprovalsReviewers = allowedApprovalsReviewers
         self.allowedSandboxModes = allowedSandboxModes
+        self.allowedWebSearchModes = allowedWebSearchModes
+        self.featureRequirements = featureRequirements
         self.hooks = hooks
         self.hooksSource = hooksSource
         self.hooksSourceDescription = hooksSourceDescription
+        self.enforceResidency = enforceResidency
     }
 
     public var isEmpty: Bool {
         allowedApprovalPolicies == nil &&
             allowedApprovalsReviewers == nil &&
             allowedSandboxModes == nil &&
-            hooks == nil
+            allowedWebSearchModes == nil &&
+            featureRequirements == nil &&
+            hooks == nil &&
+            enforceResidency == nil
     }
 
     public mutating func mergeUnsetFields(from other: ConfigRequirementsToml) {
@@ -147,10 +178,19 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if allowedSandboxModes == nil, let value = other.allowedSandboxModes {
             allowedSandboxModes = value
         }
+        if allowedWebSearchModes == nil, let value = other.allowedWebSearchModes {
+            allowedWebSearchModes = value
+        }
+        if featureRequirements == nil, let value = other.featureRequirements {
+            featureRequirements = value
+        }
         if hooks == nil, let value = other.hooks {
             hooks = value
             hooksSource = other.hooksSource
             hooksSourceDescription = other.hooksSourceDescription
+        }
+        if enforceResidency == nil, let value = other.enforceResidency {
+            enforceResidency = value
         }
     }
 
@@ -226,8 +266,17 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         if let sandboxValue = table["allowed_sandbox_modes"] {
             result.allowedSandboxModes = try parseSandboxModes(sandboxValue)
         }
+        if let webSearchValue = table["allowed_web_search_modes"] {
+            result.allowedWebSearchModes = try parseWebSearchModes(webSearchValue)
+        }
+        if let featureValue = table["features"] ?? table["feature_requirements"] {
+            result.featureRequirements = try parseFeatureRequirements(featureValue)
+        }
         if let hooksValue = table["hooks"] {
             result.hooks = try parseManagedHooks(hooksValue)
+        }
+        if let residencyValue = table["enforce_residency"] {
+            result.enforceResidency = try parseResidencyRequirement(residencyValue)
         }
 
         return result
@@ -262,6 +311,38 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             }
             return mode
         }
+    }
+
+    private static func parseWebSearchModes(_ value: ConfigValue) throws -> [WebSearchModeRequirement] {
+        try stringArray(value, key: "allowed_web_search_modes").map { value in
+            guard let mode = WebSearchModeRequirement(rawValue: value) else {
+                throw ConfigRequirementsParseError.invalidWebSearchMode(value)
+            }
+            return mode
+        }
+    }
+
+    private static func parseFeatureRequirements(_ value: ConfigValue) throws -> [String: Bool] {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidFeatureRequirements("features")
+        }
+        var requirements: [String: Bool] = [:]
+        for (key, value) in table {
+            guard case let .bool(enabled) = value else {
+                throw ConfigRequirementsParseError.invalidFeatureRequirements(key)
+            }
+            requirements[key] = enabled
+        }
+        return requirements
+    }
+
+    private static func parseResidencyRequirement(_ value: ConfigValue) throws -> ResidencyRequirement {
+        guard case let .string(rawValue) = value,
+              let requirement = ResidencyRequirement(rawValue: rawValue)
+        else {
+            throw ConfigRequirementsParseError.invalidResidencyRequirement(String(describing: value))
+        }
+        return requirement
     }
 
     private static func stringArray(_ value: ConfigValue, key: String) throws -> [String] {
@@ -311,10 +392,16 @@ extension ConfigRequirementsToml {
             "allowedSandboxModes": allowedSandboxModes.map { modes in
                 modes.compactMap(\.appServerSandboxModeValue)
             } as Any? ?? NSNull(),
-            "allowedWebSearchModes": NSNull(),
-            "featureRequirements": NSNull(),
+            "allowedWebSearchModes": allowedWebSearchModes.map { modes in
+                var normalized = modes.map(\.rawValue)
+                if !normalized.contains(WebSearchModeRequirement.disabled.rawValue) {
+                    normalized.append(WebSearchModeRequirement.disabled.rawValue)
+                }
+                return normalized
+            } as Any? ?? NSNull(),
+            "featureRequirements": featureRequirements as Any? ?? NSNull(),
             "hooks": hooks.map { $0.appServerObject() } as Any? ?? NSNull(),
-            "enforceResidency": NSNull(),
+            "enforceResidency": enforceResidency?.rawValue as Any? ?? NSNull(),
             "network": NSNull()
         ]
     }

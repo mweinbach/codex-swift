@@ -464,6 +464,8 @@ Source baseline inspected for this scaffold:
   - `config/read` now honors the optional absolute `cwd` param when loading config layers, matching Rust's project-layer-aware effective config, origins, and included layer list.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements reviewer constraints
   - `configRequirements/read` now parses `allowed_approvals_reviewers` and returns Rust's camelCase `allowedApprovalsReviewers` values, including the `auto_review` input alias normalized to `guardian_subagent`.
+- `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements web-search/features/residency fields
+  - `configRequirements/read` now parses `allowed_web_search_modes`, `features`/`feature_requirements`, and `enforce_residency`, returning Rust's camelCase response keys while normalizing omitted `disabled` web-search mode like Rust.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` model-provider capabilities
   - `modelProvider/capabilities/read` now reloads the active config and returns Rust-shaped provider capability booleans, including the Amazon Bedrock built-in provider's disabled namespace-tools, image-generation, and web-search capabilities.
 - `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox readiness
