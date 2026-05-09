@@ -439,6 +439,27 @@ public enum NonInteractiveExec {
                     additionalContextItems: additionalItems
                 )
             }
+            if hookPayload.sandboxPermissions.requiresEscalatedPermissions,
+               let permissionDecision = await runPermissionRequestHooks(
+                   handlers: handlers,
+                   hookPayload: hookPayload,
+                   conversationID: conversationID,
+                   turnID: turnID,
+                   cwd: cwd,
+                   model: model,
+                   approvalPolicy: approvalPolicy
+               )
+            {
+                switch permissionDecision {
+                case .allow:
+                    break
+                case let .deny(message):
+                    return FunctionCallExecutionResult(
+                        output: deniedPermissionOutput(for: item, hookPayload: hookPayload, message: message),
+                        additionalContextItems: additionalItems
+                    )
+                }
+            }
 
             let output = await executeFunctionCall(
                 item,
@@ -891,6 +912,8 @@ public enum NonInteractiveExec {
         var matcherAliases: [String]
         var toolUseID: String
         var toolInput: JSONValue
+        var sandboxPermissions: SandboxPermissions = .useDefault
+        var approvalDescription: String?
     }
 
     private struct PostToolHookPayload: Equatable, Sendable {
@@ -964,6 +987,43 @@ public enum NonInteractiveExec {
         }
     }
 
+    private static func runPermissionRequestHooks(
+        handlers: [ConfiguredHookHandler],
+        hookPayload: ToolHookPayload,
+        conversationID: ConversationId,
+        turnID: String,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval
+    ) async -> HookPermissionRequestDecision? {
+        do {
+            let request = try HookPermissionRequestRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                turnID: turnID,
+                cwd: AbsolutePath(absolutePath: cwd.standardizedFileURL.path),
+                model: model,
+                permissionMode: hookPermissionMode(approvalPolicy),
+                toolName: hookPayload.toolName,
+                matcherAliases: hookPayload.matcherAliases,
+                runIDSuffix: hookPayload.toolUseID,
+                toolInput: permissionToolInput(from: hookPayload)
+            )
+            return await HookPermissionRequest.run(handlers: handlers, shell: HookCommandShell(), request: request).decision
+        } catch {
+            return nil
+        }
+    }
+
+    private static func permissionToolInput(from hookPayload: ToolHookPayload) -> JSONValue {
+        guard let approvalDescription = hookPayload.approvalDescription,
+              case var .object(input) = hookPayload.toolInput
+        else {
+            return hookPayload.toolInput
+        }
+        input["description"] = .string(approvalDescription)
+        return .object(input)
+    }
+
     private static func hookAdditionalContextItems(_ contexts: [String]) -> [ResponseItem] {
         contexts.map { context in
             ResponseInputItem(userInputs: [.text(context)]).responseItem()
@@ -983,7 +1043,9 @@ public enum NonInteractiveExec {
                     toolName: "Bash",
                     matcherAliases: [],
                     toolUseID: callID,
-                    toolInput: .object(["command": .string(params.cmd)])
+                    toolInput: .object(["command": .string(params.cmd)]),
+                    sandboxPermissions: params.sandboxPermissions,
+                    approvalDescription: params.justification
                 )
 
             case "shell_command":
@@ -994,7 +1056,9 @@ public enum NonInteractiveExec {
                     toolName: "Bash",
                     matcherAliases: [],
                     toolUseID: callID,
-                    toolInput: .object(["command": .string(params.command)])
+                    toolInput: .object(["command": .string(params.command)]),
+                    sandboxPermissions: params.sandboxPermissions ?? .useDefault,
+                    approvalDescription: params.justification
                 )
 
             case "shell", "container.exec":
@@ -1005,7 +1069,9 @@ public enum NonInteractiveExec {
                     toolName: "Bash",
                     matcherAliases: [],
                     toolUseID: callID,
-                    toolInput: .object(["command": .string(params.command.joined(separator: " "))])
+                    toolInput: .object(["command": .string(params.command.joined(separator: " "))]),
+                    sandboxPermissions: params.sandboxPermissions ?? .useDefault,
+                    approvalDescription: params.justification
                 )
 
             default:
@@ -1082,6 +1148,23 @@ public enum NonInteractiveExec {
         reason: String?
     ) -> ResponseItem {
         let message = blockedToolMessage(hookPayload: hookPayload, reason: reason)
+        switch item {
+        case let .functionCall(_, _, _, callID):
+            return functionOutput(callID: callID, content: message, success: false)
+        case let .customToolCall(_, _, callID, _, _):
+            return .customToolCallOutput(callID: callID, output: message)
+        case let .localShellCall(id, callID, _, _):
+            return functionOutput(callID: callID ?? id ?? "local_shell", content: message, success: false)
+        default:
+            return functionOutput(callID: hookPayload.toolUseID, content: message, success: false)
+        }
+    }
+
+    private static func deniedPermissionOutput(
+        for item: ResponseItem,
+        hookPayload: ToolHookPayload,
+        message: String
+    ) -> ResponseItem {
         switch item {
         case let .functionCall(_, _, _, callID):
             return functionOutput(callID: callID, content: message, success: false)

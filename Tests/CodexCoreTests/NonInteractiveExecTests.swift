@@ -409,6 +409,80 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testPermissionRequestHookDeniesEscalatedShellCommandBeforeExecution() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf should-not-run","login":false,"sandbox_permissions":"require_escalated","justification":"need broader access"}"#,
+            callID: "call-shell"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .permissionRequest,
+                    matcher: "Bash",
+                    command: #"printf %s '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"denied by hook"}}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "denied by hook")
+    }
+
+    func testPermissionRequestHookAllowFallsThroughToEscalatedShellCommand() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf allowed","login":false,"sandbox_permissions":"require_escalated","justification":"need broader access"}"#,
+            callID: "call-shell"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .permissionRequest,
+                    matcher: "Bash",
+                    command: #"printf %s '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("allowed"), payload.content)
+    }
+
     func testResponsesLoopExecutesCustomToolCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "patch")])
