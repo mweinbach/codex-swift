@@ -5260,6 +5260,90 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "chatgpt authentication required to read rate limits")
     }
 
+    func testSendAddCreditsNudgeEmailRequiresAuthentication() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/sendAddCreditsNudgeEmail","params":{"creditType":"credits"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "codex account authentication required to notify workspace owner")
+    }
+
+    func testSendAddCreditsNudgeEmailRequiresChatGPTAuthentication() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/sendAddCreditsNudgeEmail","params":{"creditType":"usage_limit"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "chatgpt authentication required to notify workspace owner")
+    }
+
+    func testSendAddCreditsNudgeEmailUsesSenderAndReturnsStatus() async throws {
+        let temp = try TemporaryDirectory()
+        try #"chatgpt_base_url = "https://chatgpt.test/base/""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
+        let sender = AppServerRecordingAddCreditsNudgeEmailSender(status: .cooldownActive)
+        let configuration = testConfiguration(codexHome: temp.url, addCreditsNudgeEmailSender: sender)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/sendAddCreditsNudgeEmail","params":{"creditType":"usage_limit"}}"#,
+            configuration: configuration
+        )
+
+        let requests = await sender.requests
+        XCTAssertEqual(requests, [
+            AppServerRecordingAddCreditsNudgeEmailSender.Request(
+                baseURL: "https://chatgpt.test/base/",
+                accessToken: "access-token",
+                accountID: "acct-test",
+                creditType: .usageLimit
+            )
+        ])
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "cooldown_active")
+    }
+
+    func testSendAddCreditsNudgeEmailSurfacesBackendFailure() throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
+        let sender = AppServerRecordingAddCreditsNudgeEmailSender(error: AddCreditsNudgeEmailTestError())
+        let configuration = testConfiguration(codexHome: temp.url, addCreditsNudgeEmailSender: sender)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/sendAddCreditsNudgeEmail","params":{"creditType":"credits"}}"#,
+            configuration: configuration
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "failed to notify workspace owner: boom")
+    }
+
     func testAccountRateLimitsReadUsesFetcherAndReturnsV2Shape() async throws {
         let temp = try TemporaryDirectory()
         try #"chatgpt_base_url = "https://chatgpt.test/base/""#.write(
@@ -5334,6 +5418,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(snapshot.primary?.windowMinutes, 60)
         XCTAssertEqual(snapshot.secondary?.windowMinutes, 1_440)
         XCTAssertEqual(snapshot.planType, .pro)
+    }
+
+    func testURLSessionAddCreditsNudgeEmailSenderPostsExpectedBody() async throws {
+        let capture = AppServerRequestCapture()
+        let sender = URLSessionAddCreditsNudgeEmailSender { request in
+            await capture.append(request)
+            return AccountRateLimitsHTTPResponse(statusCode: 200, body: Data())
+        }
+
+        let status = try await sender.send(
+            baseURL: "https://api.example.test/",
+            accessToken: "chatgpt-token",
+            accountID: "account-123",
+            creditType: .usageLimit
+        )
+
+        let requests = await capture.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.url, URL(string: "https://api.example.test/api/codex/accounts/send_add_credits_nudge_email"))
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.headers["Authorization"] ?? nil, "Bearer chatgpt-token")
+        XCTAssertEqual(request.headers["chatgpt-account-id"] ?? nil, "account-123")
+        XCTAssertEqual(request.headers["Content-Type"] ?? nil, "application/json")
+        XCTAssertEqual(request.body, #"{"credit_type":"usage_limit"}"#)
+        XCTAssertEqual(status, .sent)
+    }
+
+    func testURLSessionAddCreditsNudgeEmailSenderMapsCooldown() async throws {
+        let sender = URLSessionAddCreditsNudgeEmailSender { _ in
+            AccountRateLimitsHTTPResponse(statusCode: 429, body: Data())
+        }
+
+        let status = try await sender.send(
+            baseURL: "https://api.example.test/",
+            accessToken: "chatgpt-token",
+            accountID: "account-123",
+            creditType: .credits
+        )
+
+        XCTAssertEqual(status, .cooldownActive)
     }
 
     func testURLSessionAccountRateLimitsFetcherUsesWhamUsagePathForChatGPTBackend() async throws {
@@ -7227,6 +7351,7 @@ final class CodexAppServerTests: XCTestCase {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
+        addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
@@ -7243,6 +7368,7 @@ final class CodexAppServerTests: XCTestCase {
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
+            addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
             authRefreshTransport: authRefreshTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
@@ -7646,6 +7772,7 @@ private actor AppServerRequestCapture {
         let url: URL?
         let method: String?
         let headers: [String: String]
+        let body: String?
     }
 
     private(set) var requests: [Request] = []
@@ -7654,7 +7781,8 @@ private actor AppServerRequestCapture {
         requests.append(Request(
             url: request.url,
             method: request.httpMethod,
-            headers: request.allHTTPHeaderFields ?? [:]
+            headers: request.allHTTPHeaderFields ?? [:],
+            body: request.httpBody.map { String(decoding: $0, as: UTF8.self) }
         ))
     }
 }
@@ -7751,6 +7879,45 @@ private actor AppServerRecordingAccountRateLimitsFetcher: AccountRateLimitsFetch
         requests.append(Request(baseURL: baseURL, accessToken: accessToken, accountID: accountID))
         return snapshot
     }
+}
+
+private actor AppServerRecordingAddCreditsNudgeEmailSender: AddCreditsNudgeEmailSending {
+    struct Request: Equatable {
+        let baseURL: String
+        let accessToken: String
+        let accountID: String
+        let creditType: AddCreditsNudgeCreditType
+    }
+
+    private let result: Result<AddCreditsNudgeEmailStatus, Error>
+    private(set) var requests: [Request] = []
+
+    init(status: AddCreditsNudgeEmailStatus) {
+        self.result = .success(status)
+    }
+
+    init(error: Error) {
+        self.result = .failure(error)
+    }
+
+    func send(
+        baseURL: String,
+        accessToken: String,
+        accountID: String,
+        creditType: AddCreditsNudgeCreditType
+    ) async throws -> AddCreditsNudgeEmailStatus {
+        requests.append(Request(
+            baseURL: baseURL,
+            accessToken: accessToken,
+            accountID: accountID,
+            creditType: creditType
+        ))
+        return try result.get()
+    }
+}
+
+private struct AddCreditsNudgeEmailTestError: Error, CustomStringConvertible {
+    var description: String { "boom" }
 }
 
 private final class TemporaryDirectory {

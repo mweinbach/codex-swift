@@ -105,6 +105,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
+    public let addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending
     public let authRefreshTransport: AppServerAuthRefreshTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
@@ -122,6 +123,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
+        addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
@@ -138,6 +140,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
+        self.addCreditsNudgeEmailSender = addCreditsNudgeEmailSender
         self.authRefreshTransport = authRefreshTransport
         self.mcpHTTPTransport = mcpHTTPTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
@@ -161,6 +164,10 @@ public protocol AccountRateLimitsFetching: Sendable {
     func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot
 }
 
+public protocol AddCreditsNudgeEmailSending: Sendable {
+    func send(baseURL: String, accessToken: String, accountID: String, creditType: AddCreditsNudgeCreditType) async throws -> AddCreditsNudgeEmailStatus
+}
+
 public struct AccountRateLimitsHTTPResponse: Sendable {
     public let statusCode: Int
     public let body: Data
@@ -169,6 +176,16 @@ public struct AccountRateLimitsHTTPResponse: Sendable {
         self.statusCode = statusCode
         self.body = body
     }
+}
+
+public enum AddCreditsNudgeCreditType: String, Sendable {
+    case credits
+    case usageLimit = "usage_limit"
+}
+
+public enum AddCreditsNudgeEmailStatus: String, Sendable {
+    case sent
+    case cooldownActive = "cooldown_active"
 }
 
 private struct AppServerProcessSpawnParams {
@@ -283,8 +300,8 @@ public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
     }
 
     public func fetchRateLimits(baseURL: String, accessToken: String, accountID: String) async throws -> RateLimitSnapshot {
-        let normalizedBaseURL = Self.normalizedBaseURL(baseURL)
-        let usagePath = normalizedBaseURL.contains("/backend-api") ? "/wham/usage" : "/api/codex/usage"
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(baseURL)
+        let usagePath = AccountBackendEndpoint.isChatGPTPathStyle(normalizedBaseURL) ? "/wham/usage" : "/api/codex/usage"
         let endpointText = normalizedBaseURL + usagePath
         guard let url = URL(string: endpointText) else {
             throw AccountRateLimitsFetchError.invalidURL(endpointText)
@@ -311,8 +328,64 @@ public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
         }
         return AccountRateLimitsHTTPResponse(statusCode: httpResponse.statusCode, body: data)
     }
+}
 
-    private static func normalizedBaseURL(_ baseURL: String) -> String {
+public struct URLSessionAddCreditsNudgeEmailSender: AddCreditsNudgeEmailSending {
+    public typealias Transport = @Sendable (URLRequest) async throws -> AccountRateLimitsHTTPResponse
+
+    private let transport: Transport
+
+    public init() {
+        self.transport = URLSessionAddCreditsNudgeEmailSender.urlSessionTransport
+    }
+
+    public init(transport: @escaping Transport) {
+        self.transport = transport
+    }
+
+    public func send(
+        baseURL: String,
+        accessToken: String,
+        accountID: String,
+        creditType: AddCreditsNudgeCreditType
+    ) async throws -> AddCreditsNudgeEmailStatus {
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(baseURL)
+        let path = AccountBackendEndpoint.isChatGPTPathStyle(normalizedBaseURL)
+            ? "/wham/accounts/send_add_credits_nudge_email"
+            : "/api/codex/accounts/send_add_credits_nudge_email"
+        let endpointText = normalizedBaseURL + path
+        guard let url = URL(string: endpointText) else {
+            throw AccountRateLimitsFetchError.invalidURL(endpointText)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["credit_type": creditType.rawValue])
+
+        let response = try await transport(request)
+        if response.statusCode == 429 {
+            return .cooldownActive
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw AccountRateLimitsFetchError.httpStatus(response.statusCode)
+        }
+        return .sent
+    }
+
+    private static func urlSessionTransport(_ request: URLRequest) async throws -> AccountRateLimitsHTTPResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AccountRateLimitsFetchError.nonHTTPResponse
+        }
+        return AccountRateLimitsHTTPResponse(statusCode: httpResponse.statusCode, body: data)
+    }
+}
+
+private enum AccountBackendEndpoint {
+    static func normalizedBaseURL(_ baseURL: String) -> String {
         var normalized = baseURL
         while normalized.hasSuffix("/") {
             normalized.removeLast()
@@ -323,6 +396,10 @@ public struct URLSessionAccountRateLimitsFetcher: AccountRateLimitsFetching {
             normalized += "/backend-api"
         }
         return normalized
+    }
+
+    static func isChatGPTPathStyle(_ normalizedBaseURL: String) -> Bool {
+        normalizedBaseURL.contains("/backend-api")
     }
 }
 
@@ -8154,6 +8231,56 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func sendAddCreditsNudgeEmailResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let auth = try currentAuth(configuration: configuration) else {
+            throw AppServerError.invalidRequest("codex account authentication required to notify workspace owner")
+        }
+        guard case .chatGPT = auth.kind else {
+            throw AppServerError.invalidRequest("chatgpt authentication required to notify workspace owner")
+        }
+        guard let accountID = auth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accountID.isEmpty
+        else {
+            throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
+        }
+        guard let rawCreditType = stringParam(params?["creditType"]) else {
+            throw AppServerError.invalidRequest("missing creditType")
+        }
+        guard let creditType = AddCreditsNudgeCreditType(rawValue: rawCreditType) else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(rawCreditType)`, expected `credits` or `usage_limit`"
+            )
+        }
+
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to construct backend client: \(error)")
+        }
+
+        do {
+            let status = try runAsyncBlocking {
+                try await configuration.addCreditsNudgeEmailSender.send(
+                    baseURL: runtimeConfig.chatgptBaseURL,
+                    accessToken: auth.token,
+                    accountID: accountID,
+                    creditType: creditType
+                )
+            }
+            return ["status": status.rawValue]
+        } catch {
+            throw AppServerError.internalError("failed to notify workspace owner: \(error)")
+        }
+    }
+
     fileprivate static func userInfoResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         let auth = try currentAuth(configuration: configuration)
         let email: String?
@@ -12752,6 +12879,14 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.accountRateLimitsResult(configuration: configuration)
+                    )
+                case "account/sendAddCreditsNudgeEmail":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.sendAddCreditsNudgeEmailResult(
+                            params: params,
+                            configuration: configuration
+                        )
                     )
                 case "userInfo":
                     response = CodexAppServer.responseObject(

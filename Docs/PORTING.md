@@ -433,6 +433,8 @@ Source baseline inspected for this scaffold:
   - `collaborationMode/list` now returns the Rust-ordered collaboration mode presets for Plan and Default, with mode aliases and `reasoning_effort` wire keys matching the protocol.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` requirements listing
   - `configRequirements/read` now returns null when no requirements are configured and maps the ported requirements fields for allowed approval policies and sandbox modes into the Rust app-server response keys.
+- `codex-rs/app-server/src/request_processors/account_processor.rs` add-credits nudge emails
+  - `account/sendAddCreditsNudgeEmail` now preserves Rust auth requirement errors, ChatGPT-auth backend headers, `credits`/`usage_limit` request bodies, `sent` and `cooldown_active` response statuses, and backend-failure internal errors.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config writes
   - `config/value/write` and `config/batchWrite` preserve Rust user-config write response/error shapes for replacement writes, batch writes, version conflicts, readonly-layer rejection, unknown merge-strategy rejection, pipelined read-after-write visibility, and replace/upsert table merge semantics. Runtime hot-reload into loaded live threads remains pending with the broader live-thread runtime.
 - `codex-rs/app-server/src/command_exec.rs` command exec follow-up controls
