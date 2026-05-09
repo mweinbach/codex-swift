@@ -556,6 +556,8 @@ Source baseline inspected for this scaffold:
   - Matched Rust's cwd-independent target folding for `:root` versus `/` and `:slash_tmp` versus `/tmp`.
 - `codex-rs/protocol/src/permissions.rs` symlink-aware permission projections
   - Matched Rust's effective path normalization for readable roots, unreadable roots, and writable-root masks, including top-level alias canonicalization and nested symlink preservation.
+- `codex-rs/protocol/src/permissions.rs` read-deny matcher
+  - Added direct read-deny matching for exact unreadable roots and glob entries, including canonical path candidates, separator-aware `*`/`?`, globstar root matches, and unclosed `[` literal behavior.
 - `codex-rs/protocol/src/models.rs` permission profile runtime permissions
   - Added a Swift `FileSystemSandboxPolicy` runtime shape plus `PermissionProfile.fileSystemSandboxPolicy` and `runtimePermissions` helpers matching Rust's managed, disabled, and external profile semantics.
 - `codex-rs/protocol/src/permissions.rs` filesystem deny-read preservation

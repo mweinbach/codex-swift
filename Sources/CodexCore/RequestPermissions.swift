@@ -1290,7 +1290,23 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return result
     }
 
-    private static func normalizeEffectiveAbsolutePath(_ path: AbsolutePath) -> AbsolutePath {
+    fileprivate static func normalizedAndCanonicalCandidates(_ path: String) -> [AbsolutePath] {
+        var candidates: [AbsolutePath] = []
+        if let normalized = try? AbsolutePath(absolutePath: path) {
+            candidates.append(normalized)
+        }
+        guard fileExistsForSymlinkMetadata(atPath: path),
+              let absolutePath = try? AbsolutePath(absolutePath: path),
+              let canonical = canonicalizeSymlinks(absolutePath),
+              !candidates.contains(canonical)
+        else {
+            return candidates
+        }
+        candidates.append(canonical)
+        return candidates
+    }
+
+    fileprivate static func normalizeEffectiveAbsolutePath(_ path: AbsolutePath) -> AbsolutePath {
         let rawPath = path.path
         for ancestor in path.ancestors {
             guard fileExistsForSymlinkMetadata(atPath: ancestor.path),
@@ -1305,7 +1321,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return path
     }
 
-    private static func canonicalizePreservingSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
+    fileprivate static func canonicalizePreservingSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
         let logical = path
         let canonical = canonicalizeSymlinks(path) ?? logical
         if shouldPreserveLogicalPath(logical), canonical != logical {
@@ -1314,14 +1330,20 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return canonical
     }
 
-    private static func canonicalizeSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
+    fileprivate static func canonicalizeSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
         var current = "/"
         for component in path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init) {
             let candidate = current == "/" ? "/\(component)" : "\(current)/\(component)"
             if isSymbolicLink(atPath: candidate),
                let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: candidate) {
                 if destination.hasPrefix("/") {
-                    current = (try? AbsolutePath(absolutePath: destination))?.path ?? destination
+                    if let destinationPath = try? AbsolutePath(absolutePath: destination),
+                       destinationPath != path,
+                       let canonicalDestination = canonicalizeSymlinks(destinationPath) {
+                        current = canonicalDestination.path
+                    } else {
+                        current = (try? AbsolutePath(absolutePath: destination))?.path ?? destination
+                    }
                 } else {
                     let parent = (candidate as NSString).deletingLastPathComponent
                     let base = parent.isEmpty ? "/" : parent
@@ -1334,17 +1356,17 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return try? AbsolutePath(absolutePath: current)
     }
 
-    private static func shouldPreserveLogicalPath(_ path: AbsolutePath) -> Bool {
+    fileprivate static func shouldPreserveLogicalPath(_ path: AbsolutePath) -> Bool {
         path.ancestors.contains { ancestor in
             isSymbolicLink(atPath: ancestor.path) && ancestor.parent?.parent != nil
         }
     }
 
-    private static func fileExistsForSymlinkMetadata(atPath path: String) -> Bool {
+    fileprivate static func fileExistsForSymlinkMetadata(atPath path: String) -> Bool {
         FileManager.default.fileExists(atPath: path) || isSymbolicLink(atPath: path)
     }
 
-    private static func isSymbolicLink(atPath path: String) -> Bool {
+    fileprivate static func isSymbolicLink(atPath path: String) -> Bool {
         (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeSymbolicLink
     }
 
@@ -1368,6 +1390,136 @@ private struct FileSystemSemanticSignature: Equatable {
     let writableRoots: [WritableRoot]
     let unreadableRoots: [AbsolutePath]
     let unreadableGlobs: [String]
+}
+
+public struct ReadDenyMatcher {
+    private let deniedCandidates: [[AbsolutePath]]
+    private let denyReadMatchers: [GitGlobMatcher]
+    private let invalidPattern: Bool
+
+    public init?(fileSystemSandboxPolicy: FileSystemSandboxPolicy, cwd: String) {
+        guard fileSystemSandboxPolicy.hasDeniedReadRestrictions else {
+            return nil
+        }
+
+        deniedCandidates = fileSystemSandboxPolicy
+            .getUnreadableRootsWithCwd(cwd)
+            .map { FileSystemSandboxPolicy.normalizedAndCanonicalCandidates($0.path) }
+
+        var invalidPattern = false
+        denyReadMatchers = fileSystemSandboxPolicy.getUnreadableGlobsWithCwd(cwd).compactMap { pattern in
+            guard let matcher = GitGlobMatcher(pattern: pattern) else {
+                invalidPattern = true
+                return nil
+            }
+            return matcher
+        }
+        self.invalidPattern = invalidPattern
+    }
+
+    public func isReadDenied(_ path: String) -> Bool {
+        if invalidPattern {
+            return true
+        }
+
+        let pathCandidates = FileSystemSandboxPolicy.normalizedAndCanonicalCandidates(path)
+        if deniedCandidates.contains(where: { deniedCandidateSet in
+            pathCandidates.contains { candidate in
+                deniedCandidateSet.contains { deniedCandidate in
+                    candidate.isUnderOrEqual(deniedCandidate)
+                }
+            }
+        }) {
+            return true
+        }
+
+        return denyReadMatchers.contains { matcher in
+            pathCandidates.contains { matcher.matches($0.path) }
+        }
+    }
+}
+
+private struct GitGlobMatcher {
+    private let regex: NSRegularExpression
+
+    init?(pattern: String) {
+        guard let regex = try? NSRegularExpression(pattern: Self.regexPattern(for: pattern)) else {
+            return nil
+        }
+        self.regex = regex
+    }
+
+    func matches(_ path: String) -> Bool {
+        let range = NSRange(path.startIndex..<path.endIndex, in: path)
+        return regex.firstMatch(in: path, range: range) != nil
+    }
+
+    private static func regexPattern(for pattern: String) -> String {
+        let characters = Array(pattern)
+        var index = 0
+        var regex = "^"
+        while index < characters.count {
+            let character = characters[index]
+            if character == "*" {
+                if characters.indices.contains(index + 1), characters[index + 1] == "*" {
+                    if characters.indices.contains(index + 2), characters[index + 2] == "/" {
+                        regex += "(?:.*/)?"
+                        index += 3
+                    } else {
+                        regex += ".*"
+                        index += 2
+                    }
+                } else {
+                    regex += "[^/]*"
+                    index += 1
+                }
+            } else if character == "?" {
+                regex += "[^/]"
+                index += 1
+            } else if character == "[" {
+                if let endIndex = firstClosingBracket(in: characters, after: index) {
+                    regex += characterClass(from: characters[(index + 1)..<endIndex])
+                    index = endIndex + 1
+                } else {
+                    regex += "\\["
+                    index += 1
+                }
+            } else {
+                regex += escapedRegexLiteral(character)
+                index += 1
+            }
+        }
+        regex += "$"
+        return regex
+    }
+
+    private static func firstClosingBracket(in characters: [Character], after index: Int) -> Int? {
+        var candidate = index + 1
+        while candidate < characters.count {
+            if characters[candidate] == "]" {
+                return candidate
+            }
+            candidate += 1
+        }
+        return nil
+    }
+
+    private static func characterClass(from characters: ArraySlice<Character>) -> String {
+        var content = String(characters)
+        if content.first == "!" {
+            content.removeFirst()
+            return "[^\(content)]"
+        }
+        return "[\(content)]"
+    }
+
+    private static func escapedRegexLiteral(_ character: Character) -> String {
+        let string = String(character)
+        if #".\+*?[^]$(){}=!<>|:-"#.contains(character) {
+            return "\\\(string)"
+        }
+        return string
+    }
 }
 
 private extension FileSystemPath {

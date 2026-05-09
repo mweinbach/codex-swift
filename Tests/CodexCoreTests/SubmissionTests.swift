@@ -1078,6 +1078,114 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(FileSystemSandboxPolicy.externalSandbox.getUnreadableGlobsWithCwd(cwd.path), [])
     }
 
+    func testReadDenyMatcherExactPathAndDescendantsMatchRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let denied = try root.join("denied")
+        let nested = try denied.join("nested.txt")
+        try FileManager.default.createDirectory(atPath: denied.path, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: nested.path, contents: Data("secret".utf8))
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(denied.path), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(denied.path, policy: policy, cwd: root.path))
+        XCTAssertTrue(isReadDenied(nested.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(try root.join("other.txt").path, policy: policy, cwd: root.path))
+    }
+
+    func testReadDenyMatcherCanonicalTargetMatchesDeniedSymlinkAliasLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let realDir = temp.url.appendingPathComponent("real", isDirectory: true)
+        let aliasDir = temp.url.appendingPathComponent("alias", isDirectory: true)
+        try FileManager.default.createDirectory(at: realDir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: aliasDir, withDestinationURL: realDir)
+
+        let realSecret = try root.join("real/secret.txt")
+        let aliasSecret = try root.join("alias/secret.txt")
+        FileManager.default.createFile(atPath: realSecret.path, contents: Data("secret".utf8))
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(realDir.path), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(aliasSecret.path, policy: policy, cwd: root.path))
+    }
+
+    func testReadDenyMatcherLiteralPatternsAndGlobsMatchRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let literal = try root.join("private")
+        let other = try root.join("notes.txt")
+        try FileManager.default.createDirectory(atPath: literal.path, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: other.path, contents: Data("notes".utf8))
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(literal.path), access: .none),
+            FileSystemSandboxEntry(path: .globPattern("\(root.path)/**/*.txt"), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(literal.path, policy: policy, cwd: root.path))
+        XCTAssertTrue(isReadDenied(other.path, policy: policy, cwd: root.path))
+    }
+
+    func testReadDenyMatcherGlobPatternsDoNotCrossSeparatorsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let matching = try root.join("app/file42.txt")
+        let nested = try root.join("app/nested/file42.txt")
+        let short = try root.join("app/file4.txt")
+        let letters = try root.join("app/fileab.txt")
+        try FileManager.default.createDirectory(atPath: try root.join("app/nested").path, withIntermediateDirectories: true)
+        for path in [matching, nested, short, letters] {
+            FileManager.default.createFile(atPath: path.path, contents: Data("secret".utf8))
+        }
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("\(root.path)/*/file[0-9]?.txt"), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(matching.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(nested.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(short.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(letters.path, policy: policy, cwd: root.path))
+    }
+
+    func testReadDenyMatcherGlobstarPatternsDenyRootAndNestedMatchesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let rootEnv = try root.join(".env")
+        let nestedEnv = try root.join("app/.env")
+        let other = try root.join("app/notes.txt")
+        try FileManager.default.createDirectory(atPath: try root.join("app").path, withIntermediateDirectories: true)
+        for path in [rootEnv, nestedEnv, other] {
+            FileManager.default.createFile(atPath: path.path, contents: Data("secret".utf8))
+        }
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("\(root.path)/**/*.env"), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(rootEnv.path, policy: policy, cwd: root.path))
+        XCTAssertTrue(isReadDenied(nestedEnv.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(other.path, policy: policy, cwd: root.path))
+    }
+
+    func testReadDenyMatcherUnclosedCharacterClassesMatchLiteralBracketsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let root = try AbsolutePath(absolutePath: temp.url.path)
+        let bracketFile = try root.join("[")
+        let other = try root.join("notes.txt")
+        FileManager.default.createFile(atPath: bracketFile.path, contents: Data("secret".utf8))
+        FileManager.default.createFile(atPath: other.path, contents: Data("notes".utf8))
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("\(root.path)/["), access: .none)
+        ])
+
+        XCTAssertTrue(isReadDenied(bracketFile.path, policy: policy, cwd: root.path))
+        XCTAssertFalse(isReadDenied(other.path, policy: policy, cwd: root.path))
+    }
+
     func testFileSystemSandboxPolicyToLegacySandboxPolicyMatchesRustBridgeableCases() throws {
         let temp = try TemporaryDirectory()
         let cwd = try AbsolutePath(absolutePath: temp.url.path)
@@ -1426,6 +1534,10 @@ final class SubmissionTests: XCTestCase {
             return try AbsolutePath(absolutePath: effectiveRoot)
         }
         return try AbsolutePath.resolve(remainder, against: effectiveRoot)
+    }
+
+    private func isReadDenied(_ path: String, policy: FileSystemSandboxPolicy, cwd: String) -> Bool {
+        ReadDenyMatcher(fileSystemSandboxPolicy: policy, cwd: cwd)?.isReadDenied(path) ?? false
     }
 }
 
