@@ -118,6 +118,35 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
             try container.encodeIfPresent(detail, forKey: .detail)
         }
     }
+
+    fileprivate var rustDisplayJSON: String {
+        switch self {
+        case let .inputText(text):
+            return #"{"type":"input_text","text":\#(Self.jsonString(text))}"#
+        case let .inputImage(imageURL, detail):
+            var fields = [
+                #""type":"input_image""#,
+                #""image_url":\#(Self.jsonString(imageURL))"#,
+            ]
+            if let detail {
+                fields.append(#""detail":\#(Self.jsonString(detail.rawValue))"#)
+            }
+            return "{\(fields.joined(separator: ","))}"
+        }
+    }
+
+    fileprivate static func rustDisplayJSON(for items: [Self]) -> String {
+        "[" + items.map(\.rustDisplayJSON).joined(separator: ",") + "]"
+    }
+
+    private static func jsonString(_ value: String) -> String {
+        guard let data = try? JSONEncoder.codexCompact.encode(value),
+              let encoded = String(data: data, encoding: .utf8)
+        else {
+            return #""""#
+        }
+        return encoded
+    }
 }
 
 public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvertible, Sendable {
@@ -167,7 +196,10 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
     }
 
     public var description: String {
-        content
+        if let contentItems {
+            return FunctionCallOutputContentItem.rustDisplayJSON(for: contentItems)
+        }
+        return content
     }
 
     public init(from decoder: Decoder) throws {
@@ -178,7 +210,7 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         }
 
         let items = try container.decode([FunctionCallOutputContentItem].self)
-        let content = try String(data: JSONEncoder.codexCompact.encode(items), encoding: .utf8) ?? "[]"
+        let content = FunctionCallOutputContentItem.rustDisplayJSON(for: items)
         self.init(content: content, contentItems: items)
     }
 

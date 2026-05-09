@@ -523,6 +523,8 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(decodedCallID, "custom-1")
         XCTAssertEqual(decodedName, "apply_patch")
         XCTAssertEqual(decodedOutput.contentItems, [.inputText(text: "patched")])
+        XCTAssertEqual(decodedOutput.description, #"[{"type":"input_text","text":"patched"}]"#)
+        XCTAssertEqual(itemOutputDescription(item), #"[{"type":"input_text","text":"patched"}]"#)
 
         try XCTAssertJSONObjectEqual(ResponseItem.customToolCallOutput(callID: "custom-2", output: "done"), [
             "type": "custom_tool_call_output",
@@ -1089,6 +1091,13 @@ final class ResponseModelsTests: XCTestCase {
             throw TestImageError.imageDecoding
         }
         return (image.width, image.height)
+    }
+
+    private func itemOutputDescription(_ item: ResponseItem) -> String? {
+        guard case let .customToolCallOutput(_, _, output) = item else {
+            return nil
+        }
+        return output.description
     }
 }
 
