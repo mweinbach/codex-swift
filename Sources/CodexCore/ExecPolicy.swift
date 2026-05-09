@@ -311,16 +311,27 @@ public struct PolicyEvaluation: Equatable, Sendable {
     }
 }
 
+public struct ExecPolicyMatchOptions: Equatable, Sendable {
+    public var resolveHostExecutables: Bool
+
+    public init(resolveHostExecutables: Bool = false) {
+        self.resolveHostExecutables = resolveHostExecutables
+    }
+}
+
 public struct ExecPolicy: Equatable, Sendable {
     private var rulesByProgram: [String: [PrefixRule]]
     private var networkRulesStorage: [NetworkRule]
+    private var hostExecutablesByName: [String: [String]]
 
     public init(
         rulesByProgram: [String: [PrefixRule]] = [:],
-        networkRules: [NetworkRule] = []
+        networkRules: [NetworkRule] = [],
+        hostExecutables: [String: [String]] = [:]
     ) {
         self.rulesByProgram = rulesByProgram
         self.networkRulesStorage = networkRules
+        self.hostExecutablesByName = hostExecutables
     }
 
     public static func empty() -> ExecPolicy {
@@ -333,6 +344,10 @@ public struct ExecPolicy: Equatable, Sendable {
 
     public func networkRules() -> [NetworkRule] {
         networkRulesStorage
+    }
+
+    public func hostExecutables() -> [String: [String]] {
+        hostExecutablesByName
     }
 
     public func compiledNetworkDomains() -> (allowed: [String], denied: [String]) {
@@ -389,9 +404,8 @@ public struct ExecPolicy: Equatable, Sendable {
     }
 
     private static func upsertDomain(_ domains: inout [String], _ host: String) {
-        if !domains.contains(host) {
-            domains.append(host)
-        }
+        domains.removeAll { $0 == host }
+        domains.append(host)
     }
 
     private static func normalizeNetworkRuleHost(_ raw: String) throws -> String {
@@ -450,6 +464,60 @@ public struct ExecPolicy: Equatable, Sendable {
         return normalized
     }
 
+    public mutating func setHostExecutablePaths(name rawName: String, paths rawPaths: [String]) throws {
+        let name = try Self.validateHostExecutableName(rawName)
+        var paths: [String] = []
+        for rawPath in rawPaths {
+            let path = try Self.parseLiteralAbsolutePath(rawPath)
+            guard let pathName = Self.executablePathLookupKey(path),
+                  pathName == Self.executableLookupKey(name)
+            else {
+                throw ExecPolicyError.invalidRule("host_executable path `\(rawPath)` must have basename `\(name)`")
+            }
+            if !paths.contains(path) {
+                paths.append(path)
+            }
+        }
+        hostExecutablesByName[Self.executableLookupKey(name)] = paths
+    }
+
+    private static func validateHostExecutableName(_ name: String) throws -> String {
+        guard !name.isEmpty else {
+            throw ExecPolicyError.invalidRule("host_executable name cannot be empty")
+        }
+        guard !name.contains("/") && name != "." && name != ".." else {
+            throw ExecPolicyError.invalidRule("host_executable name must be a bare executable name (got \(name))")
+        }
+        return name
+    }
+
+    private static func parseLiteralAbsolutePath(_ raw: String) throws -> String {
+        guard raw.hasPrefix("/") else {
+            throw ExecPolicyError.invalidRule("host_executable paths must be absolute (got \(raw))")
+        }
+        return URL(fileURLWithPath: raw).standardizedFileURL.path
+    }
+
+    private static func executableLookupKey(_ raw: String) -> String {
+        #if os(Windows)
+        let lowercased = raw.lowercased()
+        for suffix in [".exe", ".cmd", ".bat", ".com"] where lowercased.hasSuffix(suffix) {
+            return String(lowercased.dropLast(suffix.count))
+        }
+        return lowercased
+        #else
+        return raw
+        #endif
+    }
+
+    private static func executablePathLookupKey(_ path: String) -> String? {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        guard !name.isEmpty else {
+            return nil
+        }
+        return executableLookupKey(name)
+    }
+
     public func check(
         _ command: [String],
         heuristicsFallback: @escaping (ArraySlice<String>) -> ExecPolicyDecision
@@ -471,10 +539,18 @@ public struct ExecPolicy: Equatable, Sendable {
         _ command: [String],
         heuristicsFallback: ((ArraySlice<String>) -> ExecPolicyDecision)?
     ) -> [RuleMatch] {
-        var matchedRules = command.first
-            .flatMap { rulesByProgram[$0] }?
-            .compactMap { $0.matches(command) }
-            ?? []
+        matchesForCommand(command, heuristicsFallback: heuristicsFallback, options: ExecPolicyMatchOptions())
+    }
+
+    public func matchesForCommand(
+        _ command: [String],
+        heuristicsFallback: ((ArraySlice<String>) -> ExecPolicyDecision)?,
+        options: ExecPolicyMatchOptions
+    ) -> [RuleMatch] {
+        var matchedRules = matchExactRules(command)
+        if matchedRules.isEmpty, options.resolveHostExecutables {
+            matchedRules = matchHostExecutableRules(command)
+        }
 
         if matchedRules.isEmpty, let heuristicsFallback {
             matchedRules.append(.heuristicsRuleMatch(
@@ -485,14 +561,63 @@ public struct ExecPolicy: Equatable, Sendable {
 
         return matchedRules
     }
+
+    public func check(
+        _ command: [String],
+        heuristicsFallback: @escaping (ArraySlice<String>) -> ExecPolicyDecision,
+        options: ExecPolicyMatchOptions
+    ) -> PolicyEvaluation {
+        PolicyEvaluation.fromMatches(matchesForCommand(
+            command,
+            heuristicsFallback: heuristicsFallback,
+            options: options
+        ))
+    }
+
+    private func matchExactRules(_ command: [String]) -> [RuleMatch] {
+        command.first
+            .flatMap { rulesByProgram[$0] }?
+            .compactMap { $0.matches(command) }
+            ?? []
+    }
+
+    private func matchHostExecutableRules(_ command: [String]) -> [RuleMatch] {
+        guard let first = command.first,
+              first.hasPrefix("/"),
+              let basename = Self.executablePathLookupKey(first),
+              let rules = rulesByProgram[basename]
+        else {
+            return []
+        }
+
+        if let paths = hostExecutablesByName[basename],
+           !paths.contains(URL(fileURLWithPath: first).standardizedFileURL.path) {
+            return []
+        }
+
+        let basenameCommand = [basename] + command.dropFirst()
+        return rules.compactMap { rule in
+            guard case let .prefixRuleMatch(matchedPrefix, decision, _, justification) = rule.matches(basenameCommand) else {
+                return nil
+            }
+            return .prefixRuleMatch(
+                matchedPrefix: matchedPrefix,
+                decision: decision,
+                resolvedProgram: first,
+                justification: justification
+            )
+        }
+    }
 }
 
 public final class PolicyParser {
     private var policy = ExecPolicy.empty()
+    private var pendingExampleValidations: [(rules: [PrefixRule], matches: [[String]], notMatches: [[String]])] = []
 
     public init() {}
 
     public func parse(_ policyIdentifier: String, _ policyFileContents: String) throws {
+        let pendingValidationStartIndex = pendingExampleValidations.count
         let source = Self.stripLineComments(from: policyFileContents)
         let prefixRuleBodies = try Self.extractCallBodies(
             named: "prefix_rule",
@@ -510,6 +635,15 @@ public final class PolicyParser {
         for body in networkRuleBodies {
             try addNetworkRule(from: body)
         }
+        let hostExecutableBodies = try Self.extractCallBodies(
+            named: "host_executable",
+            from: source,
+            identifier: policyIdentifier
+        )
+        for body in hostExecutableBodies {
+            try addHostExecutable(from: body)
+        }
+        try validatePendingExamples(from: pendingValidationStartIndex)
     }
 
     public func build() -> ExecPolicy {
@@ -550,14 +684,12 @@ public final class PolicyParser {
             )
         }
 
-        try Self.validateNotMatchExamples(rules: rules, notMatches: notMatchExamples)
-        try Self.validateMatchExamples(rules: rules, matches: matchExamples)
-
         for rule in rules {
             var existing = policy.rules(for: rule.program)
             existing.append(rule)
             policy = policy.replacingRules(for: rule.program, with: existing)
         }
+        pendingExampleValidations.append((rules, matchExamples, notMatchExamples))
     }
 
     private func addNetworkRule(from body: String) throws {
@@ -571,6 +703,43 @@ public final class PolicyParser {
             decision: rawDecision == "deny" ? .forbidden : ExecPolicyDecision.parse(rawDecision),
             justification: try Self.parseOptionalJustification(arguments["justification"])
         )
+    }
+
+    private func addHostExecutable(from body: String) throws {
+        let arguments = try Self.parseArguments(body)
+        let name = try Self.requireStringArgument(arguments, key: "name", function: "host_executable")
+        guard let pathsValue = arguments["paths"] else {
+            throw ExecPolicyError.invalidRule("host_executable missing paths")
+        }
+        guard case let .array(items) = pathsValue else {
+            throw ExecPolicyError.invalidRule("host_executable paths must be a list")
+        }
+        let paths = try items.map { item -> String in
+            guard case let .string(path) = item else {
+                throw ExecPolicyError.invalidRule("host_executable paths must be strings")
+            }
+            return path
+        }
+        try policy.setHostExecutablePaths(name: name, paths: paths)
+    }
+
+    private func validatePendingExamples(from startIndex: Int) throws {
+        for validation in pendingExampleValidations[startIndex...] {
+            let validationPolicy = ExecPolicy(
+                rulesByProgram: Dictionary(grouping: validation.rules, by: \.program),
+                hostExecutables: policy.hostExecutables()
+            )
+            try Self.validateNotMatchExamples(
+                policy: validationPolicy,
+                rules: validation.rules,
+                notMatches: validation.notMatches
+            )
+            try Self.validateMatchExamples(
+                policy: validationPolicy,
+                rules: validation.rules,
+                matches: validation.matches
+            )
+        }
     }
 
     private static func extractCallBodies(
@@ -896,9 +1065,23 @@ public final class PolicyParser {
         }
     }
 
-    private static func validateMatchExamples(rules: [PrefixRule], matches: [[String]]) throws {
+    private static func validateMatchExamples(
+        policy: ExecPolicy,
+        rules: [PrefixRule],
+        matches: [[String]]
+    ) throws {
         let unmatched = matches.filter { example in
-            !rules.contains { $0.matches(example) != nil }
+            !policy.matchesForCommand(
+                example,
+                heuristicsFallback: nil,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            )
+            .contains { ruleMatch in
+                guard case .prefixRuleMatch = ruleMatch else {
+                    return false
+                }
+                return true
+            }
         }
         guard unmatched.isEmpty else {
             throw ExecPolicyError.exampleDidNotMatch(
@@ -908,11 +1091,25 @@ public final class PolicyParser {
         }
     }
 
-    private static func validateNotMatchExamples(rules: [PrefixRule], notMatches: [[String]]) throws {
+    private static func validateNotMatchExamples(
+        policy: ExecPolicy,
+        rules: [PrefixRule],
+        notMatches: [[String]]
+    ) throws {
         for example in notMatches {
-            if let rule = rules.first(where: { $0.matches(example) != nil }) {
+            let matches = policy.matchesForCommand(
+                example,
+                heuristicsFallback: nil,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            )
+            if matches.contains(where: {
+                guard case .prefixRuleMatch = $0 else {
+                    return false
+                }
+                return true
+            }) {
                 throw ExecPolicyError.exampleDidMatch(
-                    rule: rule.description,
+                    rule: rules.map(\.description).joined(separator: ", "),
                     example: ShellExampleParser.join(example)
                 )
             }

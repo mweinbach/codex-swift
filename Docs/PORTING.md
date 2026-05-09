@@ -530,6 +530,8 @@ Source baseline inspected for this scaffold:
   - Added Swift limited/extended rollout event persistence classification for modeled events, including Rust's persisted patch/MCP/web-search/image-generation completion events and extended-only error/exec/view-image events.
 - `codex-rs/execpolicy/src/parser.rs` prefix/network rule details
   - Added Swift execpolicy parsing for prefix-rule justifications plus network-rule host/protocol/decision parsing, host normalization, wildcard rejection, deny aliasing, and compiled allow/deny domain lists.
+- `codex-rs/execpolicy/src/parser.rs` and `policy.rs` host executable rules
+  - Added Swift execpolicy host-executable parsing, validation, deduplication, last-definition-wins behavior, deferred example validation with host executable resolution, and optional absolute-path command matching that records `resolvedProgram`.
 
 ## Known Gaps
 
@@ -551,7 +553,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - full Rust command parser parity for complex Bash/Powershell AST cases
 - config-layer file IO and full non-apply config loading
 - full apply-patch approval/diff event plumbing across shell-intercept and live-tool paths
-- Starlark-compatible execpolicy parser completeness, including host executable resolution and full Starlark evaluation behavior
+- Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior
 - full `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state

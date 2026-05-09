@@ -138,6 +138,160 @@ final class ExecPolicyTests: XCTestCase {
         }
     }
 
+    func testParsesHostExecutablePaths() throws {
+        let policy = try parsePolicy("""
+        host_executable(
+            name = "git",
+            paths = [
+                "/opt/homebrew/bin/git",
+                "/usr/bin/git",
+                "/usr/bin/git",
+            ],
+        )
+        """)
+
+        XCTAssertEqual(policy.hostExecutables()["git"], ["/opt/homebrew/bin/git", "/usr/bin/git"])
+    }
+
+    func testHostExecutableValidationMatchesRust() {
+        XCTAssertThrowsError(try parsePolicy(#"host_executable(name = "git", paths = ["git"])"#)) { error in
+            XCTAssertEqual(error as? ExecPolicyError, .invalidRule("host_executable paths must be absolute (got git)"))
+        }
+        XCTAssertThrowsError(try parsePolicy(#"host_executable(name = "/usr/bin/git", paths = ["/usr/bin/git"])"#)) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyError,
+                .invalidRule("host_executable name must be a bare executable name (got /usr/bin/git)")
+            )
+        }
+        XCTAssertThrowsError(try parsePolicy(#"host_executable(name = "git", paths = ["/usr/bin/rg"])"#)) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyError,
+                .invalidRule("host_executable path `/usr/bin/rg` must have basename `git`")
+            )
+        }
+    }
+
+    func testHostExecutableLastDefinitionWins() throws {
+        let parser = PolicyParser()
+        try parser.parse("shared.rules", #"host_executable(name = "git", paths = ["/usr/bin/git"])"#)
+        try parser.parse("user.rules", #"host_executable(name = "git", paths = ["/opt/homebrew/bin/git"])"#)
+        let policy = parser.build()
+
+        XCTAssertEqual(policy.hostExecutables()["git"], ["/opt/homebrew/bin/git"])
+    }
+
+    func testHostExecutableResolutionUsesBasenameRuleWhenAllowed() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(pattern = ["git", "status"], decision = "prompt")
+        host_executable(name = "git", paths = ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(
+            policy.check(
+                tokens("/usr/bin/git", "status"),
+                heuristicsFallback: allowAll,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            ),
+            PolicyEvaluation(
+                decision: .prompt,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: tokens("git", "status"),
+                    decision: .prompt,
+                    resolvedProgram: "/usr/bin/git"
+                )]
+            )
+        )
+    }
+
+    func testPrefixRuleExamplesHonorHostExecutableResolution() throws {
+        _ = try parsePolicy("""
+        prefix_rule(
+            pattern = ["git", "status"],
+            match = [["/usr/bin/git", "status"]],
+            not_match = [["/opt/homebrew/bin/git", "status"]],
+        )
+        host_executable(name = "git", paths = ["/usr/bin/git"])
+        """)
+    }
+
+    func testHostExecutableResolutionRespectsExplicitEmptyAllowlist() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(pattern = ["git"], decision = "prompt")
+        host_executable(name = "git", paths = [])
+        """)
+
+        XCTAssertEqual(
+            policy.check(
+                tokens("/usr/bin/git", "status"),
+                heuristicsFallback: allowAll,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            ),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("/usr/bin/git", "status"), decision: .allow)]
+            )
+        )
+    }
+
+    func testHostExecutableResolutionIgnoresPathNotInAllowlist() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(pattern = ["git"], decision = "prompt")
+        host_executable(name = "git", paths = ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(
+            policy.check(
+                tokens("/opt/homebrew/bin/git", "status"),
+                heuristicsFallback: allowAll,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            ),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("/opt/homebrew/bin/git", "status"), decision: .allow)]
+            )
+        )
+    }
+
+    func testHostExecutableResolutionFallsBackWithoutMapping() throws {
+        let policy = try parsePolicy(#"prefix_rule(pattern = ["git"], decision = "prompt")"#)
+
+        XCTAssertEqual(
+            policy.check(
+                tokens("/usr/bin/git", "status"),
+                heuristicsFallback: allowAll,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            ),
+            PolicyEvaluation(
+                decision: .prompt,
+                matchedRules: [.prefixRuleMatch(
+                    matchedPrefix: tokens("git"),
+                    decision: .prompt,
+                    resolvedProgram: "/usr/bin/git"
+                )]
+            )
+        )
+    }
+
+    func testHostExecutableResolutionDoesNotOverrideExactMatch() throws {
+        let policy = try parsePolicy("""
+        prefix_rule(pattern = ["/usr/bin/git"], decision = "allow")
+        prefix_rule(pattern = ["git"], decision = "prompt")
+        host_executable(name = "git", paths = ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(
+            policy.check(
+                tokens("/usr/bin/git", "status"),
+                heuristicsFallback: allowAll,
+                options: ExecPolicyMatchOptions(resolveHostExecutables: true)
+            ),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("/usr/bin/git"), decision: .allow)]
+            )
+        )
+    }
+
     func testParsesMultiplePolicyFiles() throws {
         let parser = PolicyParser()
         try parser.parse("first.rules", """
