@@ -638,6 +638,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's field-level experimental API guards for `thread/resume.permissions`, `thread/resume.excludeTurns`, `thread/resume.persistFullHistory`, `thread/fork.path`, `thread/fork.permissions`, `thread/fork.excludeTurns`, `thread/fork.persistFullHistory`, and nested `askForApproval.granular`.
 - `codex-rs/app-server` thread resume/fork override compatibility
   - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
+- `codex-rs/app-server-protocol` thread-resume response shape
+  - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile.
 
 ## Known Gaps
 

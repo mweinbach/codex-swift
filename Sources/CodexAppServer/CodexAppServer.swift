@@ -852,9 +852,14 @@ public enum CodexAppServer {
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,
+            "serviceTier": nullable(stringParam(params?["serviceTier"])),
             "cwd": thread["cwd"] ?? "/",
+            "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
+            "approvalsReviewer": "user",
             "sandbox": try jsonObject(sandbox),
+            "permissionProfile": NSNull(),
+            "activePermissionProfile": NSNull(),
             "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
