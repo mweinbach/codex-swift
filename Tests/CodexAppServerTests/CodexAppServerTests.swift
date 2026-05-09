@@ -1884,6 +1884,141 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadUsesManifestDeclaredLocalCapabilityPaths() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let pluginRoot = sourceRoot.appendingPathComponent("plugins/weather", isDirectory: true)
+        try """
+        [features]
+        plugin_hooks = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        try """
+        {
+          "name": "weather",
+          "description": "Reads local weather",
+          "keywords": ["forecast", "local"],
+          "skills": "./custom-skills",
+          "apps": "./config/apps.json",
+          "mcpServers": "./config/mcp.json",
+          "hooks": ["./config/one-hooks.json", "./config/two-hooks.json"],
+          "interface": {
+            "displayName": "Weather",
+            "shortDescription": "Local weather tools",
+            "capabilities": ["mcp", "skills"]
+          }
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let customSkillDirectory = pluginRoot.appendingPathComponent("custom-skills/radar", isDirectory: true)
+        try FileManager.default.createDirectory(at: customSkillDirectory, withIntermediateDirectories: true)
+        try """
+        ---
+        name: radar
+        description: read local radar
+        ---
+        """.write(
+            to: customSkillDirectory.appendingPathComponent("SKILL.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let configDirectory = pluginRoot.appendingPathComponent("config", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "apps": {
+            "radar": {
+              "id": "connector_radar",
+              "name": "Radar"
+            }
+          }
+        }
+        """.write(
+            to: configDirectory.appendingPathComponent("apps.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "mcpServers": {
+            "radar": {
+              "command": "radar-mcp"
+            }
+          }
+        }
+        """.write(
+            to: configDirectory.appendingPathComponent("mcp.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "echo pre"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(
+            to: configDirectory.appendingPathComponent("one-hooks.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "hooks": {
+            "PostToolUse": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "echo post"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(
+            to: configDirectory.appendingPathComponent("two-hooks.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+
+        let skills = try XCTUnwrap(plugin["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["weather:forecast", "weather:radar"])
+
+        let hooks = try XCTUnwrap(plugin["hooks"] as? [[String: Any]])
+        XCTAssertEqual(
+            hooks.map { $0["key"] as? String },
+            [
+                "weather@debug:config/one-hooks.json:pre_tool_use:0:0",
+                "weather@debug:config/two-hooks.json:post_tool_use:0:0"
+            ]
+        )
+
+        let apps = try XCTUnwrap(plugin["apps"] as? [[String: Any]])
+        XCTAssertEqual(apps.map { $0["id"] as? String }, ["connector_radar"])
+        XCTAssertEqual(plugin["mcpServers"] as? [String], ["radar"])
+    }
+
     func testPluginReadValidatesSourceAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path

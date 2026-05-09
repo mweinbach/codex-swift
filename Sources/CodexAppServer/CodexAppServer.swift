@@ -2034,17 +2034,18 @@ public enum CodexAppServer {
         }
         let source = summary["source"] as? [String: Any]
         let sourcePath = (source?["path"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let manifest = sourcePath.map(localPluginManifest(root:)) ?? (interface: NSNull(), keywords: [], description: nil, version: nil)
-        let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config) } ?? []
+        let manifest = sourcePath.map(localPluginManifest(root:)) ?? LocalPluginManifest.empty
+        let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config, manifest: manifest) } ?? []
         let hooks = sourcePath.map {
             localPluginHooks(
                 root: $0,
                 pluginID: "\(pluginName)@\(marketplaceName)",
-                enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: false)
+                enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: false),
+                manifest: manifest
             )
         } ?? []
-        let apps = sourcePath.map(localPluginApps(root:)) ?? []
-        let mcpServers = sourcePath.map(localPluginMcpServerNames(root:)) ?? []
+        let apps = sourcePath.map { localPluginApps(root: $0, manifest: manifest) } ?? []
+        let mcpServers = sourcePath.map { localPluginMcpServerNames(root: $0, manifest: manifest) } ?? []
 
         return [
             "plugin": [
@@ -2087,7 +2088,31 @@ public enum CodexAppServer {
         }.standardizedFileURL
     }
 
-    private static func localPluginManifest(root: URL) -> (interface: Any, keywords: [String], description: String?, version: String?) {
+    private struct LocalPluginManifest {
+        let interface: Any
+        let keywords: [String]
+        let description: String?
+        let version: String?
+        let skillRoot: URL?
+        let appConfig: URL?
+        let mcpConfig: URL?
+        let hookConfigs: [URL]?
+
+        static var empty: LocalPluginManifest {
+            LocalPluginManifest(
+                interface: NSNull(),
+                keywords: [],
+                description: nil,
+                version: nil,
+                skillRoot: nil,
+                appConfig: nil,
+                mcpConfig: nil,
+                hookConfigs: nil
+            )
+        }
+    }
+
+    private static func localPluginManifest(root: URL) -> LocalPluginManifest {
         let candidates = [
             root.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
             root.appendingPathComponent(".claude-plugin/plugin.json", isDirectory: false)
@@ -2096,21 +2121,37 @@ public enum CodexAppServer {
               let data = try? Data(contentsOf: path),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return (NSNull(), [], nil, nil)
+            return .empty
         }
         let keywords = object["keywords"] as? [String] ?? []
-        return (
-            pluginInterfaceObject(object["interface"], pluginRoot: root),
-            keywords,
-            object["description"] as? String,
-            object["version"] as? String
+        return LocalPluginManifest(
+            interface: pluginInterfaceObject(object["interface"], pluginRoot: root),
+            keywords: keywords,
+            description: object["description"] as? String,
+            version: object["version"] as? String,
+            skillRoot: localPluginManifestPath(root: root, value: object["skills"]),
+            appConfig: localPluginManifestPath(root: root, value: object["apps"]),
+            mcpConfig: localPluginManifestPath(root: root, value: object["mcpServers"]),
+            hookConfigs: localPluginManifestHookPaths(root: root, value: object["hooks"])
         )
     }
 
-    private static func localPluginSkills(root: URL, pluginName: String, config: ConfigValue) -> [[String: Any]] {
-        let skillsRoot = root.appendingPathComponent("skills", isDirectory: true)
+    private static func localPluginSkills(root: URL, pluginName: String, config: ConfigValue, manifest: LocalPluginManifest) -> [[String: Any]] {
+        let defaultSkillsRoot = root.appendingPathComponent("skills", isDirectory: true)
+        var skillRoots: [URL] = []
+        if isDirectory(defaultSkillsRoot) {
+            skillRoots.append(defaultSkillsRoot)
+        }
+        if let skillRoot = manifest.skillRoot {
+            skillRoots.append(skillRoot)
+        }
+        skillRoots = Array(Dictionary(grouping: skillRoots.map(\.standardizedFileURL), by: \.path).values.compactMap(\.first))
+            .sorted { $0.path < $1.path }
+
         var outcome = SkillLoadOutcome()
-        discoverSkills(root: skillsRoot, scope: .user, outcome: &outcome)
+        for skillsRoot in skillRoots {
+            discoverSkills(root: skillsRoot, scope: .user, outcome: &outcome)
+        }
         let rules = skillConfigRules(from: config)
         return outcome.skills.sorted {
             if $0.name != $1.name {
@@ -2129,31 +2170,34 @@ public enum CodexAppServer {
         }
     }
 
-    private static func localPluginHooks(root: URL, pluginID: String, enabled: Bool) -> [[String: Any]] {
+    private static func localPluginHooks(root: URL, pluginID: String, enabled: Bool, manifest: LocalPluginManifest) -> [[String: Any]] {
         guard enabled else {
             return []
         }
-        let hooksPath = root.appendingPathComponent("hooks/hooks.json", isDirectory: false)
-        guard let data = try? Data(contentsOf: hooksPath),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = object["hooks"] as? [String: Any]
-        else {
-            return []
-        }
+        let hookPaths = manifest.hookConfigs ?? [root.appendingPathComponent("hooks/hooks.json", isDirectory: false)]
         var summaries: [[String: Any]] = []
-        for (eventKey, value) in hooks {
-            guard let eventName = localPluginHookEventName(eventKey),
-                  let groups = value as? [[String: Any]]
+        for hooksPath in hookPaths {
+            guard let data = try? Data(contentsOf: hooksPath),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let hooks = object["hooks"] as? [String: Any]
             else {
                 continue
             }
-            for (groupIndex, group) in groups.enumerated() {
-                let handlers = group["hooks"] as? [[String: Any]] ?? []
-                for handlerIndex in handlers.indices {
-                    summaries.append([
-                        "key": "\(pluginID):hooks/hooks.json:\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
-                        "eventName": appServerHookEventName(eventName)
-                    ])
+            let sourcePath = localPluginRelativePath(root: root, path: hooksPath)
+            for (eventKey, value) in hooks {
+                guard let eventName = localPluginHookEventName(eventKey),
+                      let groups = value as? [[String: Any]]
+                else {
+                    continue
+                }
+                for (groupIndex, group) in groups.enumerated() {
+                    let handlers = group["hooks"] as? [[String: Any]] ?? []
+                    for handlerIndex in handlers.indices {
+                        summaries.append([
+                            "key": "\(pluginID):\(sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
+                            "eventName": appServerHookEventName(eventName)
+                        ])
+                    }
                 }
             }
         }
@@ -2170,35 +2214,37 @@ public enum CodexAppServer {
         return HookEventName.allCases.first { $0.rawValue == raw }
     }
 
-    private static func localPluginApps(root: URL) -> [[String: Any]] {
-        let appPath = root.appendingPathComponent(".app.json", isDirectory: false)
-        guard let data = try? Data(contentsOf: appPath),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let apps = object["apps"] as? [String: Any]
-        else {
-            return []
-        }
-        return apps.values.compactMap { value -> [String: Any]? in
-            guard let app = value as? [String: Any],
-                  let id = app["id"] as? String,
-                  !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private static func localPluginApps(root: URL, manifest: LocalPluginManifest) -> [[String: Any]] {
+        let appPaths = [manifest.appConfig ?? root.appendingPathComponent(".app.json", isDirectory: false)]
+        var appSummaries: [[String: Any]] = []
+        for appPath in appPaths {
+            guard let data = try? Data(contentsOf: appPath),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let apps = object["apps"] as? [String: Any]
             else {
-                return nil
+                continue
             }
-            return [
-                "id": id,
-                "name": app["name"] as? String ?? id,
-                "description": nullable(app["description"] as? String),
-                "installUrl": nullable(app["installUrl"] as? String ?? app["installURL"] as? String),
-                "needsAuth": false
-            ].nullStripped(keepNulls: true)
-        }.sorted {
-            ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+            appSummaries.append(contentsOf: apps.values.compactMap { value -> [String: Any]? in
+                guard let app = value as? [String: Any],
+                      let id = app["id"] as? String,
+                      !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else {
+                    return nil
+                }
+                return [
+                    "id": id,
+                    "name": app["name"] as? String ?? id,
+                    "description": nullable(app["description"] as? String),
+                    "installUrl": nullable(app["installUrl"] as? String ?? app["installURL"] as? String),
+                    "needsAuth": false
+                ].nullStripped(keepNulls: true)
+            })
         }
+        return appSummaries.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
     }
 
-    private static func localPluginMcpServerNames(root: URL) -> [String] {
-        let mcpPath = root.appendingPathComponent(".mcp.json", isDirectory: false)
+    private static func localPluginMcpServerNames(root: URL, manifest: LocalPluginManifest) -> [String] {
+        let mcpPath = manifest.mcpConfig ?? root.appendingPathComponent(".mcp.json", isDirectory: false)
         guard let data = try? Data(contentsOf: mcpPath),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let servers = object["mcpServers"] as? [String: Any]
@@ -2206,6 +2252,48 @@ public enum CodexAppServer {
             return []
         }
         return Array(Set(servers.keys)).sorted()
+    }
+
+    private static func localPluginManifestPath(root: URL, value: Any?) -> URL? {
+        guard let rawPath = value as? String else {
+            return nil
+        }
+        return localPluginResolvedManifestPath(root: root, rawPath: rawPath)
+    }
+
+    private static func localPluginManifestHookPaths(root: URL, value: Any?) -> [URL]? {
+        if let rawPath = value as? String {
+            return localPluginResolvedManifestPath(root: root, rawPath: rawPath).map { [$0] }
+        }
+        if let rawPaths = value as? [String] {
+            let paths = rawPaths.compactMap { localPluginResolvedManifestPath(root: root, rawPath: $0) }
+            return paths.isEmpty ? nil : paths
+        }
+        return nil
+    }
+
+    private static func localPluginResolvedManifestPath(root: URL, rawPath: String) -> URL? {
+        guard rawPath.hasPrefix("./"), rawPath.count > 2 else {
+            return nil
+        }
+        let relative = String(rawPath.dropFirst(2))
+        let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            return nil
+        }
+        return components.reduce(root) { partial, component in
+            partial.appendingPathComponent(String(component), isDirectory: false)
+        }.standardizedFileURL
+    }
+
+    private static func localPluginRelativePath(root: URL, path: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        let path = path.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : "\(rootPath)/"
+        if path.hasPrefix(prefix) {
+            return String(path.dropFirst(prefix.count))
+        }
+        return path
     }
 
     private static func configFeatureEnabled(_ key: String, in config: ConfigValue, defaultValue: Bool) -> Bool {
