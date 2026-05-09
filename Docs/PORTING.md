@@ -606,6 +606,8 @@ Source baseline inspected for this scaffold:
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/app-server-protocol` experimental `command/exec.permissionProfile` gating
   - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled.
+- `codex-rs/app-server-protocol` experimental `account/login/start.chatgptAuthTokens` gating
+  - matched Rust's field-level experimental API guard for external ChatGPT token login, while preserving forced-login and forced-workspace validation after opt-in.
 - `codex-rs/app-server-protocol` experimental `thread/goal/*` gating
   - matched Rust's method-level experimental API guard for `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear`, including preserving the goals-feature-disabled error after clients opt into `experimentalApi`.
 - `codex-rs/app-server-protocol` experimental `thread/turns/*` gating

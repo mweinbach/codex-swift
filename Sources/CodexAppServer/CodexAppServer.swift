@@ -1458,6 +1458,18 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("turn/steer.responsesapiClientMetadata requires experimentalApi capability")
     }
 
+    fileprivate static func requireAccountLoginStartExperimentalFieldsAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled,
+              stringParam(params?["type"]) == "chatgptAuthTokens"
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("account/login/start.chatgptAuthTokens requires experimentalApi capability")
+    }
+
     fileprivate static func turnInterruptResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
@@ -14770,6 +14782,10 @@ final class CodexAppServerMessageProcessor {
                     )
                     notifications.append(try CodexAppServer.authStatusChangeNotification(configuration: configuration))
                 case "account/login/start":
+                    try CodexAppServer.requireAccountLoginStartExperimentalFieldsAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
                     if CodexAppServer.stringParam(params?["type"]) == "chatgpt" {
                         response = CodexAppServer.responseObject(
                             id: id,

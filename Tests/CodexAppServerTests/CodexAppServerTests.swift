@@ -5577,10 +5577,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginChatGPTAuthTokensRequiresExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\#(accessToken)","chatgptAccountId":"org-embedded","chatgptPlanType":"pro"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "account/login/start.chatgptAuthTokens requires experimentalApi capability")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
     func testAccountLoginChatGPTAuthTokensPersistsExternalAuthAndNotifies() throws {
         let temp = try TemporaryDirectory()
         let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
 
         let messages = try decodeMessages(processor.processLine(Data("""
         {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-embedded","chatgptPlanType":"pro"}}
@@ -5704,7 +5722,8 @@ final class CodexAppServerTests: XCTestCase {
             """
             {"id":1,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-denied"}}
             """,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let forcedAPIError = try XCTUnwrap(forcedAPI["error"] as? [String: Any])
         XCTAssertEqual(forcedAPIError["code"] as? Int, -32600)
@@ -5722,7 +5741,8 @@ final class CodexAppServerTests: XCTestCase {
             """
             {"id":2,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"\(accessToken)","chatgptAccountId":"org-denied"}}
             """,
-            codexHome: temp.url
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
         )
         let wrongWorkspaceError = try XCTUnwrap(wrongWorkspace["error"] as? [String: Any])
         XCTAssertEqual(wrongWorkspaceError["code"] as? Int, -32600)
