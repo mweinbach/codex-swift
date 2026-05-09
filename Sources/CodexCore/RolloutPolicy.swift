@@ -47,6 +47,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case skillsUpdateAvailable = "skills_update_available"
     case planUpdate = "plan_update"
     case turnAborted = "turn_aborted"
+    case threadRolledBack = "thread_rolled_back"
     case shutdownComplete = "shutdown_complete"
     case enteredReviewMode = "entered_review_mode"
     case exitedReviewMode = "exited_review_mode"
@@ -166,6 +167,8 @@ public enum RolloutPolicy {
             return .planUpdate
         case .turnAborted:
             return .turnAborted
+        case .threadRolledBack:
+            return .threadRolledBack
         case .shutdownComplete:
             return .shutdownComplete
         case .enteredReviewMode:
@@ -251,6 +254,7 @@ public enum RolloutPolicy {
              .mcpToolCallEnd,
              .undoCompleted,
              .turnAborted,
+             .threadRolledBack,
              .webSearchEnd,
              .imageGenerationEnd:
             return .limited

@@ -1041,6 +1041,46 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    fileprivate static func threadRollbackResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard let threadID = stringParam(params?["threadId"]) else {
+            throw AppServerError.invalidRequest("missing threadId")
+        }
+        guard let numTurnsNumber = params?["numTurns"] as? NSNumber else {
+            throw AppServerError.invalidRequest("missing numTurns")
+        }
+        let rawNumTurns = numTurnsNumber.int64Value
+        guard rawNumTurns > 0 && rawNumTurns <= Int64(UInt32.max) else {
+            throw AppServerError.invalidRequest("numTurns must be at least 1")
+        }
+        let numTurns = UInt32(rawNumTurns)
+
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.threadRolledBack(ThreadRolledBackEvent(numTurns: numTurns)))
+        ])
+        try recorder.shutdown()
+
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        return [
+            "thread": try threadObject(
+                for: item,
+                defaultProvider: configuration.defaultModelProvider,
+                turns: buildTurnsFromRolloutEvents(at: rolloutPath)
+            )
+        ]
+    }
+
     fileprivate static func threadUnsubscribeResult(
         params: [String: Any]?,
         isLoaded: (String) -> Bool,
@@ -13744,6 +13784,11 @@ final class CodexAppServerMessageProcessor {
                             configuration: configuration
                         )
                     )
+                case "thread/rollback":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.threadRollbackResult(params: params, configuration: configuration)
+                    )
                 case "thread/backgroundTerminals/clean":
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -14345,6 +14390,14 @@ private struct AppServerThreadHistoryBuilder {
                 return
             }
             currentStatus = "interrupted"
+        case let .threadRolledBack(event):
+            finishCurrentTurn()
+            let count = Int(event.numTurns)
+            if count >= turns.count {
+                turns.removeAll()
+            } else {
+                turns.removeLast(count)
+            }
         default:
             return
         }

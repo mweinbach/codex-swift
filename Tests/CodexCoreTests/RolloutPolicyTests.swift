@@ -55,6 +55,7 @@ final class RolloutPolicyTests: XCTestCase {
             .mcpToolCallEnd,
             .undoCompleted,
             .turnAborted,
+            .threadRolledBack,
             .webSearchEnd,
             .imageGenerationEnd
         ]
@@ -102,6 +103,7 @@ final class RolloutPolicyTests: XCTestCase {
         )
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.warning(WarningEvent(message: "heads up"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.threadRolledBack(ThreadRolledBackEvent(numTurns: 1))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.imageGenerationEnd(ImageGenerationEndEvent(
             callID: "ig-1",

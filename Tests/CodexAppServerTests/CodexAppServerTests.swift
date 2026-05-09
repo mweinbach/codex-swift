@@ -4468,6 +4468,77 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(newerData.map(turnUserText), ["third", "fourth"])
     }
 
+    func testThreadRollbackPersistsMarkerAndReturnsPrunedThread() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .agentMessage(AgentMessageEvent(message: "first done")),
+            .userMessage(UserMessageEvent(message: "second")),
+            .agentMessage(AgentMessageEvent(message: "second done")),
+            .userMessage(UserMessageEvent(message: "third"))
+        ])
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":2}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.map(turnUserText), ["first"])
+        XCTAssertEqual(turnAgentTexts(turns[0]), ["first done"])
+
+        let rolloutText = try String(contentsOf: URL(fileURLWithPath: rolloutPath), encoding: .utf8)
+        XCTAssertTrue(rolloutText.contains(#""type":"thread_rolled_back""#))
+        XCTAssertTrue(rolloutText.contains(#""num_turns":2"#))
+
+        let read = try appServerResponse(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
+            codexHome: temp.url
+        )
+        let readThread = try XCTUnwrap((read["result"] as? [String: Any])?["thread"] as? [String: Any])
+        let readTurns = try XCTUnwrap(readThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(readTurns.map(turnUserText), ["first"])
+    }
+
+    func testThreadTurnsListAppliesPersistedRollbackMarkers() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .userMessage(UserMessageEvent(message: "second")),
+            .userMessage(UserMessageEvent(message: "third")),
+            .threadRolledBack(ThreadRolledBackEvent(numTurns: 1))
+        ])
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":10}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map(turnUserText), ["second", "first"])
+    }
+
     func testThreadTurnsListSupportsItemsViewAndUnsupportedItemsHydration() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

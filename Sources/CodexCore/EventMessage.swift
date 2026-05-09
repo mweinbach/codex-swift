@@ -14,6 +14,18 @@ public struct ContextCompactedEvent: Equatable, Codable, Sendable {
     public init() {}
 }
 
+public struct ThreadRolledBackEvent: Equatable, Codable, Sendable {
+    public let numTurns: UInt32
+
+    private enum CodingKeys: String, CodingKey {
+        case numTurns = "num_turns"
+    }
+
+    public init(numTurns: UInt32) {
+        self.numTurns = numTurns
+    }
+}
+
 public enum EventMessage: Equatable, Codable, Sendable {
     case error(ErrorEvent)
     case warning(WarningEvent)
@@ -61,6 +73,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case skillsUpdateAvailable
     case planUpdate(UpdatePlanArguments)
     case turnAborted(TurnAbortedEvent)
+    case threadRolledBack(ThreadRolledBackEvent)
     case shutdownComplete
     case enteredReviewMode(ReviewRequest)
     case exitedReviewMode(ExitedReviewModeEvent)
@@ -122,6 +135,7 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case skillsUpdateAvailable = "skills_update_available"
         case planUpdate = "plan_update"
         case turnAborted = "turn_aborted"
+        case threadRolledBack = "thread_rolled_back"
         case shutdownComplete = "shutdown_complete"
         case enteredReviewMode = "entered_review_mode"
         case exitedReviewMode = "exited_review_mode"
@@ -228,6 +242,8 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .planUpdate(try UpdatePlanArguments(from: decoder))
         case .turnAborted:
             self = .turnAborted(try TurnAbortedEvent(from: decoder))
+        case .threadRolledBack:
+            self = .threadRolledBack(try ThreadRolledBackEvent(from: decoder))
         case .shutdownComplete:
             self = .shutdownComplete
         case .enteredReviewMode:
@@ -388,6 +404,9 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .turnAborted(event):
             try container.encode(EventType.turnAborted, forKey: .type)
+            try event.encode(to: encoder)
+        case let .threadRolledBack(event):
+            try container.encode(EventType.threadRolledBack, forKey: .type)
             try event.encode(to: encoder)
         case .shutdownComplete:
             try container.encode(EventType.shutdownComplete, forKey: .type)
