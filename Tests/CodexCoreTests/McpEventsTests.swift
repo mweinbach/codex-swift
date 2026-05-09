@@ -547,6 +547,25 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(block, .image(McpImageContent(data: "AAAA", mimeType: "audio/wav", type: "audio")))
     }
 
+    func testMcpImageContentDecodesRustMimeAliasesAndDefault() throws {
+        let snake = try JSONDecoder().decode(McpContentBlock.self, from: Data("""
+        {
+          "type": "image",
+          "data": "AAAA",
+          "mime_type": "image/jpeg"
+        }
+        """.utf8))
+        XCTAssertEqual(snake, .image(McpImageContent(data: "AAAA", mimeType: "image/jpeg")))
+
+        let missing = try JSONDecoder().decode(McpContentBlock.self, from: Data("""
+        {
+          "type": "image",
+          "data": "BBBB"
+        }
+        """.utf8))
+        XCTAssertEqual(missing, .image(McpImageContent(data: "BBBB", mimeType: "application/octet-stream")))
+    }
+
     func testAuthStatusWireValuesAndDisplayMatchRust() throws {
         XCTAssertEqual(try encode(McpAuthStatus.unsupported), #""unsupported""#)
         XCTAssertEqual(try encode(McpAuthStatus.notLoggedIn), #""not_logged_in""#)

@@ -137,6 +137,26 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testMcpCallToolResultImageContentDefaultsMissingMimeLikeRust() throws {
+        let json = #"""
+        {
+            "content": [
+                {
+                    "type": "image",
+                    "data": "BASE64"
+                }
+            ]
+        }
+        """#
+        let result = try JSONDecoder().decode(McpCallToolResult.self, from: Data(json.utf8))
+        let payload = FunctionCallOutputPayload(callToolResult: result)
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputImage(imageURL: "data:application/octet-stream;base64,BASE64", detail: defaultImageDetail)
+        ])
+    }
+
     func testMcpCallToolResultMixedUnsupportedBlocksBecomeTextWhenImagePresentLikeRust() throws {
         let resource = McpResourceLink(
             name: "readme",

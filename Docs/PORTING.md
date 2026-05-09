@@ -106,6 +106,7 @@ Source baseline inspected for this scaffold:
   - lowercase ChatGPT plan wire values, usage-based plan variants, plan family helpers, auth-plan aliases, display names, and unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, optional message phases, content items, function-call namespace preservation, function/custom-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, compaction alias decoding, and context-compaction item optional payload encoding
+  - MCP image content used for function-call output conversion now accepts Rust's `mimeType`/`mime_type` spellings and defaults missing MIME types to `application/octet-stream`.
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`
   - turn item wire tags, user/hook-prompt/agent/plan/reasoning/web-search/image-view/image-generation/file-change/MCP-tool-call/context-compaction item models, hook-prompt XML continuation parsing/serialization, item IDs, user-message local-image/text-element legacy metadata, legacy message/reasoning/web-search/image-view/image-generation/patch/MCP/context-compaction events, item started/completed timing fields, and item started/completed legacy bridging
 - `codex-rs/protocol/src/protocol.rs` token usage models

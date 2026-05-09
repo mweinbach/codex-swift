@@ -653,6 +653,7 @@ public struct McpImageContent: Equatable, Codable, Sendable {
         case data
         case meta = "_meta"
         case mimeType = "mimeType"
+        case mimeTypeSnake = "mime_type"
         case type
     }
 
@@ -668,6 +669,26 @@ public struct McpImageContent: Equatable, Codable, Sendable {
         self.meta = meta
         self.mimeType = mimeType
         self.type = type
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
+        self.data = try container.decode(String.self, forKey: .data)
+        self.meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
+        self.mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
+            ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
+            ?? "application/octet-stream"
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "image"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encode(data, forKey: .data)
+        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encode(type, forKey: .type)
     }
 }
 
