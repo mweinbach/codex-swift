@@ -38,6 +38,10 @@ public final class ReadinessFlag: @unchecked Sendable {
 
     public init() {}
 
+    init(nextID: Int32) {
+        self.nextID = nextID
+    }
+
     public var isReady: Bool {
         if lock.try() {
             defer { lock.unlock() }
@@ -60,10 +64,13 @@ public final class ReadinessFlag: @unchecked Sendable {
                 throw ReadinessError.flagAlreadyReady
             }
 
-            let token = ReadinessToken(nextID)
-            nextID &+= 1
-            tokens.insert(token)
-            return token
+            while true {
+                let token = ReadinessToken(nextID)
+                nextID &+= 1
+                if token.rawValue != 0, tokens.insert(token).inserted {
+                    return token
+                }
+            }
         }
     }
 

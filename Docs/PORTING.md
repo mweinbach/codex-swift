@@ -333,7 +333,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/utils/image/src/lib.rs`, `codex-rs/utils/image/src/error.rs`, and local-image conversion in `codex-rs/protocol/src/models.rs`
   - PNG/JPEG/GIF local image loading, bounds-preserving resize to 2048x2048, GIF-to-PNG prompt transcoding, data URL encoding, and Rust-matching local-image placeholder messages for read, invalid, non-image, and unsupported image inputs
 - `codex-rs/utils/readiness/src/lib.rs`
-  - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, and Rust-matching readiness error strings
+  - token-authorized one-way readiness flag, no-subscriber ready fast path, async waiter unblocking, invalid/consumed token rejection, zero/duplicate token avoidance on counter wraparound, and Rust-matching readiness error strings
 - `codex-rs/cloud-tasks-client/src/api.rs` and `codex-rs/cloud-tasks-client/src/mock.rs`
   - cloud task IDs/statuses/summaries, apply outcome/error wire behavior, mock task rows, diff-count summaries, task text/messages, sibling attempts, and local create/apply/preflight behavior
 - `codex-rs/cloud-tasks-client/src/http.rs` plus task-detail helpers from `codex-rs/backend-client`

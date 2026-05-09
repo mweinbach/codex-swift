@@ -1,4 +1,4 @@
-import CodexCore
+@testable import CodexCore
 import XCTest
 
 final class ReadinessTests: XCTestCase {
@@ -63,5 +63,22 @@ final class ReadinessTests: XCTestCase {
         } catch let error as ReadinessError {
             XCTAssertEqual(error, .flagAlreadyReady)
         }
+    }
+
+    func testSubscribeSkipsZeroTokenOnWraparound() async throws {
+        let flag = ReadinessFlag(nextID: 0)
+
+        let token = try flag.subscribe()
+        XCTAssertNotEqual(token, ReadinessToken(0))
+        XCTAssertTrue(try flag.markReady(token))
+    }
+
+    func testSubscribeAvoidsDuplicateTokensOnWraparound() async throws {
+        let flag = ReadinessFlag(nextID: Int32.max)
+
+        let first = try flag.subscribe()
+        let second = try flag.subscribe()
+        XCTAssertNotEqual(second, first)
+        XCTAssertNotEqual(second, ReadinessToken(0))
     }
 }
