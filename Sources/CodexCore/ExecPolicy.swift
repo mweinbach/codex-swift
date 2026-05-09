@@ -3389,7 +3389,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "enumerate", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "abs", "hash", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -3473,6 +3473,13 @@ public final class PolicyParser {
             )
         case "abs":
             return try parseStarlarkAbsoluteValueCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "hash":
+            return try parseStarlarkHashCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -3821,6 +3828,24 @@ public final class PolicyParser {
         }
     }
 
+    private static func parseStarlarkHashCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .string(string) = value else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .integer(Int64(starlarkHashCode(for: string)))
+    }
+
     private static func parseStarlarkStringConversionCall(
         _ rawArguments: [String],
         expression: String,
@@ -3930,6 +3955,12 @@ public final class PolicyParser {
             return integer
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkHashCode(for value: String) -> Int32 {
+        value.utf16.reduce(Int32(0)) { hash, codeUnit in
+            hash &* 31 &+ Int32(codeUnit)
         }
     }
 
