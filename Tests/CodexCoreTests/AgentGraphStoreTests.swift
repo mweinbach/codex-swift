@@ -566,6 +566,43 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(storedTools, firstTools)
     }
 
+    func testSQLiteStoreGetsAndSetsThreadMemoryMode() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let memoryThreadID = try threadID(81)
+        let nullModeThreadID = try threadID(82)
+        let missingThreadID = try threadID(83)
+        try insertRawSQLiteThread(
+            id: memoryThreadID,
+            agentPath: try AgentPath(validating: "/root/memory"),
+            memoryMode: "enabled",
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: nullModeThreadID,
+            agentPath: try AgentPath(validating: "/root/memory_null"),
+            memoryMode: nil,
+            databaseURL: databaseURL
+        )
+
+        let initialMode = try await store.getThreadMemoryMode(threadID: memoryThreadID)
+        let nullMode = try await store.getThreadMemoryMode(threadID: nullModeThreadID)
+        let missingMode = try await store.getThreadMemoryMode(threadID: missingThreadID)
+        XCTAssertEqual(initialMode, "enabled")
+        XCTAssertNil(nullMode)
+        XCTAssertNil(missingMode)
+
+        let updated = try await store.setThreadMemoryMode(threadID: memoryThreadID, memoryMode: "disabled")
+        let missingUpdated = try await store.setThreadMemoryMode(threadID: missingThreadID, memoryMode: "polluted")
+        let updatedMode = try await store.getThreadMemoryMode(threadID: memoryThreadID)
+
+        XCTAssertTrue(updated)
+        XCTAssertFalse(missingUpdated)
+        XCTAssertEqual(updatedMode, "disabled")
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -620,7 +657,8 @@ final class AgentGraphStoreTests: XCTestCase {
                 """
                 CREATE TABLE threads (
                     id TEXT NOT NULL PRIMARY KEY,
-                    agent_path TEXT
+                    agent_path TEXT,
+                    memory_mode TEXT
                 )
                 """
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
@@ -635,11 +673,12 @@ final class AgentGraphStoreTests: XCTestCase {
     private func insertRawSQLiteThread(
         id: ThreadId,
         agentPath: AgentPath,
+        memoryMode: String? = nil,
         databaseURL: URL
     ) throws {
         try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
             var statement: OpaquePointer?
-            let query = "INSERT INTO threads (id, agent_path) VALUES (?, ?)"
+            let query = "INSERT INTO threads (id, agent_path, memory_mode) VALUES (?, ?, ?)"
             XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
             let preparedStatement = try XCTUnwrap(statement)
             defer {
@@ -647,6 +686,11 @@ final class AgentGraphStoreTests: XCTestCase {
             }
             XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
             XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, agentPath.description, -1, testSQLiteTransient), SQLITE_OK)
+            if let memoryMode {
+                XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, memoryMode, -1, testSQLiteTransient), SQLITE_OK)
+            } else {
+                XCTAssertEqual(sqlite3_bind_null(preparedStatement, 3), SQLITE_OK)
+            }
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
         }
     }

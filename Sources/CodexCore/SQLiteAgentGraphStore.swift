@@ -211,6 +211,37 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func getThreadMemoryMode(threadID: ThreadId) async throws -> String? {
+        let database = handle.database
+        return try Self.withStatement(
+            query: "SELECT memory_mode FROM threads WHERE id = ?",
+            bindings: [.text(threadID.description)],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return Self.optionalTextColumn(statement, index: 0)
+        }
+    }
+
+    public func setThreadMemoryMode(threadID: ThreadId, memoryMode: String) async throws -> Bool {
+        let database = handle.database
+        try Self.execute(
+            "UPDATE threads SET memory_mode = ? WHERE id = ?",
+            bindings: [
+                .text(memoryMode),
+                .text(threadID.description),
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus

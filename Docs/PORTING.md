@@ -844,6 +844,8 @@ Source baseline inspected for this scaffold:
   - added SQLite thread-spawn direct-child and descendant lookup by canonical `agent_path`, including Rust's `threads` join, `ORDER BY threads.id LIMIT 2`, missing result, and duplicate canonical-path error behavior.
 - `codex-rs/state/src/runtime/threads.rs` thread dynamic tools
   - added SQLite `thread_dynamic_tools` persistence and retrieval for Rust's position-ordered dynamic tool specs, including namespace, JSON input schema, `defer_loading`, nil/empty no-op writes, no-row `nil` reads, and `ON CONFLICT(thread_id, position) DO NOTHING` no-overwrite behavior.
+- `codex-rs/state/src/runtime/threads.rs` thread memory mode
+  - added SQLite thread memory-mode get/set helpers preserving Rust's absent-row and SQL-null `None` behavior plus update row-count reporting for missing thread ids.
 
 ## Known Gaps
 
