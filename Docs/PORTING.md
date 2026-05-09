@@ -469,6 +469,8 @@ Source baseline inspected for this scaffold:
   - `configRequirements/read` now parses `allowed_web_search_modes`, `features`/`feature_requirements`, and `enforce_residency`, returning Rust's camelCase response keys while normalizing omitted `disabled` web-search mode like Rust.
 - `codex-rs/config/src/config_requirements.rs` app connector requirements
   - Requirements TOML now parses `[apps.<connector_id>] enabled = ...` entries and preserves Rust's descending enablement merge semantics where any lower-precedence `enabled = false` still disables that connector while higher-precedence explicit values otherwise win.
+- `codex-rs/config/src/config_requirements.rs` MCP/plugin requirements
+  - Requirements TOML now parses top-level `[mcp_servers.<name>.identity]` command/url identities plus `[plugins."<plugin_id>".mcp_servers.<name>.identity]` command/url identities, carries them through `ConfigRequirements`, and preserves Rust's first-source-wins merge behavior.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements network field
   - `configRequirements/read` now parses `experimental_network`, including canonical `domains`/`unix_sockets`, legacy `allowed_domains`/`denied_domains`/`allow_unix_sockets`, Rust's legacy/canonical conflict checks, and the camelCase API object with legacy compatibility views.
 - `codex-rs/config/src/config_requirements.rs` filesystem permissions requirements

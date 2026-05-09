@@ -384,6 +384,98 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual((hooksObject["PermissionRequest"] as? [[String: Any]])?.count, 0)
     }
 
+    func testDeserializeMcpServerRequirements() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [mcp_servers.docs.identity]
+        command = "codex-mcp"
+
+        [mcp_servers.remote.identity]
+        url = "https://example.com/mcp"
+        """)
+
+        let expected: [String: McpServerRequirement] = [
+            "docs": McpServerRequirement(identity: .command(command: "codex-mcp")),
+            "remote": McpServerRequirement(identity: .url(url: "https://example.com/mcp"))
+        ]
+        XCTAssertEqual(config.mcpServers, expected)
+        XCTAssertEqual(try config.requirements().mcpServers, expected)
+        XCTAssertFalse(config.isEmpty)
+    }
+
+    func testDeserializePluginMcpServerRequirements() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [plugins."sample@test".mcp_servers.sample.identity]
+        command = "sample-mcp"
+
+        [plugins."remote@test".mcp_servers.remote.identity]
+        url = "https://example.com/mcp"
+        """)
+
+        let expected: [String: PluginRequirementsToml] = [
+            "remote@test": PluginRequirementsToml(mcpServers: [
+                "remote": McpServerRequirement(identity: .url(url: "https://example.com/mcp"))
+            ]),
+            "sample@test": PluginRequirementsToml(mcpServers: [
+                "sample": McpServerRequirement(identity: .command(command: "sample-mcp"))
+            ])
+        ]
+        XCTAssertEqual(config.plugins, expected)
+        XCTAssertEqual(try config.requirements().plugins, expected)
+        XCTAssertFalse(config.isEmpty)
+        XCTAssertTrue(ConfigRequirementsToml(plugins: [
+            "empty@test": PluginRequirementsToml()
+        ]).isEmpty)
+    }
+
+    func testMergeUnsetFieldsPreservesHigherPrecedenceMcpAndPluginRequirements() throws {
+        var merged = try ConfigRequirementsToml.parse("""
+        [mcp_servers.docs.identity]
+        command = "high-mcp"
+
+        [plugins."sample@test".mcp_servers.sample.identity]
+        command = "high-plugin-mcp"
+        """)
+
+        let lower = try ConfigRequirementsToml.parse("""
+        [mcp_servers.docs.identity]
+        command = "low-mcp"
+
+        [mcp_servers.remote.identity]
+        url = "https://example.com/mcp"
+
+        [plugins."sample@test".mcp_servers.sample.identity]
+        command = "low-plugin-mcp"
+
+        [plugins."remote@test".mcp_servers.remote.identity]
+        url = "https://example.com/plugin-mcp"
+        """)
+
+        merged.mergeUnsetFields(from: lower)
+        XCTAssertEqual(merged.mcpServers, [
+            "docs": McpServerRequirement(identity: .command(command: "high-mcp"))
+        ])
+        XCTAssertEqual(merged.plugins, [
+            "sample@test": PluginRequirementsToml(mcpServers: [
+                "sample": McpServerRequirement(identity: .command(command: "high-plugin-mcp"))
+            ])
+        ])
+
+        var empty = ConfigRequirementsToml()
+        empty.mergeUnsetFields(from: lower)
+        XCTAssertEqual(empty.mcpServers, [
+            "docs": McpServerRequirement(identity: .command(command: "low-mcp")),
+            "remote": McpServerRequirement(identity: .url(url: "https://example.com/mcp"))
+        ])
+        XCTAssertEqual(empty.plugins, [
+            "remote@test": PluginRequirementsToml(mcpServers: [
+                "remote": McpServerRequirement(identity: .url(url: "https://example.com/plugin-mcp"))
+            ]),
+            "sample@test": PluginRequirementsToml(mcpServers: [
+                "sample": McpServerRequirement(identity: .command(command: "low-plugin-mcp"))
+            ])
+        ])
+    }
+
     func testDeserializeFilesystemDenyReadRequirements() throws {
         let config = try ConfigRequirementsToml.parse("""
         [permissions.filesystem]

@@ -51,17 +51,23 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var approvalPolicy: Constrained<AskForApproval>
     public var sandboxPolicy: Constrained<SandboxPolicy>
     public var managedHooks: ManagedHooksRequirement?
+    public var mcpServers: [String: McpServerRequirement]?
+    public var plugins: [String: PluginRequirementsToml]?
     public var filesystem: FilesystemConstraints?
 
     public init(
         approvalPolicy: Constrained<AskForApproval> = .allowAnyFromDefault(),
         sandboxPolicy: Constrained<SandboxPolicy> = .allowAny(.readOnly),
         managedHooks: ManagedHooksRequirement? = nil,
+        mcpServers: [String: McpServerRequirement]? = nil,
+        plugins: [String: PluginRequirementsToml]? = nil,
         filesystem: FilesystemConstraints? = nil
     ) {
         self.approvalPolicy = approvalPolicy
         self.sandboxPolicy = sandboxPolicy
         self.managedHooks = managedHooks
+        self.mcpServers = mcpServers
+        self.plugins = plugins
         self.filesystem = filesystem
     }
 
@@ -130,6 +136,31 @@ public struct ManagedHooksRequirementsToml: Equatable, Sendable {
         #else
         return managedDir
         #endif
+    }
+}
+
+public enum McpServerIdentityRequirement: Equatable, Sendable {
+    case command(command: String)
+    case url(url: String)
+}
+
+public struct McpServerRequirement: Equatable, Sendable {
+    public var identity: McpServerIdentityRequirement
+
+    public init(identity: McpServerIdentityRequirement) {
+        self.identity = identity
+    }
+}
+
+public struct PluginRequirementsToml: Equatable, Sendable {
+    public var mcpServers: [String: McpServerRequirement]?
+
+    public init(mcpServers: [String: McpServerRequirement]? = nil) {
+        self.mcpServers = mcpServers
+    }
+
+    public var isEmpty: Bool {
+        mcpServers?.isEmpty ?? true
     }
 }
 
@@ -321,6 +352,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var hooks: ManagedHooksRequirementsToml?
     public var hooksSource: HookSource
     public var hooksSourceDescription: String
+    public var mcpServers: [String: McpServerRequirement]?
+    public var plugins: [String: PluginRequirementsToml]?
     public var apps: AppsRequirementsToml?
     public var enforceResidency: ResidencyRequirement?
     public var network: NetworkRequirementsToml?
@@ -336,6 +369,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements",
+        mcpServers: [String: McpServerRequirement]? = nil,
+        plugins: [String: PluginRequirementsToml]? = nil,
         apps: AppsRequirementsToml? = nil,
         enforceResidency: ResidencyRequirement? = nil,
         network: NetworkRequirementsToml? = nil,
@@ -350,6 +385,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.hooks = hooks
         self.hooksSource = hooksSource
         self.hooksSourceDescription = hooksSourceDescription
+        self.mcpServers = mcpServers
+        self.plugins = plugins
         self.apps = apps
         self.enforceResidency = enforceResidency
         self.network = network
@@ -364,6 +401,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             allowedWebSearchModes == nil &&
             featureRequirements == nil &&
             hooks == nil &&
+            mcpServers == nil &&
+            (plugins?.values.allSatisfy(\.isEmpty) ?? true) &&
             (apps?.isEmpty ?? true) &&
             enforceResidency == nil &&
             network == nil &&
@@ -393,6 +432,12 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             hooks = value
             hooksSource = other.hooksSource
             hooksSourceDescription = other.hooksSourceDescription
+        }
+        if mcpServers == nil, let value = other.mcpServers {
+            mcpServers = value
+        }
+        if plugins == nil, let value = other.plugins {
+            plugins = value
         }
         if var mergedApps = apps {
             if let lowerPrecedenceApps = other.apps {
@@ -471,6 +516,8 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             managedHooks: managedHooks,
+            mcpServers: mcpServers,
+            plugins: plugins,
             filesystem: permissions?.filesystem.map { FilesystemConstraints(denyRead: $0.denyRead ?? []) }
         )
     }
@@ -501,6 +548,12 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let hooksValue = table["hooks"] {
             result.hooks = try parseManagedHooks(hooksValue)
+        }
+        if let mcpServersValue = table["mcp_servers"] {
+            result.mcpServers = try parseMcpServerRequirements(mcpServersValue, key: "mcp_servers")
+        }
+        if let pluginsValue = table["plugins"] {
+            result.plugins = try parsePluginRequirements(pluginsValue)
         }
         if let appsValue = table["apps"] {
             result.apps = try parseAppsRequirements(appsValue)
@@ -687,6 +740,64 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             )
         }
         return AppsRequirementsToml(apps: apps)
+    }
+
+    private static func parsePluginRequirements(_ value: ConfigValue) throws -> [String: PluginRequirementsToml] {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine("plugins")
+        }
+        var plugins: [String: PluginRequirementsToml] = [:]
+        for pluginID in table.keys.sorted() {
+            guard case let .table(pluginTable) = table[pluginID] else {
+                throw ConfigRequirementsParseError.invalidLine("plugins.\(pluginID)")
+            }
+            let mcpServers = try pluginTable["mcp_servers"].map {
+                try parseMcpServerRequirements($0, key: "plugins.\(pluginID).mcp_servers")
+            }
+            plugins[pluginID] = PluginRequirementsToml(mcpServers: mcpServers)
+        }
+        return plugins
+    }
+
+    private static func parseMcpServerRequirements(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> [String: McpServerRequirement] {
+        guard case let .table(table) = value else {
+            throw ConfigRequirementsParseError.invalidLine(key)
+        }
+        var servers: [String: McpServerRequirement] = [:]
+        for serverName in table.keys.sorted() {
+            guard case let .table(serverTable) = table[serverName] else {
+                throw ConfigRequirementsParseError.invalidLine("\(key).\(serverName)")
+            }
+            guard case let .table(identityTable)? = serverTable["identity"] else {
+                throw ConfigRequirementsParseError.invalidLine("\(key).\(serverName).identity")
+            }
+            servers[serverName] = McpServerRequirement(
+                identity: try parseMcpServerIdentity(identityTable, key: "\(key).\(serverName).identity")
+            )
+        }
+        return servers
+    }
+
+    private static func parseMcpServerIdentity(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> McpServerIdentityRequirement {
+        if let commandValue = table["command"] {
+            guard case let .string(command) = commandValue else {
+                throw ConfigRequirementsParseError.invalidLine("\(key).command")
+            }
+            return .command(command: command)
+        }
+        if let urlValue = table["url"] {
+            guard case let .string(url) = urlValue else {
+                throw ConfigRequirementsParseError.invalidLine("\(key).url")
+            }
+            return .url(url: url)
+        }
+        throw ConfigRequirementsParseError.invalidLine(key)
     }
 
     private static func parseFilesystemRequirements(_ value: ConfigValue) throws -> FilesystemRequirementsToml {
