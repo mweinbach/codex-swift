@@ -547,7 +547,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/permissions.rs` filesystem access classification
   - Added Swift helpers for Rust's full-disk read/write classification and platform-default inclusion checks.
 - `codex-rs/protocol/src/permissions.rs` filesystem read-deny projections
-  - Added Swift helpers for Rust's cwd-resolved readable roots, unreadable roots, and unreadable glob pattern projections.
+  - Added Swift helpers for Rust's cwd-resolved readable roots, writable roots with read-only carveouts, unreadable roots, and unreadable glob pattern projections.
 - `codex-rs/protocol/src/permissions.rs` legacy sandbox conversion
   - Added Swift parity for converting runtime filesystem policies back to legacy sandbox policies, including unbridgeable write rejection.
 - `codex-rs/protocol/src/models.rs` permission profile runtime permissions

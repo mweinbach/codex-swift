@@ -705,6 +705,46 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return Self.deduplicated(roots)
     }
 
+    public func getWritableRootsWithCwd(_ cwd: String) -> [WritableRoot] {
+        guard case let .restricted(entries, _) = self,
+              !hasFullDiskWriteAccess
+        else {
+            return []
+        }
+
+        let resolvedEntries = resolvedEntriesWithCwd(entries, cwd: cwd)
+        let writableEntries = resolvedEntries
+            .filter { $0.access.canWrite }
+            .filter { canWritePathWithCwd($0.path.path, cwd: cwd) }
+            .map(\.path)
+
+        return Self.deduplicated(writableEntries).map { root in
+            let protectMissingDotCodex = Self.absolutePathForLegacyCwd(cwd) == root
+            var readOnlySubpaths = Self.defaultReadOnlySubpathsForWritableRoot(
+                root,
+                protectMissingDotCodex: protectMissingDotCodex
+            ).filter { protectedPath in
+                !resolvedEntries.contains { $0.path == protectedPath }
+            }
+
+            readOnlySubpaths.append(contentsOf: resolvedEntries.compactMap { entry in
+                guard !entry.access.canWrite,
+                      !canWritePathWithCwd(entry.path.path, cwd: cwd),
+                      entry.path != root,
+                      entry.path.isUnderOrEqual(root)
+                else {
+                    return nil
+                }
+                return entry.path
+            })
+
+            return WritableRoot(
+                root: root,
+                readOnlySubpaths: Self.deduplicated(readOnlySubpaths)
+            )
+        }
+    }
+
     public func getUnreadableRootsWithCwd(_ cwd: String) -> [AbsolutePath] {
         guard case let .restricted(entries, _) = self else {
             return []

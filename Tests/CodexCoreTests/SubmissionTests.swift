@@ -933,6 +933,52 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getUnreadableRootsWithCwd(cwd.path), [])
     }
 
+    func testFileSystemSandboxPolicyWritableRootsIncludeReadOnlyCarveoutsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let docs = try cwd.join("docs")
+        let docsPrivate = try docs.join("private")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(docsPrivate.path), access: .read)
+        ])
+
+        XCTAssertEqual(policy.getWritableRootsWithCwd(cwd.path), [
+            WritableRoot(root: cwd, readOnlySubpaths: [
+                try cwd.join(".codex"),
+                docsPrivate
+            ])
+        ])
+        XCTAssertEqual(FileSystemSandboxPolicy.unrestricted.getWritableRootsWithCwd(cwd.path), [])
+        XCTAssertEqual(
+            FileSystemSandboxPolicy.restricted(entries: [
+                FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write)
+            ]).getWritableRootsWithCwd(cwd.path),
+            []
+        )
+    }
+
+    func testFileSystemSandboxPolicyWritableRootsProtectExistingMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwdURL = temp.url
+        let dotGitURL = cwdURL.appendingPathComponent(".git", isDirectory: true)
+        let dotAgentsURL = cwdURL.appendingPathComponent(".agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: dotGitURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dotAgentsURL, withIntermediateDirectories: true)
+        let cwd = try AbsolutePath(absolutePath: cwdURL.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(cwd.path), access: .write)
+        ])
+
+        XCTAssertEqual(policy.getWritableRootsWithCwd(cwd.path), [
+            WritableRoot(root: cwd, readOnlySubpaths: [
+                try cwd.join(".git"),
+                try cwd.join(".agents"),
+                try cwd.join(".codex")
+            ])
+        ])
+    }
+
     func testFileSystemSandboxPolicyUnreadableGlobsResolveSortAndDedupLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try AbsolutePath(absolutePath: temp.url.path)
