@@ -3315,6 +3315,7 @@ final class CodexAppServerTests: XCTestCase {
         let records = [
             #"{"type":"user","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":"first request"}}"#,
             #"{"type":"assistant","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":[{"type":"text","text":"first answer"}]}}"#,
+            #"{"type":"user","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":"second request"}}"#,
             #"{"type":"custom-title","customTitle":"Imported title"}"#
         ].joined(separator: "\n")
         try records.write(to: sessionPath, atomically: true, encoding: .utf8)
@@ -3360,7 +3361,15 @@ final class CodexAppServerTests: XCTestCase {
         let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
         XCTAssertTrue(rollout.contains("first request"))
         XCTAssertTrue(rollout.contains("first answer"))
+        XCTAssertTrue(rollout.contains("second request"))
         XCTAssertTrue(rollout.contains("<EXTERNAL SESSION IMPORTED>"))
+        XCTAssertTrue(rollout.contains(#""type":"task_started""#))
+        XCTAssertTrue(rollout.contains(#""type":"task_complete""#))
+        XCTAssertTrue(rollout.contains(#""turn_id":"external-import-turn-1""#))
+        XCTAssertTrue(rollout.contains(#""turn_id":"external-import-turn-2""#))
+        XCTAssertTrue(rollout.contains(#""last_agent_message":"first answer""#))
+        XCTAssertTrue(rollout.contains(#""type":"token_count""#))
+        XCTAssertTrue(rollout.contains(#""total_tokens":"#))
         let ledgerData = try Data(
             contentsOf: codexHome.appendingPathComponent("external_agent_session_imports.json", isDirectory: false)
         )

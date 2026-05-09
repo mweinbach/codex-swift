@@ -5551,6 +5551,7 @@ public enum CodexAppServer {
 
         var role: Role
         var text: String
+        var timestamp: Int64?
     }
 
     private static let externalAgentSessionImportMaxCount = 50
@@ -5680,31 +5681,85 @@ public enum CodexAppServer {
         from messages: [ExternalAgentConversationMessage]
     ) -> [RolloutRecordItem] {
         var items: [RolloutRecordItem] = []
-        var hasUserTurn = false
+        var responseItems: [ResponseItem] = []
+        var currentTurn: (id: String, lastAgentMessage: String?)?
+        var userTurnCount = 0
         for message in messages {
             switch message.role {
             case .user:
-                hasUserTurn = true
-                items.append(.responseItem(.message(
+                if let turn = currentTurn {
+                    items.append(.eventMsg(.taskComplete(TaskCompleteEvent(
+                        turnID: turn.id,
+                        lastAgentMessage: turn.lastAgentMessage
+                    ))))
+                }
+                userTurnCount += 1
+                let turnID = "external-import-turn-\(userTurnCount)"
+                items.append(.eventMsg(.taskStarted(TaskStartedEvent(
+                    turnID: turnID,
+                    startedAt: message.timestamp,
+                    modelContextWindow: nil
+                ))))
+                let responseItem = ResponseItem.message(
                     role: "user",
                     content: [.inputText(text: message.text)]
-                )))
+                )
+                responseItems.append(responseItem)
+                items.append(.responseItem(responseItem))
                 items.append(.eventMsg(.userMessage(UserMessageEvent(message: message.text))))
+                currentTurn = (turnID, nil)
             case .assistant:
-                guard hasUserTurn else {
+                guard currentTurn != nil else {
                     continue
                 }
-                items.append(.responseItem(.message(
+                let responseItem = ResponseItem.message(
                     role: "assistant",
                     content: [.outputText(text: message.text)]
-                )))
+                )
+                responseItems.append(responseItem)
+                items.append(.responseItem(responseItem))
                 items.append(.eventMsg(.agentMessage(AgentMessageEvent(message: message.text))))
+                currentTurn?.lastAgentMessage = message.text
             }
         }
-        if hasUserTurn {
+        if let turn = currentTurn {
             items.append(.eventMsg(.agentMessage(AgentMessageEvent(message: externalAgentSessionImportedMarker))))
+            items.append(externalAgentTokenCountItem(responseItems))
+            items.append(.eventMsg(.taskComplete(TaskCompleteEvent(
+                turnID: turn.id,
+                lastAgentMessage: turn.lastAgentMessage,
+                completedAt: messages.last?.timestamp
+            ))))
         }
         return items
+    }
+
+    private static func externalAgentTokenCountItem(_ responseItems: [ResponseItem]) -> RolloutRecordItem {
+        let lastAssistantIndex = responseItems.lastIndex {
+            guard case let .message(_, role, _, _) = $0 else {
+                return false
+            }
+            return role == "assistant"
+        }
+        let tokens = lastAssistantIndex.map {
+            estimateExternalAgentResponseItemsTokenCount(Array(responseItems[...$0]))
+        } ?? 0
+        let usage = TokenUsage(totalTokens: tokens)
+        return .eventMsg(.tokenCount(TokenCountEvent(
+            info: TokenUsageInfo(totalTokenUsage: usage, lastTokenUsage: usage),
+            rateLimits: nil
+        )))
+    }
+
+    private static func estimateExternalAgentResponseItemsTokenCount(_ responseItems: [ResponseItem]) -> Int64 {
+        responseItems.reduce(Int64(0)) { total, item in
+            guard let data = try? JSONEncoder().encode(item) else {
+                return total
+            }
+            let tokens = Int64(clamping: Truncation.approxTokensFromByteCount(data.count))
+            let sum = total.addingReportingOverflow(tokens)
+            return sum.overflow ? Int64.max : sum.partialValue
+        }
     }
 
     private static func importExternalAgentSession(
@@ -5781,7 +5836,8 @@ public enum CodexAppServer {
         }
         return ExternalAgentConversationMessage(
             role: (type == "assistant" || extracted.onlyToolResult) ? .assistant : .user,
-            text: extracted.text
+            text: extracted.text,
+            timestamp: (record["timestamp"] as? String).flatMap(parseExternalAgentTimestamp).map(Int64.init)
         )
     }
 
