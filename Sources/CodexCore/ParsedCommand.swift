@@ -1059,14 +1059,16 @@ private func containsUnsupportedShellSyntax(_ script: String) -> Bool {
 private func shellSplit(_ input: String) -> [String]? {
     var tokens: [String] = []
     var current = ""
+    var tokenStarted = false
     var singleQuoted = false
     var doubleQuoted = false
     var escaped = false
 
     func flushCurrent() {
-        if !current.isEmpty {
+        if tokenStarted {
             tokens.append(current)
             current.removeAll(keepingCapacity: true)
+            tokenStarted = false
         }
     }
 
@@ -1076,6 +1078,7 @@ private func shellSplit(_ input: String) -> [String]? {
 
         if escaped {
             current.append(char)
+            tokenStarted = true
             escaped = false
             index = input.index(after: index)
             continue
@@ -1088,12 +1091,14 @@ private func shellSplit(_ input: String) -> [String]? {
         }
 
         if char == "'", !doubleQuoted {
+            tokenStarted = true
             singleQuoted.toggle()
             index = input.index(after: index)
             continue
         }
 
         if char == "\"", !singleQuoted {
+            tokenStarted = true
             doubleQuoted.toggle()
             index = input.index(after: index)
             continue
@@ -1128,6 +1133,7 @@ private func shellSplit(_ input: String) -> [String]? {
         }
 
         current.append(char)
+        tokenStarted = true
         index = input.index(after: index)
     }
 

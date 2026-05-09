@@ -86,6 +86,20 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["cd", "", "&&", "cd", "bar", "&&", "cat", "foo.txt"]), [
             .read(cmd: "cat foo.txt", name: "foo.txt", path: "bar/foo.txt")
         ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd '' && cat foo.txt"]), [
+            .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo.txt")
+        ])
+    }
+
+    func testShellSplitPreservesQuotedEmptyWordsLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cat ''"]), [
+            .read(cmd: "cat ''", name: "", path: "")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"grep -R "" src"#]), [
+            .search(cmd: "grep -R '' src", query: "", path: "src")
+        ])
     }
 
     func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
