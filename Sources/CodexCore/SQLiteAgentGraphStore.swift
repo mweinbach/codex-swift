@@ -125,6 +125,54 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return try threadIDs(query: query, bindings: bindings)
     }
 
+    public func findThreadSpawnChild(
+        parentThreadID: ThreadId,
+        agentPath: AgentPath
+    ) async throws -> ThreadId? {
+        try oneThreadID(
+            query:
+            """
+            SELECT threads.id
+            FROM thread_spawn_edges
+            JOIN threads ON threads.id = thread_spawn_edges.child_thread_id
+            WHERE thread_spawn_edges.parent_thread_id = ?
+              AND threads.agent_path = ?
+            ORDER BY threads.id
+            LIMIT 2
+            """,
+            bindings: [parentThreadID.description, agentPath.description],
+            agentPath: agentPath
+        )
+    }
+
+    public func findThreadSpawnDescendant(
+        rootThreadID: ThreadId,
+        agentPath: AgentPath
+    ) async throws -> ThreadId? {
+        try oneThreadID(
+            query:
+            """
+            WITH RECURSIVE subtree(child_thread_id) AS (
+                SELECT child_thread_id
+                FROM thread_spawn_edges
+                WHERE parent_thread_id = ?
+                UNION ALL
+                SELECT edge.child_thread_id
+                FROM thread_spawn_edges AS edge
+                JOIN subtree ON edge.parent_thread_id = subtree.child_thread_id
+            )
+            SELECT threads.id
+            FROM subtree
+            JOIN threads ON threads.id = subtree.child_thread_id
+            WHERE threads.agent_path = ?
+            ORDER BY threads.id
+            LIMIT 2
+            """,
+            bindings: [rootThreadID.description, agentPath.description],
+            agentPath: agentPath
+        )
+    }
+
     private func execute(_ query: String, _ bindings: String...) throws {
         try Self.execute(query, bindings: bindings, database: handle.database)
     }
@@ -160,6 +208,24 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                     throw AgentGraphStoreError.internal(message: error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private func oneThreadID(
+        query: String,
+        bindings: [String],
+        agentPath: AgentPath
+    ) throws -> ThreadId? {
+        let ids = try threadIDs(query: query, bindings: bindings)
+        switch ids.count {
+        case 0:
+            return nil
+        case 1:
+            return ids[0]
+        default:
+            throw AgentGraphStoreError.internal(
+                message: "multiple agents found for canonical path `\(agentPath)`"
+            )
         }
     }
 

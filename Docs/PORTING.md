@@ -838,6 +838,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's case-sensitive shell executable stem detection and platform-native path separator handling while preserving recursive extension stripping for wrappers such as `powershell.EXE`, so uppercase wrapper names and non-native path separators now fall back to whole-command unknown summaries.
 - `codex-rs/agent-graph-store` local SQLite store
   - added `SQLiteAgentGraphStore` with Rust's `thread_spawn_edges` schema/index, child-id upsert behavior, missing-child status no-op, open/closed status filtering, future-status inclusion for unfiltered child lists, reopen persistence, and recursive breadth-first descendant ordering.
+- `codex-rs/state/src/runtime/threads.rs` thread-spawn path lookup
+  - added SQLite thread-spawn direct-child and descendant lookup by canonical `agent_path`, including Rust's `threads` join, `ORDER BY threads.id LIMIT 2`, missing result, and duplicate canonical-path error behavior.
 
 ## Known Gaps
 

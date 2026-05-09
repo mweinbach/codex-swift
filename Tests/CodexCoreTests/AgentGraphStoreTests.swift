@@ -324,6 +324,93 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(closedDescendants, [closedChildThreadID, closedGreatGrandchildThreadID])
     }
 
+    func testSQLiteStoreFindsDirectChildAndDescendantByAgentPath() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let rootThreadID = try threadID(60)
+        let childThreadID = try threadID(61)
+        let grandchildThreadID = try threadID(62)
+        let childPath = try AgentPath(validating: "/root/reviewer")
+        let grandchildPath = try AgentPath(validating: "/root/reviewer/researcher")
+        let missingPath = try AgentPath(validating: "/root/missing")
+
+        try insertRawSQLiteThread(id: childThreadID, agentPath: childPath, databaseURL: databaseURL)
+        try insertRawSQLiteThread(id: grandchildThreadID, agentPath: grandchildPath, databaseURL: databaseURL)
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: childThreadID,
+            status: .open
+        )
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: childThreadID,
+            childThreadID: grandchildThreadID,
+            status: .closed
+        )
+
+        let directChild = try await store.findThreadSpawnChild(
+            parentThreadID: rootThreadID,
+            agentPath: childPath
+        )
+        XCTAssertEqual(directChild, childThreadID)
+
+        let directGrandchild = try await store.findThreadSpawnChild(
+            parentThreadID: rootThreadID,
+            agentPath: grandchildPath
+        )
+        XCTAssertNil(directGrandchild)
+
+        let descendant = try await store.findThreadSpawnDescendant(
+            rootThreadID: rootThreadID,
+            agentPath: grandchildPath
+        )
+        XCTAssertEqual(descendant, grandchildThreadID)
+
+        let missing = try await store.findThreadSpawnDescendant(
+            rootThreadID: rootThreadID,
+            agentPath: missingPath
+        )
+        XCTAssertNil(missing)
+    }
+
+    func testSQLiteStoreFindByAgentPathReportsDuplicateCanonicalPath() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let rootThreadID = try threadID(70)
+        let firstChildThreadID = try threadID(71)
+        let secondChildThreadID = try threadID(72)
+        let duplicatePath = try AgentPath(validating: "/root/worker")
+
+        try insertRawSQLiteThread(id: firstChildThreadID, agentPath: duplicatePath, databaseURL: databaseURL)
+        try insertRawSQLiteThread(id: secondChildThreadID, agentPath: duplicatePath, databaseURL: databaseURL)
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: firstChildThreadID,
+            status: .open
+        )
+        try await store.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: secondChildThreadID,
+            status: .open
+        )
+
+        do {
+            _ = try await store.findThreadSpawnChild(
+                parentThreadID: rootThreadID,
+                agentPath: duplicatePath
+            )
+            XCTFail("duplicate canonical path lookup should fail")
+        } catch let error as AgentGraphStoreError {
+            XCTAssertEqual(
+                error,
+                .internal(message: "multiple agents found for canonical path `/root/worker`")
+            )
+        }
+    }
+
     private func threadID(_ suffix: Int) throws -> ThreadId {
         try ThreadId(string: String(format: "00000000-0000-0000-0000-%012d", suffix))
     }
@@ -365,6 +452,57 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, childThreadID.description, -1, testSQLiteTransient), SQLITE_OK)
         XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, status, -1, testSQLiteTransient), SQLITE_OK)
         XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+    }
+
+    private func createMinimalThreadsTable(databaseURL: URL) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query =
+                """
+                CREATE TABLE threads (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    agent_path TEXT
+                )
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func insertRawSQLiteThread(
+        id: ThreadId,
+        agentPath: AgentPath,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "INSERT INTO threads (id, agent_path) VALUES (?, ?)"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, id.description, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, agentPath.description, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func withRawSQLiteDatabase<T>(
+        databaseURL: URL,
+        body: (OpaquePointer) throws -> T
+    ) throws -> T {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        return try body(openedDatabase)
     }
 }
 
