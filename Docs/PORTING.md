@@ -667,6 +667,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for Starlark string and list repetition with `*`, including left- and right-hand integer counts, empty results for non-positive counts, and use in generated prefix rules, examples, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence builtins and assignment destructuring
   - Added Swift execpolicy parser support for `enumerate(...)` and `zip(...)` over supported list/string iterables, including shortest-input zip behavior, enumerate start offsets, loop-target destructuring over generated pairs, and simple destructuring assignments inside supported policy blocks.
+- `codex-rs/execpolicy/src/parser.rs` Starlark iterable builtins and dictionary iteration
+  - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, covering deterministic map-driven rule, network, and host executable generation.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity

@@ -884,6 +884,60 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkIterableBuiltinsAndDictIteration() throws {
+        let policy = try parsePolicy("""
+        TOOLS = {
+            "pnpm": ["install", "prompt"],
+            "git": ["status", "allow"],
+            "hg": ["status", "forbidden"],
+        }
+        ORDER = sorted(TOOLS)
+        DESCENDING = list(reversed(ORDER))
+
+        for tool in ORDER:
+            prefix_rule([tool, TOOLS[tool][0]], TOOLS[tool][1], justification = "iterable builtin " + tool)
+
+        for tool in tuple(DESCENDING[:1]):
+            network_rule(tool + ".example.com", "https", "deny")
+
+        PATHS = {
+            "pnpm": "/usr/local/bin/pnpm",
+            "git": "/usr/bin/git",
+        }
+        for tool in sorted(PATHS):
+            host_executable(tool, [PATHS[tool]])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "iterable builtin git"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.single("status")]),
+                decision: .forbidden,
+                justification: "iterable builtin hg"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .prompt,
+                justification: "iterable builtin pnpm"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "pnpm.example.com", protocol: .https, decision: .forbidden)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git"],
+            "pnpm": ["/usr/local/bin/pnpm"]
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkRangeAndComputedIndexes() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
