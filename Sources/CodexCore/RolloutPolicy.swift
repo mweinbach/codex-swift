@@ -291,6 +291,8 @@ public enum RolloutPolicy {
              .mcpToolCallEnd,
              .undoCompleted,
              .turnAborted,
+             .taskStarted,
+             .taskComplete,
              .threadRolledBack,
              .webSearchEnd,
              .imageGenerationEnd:
@@ -301,8 +303,6 @@ public enum RolloutPolicy {
              .viewImageToolCall:
             return .extended
         case .warning,
-             .taskStarted,
-             .taskComplete,
              .agentMessageDelta,
              .agentReasoningDelta,
              .agentReasoningRawContentDelta,

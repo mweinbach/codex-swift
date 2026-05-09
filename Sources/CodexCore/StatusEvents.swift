@@ -189,46 +189,92 @@ public struct WarningEvent: Equatable, Codable, Sendable {
 }
 
 public struct TaskCompleteEvent: Equatable, Codable, Sendable {
+    public let turnID: String?
     public let lastAgentMessage: String?
+    public let completedAt: Int64?
+    public let durationMilliseconds: Int64?
+    public let timeToFirstTokenMilliseconds: Int64?
 
     private enum CodingKeys: String, CodingKey {
+        case turnID = "turn_id"
         case lastAgentMessage = "last_agent_message"
+        case completedAt = "completed_at"
+        case durationMilliseconds = "duration_ms"
+        case timeToFirstTokenMilliseconds = "time_to_first_token_ms"
     }
 
-    public init(lastAgentMessage: String?) {
+    public init(
+        turnID: String? = nil,
+        lastAgentMessage: String?,
+        completedAt: Int64? = nil,
+        durationMilliseconds: Int64? = nil,
+        timeToFirstTokenMilliseconds: Int64? = nil
+    ) {
+        self.turnID = turnID
         self.lastAgentMessage = lastAgentMessage
+        self.completedAt = completedAt
+        self.durationMilliseconds = durationMilliseconds
+        self.timeToFirstTokenMilliseconds = timeToFirstTokenMilliseconds
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
         self.lastAgentMessage = try container.decodeIfPresent(String.self, forKey: .lastAgentMessage)
+        self.completedAt = try container.decodeIfPresent(Int64.self, forKey: .completedAt)
+        self.durationMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .durationMilliseconds)
+        self.timeToFirstTokenMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .timeToFirstTokenMilliseconds)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(turnID, forKey: .turnID)
         try container.encodeIfPresentOrNull(lastAgentMessage, forKey: .lastAgentMessage)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        try container.encodeIfPresent(durationMilliseconds, forKey: .durationMilliseconds)
+        try container.encodeIfPresent(timeToFirstTokenMilliseconds, forKey: .timeToFirstTokenMilliseconds)
     }
 }
 
 public struct TaskStartedEvent: Equatable, Codable, Sendable {
+    public let turnID: String?
+    public let startedAt: Int64?
     public let modelContextWindow: Int64?
+    public let collaborationModeKind: CollaborationModeKind?
 
     private enum CodingKeys: String, CodingKey {
+        case turnID = "turn_id"
+        case startedAt = "started_at"
         case modelContextWindow = "model_context_window"
+        case collaborationModeKind = "collaboration_mode_kind"
     }
 
-    public init(modelContextWindow: Int64?) {
+    public init(
+        turnID: String? = nil,
+        startedAt: Int64? = nil,
+        modelContextWindow: Int64?,
+        collaborationModeKind: CollaborationModeKind? = nil
+    ) {
+        self.turnID = turnID
+        self.startedAt = startedAt
         self.modelContextWindow = modelContextWindow
+        self.collaborationModeKind = collaborationModeKind
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        self.startedAt = try container.decodeIfPresent(Int64.self, forKey: .startedAt)
         self.modelContextWindow = try container.decodeIfPresent(Int64.self, forKey: .modelContextWindow)
+        self.collaborationModeKind = try container.decodeIfPresent(CollaborationModeKind.self, forKey: .collaborationModeKind)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(turnID, forKey: .turnID)
+        try container.encodeIfPresent(startedAt, forKey: .startedAt)
         try container.encodeIfPresentOrNull(modelContextWindow, forKey: .modelContextWindow)
+        try container.encodeIfPresent(collaborationModeKind, forKey: .collaborationModeKind)
     }
 }
 

@@ -17,6 +17,55 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Event.self, from: data), event)
     }
 
+    func testTurnLifecycleAliasesAndTimingFieldsMatchRust() throws {
+        let started = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "turn_started",
+          "turn_id": "turn-1",
+          "started_at": 1778320000,
+          "model_context_window": 128000,
+          "collaboration_mode_kind": "plan"
+        }
+        """.utf8))
+
+        XCTAssertEqual(started, .taskStarted(TaskStartedEvent(
+            turnID: "turn-1",
+            startedAt: 1_778_320_000,
+            modelContextWindow: 128_000,
+            collaborationModeKind: .plan
+        )))
+
+        let complete = EventMessage.taskComplete(TaskCompleteEvent(
+            turnID: "turn-1",
+            lastAgentMessage: "done",
+            completedAt: 1_778_320_010,
+            durationMilliseconds: 10_250,
+            timeToFirstTokenMilliseconds: 300
+        ))
+
+        try XCTAssertJSONObjectEqual(complete, [
+            "type": "task_complete",
+            "turn_id": "turn-1",
+            "last_agent_message": "done",
+            "completed_at": 1_778_320_010,
+            "duration_ms": 10_250,
+            "time_to_first_token_ms": 300
+        ])
+
+        let decodedComplete = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "turn_complete",
+          "turn_id": "turn-1",
+          "last_agent_message": "done",
+          "completed_at": 1778320010,
+          "duration_ms": 10250,
+          "time_to_first_token_ms": 300
+        }
+        """.utf8))
+
+        XCTAssertEqual(decodedComplete, complete)
+    }
+
     func testEventMessageFlattensPayloadFieldsBesideType() throws {
         let msg = EventMessage.error(ErrorEvent(
             message: "stream disconnected",

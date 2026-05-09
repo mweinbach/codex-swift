@@ -147,6 +147,30 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case agentMessageContentDelta = "agent_message_content_delta"
         case reasoningContentDelta = "reasoning_content_delta"
         case reasoningRawContentDelta = "reasoning_raw_content_delta"
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let rawValue = try container.decode(String.self)
+            switch rawValue {
+            case "turn_started":
+                self = .taskStarted
+            case "turn_complete":
+                self = .taskComplete
+            default:
+                guard let value = EventType(rawValue: rawValue) else {
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "Unknown event type: \(rawValue)"
+                    )
+                }
+                self = value
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
     }
 
     public init(from decoder: Decoder) throws {

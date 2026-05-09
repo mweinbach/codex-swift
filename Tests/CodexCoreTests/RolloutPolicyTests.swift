@@ -102,6 +102,8 @@ final class RolloutPolicyTests: XCTestCase {
             .mcpToolCallEnd,
             .undoCompleted,
             .turnAborted,
+            .taskStarted,
+            .taskComplete,
             .threadRolledBack,
             .webSearchEnd,
             .imageGenerationEnd
@@ -153,6 +155,14 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.userMessage(UserMessageEvent(message: "hello"))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.threadRolledBack(ThreadRolledBackEvent(numTurns: 1))))
         XCTAssertFalse(RolloutPolicy.shouldPersistEventMessage(.imageGenerationBegin(ImageGenerationBeginEvent(callID: "ig-1"))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.taskStarted(TaskStartedEvent(
+            turnID: "turn-1",
+            modelContextWindow: nil
+        ))))
+        XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.taskComplete(TaskCompleteEvent(
+            turnID: "turn-1",
+            lastAgentMessage: nil
+        ))))
         XCTAssertTrue(RolloutPolicy.shouldPersistEventMessage(.imageGenerationEnd(ImageGenerationEndEvent(
             callID: "ig-1",
             status: "completed",
