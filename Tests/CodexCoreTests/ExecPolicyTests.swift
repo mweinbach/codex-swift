@@ -558,6 +558,37 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testExecApprovalRequirementEvaluatesHeredocPrefixRulesWithoutAmendment() throws {
+        let manager = ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["python3"], decision="allow")"#))
+        let command = tokens("bash", "-lc", "python3 <<'PY'\nprint('hello')\nPY")
+
+        XCTAssertEqual(
+            manager.createExecApprovalRequirementForCommand(
+                features: .withDefaults(),
+                command: command,
+                approvalPolicy: .onRequest,
+                sandboxPolicy: .readOnly,
+                sandboxPermissions: .useDefault
+            ),
+            .skip(bypassSandbox: true, proposedExecPolicyAmendment: nil)
+        )
+    }
+
+    func testExecApprovalRequirementSuppressesHeredocFallbackAmendment() {
+        let command = tokens("bash", "-lc", "python3 <<'PY'\nprint('hello')\nPY")
+
+        XCTAssertEqual(
+            ExecPolicyManager().createExecApprovalRequirementForCommand(
+                features: .withDefaults(),
+                command: command,
+                approvalPolicy: .unlessTrusted,
+                sandboxPolicy: .readOnly,
+                sandboxPermissions: .useDefault
+            ),
+            .needsApproval(reason: nil, proposedExecPolicyAmendment: nil)
+        )
+    }
+
     func testHeuristicsApplyWhenOtherCommandsMatchPolicy() throws {
         let manager = ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["apple"], decision="allow")"#))
         let command = ["bash", "-lc", "apple | orange"]

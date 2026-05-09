@@ -89,4 +89,46 @@ final class BashPlainCommandParserTests: XCTestCase {
         XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"$(pwd)" pattern"#))
         XCTAssertNil(BashPlainCommandParser.parseWordOnlyCommandsSequence(#"rg -g"$(echo '*.py')" pattern"#))
     }
+
+    func testSingleCommandPrefixSupportsSimpleHeredoc() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+                "bash",
+                "-lc",
+                "python3 <<'PY'\nprint('hello')\nPY",
+            ]),
+            ["python3"]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+                "bash",
+                "-lc",
+                "python3 << PY\nprint('hello')\nPY",
+            ]),
+            ["python3"]
+        )
+    }
+
+    func testSingleCommandPrefixRejectsUnsafeHeredocShapes() {
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "python3 <<'PY'\nprint('hello')\nPY\necho done",
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "python3 <<'PY' > /tmp/out.txt\nprint('hello')\nPY",
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "PATH=/tmp/evil:$PATH cat <<'EOF'\nhello\nEOF",
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            #"python3 <<< "$(rm -rf /)""#,
+        ]))
+    }
 }

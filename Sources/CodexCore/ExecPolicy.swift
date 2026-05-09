@@ -1174,6 +1174,11 @@ public enum ExecApprovalRequirement: Equatable, Sendable {
     }
 }
 
+private struct ExecPolicyCommands {
+    let commands: [[String]]
+    let allowsAutoAmendment: Bool
+}
+
 public final class ExecPolicyManager: @unchecked Sendable {
     public static let rulesDirectoryName = "rules"
     public static let defaultPolicyFileName = "default.rules"
@@ -1286,8 +1291,8 @@ public final class ExecPolicyManager: @unchecked Sendable {
         sandboxPermissions: SandboxPermissions
     ) -> ExecApprovalRequirement {
         _ = features
-        let commands = BashPlainCommandParser.parseShellLcPlainCommands(command) ?? [command]
-        let evaluation = policy.checkMultiple(commands) { commandSlice in
+        let policyCommands = Self.commandsForExecPolicy(command)
+        let evaluation = policy.checkMultiple(policyCommands.commands) { commandSlice in
             CommandSafety.requiresInitialApproval(
                 policy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
@@ -1307,16 +1312,30 @@ public final class ExecPolicyManager: @unchecked Sendable {
             }
             return .needsApproval(
                 reason: Self.derivePromptReason(evaluation),
-                proposedExecPolicyAmendment: Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
+                proposedExecPolicyAmendment: policyCommands.allowsAutoAmendment
+                    ? Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
+                    : nil
             )
         case .allow:
             return .skip(
                 bypassSandbox: evaluation.matchedRules.contains {
                     $0.isPolicyMatch && $0.decision == .allow
                 },
-                proposedExecPolicyAmendment: Self.tryDeriveExecPolicyAmendmentForAllowRules(evaluation.matchedRules)
+                proposedExecPolicyAmendment: policyCommands.allowsAutoAmendment
+                    ? Self.tryDeriveExecPolicyAmendmentForAllowRules(evaluation.matchedRules)
+                    : nil
             )
         }
+    }
+
+    private static func commandsForExecPolicy(_ command: [String]) -> ExecPolicyCommands {
+        if let commands = BashPlainCommandParser.parseShellLcPlainCommands(command) {
+            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true)
+        }
+        if let command = BashPlainCommandParser.parseShellLcSingleCommandPrefix(command) {
+            return ExecPolicyCommands(commands: [command], allowsAutoAmendment: false)
+        }
+        return ExecPolicyCommands(commands: [command], allowsAutoAmendment: true)
     }
 
     public func appendAmendmentAndUpdate(

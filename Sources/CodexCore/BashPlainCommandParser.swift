@@ -19,6 +19,46 @@ public enum BashPlainCommandParser {
         return parseWordOnlyCommandsSequence(script)
     }
 
+    public static func parseShellLcSingleCommandPrefix(_ command: [String]) -> [String]? {
+        guard let (_, script) = extractBashCommand(command) else { return nil }
+        guard let redirectRange = script.range(of: "<<") else { return nil }
+        guard !script[redirectRange.upperBound...].hasPrefix("<") else { return nil }
+
+        let prefix = String(script[..<redirectRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let commands = parseWordOnlyCommandsSequence(prefix), commands.count == 1 else {
+            return nil
+        }
+
+        let remainder = String(script[redirectRange.upperBound...])
+        let redirectLine = remainder.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        let delimiterToken = redirectLine.trimmingCharacters(in: .whitespaces)
+        guard !delimiterToken.isEmpty,
+              !delimiterToken.contains(" "),
+              !delimiterToken.contains("\t"),
+              !delimiterToken.contains(">"),
+              !delimiterToken.contains("<"),
+              !delimiterToken.contains("|"),
+              !delimiterToken.contains("&"),
+              !delimiterToken.contains(";")
+        else {
+            return nil
+        }
+
+        let delimiter = delimiterToken.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+        guard !delimiter.isEmpty else { return nil }
+
+        let lines = script.components(separatedBy: .newlines)
+        guard let delimiterIndex = lines.firstIndex(where: { $0 == delimiter }) else {
+            return nil
+        }
+        let trailingLines = lines.suffix(from: lines.index(after: delimiterIndex))
+        guard trailingLines.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            return nil
+        }
+
+        return commands[0]
+    }
+
     public static func parseWordOnlyCommandsSequence(_ source: String) -> [[String]]? {
         var commands: [[String]] = []
         var currentCommand: [String] = []
