@@ -542,6 +542,40 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testExecApprovalRequirementRespectsGranularApprovalFlags() throws {
+        let manager = ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["rm"], decision="prompt")"#))
+
+        XCTAssertEqual(
+            manager.createExecApprovalRequirementForCommand(
+                features: .withDefaults(),
+                command: tokens("rm"),
+                approvalPolicy: .granular(GranularApprovalConfig(
+                    sandboxApproval: true,
+                    rules: false,
+                    mcpElicitations: true
+                )),
+                sandboxPolicy: .dangerFullAccess,
+                sandboxPermissions: .useDefault
+            ),
+            .forbidden(reason: ExecPolicyManager.granularRulesApprovalConflictReason)
+        )
+
+        XCTAssertEqual(
+            ExecPolicyManager().createExecApprovalRequirementForCommand(
+                features: .withDefaults(),
+                command: tokens("python3", "script.py"),
+                approvalPolicy: .granular(GranularApprovalConfig(
+                    sandboxApproval: false,
+                    rules: true,
+                    mcpElicitations: true
+                )),
+                sandboxPolicy: .readOnly,
+                sandboxPermissions: .requireEscalated
+            ),
+            .forbidden(reason: ExecPolicyManager.granularSandboxApprovalConflictReason)
+        )
+    }
+
     func testExecApprovalRequirementFallsBackToHeuristics() {
         let command = tokens("cargo", "build")
         let manager = ExecPolicyManager()

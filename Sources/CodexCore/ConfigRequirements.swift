@@ -450,9 +450,17 @@ extension AskForApproval {
             return "OnFailure"
         case .onRequest:
             return "OnRequest"
+        case let .granular(config):
+            return "Granular(\(config.rustDebugDescription))"
         case .never:
             return "Never"
         }
+    }
+}
+
+extension GranularApprovalConfig {
+    public var rustDebugDescription: String {
+        "GranularApprovalConfig { sandbox_approval: \(sandboxApproval), rules: \(rules), skill_approval: \(skillApproval), request_permissions: \(requestPermissions), mcp_elicitations: \(mcpElicitations) }"
     }
 }
 

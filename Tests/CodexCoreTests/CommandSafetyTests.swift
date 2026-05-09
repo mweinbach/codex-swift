@@ -321,4 +321,17 @@ final class CommandSafetyTests: XCTestCase {
             sandboxPermissions: .requireEscalated
         ))
     }
+
+    func testGranularPolicyMirrorsOnRequestForInitialPromptDetection() {
+        XCTAssertTrue(CommandSafety.requiresInitialApproval(
+            policy: .granular(GranularApprovalConfig(
+                sandboxApproval: true,
+                rules: true,
+                mcpElicitations: true
+            )),
+            sandboxPolicy: .readOnly,
+            command: ["python3", "script.py"],
+            sandboxPermissions: .requireEscalated
+        ))
+    }
 }

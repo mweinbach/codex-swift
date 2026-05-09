@@ -504,6 +504,8 @@ Source baseline inspected for this scaffold:
   - `TokenUsageInfo.newOrAppend` now matches Rust by refreshing an existing `model_context_window` when a new value is supplied, even if no new last-usage delta is appended.
 - `codex-rs/protocol/src/protocol.rs` override turn-context active permission profile
   - `Op.overrideTurnContext` now carries Rust's `active_permission_profile` override field alongside `permission_profile`, preserving standalone permission-profile selections outside combined user-input operations.
+- `codex-rs/protocol/src/protocol.rs` granular approval policy
+  - `AskForApproval.granular` and `GranularApprovalConfig` now preserve Rust's externally tagged wire shape, optional-flag defaults, helper accessors, raw string projection, and exec-policy prompt rejection reasons for disallowed sandbox/rules approval prompts.
 - `codex-rs/protocol/src/models.rs` reasoning item ID default
   - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
 - `codex-rs/protocol/src/models.rs` legacy ghost snapshot response item

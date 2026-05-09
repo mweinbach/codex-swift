@@ -26,6 +26,62 @@ final class ProtocolConfigTypesTests: XCTestCase {
         XCTAssertEqual(try encode(AskForApproval.unlessTrusted), #""untrusted""#)
     }
 
+    func testGranularApprovalConfigMatchesRustWireShapeAndDefaults() throws {
+        let config = GranularApprovalConfig(
+            sandboxApproval: true,
+            rules: false,
+            skillApproval: true,
+            requestPermissions: true,
+            mcpElicitations: false
+        )
+
+        try XCTAssertJSONObjectEqual(AskForApproval.granular(config), [
+            "granular": [
+                "sandbox_approval": true,
+                "rules": false,
+                "skill_approval": true,
+                "request_permissions": true,
+                "mcp_elicitations": false
+            ]
+        ])
+        XCTAssertEqual(AskForApproval.granular(config).rawValue, "granular")
+        XCTAssertTrue(config.allowsSandboxApproval)
+        XCTAssertFalse(config.allowsRulesApproval)
+        XCTAssertTrue(config.allowsSkillApproval)
+        XCTAssertTrue(config.allowsRequestPermissions)
+        XCTAssertFalse(config.allowsMcpElicitations)
+
+        let decoded = try JSONDecoder().decode(GranularApprovalConfig.self, from: Data(#"""
+        {
+          "sandbox_approval": true,
+          "rules": false,
+          "mcp_elicitations": true
+        }
+        """#.utf8))
+        XCTAssertEqual(decoded, GranularApprovalConfig(
+            sandboxApproval: true,
+            rules: false,
+            skillApproval: false,
+            requestPermissions: false,
+            mcpElicitations: true
+        ))
+
+        let mode = try JSONDecoder().decode(AskForApproval.self, from: Data(#"""
+        {
+          "granular": {
+            "sandbox_approval": false,
+            "rules": true,
+            "mcp_elicitations": true
+          }
+        }
+        """#.utf8))
+        XCTAssertEqual(mode, .granular(GranularApprovalConfig(
+            sandboxApproval: false,
+            rules: true,
+            mcpElicitations: true
+        )))
+    }
+
     func testCollaborationModeKindAliasesMatchRustDefaults() throws {
         let decoder = JSONDecoder()
         for alias in ["default", "code", "pair_programming", "execute", "custom"] {

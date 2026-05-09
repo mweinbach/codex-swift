@@ -130,7 +130,7 @@ public enum CommandSafety {
         switch policy {
         case .never, .onFailure:
             return false
-        case .onRequest:
+        case .onRequest, .granular:
             switch sandboxPolicy {
             case .dangerFullAccess, .externalSandbox:
                 return commandMightBeDangerous(command)

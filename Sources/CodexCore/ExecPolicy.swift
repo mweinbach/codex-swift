@@ -1184,6 +1184,8 @@ public final class ExecPolicyManager: @unchecked Sendable {
     public static let defaultPolicyFileName = "default.rules"
     public static let forbiddenReason = "execpolicy forbids this command"
     public static let promptConflictReason = "execpolicy requires approval for this command, but AskForApproval is set to Never"
+    public static let granularSandboxApprovalConflictReason = "approval required by policy, but AskForApproval::Granular.sandbox_approval is false"
+    public static let granularRulesApprovalConflictReason = "approval required by policy rule, but AskForApproval::Granular.rules is false"
     public static let promptReason = "execpolicy requires approval for this command"
 
     private var policy: ExecPolicy
@@ -1307,8 +1309,14 @@ public final class ExecPolicyManager: @unchecked Sendable {
         case .forbidden:
             return .forbidden(reason: Self.forbiddenReason)
         case .prompt:
-            if approvalPolicy == .never {
-                return .forbidden(reason: Self.promptConflictReason)
+            let promptIsPolicyRule = evaluation.matchedRules.contains {
+                $0.isPolicyMatch && $0.decision == .prompt
+            }
+            if let rejectionReason = Self.promptRejectionReason(
+                approvalPolicy: approvalPolicy,
+                promptIsPolicyRule: promptIsPolicyRule
+            ) {
+                return .forbidden(reason: rejectionReason)
             }
             return .needsApproval(
                 reason: Self.derivePromptReason(evaluation),
@@ -1438,6 +1446,23 @@ public final class ExecPolicyManager: @unchecked Sendable {
         : nil
     }
 
+    public static func promptRejectionReason(
+        approvalPolicy: AskForApproval,
+        promptIsPolicyRule: Bool
+    ) -> String? {
+        switch approvalPolicy {
+        case .never:
+            return Self.promptConflictReason
+        case .onFailure, .onRequest, .unlessTrusted:
+            return nil
+        case let .granular(config):
+            if promptIsPolicyRule {
+                return config.allowsRulesApproval ? nil : Self.granularRulesApprovalConflictReason
+            }
+            return config.allowsSandboxApproval ? nil : Self.granularSandboxApprovalConflictReason
+        }
+    }
+
     private static func jsonStringLiteral(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
@@ -1452,7 +1477,7 @@ public func defaultExecApprovalRequirement(
     switch policy {
     case .never, .onFailure:
         needsApproval = false
-    case .onRequest:
+    case .onRequest, .granular:
         switch sandboxPolicy {
         case .dangerFullAccess, .externalSandbox:
             needsApproval = false
@@ -1461,6 +1486,13 @@ public func defaultExecApprovalRequirement(
         }
     case .unlessTrusted:
         needsApproval = true
+    }
+
+    if needsApproval,
+       case let .granular(config) = policy,
+       !config.allowsSandboxApproval
+    {
+        return .forbidden(reason: "approval policy disallowed sandbox approval prompt")
     }
 
     return needsApproval
