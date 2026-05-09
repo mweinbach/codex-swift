@@ -2876,6 +2876,10 @@ public enum CodexAppServer {
             items.append(item)
         }
         if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentMcpServerConfig(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        if params?["includeHome"] as? Bool == true,
            let item = try detectExternalAgentHooks(cwd: nil, configuration: configuration) {
             items.append(item)
         }
@@ -2900,6 +2904,9 @@ public enum CodexAppServer {
                 continue
             }
             if let item = try detectExternalAgentConfig(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentMcpServerConfig(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
             if let item = try detectExternalAgentHooks(cwd: repoRoot.path, configuration: configuration) {
@@ -2946,6 +2953,8 @@ public enum CodexAppServer {
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
             case "HOOKS":
                 try importExternalAgentHooks(cwd: cwd, configuration: configuration)
+            case "MCP_SERVER_CONFIG":
+                try importExternalAgentMcpServerConfig(cwd: cwd, configuration: configuration)
             case "SKILLS":
                 try importExternalAgentSkills(cwd: cwd, configuration: configuration)
             case "SUBAGENTS":
@@ -3021,6 +3030,50 @@ public enum CodexAppServer {
             "description": "Migrate hooks from \(paths.sourceExternalAgentDirectory.path) to \(paths.targetHooks.path)",
             "details": [
                 "hooks": eventNames.map { ["name": $0] }
+            ]
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
+    private static func detectExternalAgentMcpServerConfig(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = try externalAgentMcpServerConfigPaths(cwd: cwd, configuration: configuration)
+        let settings = try externalAgentMcpSettings(
+            sourceSettings: paths.sourceSettings,
+            repoRoot: paths.cwd.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            configuration: configuration
+        )
+        let migrated = try externalAgentMcpConfigValue(
+            sourceRoot: paths.sourceRoot,
+            externalAgentHome: paths.externalAgentHome,
+            settings: settings
+        )
+        guard case let .table(root) = migrated,
+              case let .table(servers)? = root["mcp_servers"],
+              !servers.isEmpty
+        else {
+            return nil
+        }
+
+        var existing: ConfigValue = .table([:])
+        if FileManager.default.fileExists(atPath: paths.targetConfig.path) {
+            let raw = try String(contentsOf: paths.targetConfig, encoding: .utf8)
+            existing = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .table([:])
+                : try parseExternalAgentTargetConfig(raw)
+        }
+        guard try mergeMissingConfigValues(into: &existing, incoming: migrated) else {
+            return nil
+        }
+
+        var item: [String: Any] = [
+            "itemType": "MCP_SERVER_CONFIG",
+            "description": "Migrate MCP servers from \(paths.sourceRoot.path) into \(paths.targetConfig.path)",
+            "details": [
+                "mcp_servers": servers.keys.sorted().map { ["name": $0] }
             ]
         ]
         item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
@@ -3172,6 +3225,49 @@ public enum CodexAppServer {
         try (rendered + "\n").write(to: paths.targetHooks, atomically: true, encoding: .utf8)
     }
 
+    private static func importExternalAgentMcpServerConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = try externalAgentMcpServerConfigPaths(cwd: cwd, configuration: configuration)
+        let settings = try externalAgentMcpSettings(
+            sourceSettings: paths.sourceSettings,
+            repoRoot: paths.cwd.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            configuration: configuration
+        )
+        let migrated = try externalAgentMcpConfigValue(
+            sourceRoot: paths.sourceRoot,
+            externalAgentHome: paths.externalAgentHome,
+            settings: settings
+        )
+        guard case let .table(root) = migrated,
+              case let .table(servers)? = root["mcp_servers"],
+              !servers.isEmpty
+        else {
+            return
+        }
+
+        let existing: ConfigValue
+        if FileManager.default.fileExists(atPath: paths.targetConfig.path) {
+            let raw = try String(contentsOf: paths.targetConfig, encoding: .utf8)
+            existing = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .table([:])
+                : try parseExternalAgentTargetConfig(raw)
+        } else {
+            existing = .table([:])
+        }
+        var next = existing
+        guard try mergeMissingConfigValues(into: &next, incoming: migrated) else {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: paths.targetConfig.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
+    }
+
     private static func importExternalAgentAgentsMd(cwd: String?, configuration: CodexAppServerConfiguration) throws {
         if let cwd, !cwd.isEmpty,
            gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
@@ -3317,6 +3413,27 @@ public enum CodexAppServer {
             sourceExternalAgentDirectory: home.appendingPathComponent(".claude", isDirectory: true),
             targetHooks: configuration.codexHome.appendingPathComponent("hooks.json", isDirectory: false),
             cwd: nil
+        )
+    }
+
+    private static func externalAgentMcpServerConfigPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (sourceSettings: URL, sourceRoot: URL, externalAgentHome: URL, targetConfig: URL, cwd: String?) {
+        let configPaths = externalAgentConfigPaths(cwd: cwd, configuration: configuration)
+        let externalAgentHome = configPaths.sourceSettings.deletingLastPathComponent()
+        let sourceRoot: URL
+        if let repoCwd = configPaths.cwd {
+            sourceRoot = URL(fileURLWithPath: repoCwd, isDirectory: true)
+        } else {
+            sourceRoot = externalAgentHome.deletingLastPathComponent()
+        }
+        return (
+            sourceSettings: configPaths.sourceSettings,
+            sourceRoot: sourceRoot,
+            externalAgentHome: externalAgentHome,
+            targetConfig: configPaths.targetConfig,
+            cwd: configPaths.cwd
         )
     }
 
@@ -4146,6 +4263,41 @@ public enum CodexAppServer {
         }
     }
 
+    private static func effectiveExternalAgentSettings(at path: URL) throws -> [String: Any]? {
+        guard var settings = try externalAgentSettings(at: path) else {
+            return nil
+        }
+        let localSettingsPath = path
+            .deletingLastPathComponent()
+            .appendingPathComponent("settings.local.json", isDirectory: false)
+        if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
+            mergeJSONSettings(into: &settings, incoming: localSettings)
+        }
+        return settings
+    }
+
+    private static func externalAgentMcpSettings(
+        sourceSettings: URL,
+        repoRoot: URL?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        if repoRoot != nil,
+           !FileManager.default.fileExists(atPath: sourceSettings.path) {
+            let home = configuration.environment["HOME"].flatMap { value in
+                value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+            } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            let homeSettings = home
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("settings.json", isDirectory: false)
+            do {
+                return try effectiveExternalAgentSettings(at: homeSettings)
+            } catch AppServerError.internalError {
+                return nil
+            }
+        }
+        return try effectiveExternalAgentSettings(at: sourceSettings)
+    }
+
     private static func mergeJSONSettings(into existing: inout [String: Any], incoming: [String: Any]) {
         for (key, incomingValue) in incoming {
             if var existingObject = existing[key] as? [String: Any],
@@ -4156,6 +4308,300 @@ public enum CodexAppServer {
                 existing[key] = incomingValue
             }
         }
+    }
+
+    private static func externalAgentMcpConfigValue(
+        sourceRoot: URL,
+        externalAgentHome: URL,
+        settings: [String: Any]?
+    ) throws -> ConfigValue {
+        let enabledServers = stringSet(settings?["enabledMcpjsonServers"])
+        let disabledServers = stringSet(settings?["disabledMcpjsonServers"])
+        var servers: [String: ConfigValue] = [:]
+
+        let mcpJson = sourceRoot.appendingPathComponent(".mcp.json", isDirectory: false)
+        if let object = try externalAgentJSONObject(at: mcpJson) {
+            appendExternalAgentMcpServers(
+                from: object["mcpServers"],
+                enabledServers: enabledServers,
+                disabledServers: disabledServers,
+                preservingExisting: false,
+                to: &servers
+            )
+        }
+
+        let sourceClaudeJson = sourceRoot.appendingPathComponent(".claude.json", isDirectory: false)
+        try appendExternalAgentMcpServers(
+            fromClaudeJsonAt: sourceClaudeJson,
+            matching: sourceRoot,
+            enabledServers: enabledServers,
+            disabledServers: disabledServers,
+            preservingExisting: false,
+            to: &servers
+        )
+
+        let externalAgentParent = externalAgentHome.deletingLastPathComponent()
+        if !sameFileSystemPath(externalAgentParent, sourceRoot) {
+            let homeClaudeJson = externalAgentParent.appendingPathComponent(".claude.json", isDirectory: false)
+            try appendExternalAgentMcpServers(
+                fromClaudeJsonAt: homeClaudeJson,
+                matching: sourceRoot,
+                enabledServers: enabledServers,
+                disabledServers: disabledServers,
+                preservingExisting: true,
+                to: &servers
+            )
+        }
+
+        guard !servers.isEmpty else {
+            return .table([:])
+        }
+        return .table(["mcp_servers": .table(servers)])
+    }
+
+    private static func externalAgentJSONObject(at path: URL) throws -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: path)
+        return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func appendExternalAgentMcpServers(
+        fromClaudeJsonAt path: URL,
+        matching sourceRoot: URL,
+        enabledServers: Set<String>,
+        disabledServers: Set<String>,
+        preservingExisting: Bool,
+        to servers: inout [String: ConfigValue]
+    ) throws {
+        guard let object = try externalAgentJSONObject(at: path) else {
+            return
+        }
+        appendExternalAgentMcpServers(
+            from: object["mcpServers"],
+            enabledServers: enabledServers,
+            disabledServers: disabledServers,
+            preservingExisting: preservingExisting,
+            to: &servers
+        )
+        guard let projects = object["projects"] as? [String: Any] else {
+            return
+        }
+        for (projectPath, projectValue) in projects where externalAgentProjectPath(projectPath, matches: sourceRoot) {
+            guard let project = projectValue as? [String: Any] else {
+                continue
+            }
+            appendExternalAgentMcpServers(
+                from: project["mcpServers"],
+                enabledServers: enabledServers,
+                disabledServers: disabledServers,
+                preservingExisting: preservingExisting,
+                to: &servers
+            )
+        }
+    }
+
+    private static func appendExternalAgentMcpServers(
+        from value: Any?,
+        enabledServers: Set<String>,
+        disabledServers: Set<String>,
+        preservingExisting: Bool,
+        to servers: inout [String: ConfigValue]
+    ) {
+        guard let rawServers = value as? [String: Any] else {
+            return
+        }
+        for name in rawServers.keys.sorted() {
+            guard !preservingExisting || servers[name] == nil,
+                  let server = rawServers[name] as? [String: Any],
+                  let config = externalAgentMcpServerConfig(
+                    name: name,
+                    server: server,
+                    enabledServers: enabledServers,
+                    disabledServers: disabledServers
+                  )
+            else {
+                continue
+            }
+            servers[name] = config
+        }
+    }
+
+    private static func externalAgentMcpServerConfig(
+        name: String,
+        server: [String: Any],
+        enabledServers: Set<String>,
+        disabledServers: Set<String>
+    ) -> ConfigValue? {
+        guard server["enabled"] as? Bool != false,
+              server["disabled"] as? Bool != true,
+              (enabledServers.isEmpty || enabledServers.contains(name)),
+              !disabledServers.contains(name)
+        else {
+            return nil
+        }
+
+        if let command = server["command"] as? String,
+           !containsEnvPlaceholder(command) {
+            let type = server["type"] as? String
+            guard type == nil || type == "stdio" else {
+                return nil
+            }
+            var table: [String: ConfigValue] = ["command": .string(command)]
+            if let args = externalAgentMcpStringArray(server["args"]) {
+                guard !args.contains(where: containsEnvPlaceholder) else {
+                    return nil
+                }
+                if !args.isEmpty {
+                    table["args"] = .array(args.map(ConfigValue.string))
+                }
+            }
+            var env: [String: ConfigValue] = [:]
+            var envVars: [ConfigValue] = []
+            if let rawEnv = server["env"] as? [String: Any] {
+                for key in rawEnv.keys.sorted() {
+                    guard let value = externalAgentMcpString(rawEnv[key]) else {
+                        continue
+                    }
+                    if let variable = parseExternalAgentEnvPlaceholder(value), variable == key {
+                        envVars.append(.string(key))
+                    } else if containsEnvPlaceholder(value) {
+                        return nil
+                    } else {
+                        env[key] = .string(value)
+                    }
+                }
+            }
+            if !envVars.isEmpty {
+                table["env_vars"] = .array(envVars)
+            }
+            if !env.isEmpty {
+                table["env"] = .table(env)
+            }
+            return .table(table)
+        }
+
+        if let url = server["url"] as? String,
+           !containsEnvPlaceholder(url) {
+            let type = server["type"] as? String
+            guard type == nil || type == "http" || type == "streamable_http" else {
+                return nil
+            }
+            var table: [String: ConfigValue] = ["url": .string(url)]
+            var httpHeaders: [String: ConfigValue] = [:]
+            var envHttpHeaders: [String: ConfigValue] = [:]
+            if let headers = server["headers"] as? [String: Any] {
+                for key in headers.keys.sorted() {
+                    guard let value = externalAgentMcpString(headers[key]) else {
+                        continue
+                    }
+                    if key.caseInsensitiveCompare("authorization") == .orderedSame,
+                       value.hasPrefix("Bearer "),
+                       let variable = parseExternalAgentEnvPlaceholder(String(value.dropFirst("Bearer ".count))) {
+                        table["bearer_token_env_var"] = .string(variable)
+                    } else if let variable = parseExternalAgentEnvPlaceholder(value) {
+                        envHttpHeaders[key] = .string(variable)
+                    } else if containsEnvPlaceholder(value) {
+                        return nil
+                    } else {
+                        httpHeaders[key] = .string(value)
+                    }
+                }
+            }
+            if !httpHeaders.isEmpty {
+                table["http_headers"] = .table(httpHeaders)
+            }
+            if !envHttpHeaders.isEmpty {
+                table["env_http_headers"] = .table(envHttpHeaders)
+            }
+            return .table(table)
+        }
+
+        return nil
+    }
+
+    private static func externalAgentMcpString(_ value: Any?) -> String? {
+        switch value {
+        case let value as String:
+            return value
+        default:
+            return nil
+        }
+    }
+
+    private static func externalAgentMcpStringArray(_ value: Any?) -> [String]? {
+        switch value {
+        case let string as String:
+            return [string]
+        case let array as [String]:
+            return array
+        case let array as [Any]:
+            var strings: [String] = []
+            for item in array {
+                guard let string = item as? String else {
+                    return nil
+                }
+                strings.append(string)
+            }
+            return strings
+        default:
+            return nil
+        }
+    }
+
+    private static func parseExternalAgentEnvPlaceholder(_ value: String) -> String? {
+        guard value.hasPrefix("${"), value.hasSuffix("}") else {
+            return nil
+        }
+        let body = String(value.dropFirst(2).dropLast())
+        let name = body.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? body
+        guard isExternalAgentEnvName(name) else {
+            return nil
+        }
+        if body.count > name.count {
+            guard body.dropFirst(name.count).hasPrefix(":-") else {
+                return nil
+            }
+        }
+        return name
+    }
+
+    private static func containsEnvPlaceholder(_ value: String) -> Bool {
+        value.contains("${")
+    }
+
+    private static func isExternalAgentEnvName(_ name: String) -> Bool {
+        guard let first = name.unicodeScalars.first,
+              first == "_" || isASCIIAlpha(first)
+        else {
+            return false
+        }
+        return name.unicodeScalars.dropFirst().allSatisfy { scalar in
+            scalar == "_" || isASCIIAlpha(scalar) || (48...57).contains(scalar.value)
+        }
+    }
+
+    private static func isASCIIAlpha(_ scalar: Unicode.Scalar) -> Bool {
+        (65...90).contains(scalar.value) || (97...122).contains(scalar.value)
+    }
+
+    private static func stringSet(_ value: Any?) -> Set<String> {
+        if let strings = value as? [String] {
+            return Set(strings)
+        }
+        if let values = value as? [Any] {
+            return Set(values.compactMap { $0 as? String })
+        }
+        return []
+    }
+
+    private static func externalAgentProjectPath(_ path: String, matches sourceRoot: URL) -> Bool {
+        sameFileSystemPath(URL(fileURLWithPath: path, isDirectory: true), sourceRoot)
+    }
+
+    private static func sameFileSystemPath(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.standardizedFileURL.resolvingSymlinksInPath().path == rhs.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     private static func externalAgentConfigValue(from settings: [String: Any]) throws -> ConfigValue {

@@ -2804,6 +2804,109 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(migrated.contains("OBJECT"))
     }
 
+    func testExternalAgentConfigDetectAndImportMcpServersMigratesConvertibleEntries() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claude = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
+        try """
+        {
+          "enabledMcpjsonServers": ["api", "docs", "bad-env", "disabled"],
+          "disabledMcpjsonServers": ["disabled"]
+        }
+        """.write(
+            to: claude.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "mcpServers": {
+            "docs": {
+              "command": "npx",
+              "args": ["-y", "docs"],
+              "env": {
+                "TOKEN": "${TOKEN}",
+                "STATIC": "yes"
+              }
+            },
+            "api": {
+              "type": "http",
+              "url": "https://example.com/mcp",
+              "headers": {
+                "Authorization": "Bearer ${API_TOKEN}",
+                "X-Env": "${HEADER_ENV}",
+                "X-Static": "abc"
+              }
+            },
+            "bad-env": {
+              "command": "node",
+              "env": { "TOKEN": "prefix-${TOKEN}" }
+            },
+            "disabled": {
+              "command": "node"
+            }
+          }
+        }
+        """.write(
+            to: repo.url.appendingPathComponent(".mcp.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["MCP_SERVER_CONFIG"])
+        XCTAssertEqual(items[0]["cwd"] as? String, repo.url.path)
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate MCP servers from \(repo.url.path) into \(repo.url.path)/.codex/config.toml"
+        )
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        XCTAssertEqual(details["mcp_servers"] as? [[String: String]], [["name": "api"], ["name": "docs"]])
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"MCP_SERVER_CONFIG","description":"MCP","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let migrated = try String(
+            contentsOf: repo.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migrated.contains("[mcp_servers.api]"))
+        XCTAssertTrue(migrated.contains(#"url = "https://example.com/mcp""#))
+        XCTAssertTrue(migrated.contains(#"bearer_token_env_var = "API_TOKEN""#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.api.env_http_headers]"))
+        XCTAssertTrue(migrated.contains(#"X-Env = "HEADER_ENV""#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.api.http_headers]"))
+        XCTAssertTrue(migrated.contains(#"X-Static = "abc""#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.docs]"))
+        XCTAssertTrue(migrated.contains(#"command = "npx""#))
+        XCTAssertTrue(migrated.contains(#"args = ["-y", "docs"]"#))
+        XCTAssertTrue(migrated.contains(#"env_vars = ["TOKEN"]"#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.docs.env]"))
+        XCTAssertTrue(migrated.contains(#"STATIC = "yes""#))
+        XCTAssertFalse(migrated.contains("bad-env"))
+        XCTAssertFalse(migrated.contains("disabled"))
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
     func testExternalAgentConfigDetectAndImportHooksWritesHooksJsonAndCopiesScripts() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()
