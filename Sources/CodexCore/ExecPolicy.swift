@@ -814,6 +814,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkListMutationStatement(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if let assignment = try Self.parseTopLevelLiteralAssignment(
             statement,
             constants: constants,
@@ -1157,6 +1165,62 @@ public final class PolicyParser {
         let targets = try parseStarlarkLoopTargets(targetText, expression: trimmed)
         let value = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
         try bindStarlarkLoopTargets(targets, to: value, constants: &constants, expression: trimmed)
+        return true
+    }
+
+    private static func parseStarlarkListMutationStatement(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: trimmed)
+        else {
+            return false
+        }
+
+        let callee = String(trimmed[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return false
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ["append", "extend"].contains(methodName) else {
+            return false
+        }
+        guard isStarlarkIdentifier(receiverText),
+              case var .array(items) = constants[receiverText]
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let bodyStart = trimmed.index(after: openIndex)
+        let body = String(trimmed[bodyStart..<trimmed.index(before: trimmed.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        switch methodName {
+        case "append":
+            items.append(argument)
+        case "extend":
+            guard case let .array(extensionItems) = argument else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            items.append(contentsOf: extensionItems)
+        default:
+            return false
+        }
+        constants[receiverText] = .array(items)
         return true
     }
 
