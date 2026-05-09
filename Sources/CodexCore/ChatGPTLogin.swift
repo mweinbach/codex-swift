@@ -16,6 +16,7 @@ public struct ChatGPTLoginOptions: Sendable {
     public let forcedChatGPTWorkspaceID: String?
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
     public let originator: String
+    public let codexStreamlinedLogin: Bool
 
     public init(
         codexHome: URL,
@@ -26,7 +27,8 @@ public struct ChatGPTLoginOptions: Sendable {
         forceState: String? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
-        originator: String = ChatGPTLogin.defaultOriginator()
+        originator: String = ChatGPTLogin.defaultOriginator(),
+        codexStreamlinedLogin: Bool = false
     ) {
         self.codexHome = codexHome
         self.clientID = clientID
@@ -37,6 +39,7 @@ public struct ChatGPTLoginOptions: Sendable {
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
         self.authCredentialsStoreMode = authCredentialsStoreMode
         self.originator = originator
+        self.codexStreamlinedLogin = codexStreamlinedLogin
     }
 }
 
@@ -101,6 +104,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
     private let state: String
     private let forcedChatGPTWorkspaceID: String?
     private let authCredentialsStoreMode: AuthCredentialsStoreMode
+    private let codexStreamlinedLogin: Bool
     private let transport: ChatGPTLoginTransport
     private let keyringStore: AuthKeyringStore
     private let now: @Sendable () -> Date
@@ -128,6 +132,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
         self.state = state
         self.forcedChatGPTWorkspaceID = options.forcedChatGPTWorkspaceID
         self.authCredentialsStoreMode = options.authCredentialsStoreMode
+        self.codexStreamlinedLogin = options.codexStreamlinedLogin
         self.transport = transport
         self.keyringStore = keyringStore
         self.now = now
@@ -323,7 +328,8 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
                         port: actualPort,
                         issuer: issuer,
                         idToken: tokens.idToken,
-                        accessToken: tokens.accessToken
+                        accessToken: tokens.accessToken,
+                        codexStreamlinedLogin: codexStreamlinedLogin
                     )
                 )
             } catch {
@@ -729,7 +735,13 @@ public enum ChatGPTLogin {
         }
     }
 
-    static func composeSuccessURL(port: UInt16, issuer: String, idToken: String, accessToken: String) -> String {
+    static func composeSuccessURL(
+        port: UInt16,
+        issuer: String,
+        idToken: String,
+        accessToken: String,
+        codexStreamlinedLogin: Bool = false
+    ) -> String {
         let tokenClaims = jwtAuthClaims(idToken)
         let accessClaims = jwtAuthClaims(accessToken)
         let completedOnboarding = tokenClaims["completed_platform_onboarding"] as? Bool ?? false
@@ -737,14 +749,18 @@ public enum ChatGPTLogin {
         let needsSetup = (!completedOnboarding) && isOrgOwner
         let platformURL = issuer == defaultIssuer ? "https://platform.openai.com" : "https://platform.api.openai.org"
 
-        let query = formBody([
+        var queryItems = [
             ("id_token", idToken),
             ("needs_setup", needsSetup ? "true" : "false"),
             ("org_id", tokenClaims["organization_id"] as? String ?? ""),
             ("project_id", tokenClaims["project_id"] as? String ?? ""),
             ("plan_type", accessClaims["chatgpt_plan_type"] as? String ?? ""),
             ("platform_url", platformURL)
-        ])
+        ]
+        if codexStreamlinedLogin {
+            queryItems.append(("codex_streamlined_login", "true"))
+        }
+        let query = formBody(queryItems)
         return "http://localhost:\(port)/success?\(query)"
     }
 

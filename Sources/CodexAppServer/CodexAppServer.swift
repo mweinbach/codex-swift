@@ -8767,7 +8767,7 @@ public enum CodexAppServer {
         return defaultValue
     }
 
-    private static func boolParam(_ value: Any?, defaultValue: Bool) -> Bool {
+    fileprivate static func boolParam(_ value: Any?, defaultValue: Bool) -> Bool {
         if let bool = value as? Bool {
             return bool
         }
@@ -12494,7 +12494,7 @@ final class CodexAppServerMessageProcessor {
         return false
     }
 
-    private func startChatGptLogin() throws -> (loginID: UUID, authURL: String) {
+    private func startChatGptLogin(codexStreamlinedLogin: Bool = false) throws -> (loginID: UUID, authURL: String) {
         if try CodexAppServer.forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }
@@ -12506,7 +12506,8 @@ final class CodexAppServerMessageProcessor {
                 openBrowser: false,
                 forcedChatGPTWorkspaceID: runtimeConfig.forcedChatGPTWorkspaceID,
                 authCredentialsStoreMode: configuration.authCredentialsStoreMode,
-                originator: configuration.originator
+                originator: configuration.originator,
+                codexStreamlinedLogin: codexStreamlinedLogin
             ))
         } catch {
             throw AppServerError.internalError("failed to start login server: \(error)")
@@ -12620,8 +12621,11 @@ final class CodexAppServerMessageProcessor {
         ]
     }
 
-    private func loginChatGptAccountResult() throws -> [String: Any] {
-        let started = try startChatGptLogin()
+    private func loginChatGptAccountResult(params: [String: Any]?) throws -> [String: Any] {
+        let started = try startChatGptLogin(codexStreamlinedLogin: CodexAppServer.boolParam(
+            params?["codexStreamlinedLogin"],
+            defaultValue: false
+        ))
         return [
             "type": "chatgpt",
             "loginId": started.loginID.uuidString.lowercased(),
@@ -13457,7 +13461,7 @@ final class CodexAppServerMessageProcessor {
                     if CodexAppServer.stringParam(params?["type"]) == "chatgpt" {
                         response = CodexAppServer.responseObject(
                             id: id,
-                            result: try loginChatGptAccountResult()
+                            result: try loginChatGptAccountResult(params: params)
                         )
                     } else if CodexAppServer.stringParam(params?["type"]) == "chatgptDeviceCode" {
                         response = CodexAppServer.responseObject(

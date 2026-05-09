@@ -20,6 +20,36 @@ final class ChatGPTLoginTests: XCTestCase {
         )
     }
 
+    func testComposeSuccessURLIncludesStreamlinedFlagWhenRequested() throws {
+        let idToken = Self.fakeJWT(authClaims: [
+            "organization_id": "org-123",
+            "project_id": "proj-123",
+            "completed_platform_onboarding": true,
+            "is_org_owner": true
+        ])
+        let accessToken = Self.fakeJWT(authClaims: ["chatgpt_plan_type": "pro"])
+
+        let legacyURL = ChatGPTLogin.composeSuccessURL(
+            port: 1455,
+            issuer: ChatGPTLogin.defaultIssuer,
+            idToken: idToken,
+            accessToken: accessToken
+        )
+        XCTAssertNil(URLComponents(string: legacyURL)?.queryItems?.first { $0.name == "codex_streamlined_login" })
+
+        let streamlinedURL = ChatGPTLogin.composeSuccessURL(
+            port: 1455,
+            issuer: ChatGPTLogin.defaultIssuer,
+            idToken: idToken,
+            accessToken: accessToken,
+            codexStreamlinedLogin: true
+        )
+        XCTAssertEqual(
+            URLComponents(string: streamlinedURL)?.queryItems?.first { $0.name == "codex_streamlined_login" }?.value,
+            "true"
+        )
+    }
+
     func testLocalServerCallbackExchangesTokensPersistsAuthAndCompletesOnSuccess() async throws {
         let temp = try LoginTemporaryDirectory()
         let now = Date(timeIntervalSince1970: 1_800_000_100)
