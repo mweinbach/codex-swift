@@ -869,6 +869,28 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
     }
 
+    public func isSemanticallyEquivalent(to other: FileSystemSandboxPolicy, cwd: String) -> Bool {
+        semanticSignature(cwd: cwd) == other.semanticSignature(cwd: cwd)
+    }
+
+    public func needsDirectRuntimeEnforcement(
+        networkPolicy: NetworkSandboxPolicy,
+        cwd: String
+    ) -> Bool {
+        guard case .restricted = self else {
+            return false
+        }
+
+        guard let legacyPolicy = try? toLegacySandboxPolicy(networkPolicy: networkPolicy, cwd: cwd) else {
+            return true
+        }
+
+        return semanticSignature(cwd: cwd) != Self.legacyRuntimeFileSystemPolicyForCwd(
+            legacyPolicy,
+            cwd: cwd
+        ).semanticSignature(cwd: cwd)
+    }
+
     public func withAdditionalReadableRoots(
         _ additionalReadableRoots: [AbsolutePath],
         cwd: String
@@ -921,6 +943,57 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
 
         return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    private static func legacyRuntimeFileSystemPolicyForCwd(
+        _ sandboxPolicy: SandboxPolicy,
+        cwd: String
+    ) -> FileSystemSandboxPolicy {
+        guard case let .workspaceWrite(writableRoots, _, excludeTmpdirEnvVar, excludeSlashTmp) = sandboxPolicy else {
+            return fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd)
+        }
+
+        var entries: [FileSystemSandboxEntry] = [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ]
+
+        if !excludeSlashTmp {
+            entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.slashTmp.jsonValue), access: .write))
+        }
+        if !excludeTmpdirEnvVar {
+            entries.append(FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.tmpdir.jsonValue), access: .write))
+        }
+
+        entries.append(contentsOf: writableRoots.map {
+            FileSystemSandboxEntry(path: .path($0.path), access: .write)
+        })
+
+        if let cwdRoot = absolutePathForLegacyCwd(cwd) {
+            for protectedPath in defaultReadOnlySubpathsForWritableRoot(cwdRoot, protectMissingDotCodex: true) {
+                appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+            }
+        }
+
+        for writableRoot in writableRoots {
+            for protectedPath in defaultReadOnlySubpathsForWritableRoot(writableRoot, protectMissingDotCodex: false) {
+                appendDefaultReadOnlyPathIfNoExplicitRule(protectedPath, to: &entries)
+            }
+        }
+
+        return .restricted(entries: entries)
+    }
+
+    private func semanticSignature(cwd: String) -> FileSystemSemanticSignature {
+        FileSystemSemanticSignature(
+            hasFullDiskReadAccess: hasFullDiskReadAccess,
+            hasFullDiskWriteAccess: hasFullDiskWriteAccess,
+            includePlatformDefaults: includePlatformDefaults,
+            readableRoots: getReadableRootsWithCwd(cwd).sortedByPath(),
+            writableRoots: getWritableRootsWithCwd(cwd).sortedForSemanticSignature(),
+            unreadableRoots: getUnreadableRootsWithCwd(cwd).sortedByPath(),
+            unreadableGlobs: getUnreadableGlobsWithCwd(cwd)
+        )
     }
 
     public func materializeProjectRootsWithCwd(_ cwd: String) -> FileSystemSandboxPolicy {
@@ -1196,6 +1269,16 @@ private struct ResolvedFileSystemEntry: Equatable {
     let access: FileSystemAccessMode
 }
 
+private struct FileSystemSemanticSignature: Equatable {
+    let hasFullDiskReadAccess: Bool
+    let hasFullDiskWriteAccess: Bool
+    let includePlatformDefaults: Bool
+    let readableRoots: [AbsolutePath]
+    let writableRoots: [WritableRoot]
+    let unreadableRoots: [AbsolutePath]
+    let unreadableGlobs: [String]
+}
+
 private extension FileSystemPath {
     var isRootSpecialPath: Bool {
         guard case let .special(value) = self,
@@ -1226,6 +1309,20 @@ private extension FileSystemPath {
         default:
             return false
         }
+    }
+}
+
+private extension Array where Element == AbsolutePath {
+    func sortedByPath() -> [AbsolutePath] {
+        sorted { $0.path < $1.path }
+    }
+}
+
+private extension Array where Element == WritableRoot {
+    func sortedForSemanticSignature() -> [WritableRoot] {
+        map { root in
+            WritableRoot(root: root.root, readOnlySubpaths: root.readOnlySubpaths.sortedByPath())
+        }.sorted { $0.root.path < $1.root.path }
     }
 }
 

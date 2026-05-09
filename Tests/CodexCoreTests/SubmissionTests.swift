@@ -1059,6 +1059,64 @@ final class SubmissionTests: XCTestCase {
         }
     }
 
+    func testFileSystemSandboxPolicyDirectRuntimeEnforcementMatchesRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let docs = try cwd.join("docs")
+        let splitCarveout = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(docs.path), access: .read)
+        ])
+        let unbridgeableWrite = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .path("/outside"), access: .write)
+        ])
+        let readOnly = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
+        ])
+
+        XCTAssertTrue(splitCarveout.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path))
+        XCTAssertTrue(unbridgeableWrite.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path))
+        XCTAssertFalse(readOnly.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path))
+        XCTAssertFalse(FileSystemSandboxPolicy.unrestricted.needsDirectRuntimeEnforcement(networkPolicy: .enabled, cwd: cwd.path))
+    }
+
+    func testFileSystemSandboxPolicySemanticEquivalenceIgnoresEntryAndCarveoutOrderLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let privateDocs = try cwd.join("private")
+        let ordered = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(privateDocs.path), access: .read)
+        ])
+        let reordered = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(privateDocs.path), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ])
+
+        XCTAssertTrue(ordered.isSemanticallyEquivalent(to: reordered, cwd: cwd.path))
+        XCTAssertEqual(
+            ordered.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path),
+            reordered.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path)
+        )
+    }
+
+    func testFileSystemSandboxPolicySymbolicMetadataNeedsDirectRuntimeEnforcementLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(
+            .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            cwd: cwd.path
+        )
+
+        XCTAssertTrue(policy.needsDirectRuntimeEnforcement(networkPolicy: .restricted, cwd: cwd.path))
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
