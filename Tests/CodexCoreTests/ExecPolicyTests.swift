@@ -1904,6 +1904,46 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkListIndexMethod() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "status", "log"]
+        SECOND_STATUS = COMMANDS.index("status", 1)
+        LAST_COMMAND = COMMANDS.index("log", -1)
+        WINDOWED_DIFF = COMMANDS.index("diff", None, 2)
+        PAIRS = [["git", "status"], ["git", "diff"]]
+        PAIR_INDEX = PAIRS.index(["git", "diff"])
+
+        if SECOND_STATUS == 2 and LAST_COMMAND == 3:
+            prefix_rule([TOOL, COMMANDS[SECOND_STATUS]], "allow", justification = "pair " + str(PAIR_INDEX))
+
+        if WINDOWED_DIFF == 1:
+            network_rule("list-index.example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "pair 1"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "list-index.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if ["a", "b"].index("c") == 0:
+            prefix_rule(["git"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        if ["a", "b"].index("a", "bad") == 0:
+            prefix_rule(["git"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
         let policy = try parsePolicy("""
         COMMANDS = [("git", "status")]

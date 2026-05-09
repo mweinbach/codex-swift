@@ -2318,6 +2318,9 @@ public final class PolicyParser {
         if let dictMethodCall = try parseStarlarkDictMethodCall(trimmed, constants: constants, functions: functions) {
             return dictMethodCall
         }
+        if let listMethodCall = try parseStarlarkListMethodCall(trimmed, constants: constants, functions: functions) {
+            return listMethodCall
+        }
         if let methodCall = try parseStarlarkStringMethodCall(trimmed, constants: constants, functions: functions) {
             return methodCall
         }
@@ -2877,6 +2880,71 @@ public final class PolicyParser {
         default:
             return nil
         }
+    }
+
+    private static func parseStarlarkListMethodCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let callee = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return nil
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !receiverText.isEmpty, methodName == "index" else {
+            return nil
+        }
+
+        let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
+        guard case let .array(items) = receiver else {
+            return nil
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard (1...3).contains(rawArguments.count) else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let needle = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+        let start = try rawArguments.count >= 2
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[1],
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            : nil
+        let end = try rawArguments.count == 3
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[2],
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            : nil
+        let lowerBound = normalizedStarlarkSearchBound(start ?? 0, count: items.count)
+        let upperBound = normalizedStarlarkSearchBound(end ?? items.count, count: items.count)
+        guard lowerBound <= upperBound else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+        for index in lowerBound..<upperBound where items[index] == needle {
+            return .integer(Int64(index))
+        }
+        throw ConfigOverrideError.invalidLiteral(text)
     }
 
     private static func parseStarlarkDictMethodCall(
