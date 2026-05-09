@@ -4,12 +4,15 @@ public enum AppServerProtocol {
     public enum ServerRequest: Equatable, Codable, Sendable {
         case attestationGenerate(requestID: RequestID, params: Attestation.GenerateParams)
         case chatGPTAuthTokensRefresh(requestID: RequestID, params: ChatGPTAuthTokensRefreshParams)
+        case execCommandApproval(requestID: RequestID, params: ExecCommandApprovalParams)
 
         public var id: RequestID {
             switch self {
             case let .attestationGenerate(requestID, _):
                 requestID
             case let .chatGPTAuthTokensRefresh(requestID, _):
+                requestID
+            case let .execCommandApproval(requestID, _):
                 requestID
             }
         }
@@ -20,6 +23,8 @@ public enum AppServerProtocol {
                 Attestation.generateMethod
             case .chatGPTAuthTokensRefresh:
                 ChatGPTAuthTokensRefreshParams.method
+            case .execCommandApproval:
+                ExecCommandApprovalParams.method
             }
         }
 
@@ -43,6 +48,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(ChatGPTAuthTokensRefreshParams.self, forKey: .params)
                 )
+            case ExecCommandApprovalParams.method:
+                self = .execCommandApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(ExecCommandApprovalParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -61,6 +71,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .chatGPTAuthTokensRefresh(_, params):
                 try container.encode(params, forKey: .params)
+            case let .execCommandApproval(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -68,6 +80,7 @@ public enum AppServerProtocol {
     public enum ServerRequestPayload: Equatable, Sendable {
         case attestationGenerate(Attestation.GenerateParams)
         case chatGPTAuthTokensRefresh(ChatGPTAuthTokensRefreshParams)
+        case execCommandApproval(ExecCommandApprovalParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -79,6 +92,8 @@ public enum AppServerProtocol {
                 .attestationGenerate(requestID: id, params: params)
             case let .chatGPTAuthTokensRefresh(params):
                 .chatGPTAuthTokensRefresh(requestID: id, params: params)
+            case let .execCommandApproval(params):
+                .execCommandApproval(requestID: id, params: params)
             }
         }
     }
@@ -86,12 +101,15 @@ public enum AppServerProtocol {
     public enum ServerResponse: Equatable, Codable, Sendable {
         case attestationGenerate(requestID: RequestID, response: Attestation.GenerateResponse)
         case chatGPTAuthTokensRefresh(requestID: RequestID, response: ChatGPTAuthTokensRefreshResponse)
+        case execCommandApproval(requestID: RequestID, response: ExecCommandApprovalResponse)
 
         public var id: RequestID {
             switch self {
             case let .attestationGenerate(requestID, _):
                 requestID
             case let .chatGPTAuthTokensRefresh(requestID, _):
+                requestID
+            case let .execCommandApproval(requestID, _):
                 requestID
             }
         }
@@ -102,6 +120,8 @@ public enum AppServerProtocol {
                 Attestation.generateMethod
             case .chatGPTAuthTokensRefresh:
                 ChatGPTAuthTokensRefreshParams.method
+            case .execCommandApproval:
+                ExecCommandApprovalParams.method
             }
         }
 
@@ -125,6 +145,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(ChatGPTAuthTokensRefreshResponse.self, forKey: .response)
                 )
+            case ExecCommandApprovalParams.method:
+                self = .execCommandApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(ExecCommandApprovalResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -143,7 +168,57 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .chatGPTAuthTokensRefresh(_, response):
                 try container.encode(response, forKey: .response)
+            case let .execCommandApproval(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public struct ExecCommandApprovalParams: Equatable, Codable, Sendable {
+        public static let method = "execCommandApproval"
+
+        public let conversationID: String
+        public let callID: String
+        public let approvalID: String?
+        public let command: [String]
+        public let cwd: String
+        public let reason: String?
+        public let parsedCmd: [ParsedCommand]
+
+        public init(
+            conversationID: String,
+            callID: String,
+            approvalID: String? = nil,
+            command: [String],
+            cwd: String,
+            reason: String? = nil,
+            parsedCmd: [ParsedCommand]
+        ) {
+            self.conversationID = conversationID
+            self.callID = callID
+            self.approvalID = approvalID
+            self.command = command
+            self.cwd = cwd
+            self.reason = reason
+            self.parsedCmd = parsedCmd
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case conversationID = "conversationId"
+            case callID = "callId"
+            case approvalID = "approvalId"
+            case command
+            case cwd
+            case reason
+            case parsedCmd
+        }
+    }
+
+    public struct ExecCommandApprovalResponse: Equatable, Codable, Sendable {
+        public let decision: ReviewDecision
+
+        public init(decision: ReviewDecision) {
+            self.decision = decision
         }
     }
 

@@ -111,6 +111,76 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testExecCommandApprovalServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.ExecCommandApprovalParams(
+            conversationID: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            callID: "call-42",
+            approvalID: "approval-42",
+            command: ["echo", "hello"],
+            cwd: "/tmp",
+            reason: "because tests",
+            parsedCmd: [.unknown(cmd: "echo hello")]
+        )
+        let request = AppServerProtocol.ServerRequest.execCommandApproval(
+            requestID: .integer(7),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(7))
+        XCTAssertEqual(request.method, "execCommandApproval")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "execCommandApproval",
+            "id": 7,
+            "params": [
+                "conversationId": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+                "callId": "call-42",
+                "approvalId": "approval-42",
+                "command": ["echo", "hello"],
+                "cwd": "/tmp",
+                "reason": "because tests",
+                "parsedCmd": [
+                    [
+                        "type": "unknown",
+                        "cmd": "echo hello"
+                    ]
+                ]
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.execCommandApproval(params).request(withID: .integer(7)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"execCommandApproval","id":7,"params":{"conversationId":"67e55044-10b1-426f-9247-bb680e5fe0c8","callId":"call-42","approvalId":"approval-42","command":["echo","hello"],"cwd":"/tmp","reason":"because tests","parsedCmd":[{"type":"unknown","cmd":"echo hello"}]}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testExecCommandApprovalServerResponseMatchesRustWireShape() throws {
+        let response = AppServerProtocol.ServerResponse.execCommandApproval(
+            requestID: .integer(7),
+            response: AppServerProtocol.ExecCommandApprovalResponse(decision: .approvedForSession)
+        )
+
+        XCTAssertEqual(response.id, .integer(7))
+        XCTAssertEqual(response.method, "execCommandApproval")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "execCommandApproval",
+            "id": 7,
+            "response": [
+                "decision": "approved_for_session"
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"execCommandApproval","id":7,"response":{"decision":"approved_for_session"}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
