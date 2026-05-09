@@ -490,7 +490,12 @@ private func extractPowerShellCommand(_ command: [String]) -> (String, String)? 
 }
 
 private func executableName(_ path: String) -> String {
-    path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? path
+    #if os(Windows)
+    let normalized = path.replacingOccurrences(of: "\\", with: "/")
+    return normalized.split(separator: "/").last.map(String.init) ?? path
+    #else
+    return path.split(separator: "/").last.map(String.init) ?? path
+    #endif
 }
 
 private enum ParsedShellKind {

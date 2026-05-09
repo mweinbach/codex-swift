@@ -278,9 +278,16 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["/bin/bash", "-lc", "sed -n '1,10p' Cargo.toml"]), [
             .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
-        XCTAssertEqual(parseCommand([#"C:\Program Files\Git\bin\bash.exe"#, "-lc", "cat README.md"]), [
+        let windowsBashPath = [#"C:\Program Files\Git\bin\bash.exe"#, "-lc", "cat README.md"]
+        #if os(Windows)
+        XCTAssertEqual(parseCommand(windowsBashPath), [
             .read(cmd: "cat README.md", name: "README.md", path: "README.md")
         ])
+        #else
+        XCTAssertEqual(parseCommand(windowsBashPath), [
+            .unknown(cmd: #""C:\\Program Files\\Git\\bin\\bash.exe" -lc 'cat README.md'"#)
+        ])
+        #endif
         XCTAssertEqual(parseCommand(["bash", "-lc", "bat --theme TwoDark README.md"]), [
             .read(cmd: "bat --theme TwoDark README.md", name: "README.md", path: "README.md")
         ])
@@ -659,5 +666,18 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["BASH", "-lc", "cat README.md"]), [
             .unknown(cmd: "BASH -lc 'cat README.md'")
         ])
+    }
+
+    func testShellExecutablePathSeparatorsFollowPlatformLikeRustPathBuf() {
+        let command = [#"C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe"#, "-NoProfile", "-c", "Write-Host hi"]
+        #if os(Windows)
+        XCTAssertEqual(parseCommand(command), [
+            .unknown(cmd: "Write-Host hi")
+        ])
+        #else
+        XCTAssertEqual(parseCommand(command), [
+            .unknown(cmd: #""C:\\windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -c 'Write-Host hi'"#)
+        ])
+        #endif
     }
 }
