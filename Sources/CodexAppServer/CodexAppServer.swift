@@ -7586,12 +7586,13 @@ public enum CodexAppServer {
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
-        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let config = (try? CodexConfigLayerLoader.readConfig(from: configFile)) ?? .table([:])
-        let projection = catalogHookProjection(config: config, configFile: configFile, codexHome: configuration.codexHome)
         return [
             "data": cwds.map { cwd in
-                [
+                let projection = catalogHookProjection(
+                    cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                    configuration: configuration
+                )
+                return [
                     "cwd": cwd,
                     "hooks": projection.hooks,
                     "warnings": projection.warnings,
@@ -7607,20 +7608,66 @@ public enum CodexAppServer {
     }
 
     private static func catalogHookObjects(config: ConfigValue, configFile: URL, codexHome: URL) -> [[String: Any]] {
-        catalogHookProjection(config: config, configFile: configFile, codexHome: codexHome).hooks
+        catalogHookProjection(
+            effectiveConfig: config,
+            hookLayers: [(configFile, "user")],
+            codexHome: codexHome
+        ).hooks
     }
 
-    private static func catalogHookProjection(config: ConfigValue, configFile: URL, codexHome: URL) -> CatalogHookProjection {
-        guard configFeatureEnabled("hooks", in: config, defaultValue: true) else {
+    private static func catalogHookProjection(
+        cwd: URL,
+        configuration: CodexAppServerConfiguration
+    ) -> CatalogHookProjection {
+        guard let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        ) else {
             return CatalogHookProjection()
         }
-        var projection = CatalogHookProjection(hooks: userHookObjects(configFile: configFile))
-        guard configFeatureEnabled("plugins", in: config, defaultValue: false),
-              configFeatureEnabled("plugin_hooks", in: config, defaultValue: false)
+
+        let hookLayers: [(URL, String)] = stack.getLayers(ordering: .lowestPrecedenceFirst).compactMap { layer in
+            switch layer.name {
+            case let .user(file):
+                return (URL(fileURLWithPath: file.path, isDirectory: false), "user")
+            case let .project(dotCodexFolder):
+                return (
+                    URL(fileURLWithPath: dotCodexFolder.path, isDirectory: true)
+                        .appendingPathComponent("config.toml", isDirectory: false),
+                    "project"
+                )
+            case .mdm, .system, .sessionFlags, .legacyManagedConfigTomlFromFile, .legacyManagedConfigTomlFromMdm:
+                return nil
+            }
+        }
+
+        return catalogHookProjection(
+            effectiveConfig: stack.effectiveConfig(),
+            hookLayers: hookLayers,
+            codexHome: configuration.codexHome
+        )
+    }
+
+    private static func catalogHookProjection(
+        effectiveConfig: ConfigValue,
+        hookLayers: [(configFile: URL, source: String)],
+        codexHome: URL
+    ) -> CatalogHookProjection {
+        guard configFeatureEnabled("hooks", in: effectiveConfig, defaultValue: true) else {
+            return CatalogHookProjection()
+        }
+        var projection = CatalogHookProjection()
+        for hookLayer in hookLayers {
+            projection.hooks.append(contentsOf: userHookObjects(configFile: hookLayer.configFile, source: hookLayer.source))
+        }
+        guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
+              configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false)
         else {
             return projection
         }
-        for pluginID in enabledLocalPluginIDs(config: config) {
+        for pluginID in enabledLocalPluginIDs(config: effectiveConfig) {
             guard let root = activeLocalPluginRoot(id: pluginID, codexHome: codexHome) else {
                 continue
             }
@@ -10184,7 +10231,7 @@ public enum CodexAppServer {
         var statusMessage: String?
     }
 
-    private static func userHookObjects(configFile: URL) -> [[String: Any]] {
+    private static func userHookObjects(configFile: URL, source: String = "user") -> [[String: Any]] {
         guard let contents = try? String(contentsOf: configFile, encoding: .utf8) else {
             return []
         }
@@ -10215,7 +10262,7 @@ public enum CodexAppServer {
                     "timeoutSec": Int(timeoutSec),
                     "statusMessage": handler.statusMessage as Any? ?? NSNull(),
                     "sourcePath": sourcePath,
-                    "source": "user",
+                    "source": source,
                     "pluginId": NSNull(),
                     "displayOrder": displayOrder,
                     "enabled": true,

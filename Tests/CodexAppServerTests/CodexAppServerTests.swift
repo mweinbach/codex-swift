@@ -6757,6 +6757,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
     }
 
+    func testHooksListUsesEachCwdEffectiveFeatureEnablement() throws {
+        let codexHome = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        try """
+        [features]
+        hooks = false
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let projectConfig = workspace.url.appendingPathComponent(".codex/config.toml", isDirectory: false)
+        try """
+        [features]
+        hooks = true
+
+        [hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "echo project hook"
+        timeout = 5
+        """.write(to: projectConfig, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(codexHome.url.path)","\#(workspace.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 2)
+        XCTAssertEqual(data[0]["cwd"] as? String, codexHome.url.path)
+        XCTAssertEqual((data[0]["hooks"] as? [Any])?.count, 0)
+        XCTAssertEqual((data[0]["warnings"] as? [Any])?.count, 0)
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+
+        XCTAssertEqual(data[1]["cwd"] as? String, workspace.url.path)
+        XCTAssertEqual((data[1]["warnings"] as? [Any])?.count, 0)
+        XCTAssertEqual((data[1]["errors"] as? [Any])?.count, 0)
+        let hooks = try XCTUnwrap(data[1]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, "\(projectConfig.standardizedFileURL.path):pre_tool_use:0:0")
+        XCTAssertEqual(hooks[0]["eventName"] as? String, "preToolUse")
+        XCTAssertEqual(hooks[0]["handlerType"] as? String, "command")
+        XCTAssertEqual(hooks[0]["matcher"] as? String, "Bash")
+        XCTAssertEqual(hooks[0]["command"] as? String, "echo project hook")
+        XCTAssertEqual(hooks[0]["timeoutSec"] as? Int, 5)
+        XCTAssertTrue(hooks[0]["statusMessage"] is NSNull)
+        XCTAssertEqual(hooks[0]["sourcePath"] as? String, projectConfig.standardizedFileURL.path)
+        XCTAssertEqual(hooks[0]["source"] as? String, "project")
+        XCTAssertTrue(hooks[0]["pluginId"] is NSNull)
+        XCTAssertEqual(hooks[0]["displayOrder"] as? Int, 0)
+        XCTAssertEqual(hooks[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(hooks[0]["isManaged"] as? Bool, false)
+        XCTAssertTrue((hooks[0]["currentHash"] as? String)?.hasPrefix("sha256:") == true)
+        XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """
