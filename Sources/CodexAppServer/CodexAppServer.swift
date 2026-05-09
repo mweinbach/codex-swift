@@ -2539,6 +2539,11 @@ public enum CodexAppServer {
         var warnings: [String] = []
     }
 
+    private struct HookState {
+        var enabled: Bool?
+        var trustedHash: String?
+    }
+
     private struct LocalPluginManifest {
         let name: String?
         let interface: Any
@@ -2661,7 +2666,8 @@ public enum CodexAppServer {
             root: root,
             pluginID: pluginID,
             manifest: manifest,
-            configs: localPluginHookConfigs(root: root, manifest: manifest)
+            configs: localPluginHookConfigs(root: root, manifest: manifest),
+            hookStates: [:]
         )
     }
 
@@ -2669,7 +2675,8 @@ public enum CodexAppServer {
         root: URL,
         pluginID: String,
         manifest _: LocalPluginManifest,
-        configs: [LocalPluginInlineHooks]
+        configs: [LocalPluginInlineHooks],
+        hookStates: [String: HookState]
     ) -> [[String: Any]] {
         var metadata: [[String: Any]] = []
         var displayOrder = 0
@@ -2692,8 +2699,16 @@ public enum CodexAppServer {
                         let timeoutSec = hookTimeoutSec(handler["timeout"] ?? handler["timeoutSec"] ?? handler["timeout_sec"])
                             ?? 600
                         let statusMessage = handler["statusMessage"] as? String ?? handler["status_message"] as? String
+                        let key = "\(pluginID):\(config.sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)"
+                        let currentHash = userHookHash(
+                            eventName: eventName,
+                            matcher: matcher,
+                            command: command,
+                            timeoutSec: timeoutSec,
+                            statusMessage: statusMessage
+                        )
                         metadata.append([
-                            "key": "\(pluginID):\(config.sourcePath):\(HooksProtocol.hookEventKeyLabel(eventName)):\(groupIndex):\(handlerIndex)",
+                            "key": key,
                             "eventName": appServerHookEventName(eventName),
                             "handlerType": "command",
                             "matcher": matcher as Any? ?? NSNull(),
@@ -2704,16 +2719,10 @@ public enum CodexAppServer {
                             "source": "plugin",
                             "pluginId": pluginID,
                             "displayOrder": displayOrder,
-                            "enabled": true,
+                            "enabled": hookStates[key]?.enabled ?? true,
                             "isManaged": false,
-                            "currentHash": userHookHash(
-                                eventName: eventName,
-                                matcher: matcher,
-                                command: command,
-                                timeoutSec: timeoutSec,
-                                statusMessage: statusMessage
-                            ),
-                            "trustStatus": "untrusted"
+                            "currentHash": currentHash,
+                            "trustStatus": hookTrustStatus(currentHash: currentHash, state: hookStates[key])
                         ])
                         displayOrder += 1
                     }
@@ -7610,7 +7619,7 @@ public enum CodexAppServer {
     private static func catalogHookObjects(config: ConfigValue, configFile: URL, codexHome: URL) -> [[String: Any]] {
         catalogHookProjection(
             effectiveConfig: config,
-            hookLayers: [(configFile, "user")],
+            hookLayers: [(config, configFile, "user")],
             codexHome: codexHome
         ).hooks
     }
@@ -7628,12 +7637,13 @@ public enum CodexAppServer {
             return CatalogHookProjection()
         }
 
-        let hookLayers: [(URL, String)] = stack.getLayers(ordering: .lowestPrecedenceFirst).compactMap { layer in
+        let hookLayers: [(ConfigValue, URL, String)] = stack.getLayers(ordering: .lowestPrecedenceFirst).compactMap { layer in
             switch layer.name {
             case let .user(file):
-                return (URL(fileURLWithPath: file.path, isDirectory: false), "user")
+                return (layer.config, URL(fileURLWithPath: file.path, isDirectory: false), "user")
             case let .project(dotCodexFolder):
                 return (
+                    layer.config,
                     URL(fileURLWithPath: dotCodexFolder.path, isDirectory: true)
                         .appendingPathComponent("config.toml", isDirectory: false),
                     "project"
@@ -7652,15 +7662,21 @@ public enum CodexAppServer {
 
     private static func catalogHookProjection(
         effectiveConfig: ConfigValue,
-        hookLayers: [(configFile: URL, source: String)],
+        hookLayers: [(config: ConfigValue, configFile: URL, source: String)],
         codexHome: URL
     ) -> CatalogHookProjection {
         guard configFeatureEnabled("hooks", in: effectiveConfig, defaultValue: true) else {
             return CatalogHookProjection()
         }
+        let hookStates = hookStateMap(from: effectiveConfig)
         var projection = CatalogHookProjection()
         for hookLayer in hookLayers {
-            projection.hooks.append(contentsOf: userHookObjects(configFile: hookLayer.configFile, source: hookLayer.source))
+            projection.hooks.append(contentsOf: configHookObjects(
+                config: hookLayer.config,
+                configFile: hookLayer.configFile,
+                source: hookLayer.source,
+                hookStates: hookStates
+            ))
         }
         guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
               configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false)
@@ -7678,7 +7694,8 @@ public enum CodexAppServer {
                 root: root,
                 pluginID: pluginID,
                 manifest: manifest,
-                configs: hookOutcome.configs
+                configs: hookOutcome.configs,
+                hookStates: hookStates
             ))
         }
         return projection
@@ -10218,138 +10235,120 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
-    private struct ParsedUserHookGroup {
-        var eventName: HookEventName
-        var matcher: String?
-        var handlers: [ParsedUserHookHandler] = []
+    private static func hookStateMap(from config: ConfigValue) -> [String: HookState] {
+        guard let root = configTable(config),
+              let hooks = root["hooks"].flatMap(configTable),
+              let state = hooks["state"].flatMap(configTable)
+        else {
+            return [:]
+        }
+        var output: [String: HookState] = [:]
+        for (key, value) in state {
+            guard let entry = configTable(value) else {
+                continue
+            }
+            output[key] = HookState(
+                enabled: boolConfig(entry, "enabled"),
+                trustedHash: stringConfig(entry, "trusted_hash")
+            )
+        }
+        return output
     }
 
-    private struct ParsedUserHookHandler {
-        var type: String?
-        var command: String?
-        var timeoutSec: UInt64?
-        var statusMessage: String?
+    private static func hookTrustStatus(currentHash: String, state: HookState?) -> String {
+        state?.trustedHash == currentHash ? "trusted" : "untrusted"
     }
 
-    private static func userHookObjects(configFile: URL, source: String = "user") -> [[String: Any]] {
-        guard let contents = try? String(contentsOf: configFile, encoding: .utf8) else {
+    private static func configHookObjects(
+        config: ConfigValue,
+        configFile: URL,
+        source: String,
+        hookStates: [String: HookState]
+    ) -> [[String: Any]] {
+        guard let root = configTable(config),
+              let hooks = root["hooks"].flatMap(configTable)
+        else {
             return []
         }
-        let parsed = parseUserHookConfig(contents)
-        guard parsed.enabled else {
-            return []
-        }
+
         let sourcePath = configFile.standardizedFileURL.path
         var displayOrder: Int64 = 0
         var output: [[String: Any]] = []
-        for (groupIndex, group) in parsed.groups.enumerated() {
-            for (handlerIndex, handler) in group.handlers.enumerated() {
-                guard handler.type == "command", let command = handler.command else {
+        for eventName in HookEventName.allCases {
+            guard case let .array(groups)? = hooks[eventName.configLabel] else {
+                continue
+            }
+            for (groupIndex, groupValue) in groups.enumerated() {
+                guard let group = configTable(groupValue) else {
                     continue
                 }
-                let timeoutSec = handler.timeoutSec ?? 600
-                output.append([
-                    "key": HooksProtocol.hookKey(
+                let matcher = stringConfig(group, "matcher")
+                guard case let .array(handlerValues)? = group["hooks"] else {
+                    continue
+                }
+                for (handlerIndex, handlerValue) in handlerValues.enumerated() {
+                    guard let handler = configTable(handlerValue),
+                          stringConfig(handler, "type") == "command",
+                          let command = stringConfig(handler, "command")
+                    else {
+                        continue
+                    }
+                    let timeoutSec = configHookTimeoutSec(
+                        handler["timeout"] ?? handler["timeoutSec"] ?? handler["timeout_sec"]
+                    ) ?? 600
+                    let statusMessage = stringConfig(handler, "statusMessage") ?? stringConfig(handler, "status_message")
+                    let key = HooksProtocol.hookKey(
                         keySource: sourcePath,
-                        eventName: group.eventName,
+                        eventName: eventName,
                         groupIndex: groupIndex,
                         handlerIndex: handlerIndex
-                    ),
-                    "eventName": appServerHookEventName(group.eventName),
-                    "handlerType": "command",
-                    "matcher": group.matcher as Any? ?? NSNull(),
-                    "command": command,
-                    "timeoutSec": Int(timeoutSec),
-                    "statusMessage": handler.statusMessage as Any? ?? NSNull(),
-                    "sourcePath": sourcePath,
-                    "source": source,
-                    "pluginId": NSNull(),
-                    "displayOrder": displayOrder,
-                    "enabled": true,
-                    "isManaged": false,
-                    "currentHash": userHookHash(
-                        eventName: group.eventName,
-                        matcher: group.matcher,
+                    )
+                    let currentHash = userHookHash(
+                        eventName: eventName,
+                        matcher: matcher,
                         command: command,
                         timeoutSec: timeoutSec,
-                        statusMessage: handler.statusMessage
-                    ),
-                    "trustStatus": "untrusted"
-                ])
-                displayOrder += 1
+                        statusMessage: statusMessage
+                    )
+                    output.append([
+                        "key": key,
+                        "eventName": appServerHookEventName(eventName),
+                        "handlerType": "command",
+                        "matcher": matcher as Any? ?? NSNull(),
+                        "command": command,
+                        "timeoutSec": Int(timeoutSec),
+                        "statusMessage": statusMessage as Any? ?? NSNull(),
+                        "sourcePath": sourcePath,
+                        "source": source,
+                        "pluginId": NSNull(),
+                        "displayOrder": displayOrder,
+                        "enabled": hookStates[key]?.enabled ?? true,
+                        "isManaged": false,
+                        "currentHash": currentHash,
+                        "trustStatus": hookTrustStatus(currentHash: currentHash, state: hookStates[key])
+                    ])
+                    displayOrder += 1
+                }
             }
         }
         return output
     }
 
-    private static func parseUserHookConfig(_ contents: String) -> (enabled: Bool, groups: [ParsedUserHookGroup]) {
-        var enabled = true
-        var groups: [ParsedUserHookGroup] = []
-        var table: [String] = []
-        var currentGroupIndex: Int?
-        var currentHandlerIndex: Int?
-
-        for rawLine in contents.split(whereSeparator: \.isNewline) {
-            let line = stripTomlComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-
-            if line.hasPrefix("[["), line.hasSuffix("]]") {
-                let body = String(line.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
-                table = body.split(separator: ".").map(String.init)
-                currentHandlerIndex = nil
-                if table.count == 2, table[0] == "hooks", let eventName = hookEventName(configLabel: table[1]) {
-                    groups.append(ParsedUserHookGroup(eventName: eventName))
-                    currentGroupIndex = groups.count - 1
-                } else if table.count == 3, table[0] == "hooks", table[2] == "hooks",
-                          let groupIndex = currentGroupIndex {
-                    groups[groupIndex].handlers.append(ParsedUserHookHandler())
-                    currentHandlerIndex = groups[groupIndex].handlers.count - 1
-                }
-                continue
-            }
-
-            if line.hasPrefix("["), line.hasSuffix("]") {
-                let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-                table = body.split(separator: ".").map(String.init)
-                currentGroupIndex = nil
-                currentHandlerIndex = nil
-                continue
-            }
-
-            guard let equalsIndex = firstEqualsIndex(in: line) else {
-                continue
-            }
-            let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let valueText = String(line[line.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if table == ["features"], key == "hooks", valueText == "false" {
-                enabled = false
-                continue
-            }
-            guard table.first == "hooks", let groupIndex = currentGroupIndex else {
-                continue
-            }
-
-            if let handlerIndex = currentHandlerIndex {
-                if key == "type" {
-                    groups[groupIndex].handlers[handlerIndex].type = tomlString(valueText)
-                } else if key == "command" {
-                    groups[groupIndex].handlers[handlerIndex].command = tomlString(valueText)
-                } else if key == "timeout" || key == "timeoutSec" || key == "timeout_sec" {
-                    groups[groupIndex].handlers[handlerIndex].timeoutSec = UInt64(valueText)
-                } else if key == "statusMessage" || key == "status_message" {
-                    groups[groupIndex].handlers[handlerIndex].statusMessage = tomlString(valueText)
-                }
-            } else if key == "matcher" {
-                groups[groupIndex].matcher = tomlString(valueText)
-            }
-        }
-
-        return (enabled, groups)
-    }
-
     private static func hookEventName(configLabel: String) -> HookEventName? {
         HookEventName.allCases.first { $0.configLabel == configLabel }
+    }
+
+    private static func configHookTimeoutSec(_ value: ConfigValue?) -> UInt64? {
+        switch value {
+        case let .integer(integer)? where integer >= 0:
+            return UInt64(integer)
+        case let .double(double)? where double >= 0 && double.rounded() == double:
+            return UInt64(double)
+        case let .string(string)?:
+            return UInt64(string)
+        case .bool, .array, .table, .integer, .double, .none:
+            return nil
+        }
     }
 
     private static func appServerHookEventName(_ eventName: HookEventName) -> String {

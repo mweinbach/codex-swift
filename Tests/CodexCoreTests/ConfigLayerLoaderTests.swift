@@ -73,6 +73,42 @@ final class ConfigLayerLoaderTests: XCTestCase {
         )
     }
 
+    func testReadConfigParsesNestedHookArrayTables() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let file = dir.url.appendingPathComponent("config.toml")
+        try """
+        [hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "echo hook"
+        timeout = 5
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            try CodexConfigLayerLoader.readConfig(from: file),
+            .table([
+                "hooks": .table([
+                    "PreToolUse": .array([
+                        .table([
+                            "matcher": .string("Bash"),
+                            "hooks": .array([
+                                .table([
+                                    "type": .string("command"),
+                                    "command": .string("echo hook"),
+                                    "timeout": .integer(5)
+                                ])
+                            ])
+                        ])
+                    ])
+                ])
+            ])
+        )
+    }
+
     func testReadConfigResolvesRelativePathFieldsAndPreservesUnknownFieldsLikeRust() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let file = dir.url.appendingPathComponent("config.toml")

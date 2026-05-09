@@ -6826,6 +6826,70 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hooks[0]["trustStatus"] as? String, "untrusted")
     }
 
+    func testConfigBatchWriteTogglesUserHook() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        try """
+        [hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 /tmp/listed-hook.py"
+        timeout = 5
+        statusMessage = "running listed hook"
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let initial = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let initialResult = try XCTUnwrap(initial["result"] as? [String: Any])
+        let initialData = try XCTUnwrap(initialResult["data"] as? [[String: Any]])
+        let initialHooks = try XCTUnwrap(initialData[0]["hooks"] as? [[String: Any]])
+        let hookKey = try XCTUnwrap(initialHooks[0]["key"] as? String)
+        XCTAssertEqual(initialHooks[0]["enabled"] as? Bool, true)
+
+        let disable = try appServerResponse(
+            #"{"id":2,"method":"config/batchWrite","params":{"edits":[{"keyPath":"hooks.state","value":{"\#(hookKey)":{"enabled":false}},"mergeStrategy":"upsert"}],"reloadUserConfig":true}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((disable["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let disabled = try appServerResponse(
+            #"{"id":3,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let disabledResult = try XCTUnwrap(disabled["result"] as? [String: Any])
+        let disabledData = try XCTUnwrap(disabledResult["data"] as? [[String: Any]])
+        let disabledHooks = try XCTUnwrap(disabledData[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(disabledHooks.count, 1)
+        XCTAssertEqual(disabledHooks[0]["key"] as? String, hookKey)
+        XCTAssertEqual(disabledHooks[0]["enabled"] as? Bool, false)
+
+        let enable = try appServerResponse(
+            #"{"id":4,"method":"config/batchWrite","params":{"edits":[{"keyPath":"hooks.state","value":{"\#(hookKey)":{"enabled":true}},"mergeStrategy":"upsert"}],"reloadUserConfig":true}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual((enable["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let enabled = try appServerResponse(
+            #"{"id":5,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let enabledResult = try XCTUnwrap(enabled["result"] as? [String: Any])
+        let enabledData = try XCTUnwrap(enabledResult["data"] as? [[String: Any]])
+        let enabledHooks = try XCTUnwrap(enabledData[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(enabledHooks[0]["key"] as? String, hookKey)
+        XCTAssertEqual(enabledHooks[0]["enabled"] as? Bool, true)
+    }
+
     func testHooksListRespectsDisabledHooksFeature() throws {
         let codexHome = try TemporaryDirectory()
         try """

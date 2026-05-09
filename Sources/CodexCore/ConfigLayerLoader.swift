@@ -515,6 +515,13 @@ enum ConfigTomlParser {
         var childTable: [String: ConfigValue]
         if case let .table(existing) = root[first] {
             childTable = existing
+        } else if case var .array(existing) = root[first],
+                  let lastIndex = existing.indices.last,
+                  case var .table(lastTable) = existing[lastIndex] {
+            let index = appendTableArrayEntry(at: Array(path.dropFirst()), in: &lastTable)
+            existing[lastIndex] = .table(lastTable)
+            root[first] = .array(existing)
+            return index
         } else {
             childTable = [:]
         }
@@ -552,6 +559,19 @@ enum ConfigTomlParser {
         var childTable: [String: ConfigValue]
         if case let .table(existing) = root[first] {
             childTable = existing
+        } else if case var .array(existing) = root[first],
+                  let lastIndex = existing.indices.last,
+                  case var .table(lastTable) = existing[lastIndex] {
+            setInArrayTable(
+                value,
+                keyPath: keyPath,
+                tablePath: Array(tablePath.dropFirst()),
+                index: index,
+                in: &lastTable
+            )
+            existing[lastIndex] = .table(lastTable)
+            root[first] = .array(existing)
+            return
         } else {
             childTable = [:]
         }
