@@ -21,6 +21,10 @@ into Swift without changing unrelated surfaces.
 - Avoid ambiguous literal call sites such as `foo(false)`, `bar(nil)`, or
   `load(0)`. Prefer argument labels, enums, option structs, labeled overloads,
   and named methods.
+- When copying upstream guidance, rewrite the rule into the equivalent Swift
+  mechanism. Do not leave reviewers with instructions to run Rust lints, use
+  Rust attributes, or choose Rust trait shapes unless the doc is explicitly
+  describing the source checkout.
 - Use exact Swift argument comments only when an existing positional API cannot
   be changed. The comment should match the callee's external label, or the local
   parameter name for intentionally unlabeled parameters:
@@ -33,6 +37,10 @@ into Swift without changing unrelated surfaces.
   concurrency expectations.
 - Use native Swift `async` protocol requirements plus `Sendable` and `@Sendable`
   where values or closures cross concurrency boundaries.
+- Translate Rust async-trait/RPITIT guidance into explicit Swift protocol
+  contracts: put `async`/`throws`, actor isolation, cancellation expectations,
+  and sendability requirements on the protocol or adapter that owns the async
+  boundary.
 - Avoid broad `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency`
   annotations. If one is required for interoperability, keep it scoped and
   document the invariant.

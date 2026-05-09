@@ -15,6 +15,10 @@ commit.
   example, Clippy's collapsible-control-flow and format-argument rules become
   readable Swift control flow and interpolation-first string construction, not
   references to Clippy.
+- Translate the upstream API-design intent, not just the nouns. A Rust note
+  about avoiding ambiguous `bool` or `Option` arguments should become concrete
+  Swift guidance about labels, domain enums, option structs, overloads, and
+  omitted/null modeling.
 - Do not present unported behavior as complete. Point readers to
   `Docs/PORTING.md` for current Swift status.
 
@@ -46,6 +50,9 @@ commit.
   positional literals; prefer improving the API shape first.
 - Prefer a small enum or options struct over multiple optional parameters when
   nil combinations would be hard to read or would admit impossible states.
+- When the value is protocol data rather than an API choice, do not hide
+  omitted/null/value semantics behind unlabeled optionals. Decode or inspect the
+  raw JSON when needed so `nil` does not erase a distinction Rust preserves.
 
 ## Swift Control Flow
 
@@ -70,6 +77,11 @@ commit.
   role, who implements it, and what invariants callers can rely on.
 - Prefer native Swift protocol requirements such as
   `func load(...) async throws -> Value` for asynchronous contracts.
+- Treat upstream `async_trait`, `async_fn_in_trait`, and RPITIT guidance as the
+  Swift requirement to make async ownership explicit in the protocol shape:
+  actor isolation where needed, `async`/`throws` on the requirement,
+  `Sendable` return values for cross-domain results, and `@Sendable` closures
+  for callbacks that may run concurrently.
 - Types and closures that cross task, actor, or callback boundaries should be
   `Sendable` and `@Sendable` where appropriate.
 - Avoid broad `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency`

@@ -26,6 +26,10 @@ explicitly records an intentional Swift limitation.
   read like `foo(false)`, `bar(nil)`, or `load(0)`. Prefer enums, option
   structs, named methods, labeled overloads, or small value types that make the
   call site self-documenting.
+- When translating upstream Rust guidance, preserve the design pressure rather
+  than the Rust mechanism. A Rust rule about avoiding `foo(false)` or `bar(None)`
+  becomes a Swift rule about external labels, option structs, and domain enums;
+  it should not become a note about Rust lints or Cargo commands.
 - Prefer external argument labels that describe the decision being made, not the
   storage detail. For example, prefer
   `loadHistory(limit: .unbounded)` or `setExpanded(false, animated: false)`
@@ -54,6 +58,10 @@ explicitly records an intentional Swift limitation.
   unknown bucket to match Rust behavior.
 - Newly added protocols should include doc comments explaining the protocol's
   role, who implements it, and what invariants callers may rely on.
+- Translate Rust trait guidance into Swift protocol guidance. If the upstream
+  docs say a new trait needs role documentation, a new Swift protocol should
+  document its role, expected adopters, isolation expectations, and cancellation
+  or sendability guarantees when those affect callers.
 - Avoid boolean state pairs when a single enum models the state more accurately.
 - Avoid small helper methods that are referenced only once unless they isolate a
   non-obvious parity rule or improve testability.
@@ -66,6 +74,10 @@ explicitly records an intentional Swift limitation.
 
 - Prefer native Swift `async` protocol requirements for asynchronous contracts,
   for example `func load(...) async throws -> Value`.
+- Treat Rust `async_trait`, `async_fn_in_trait`, and RPITIT rules as guidance
+  about spelling the Swift concurrency contract explicitly. Use `async`/`throws`
+  protocol requirements, actor isolation, `Sendable` result types, and
+  `@Sendable` closures where the value crosses concurrency domains.
 - Add `Sendable` conformance to value types that cross task, actor, or callback
   boundaries.
 - Mark escaping concurrent closures as `@Sendable` when they can run across
