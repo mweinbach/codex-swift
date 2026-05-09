@@ -118,7 +118,7 @@ Source baseline inspected for this scaffold:
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
   - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, relative-`cd` context including rebased read/search/list paths, `rg`, `grep`, `ls`, `cat`, `bat`/`batcat`, `less`, `more`, `head`, `tail`, `nl`, and `sed -n`
-  - Rust-style unknown-collapse behavior for mixed parsed/unknown command sequences, `rg --files`/`fd`/`find` list-file classification, `git grep`/`git ls-files`, `eza`/`exa`/`tree`/`du`, `ag`/`ack`/`pt`/`rga`/`ripgrep-all`, `awk` file reads, Python file-walk summaries, richer `grep`/`sed -n` flag handling, and mutating `xargs` pipeline preservation
+  - Rust-style unknown-collapse behavior for mixed parsed/unknown command sequences, newline-separated Bash command boundaries, `rg --files`/`fd`/`find` list-file classification, `git grep`/`git ls-files`, `eza`/`exa`/`tree`/`du`, `ag`/`ack`/`pt`/`rga`/`ripgrep-all`, `awk` file reads, Python file-walk summaries, richer `grep`/`sed -n` flag handling, and mutating `xargs` pipeline preservation
 - `codex-rs/common/src/fuzzy_match.rs`
   - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 - `codex-rs/apply-patch`

@@ -118,8 +118,17 @@ public enum BashPlainCommandParser {
             }
 
             switch character {
-            case " ", "\t", "\r", "\n":
+            case " ", "\t", "\r":
                 guard finishWord() else { return nil }
+
+            case "\n":
+                guard finishWord() else { return nil }
+                if !currentCommand.isEmpty {
+                    commands.append(currentCommand)
+                    currentCommand = []
+                    expectingCommand = true
+                    endedWithOperator = false
+                }
 
             case "'", "\"":
                 quote = character

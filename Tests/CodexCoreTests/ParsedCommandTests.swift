@@ -94,6 +94,21 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testBashLcNewlinesSeparatePlainCommandsLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cat README.md\nrg --files"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md"),
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cd Sources\ncat CodexCore/ParsedCommand.swift"]), [
+            .read(
+                cmd: "cat CodexCore/ParsedCommand.swift",
+                name: "ParsedCommand.swift",
+                path: "Sources/CodexCore/ParsedCommand.swift"
+            )
+        ])
+    }
+
     func testCdThenCatIsSingleRead() {
         XCTAssertEqual(parseCommand(["cd", "foo", "&&", "cat", "foo.txt"]), [
             .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo/foo.txt")

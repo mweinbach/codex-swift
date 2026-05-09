@@ -16,6 +16,13 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
     }
 
+    func testAcceptsNewlineSeparatedCommands() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("pwd\ncat README.md\nrg --files"),
+            [["pwd"], ["cat", "README.md"], ["rg", "--files"]]
+        )
+    }
+
     func testExtractsDoubleAndSingleQuotedStrings() {
         XCTAssertEqual(
             BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "hello world""#),

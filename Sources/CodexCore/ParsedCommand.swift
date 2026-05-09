@@ -1116,6 +1116,17 @@ private func shellSplit(_ input: String) -> [String]? {
         }
 
         if !singleQuoted, !doubleQuoted {
+            if char == "\n" {
+                flushCurrent()
+                if let last = tokens.last, ["&&", "||", "|", ";"].contains(last) {
+                    index = input.index(after: index)
+                    continue
+                }
+                tokens.append(";")
+                index = input.index(after: index)
+                continue
+            }
+
             if char.isWhitespace {
                 flushCurrent()
                 index = input.index(after: index)
