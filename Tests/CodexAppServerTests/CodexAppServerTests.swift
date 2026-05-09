@@ -2460,6 +2460,78 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testMarketplaceUpgradeRefreshesConfiguredGitMarketplace() throws {
+        let temp = try TemporaryDirectory()
+        let marketplace = try makeGitMarketplaceSourceAndRemote(named: "debug", marker: "v1", in: temp.url)
+        let gitConfig = temp.url.appendingPathComponent("gitconfig", isDirectory: false)
+        try """
+        [url "\(URL(fileURLWithPath: marketplace.remote.path).absoluteString)"]
+            insteadOf = https://github.com/openai/debug-marketplace.git
+        """.write(to: gitConfig, atomically: true, encoding: .utf8)
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "GIT_CONFIG_GLOBAL": gitConfig.path,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+
+        let add = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","refName":"\#(marketplace.branch)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNil(add["error"])
+        let installedRoot = temp.url
+            .appendingPathComponent(".tmp/marketplaces/debug", isDirectory: true)
+            .path
+
+        try "v2".write(
+            to: marketplace.source.appendingPathComponent("plugins/sample/marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "plugins/sample/marker.txt"], cwd: marketplace.source)
+        try runGit(["commit", "-m", "Update marketplace"], cwd: marketplace.source)
+        try runGit(["push", "origin", marketplace.branch], cwd: marketplace.source)
+        let latestRevision = try runGit(["rev-parse", "HEAD"], cwd: marketplace.source)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let upgrade = try appServerResponse(
+            #"{"id":2,"method":"marketplace/upgrade","params":{}}"#,
+            configuration: configuration
+        )
+        let upgradeResult = try XCTUnwrap(upgrade["result"] as? [String: Any])
+        XCTAssertEqual(upgradeResult["selectedMarketplaces"] as? [String], ["debug"])
+        XCTAssertEqual(upgradeResult["upgradedRoots"] as? [String], [installedRoot])
+        XCTAssertEqual((upgradeResult["errors"] as? [Any])?.count, 0)
+        XCTAssertEqual(
+            try String(contentsOf: URL(fileURLWithPath: installedRoot).appendingPathComponent("plugins/sample/marker.txt"), encoding: .utf8),
+            "v2"
+        )
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains(#"last_revision = "\#(latestRevision)""#))
+        XCTAssertTrue(config.contains(#"ref = "\#(marketplace.branch)""#))
+        let metadata = try String(
+            contentsOf: URL(fileURLWithPath: installedRoot).appendingPathComponent(".codex-marketplace-install.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(metadata.contains(#""revision" : "\#(latestRevision)""#))
+
+        let noOp = try appServerResponse(
+            #"{"id":3,"method":"marketplace/upgrade","params":{"marketplaceName":"debug"}}"#,
+            configuration: configuration
+        )
+        let noOpResult = try XCTUnwrap(noOp["result"] as? [String: Any])
+        XCTAssertEqual(noOpResult["selectedMarketplaces"] as? [String], ["debug"])
+        XCTAssertEqual(noOpResult["upgradedRoots"] as? [String], [])
+        XCTAssertEqual((noOpResult["errors"] as? [Any])?.count, 0)
+    }
+
     func testMarketplaceAddRecordsLocalDirectoryAndDuplicateSource() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url)
@@ -6942,6 +7014,14 @@ final class CodexAppServerTests: XCTestCase {
         marker: String,
         in parent: URL
     ) throws -> URL {
+        try makeGitMarketplaceSourceAndRemote(named: name, marker: marker, in: parent).remote
+    }
+
+    private func makeGitMarketplaceSourceAndRemote(
+        named name: String,
+        marker: String,
+        in parent: URL
+    ) throws -> (source: URL, remote: URL, branch: String) {
         let source = try makeLocalMarketplaceRootWithPlugin(named: name, pluginName: "sample", in: parent)
         try marker.write(
             to: source.appendingPathComponent("plugins/sample/marker.txt", isDirectory: false),
@@ -6960,7 +7040,7 @@ final class CodexAppServerTests: XCTestCase {
             .stdout
             .trimmingCharacters(in: .whitespacesAndNewlines)
         try runGit(["push", "-u", "origin", branch], cwd: source)
-        return remote
+        return (source, remote, branch)
     }
 
     private func makeLocalMarketplaceRootWithPlugin(
