@@ -1189,14 +1189,14 @@ public enum AppServerProtocol {
 
     public struct PermissionsProfile: Equatable, Codable, Sendable {
         public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: JSONValue?
+        public let fileSystem: FileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
             self.network = network
             self.fileSystem = fileSystem
         }
@@ -1210,14 +1210,14 @@ public enum AppServerProtocol {
 
     public struct GrantedPermissionProfile: Equatable, Codable, Sendable {
         public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: JSONValue?
+        public let fileSystem: FileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
             self.network = network
             self.fileSystem = fileSystem
         }
@@ -1582,14 +1582,14 @@ public enum AppServerProtocol {
 
     public struct AdditionalPermissionProfile: Equatable, Codable, Sendable {
         public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: JSONValue?
+        public let fileSystem: FileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
             self.network = network
             self.fileSystem = fileSystem
         }

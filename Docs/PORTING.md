@@ -507,6 +507,8 @@ Source baseline inspected for this scaffold:
   - Added typed `ActivePermissionProfile` and `ActivePermissionProfileModification` models and wired `UserInputWithTurnContextParams.active_permission_profile` through them, preserving Rust's default empty `modifications` and tagged `additional_writable_root` wire shape.
 - `codex-rs/protocol/src/models.rs` permission profiles
   - Added typed `PermissionProfile`, `ManagedFileSystemPermissions`, and `NetworkSandboxPolicy` models, including Rust's tagged managed/disabled/external wire shape and legacy `{network,file_system}` rollout decode path, and wired user-turn/turn-context submissions through the typed profile.
+- `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` app-server permission payloads
+  - Reused typed `FileSystemPermissions` for app-server permissions, granted-permission, and command additional-permission payloads while preserving the existing camelCase app-server field names.
 
 ## Known Gaps
 

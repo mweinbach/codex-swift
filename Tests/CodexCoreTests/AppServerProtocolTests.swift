@@ -360,7 +360,7 @@ final class AppServerProtocolTests: XCTestCase {
             ],
             additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
                 network: RequestPermissionNetworkPermissions(enabled: true),
-                fileSystem: .object(["read": .array([.string("/tmp/project")])])
+                fileSystem: FileSystemPermissions(read: ["/tmp/project"])
             ),
             proposedExecPolicyAmendment: execAmendment,
             proposedNetworkPolicyAmendments: [networkAmendment],
@@ -683,10 +683,7 @@ final class AppServerProtocolTests: XCTestCase {
             reason: nil,
             permissions: AppServerProtocol.PermissionsProfile(
                 network: RequestPermissionNetworkPermissions(enabled: true),
-                fileSystem: .object([
-                    "read": .array([.string("/tmp/project")]),
-                    "write": .array([.string("/tmp/project/Sources")])
-                ])
+                fileSystem: FileSystemPermissions(read: ["/tmp/project"], write: ["/tmp/project/Sources"])
             )
         )
         let request = AppServerProtocol.ServerRequest.permissionsRequestApproval(
