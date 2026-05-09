@@ -587,7 +587,7 @@ private func skipFlagValues(_ args: [String], flagsWithValues: Set<String>) -> [
 }
 
 private func singleNonFlagOperand(_ args: [String], flagsWithValues: Set<String>) -> String? {
-    let operands = skipFlagValues(args, flagsWithValues: flagsWithValues).filter { !$0.hasPrefix("-") }
+    let operands = positionalOperands(args, flagsWithValues: flagsWithValues)
     guard operands.count == 1 else {
         return nil
     }
@@ -595,7 +595,43 @@ private func singleNonFlagOperand(_ args: [String], flagsWithValues: Set<String>
 }
 
 private func firstNonFlagOperand(_ args: [String], flagsWithValues: Set<String>) -> String? {
-    skipFlagValues(args, flagsWithValues: flagsWithValues).first { !$0.hasPrefix("-") }
+    positionalOperands(args, flagsWithValues: flagsWithValues).first
+}
+
+private func positionalOperands(_ args: [String], flagsWithValues: Set<String>) -> [String] {
+    var output: [String] = []
+    var afterDoubleDash = false
+    var skipNext = false
+
+    for (index, arg) in args.enumerated() {
+        if skipNext {
+            skipNext = false
+            continue
+        }
+        if afterDoubleDash {
+            output.append(arg)
+            continue
+        }
+        if arg == "--" {
+            afterDoubleDash = true
+            continue
+        }
+        if arg.hasPrefix("--"), arg.contains("=") {
+            continue
+        }
+        if flagsWithValues.contains(arg) {
+            if index + 1 < args.count {
+                skipNext = true
+            }
+            continue
+        }
+        if arg.hasPrefix("-") {
+            continue
+        }
+        output.append(arg)
+    }
+
+    return output
 }
 
 private func parseGrepLike(mainCommand: [String], tail: [String]) -> ParsedCommand {

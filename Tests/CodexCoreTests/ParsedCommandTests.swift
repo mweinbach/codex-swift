@@ -381,6 +381,18 @@ final class ParsedCommandTests: XCTestCase {
             .read(cmd: ##"cat "pkg\\src\\main.rs""##, name: "main.rs", path: #"pkg\src\main.rs"#)
         ])
 
+        XCTAssertEqual(parseCommand(["bat", "--", "-strange-file-name"]), [
+            .read(cmd: "bat -- -strange-file-name", name: "-strange-file-name", path: "-strange-file-name")
+        ])
+
+        XCTAssertEqual(parseCommand(["more", "--", "-strange-file-name"]), [
+            .read(cmd: "more -- -strange-file-name", name: "-strange-file-name", path: "-strange-file-name")
+        ])
+
+        XCTAssertEqual(parseCommand(["ls", "--", "-strange-dir"]), [
+            .listFiles(cmd: "ls -- -strange-dir", path: "-strange-dir")
+        ])
+
         XCTAssertEqual(parseCommand(["ls", "--time-style=long-iso", "./dist"]), [
             .listFiles(cmd: "ls '--time-style=long-iso' ./dist", path: ".")
         ])
