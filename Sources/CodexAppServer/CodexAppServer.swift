@@ -2876,6 +2876,10 @@ public enum CodexAppServer {
             items.append(item)
         }
         if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentHooks(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        if params?["includeHome"] as? Bool == true,
            let item = try detectExternalAgentSkills(cwd: nil, configuration: configuration) {
             items.append(item)
         }
@@ -2896,6 +2900,9 @@ public enum CodexAppServer {
                 continue
             }
             if let item = try detectExternalAgentConfig(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentHooks(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
             if let item = try detectExternalAgentSkills(cwd: repoRoot.path, configuration: configuration) {
@@ -2937,6 +2944,8 @@ public enum CodexAppServer {
                 try importExternalAgentCommands(cwd: cwd, configuration: configuration)
             case "CONFIG":
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
+            case "HOOKS":
+                try importExternalAgentHooks(cwd: cwd, configuration: configuration)
             case "SKILLS":
                 try importExternalAgentSkills(cwd: cwd, configuration: configuration)
             case "SUBAGENTS":
@@ -2990,6 +2999,29 @@ public enum CodexAppServer {
             "itemType": "CONFIG",
             "description": "Migrate \(paths.sourceSettings.path) into \(paths.targetConfig.path)",
             "details": NSNull()
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
+    private static func detectExternalAgentHooks(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = externalAgentHooksPaths(cwd: cwd, configuration: configuration)
+        let migration = try externalAgentHookMigration(sourceExternalAgentDirectory: paths.sourceExternalAgentDirectory, targetConfigDirectory: paths.targetHooks.deletingLastPathComponent())
+        let eventNames = migration.keys.sorted()
+        guard !eventNames.isEmpty,
+              try isMissingOrEmptyTextFile(paths.targetHooks)
+        else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "HOOKS",
+            "description": "Migrate hooks from \(paths.sourceExternalAgentDirectory.path) to \(paths.targetHooks.path)",
+            "details": [
+                "hooks": eventNames.map { ["name": $0] }
+            ]
         ]
         item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
         return item
@@ -3111,6 +3143,33 @@ public enum CodexAppServer {
             withIntermediateDirectories: true
         )
         try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
+    }
+
+    private static func importExternalAgentHooks(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = externalAgentHooksPaths(cwd: cwd, configuration: configuration)
+        let targetConfigDirectory = paths.targetHooks.deletingLastPathComponent()
+        let migration = try externalAgentHookMigration(
+            sourceExternalAgentDirectory: paths.sourceExternalAgentDirectory,
+            targetConfigDirectory: targetConfigDirectory
+        )
+        guard !migration.isEmpty,
+              try isMissingOrEmptyTextFile(paths.targetHooks)
+        else {
+            return
+        }
+        try FileManager.default.createDirectory(at: targetConfigDirectory, withIntermediateDirectories: true)
+        try copyExternalAgentHookScripts(
+            sourceExternalAgentDirectory: paths.sourceExternalAgentDirectory,
+            targetConfigDirectory: targetConfigDirectory
+        )
+        let payload = ["hooks": migration]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        let rendered = String(data: data, encoding: .utf8) ?? "{}"
+        try (rendered + "\n").write(to: paths.targetHooks, atomically: true, encoding: .utf8)
     }
 
     private static func importExternalAgentAgentsMd(cwd: String?, configuration: CodexAppServerConfiguration) throws {
@@ -3237,6 +3296,30 @@ public enum CodexAppServer {
         )
     }
 
+    private static func externalAgentHooksPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) -> (sourceExternalAgentDirectory: URL, targetHooks: URL, cwd: String?) {
+        if let cwd, !cwd.isEmpty,
+           let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) {
+            return (
+                sourceExternalAgentDirectory: repoRoot.appendingPathComponent(".claude", isDirectory: true),
+                targetHooks: repoRoot
+                    .appendingPathComponent(".codex", isDirectory: true)
+                    .appendingPathComponent("hooks.json", isDirectory: false),
+                cwd: repoRoot.path
+            )
+        }
+        let home = configuration.environment["HOME"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+        } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return (
+            sourceExternalAgentDirectory: home.appendingPathComponent(".claude", isDirectory: true),
+            targetHooks: configuration.codexHome.appendingPathComponent("hooks.json", isDirectory: false),
+            cwd: nil
+        )
+    }
+
     private static func externalAgentAgentsMdPaths(
         cwd: String?,
         configuration: CodexAppServerConfiguration
@@ -3297,6 +3380,284 @@ public enum CodexAppServer {
             return false
         }
         return try !String(contentsOf: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func externalAgentHookMigration(
+        sourceExternalAgentDirectory: URL,
+        targetConfigDirectory: URL?
+    ) throws -> [String: [[String: Any]]] {
+        var settingsFiles: [[String: Any]] = []
+        var disableAllHooks: Bool?
+        for settingsName in ["settings.json", "settings.local.json"] {
+            let settingsPath = sourceExternalAgentDirectory.appendingPathComponent(settingsName, isDirectory: false)
+            guard isRegularFile(path: settingsPath.path) else {
+                continue
+            }
+            let data = try Data(contentsOf: settingsPath)
+            guard let settings = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw AppServerError.internalError("invalid hooks settings: root must be an object")
+            }
+            if let disabled = settings["disableAllHooks"] as? Bool {
+                disableAllHooks = disabled
+            }
+            settingsFiles.append(settings)
+        }
+        guard disableAllHooks != true else {
+            return [:]
+        }
+
+        var migration: [String: [[String: Any]]] = [:]
+        for settings in settingsFiles {
+            appendConvertibleExternalAgentHookGroups(
+                settings: settings,
+                migration: &migration,
+                targetConfigDirectory: targetConfigDirectory
+            )
+        }
+        return migration
+    }
+
+    private static func appendConvertibleExternalAgentHookGroups(
+        settings: [String: Any],
+        migration: inout [String: [[String: Any]]],
+        targetConfigDirectory: URL?
+    ) {
+        guard let hooksConfig = settings["hooks"] as? [String: Any] else {
+            return
+        }
+        for eventName in HookEventName.allCases {
+            let eventLabel = eventName.configLabel
+            guard let groups = hooksConfig[eventLabel] as? [[String: Any]] else {
+                continue
+            }
+            for group in groups {
+                if group["if"] != nil ||
+                    group.keys.contains(where: { !["matcher", "hooks"].contains($0) }) {
+                    continue
+                }
+                var hookCommands: [[String: Any]] = []
+                for hook in group["hooks"] as? [[String: Any]] ?? [] {
+                    let hookType = hook["type"] as? String ?? "command"
+                    guard hookType == "command",
+                          !externalAgentHookHasUnsupportedKeys(hook),
+                          hook["async"] as? Bool != true,
+                          hook["asyncRewake"] == nil,
+                          hook["shell"] == nil,
+                          hook["once"] == nil,
+                          let rawCommand = hook["command"] as? String
+                    else {
+                        continue
+                    }
+                    let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !command.isEmpty else {
+                        continue
+                    }
+                    var commandPayload: [String: Any] = [
+                        "type": "command",
+                        "command": rewriteExternalAgentHookCommand(command, targetConfigDirectory: targetConfigDirectory)
+                    ]
+                    if let timeout = externalAgentHookUInt(hook["timeout"] ?? hook["timeoutSec"]) {
+                        commandPayload["timeout"] = timeout
+                    }
+                    if let statusMessage = hook["statusMessage"] as? String {
+                        commandPayload["statusMessage"] = rewriteExternalAgentTerms(statusMessage)
+                    }
+                    hookCommands.append(commandPayload)
+                }
+                guard !hookCommands.isEmpty else {
+                    continue
+                }
+                var groupPayload: [String: Any] = ["hooks": hookCommands]
+                if externalAgentHookEventSupportsMatcher(eventName),
+                   let matcher = group["matcher"] as? String {
+                    groupPayload["matcher"] = matcher
+                }
+                migration[eventLabel, default: []].append(groupPayload)
+            }
+        }
+    }
+
+    private static func externalAgentHookHasUnsupportedKeys(_ hook: [String: Any]) -> Bool {
+        hook.keys.contains { key in
+            !["type", "command", "timeout", "timeoutSec", "statusMessage", "async"].contains(key)
+        }
+    }
+
+    private static func externalAgentHookUInt(_ value: Any?) -> UInt64? {
+        switch value {
+        case let value as UInt64:
+            return value
+        case let value as UInt:
+            return UInt64(value)
+        case let value as Int where value >= 0:
+            return UInt64(value)
+        case let value as NSNumber where value.int64Value >= 0:
+            return UInt64(value.int64Value)
+        case let value as String:
+            return UInt64(value)
+        default:
+            return nil
+        }
+    }
+
+    private static func externalAgentHookEventSupportsMatcher(_ eventName: HookEventName) -> Bool {
+        switch eventName {
+        case .preToolUse, .permissionRequest, .postToolUse, .preCompact, .postCompact, .sessionStart:
+            return true
+        case .userPromptSubmit, .stop:
+            return false
+        }
+    }
+
+    private static func rewriteExternalAgentHookCommand(_ command: String, targetConfigDirectory: URL?) -> String {
+        guard let targetConfigDirectory else {
+            return command
+        }
+        if command.contains(#".claude\hooks\"#) ||
+            command.contains("%CLAUDE_PROJECT_DIR%") ||
+            command.contains("$env:CLAUDE_PROJECT_DIR") {
+            return command
+        }
+        let targetHooksDirectory = targetConfigDirectory.appendingPathComponent("hooks", isDirectory: true)
+        let sourceHooksPath = ".claude/hooks/"
+        var rewritten = replaceQuotedExternalAgentHookPaths(
+            command,
+            quote: "'",
+            sourceHooksPath: sourceHooksPath,
+            targetHooksDirectory: targetHooksDirectory
+        )
+        rewritten = replaceQuotedExternalAgentHookPaths(
+            rewritten,
+            quote: "\"",
+            sourceHooksPath: sourceHooksPath,
+            targetHooksDirectory: targetHooksDirectory
+        )
+        return replaceUnquotedExternalAgentHookPaths(
+            rewritten,
+            sourceHooksPath: sourceHooksPath,
+            targetHooksDirectory: targetHooksDirectory
+        )
+    }
+
+    private static func replaceQuotedExternalAgentHookPaths(
+        _ command: String,
+        quote: Character,
+        sourceHooksPath: String,
+        targetHooksDirectory: URL
+    ) -> String {
+        let pattern = "\(NSRegularExpression.escapedPattern(for: String(quote)))([^\\\(quote)]*?\(NSRegularExpression.escapedPattern(for: sourceHooksPath))([^\\\(quote)]*?))\(NSRegularExpression.escapedPattern(for: String(quote)))"
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return command
+        }
+        let nsCommand = command as NSString
+        let matches = expression.matches(in: command, range: NSRange(location: 0, length: nsCommand.length)).reversed()
+        var rewritten = command
+        for match in matches {
+            guard match.numberOfRanges >= 3,
+                  let fullRange = Range(match.range(at: 0), in: rewritten),
+                  let pathRange = Range(match.range(at: 1), in: rewritten),
+                  let suffixRange = Range(match.range(at: 2), in: rewritten)
+            else {
+                continue
+            }
+            let path = String(rewritten[pathRange])
+            let suffix = String(rewritten[suffixRange])
+            guard let replacement = externalAgentHookPathReplacement(
+                targetHooksDirectory: targetHooksDirectory,
+                path: path,
+                sourceHooksStart: path.distance(from: path.startIndex, to: path.range(of: sourceHooksPath)!.lowerBound),
+                suffix: suffix
+            ) else {
+                continue
+            }
+            rewritten.replaceSubrange(fullRange, with: replacement)
+        }
+        return rewritten
+    }
+
+    private static func replaceUnquotedExternalAgentHookPaths(
+        _ command: String,
+        sourceHooksPath: String,
+        targetHooksDirectory: URL
+    ) -> String {
+        let pattern = #"(?<![=\s;&|<>()])(\.?\.?/?(?:[^=\s;&|<>()]*?/)?\.claude/hooks/([^\s;&|<>()]+))"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return command
+        }
+        let nsCommand = command as NSString
+        let matches = expression.matches(in: command, range: NSRange(location: 0, length: nsCommand.length)).reversed()
+        var rewritten = command
+        for match in matches {
+            guard match.numberOfRanges >= 3,
+                  let fullRange = Range(match.range(at: 1), in: rewritten),
+                  let pathRange = Range(match.range(at: 1), in: rewritten),
+                  let suffixRange = Range(match.range(at: 2), in: rewritten)
+            else {
+                continue
+            }
+            let path = String(rewritten[pathRange])
+            let suffix = String(rewritten[suffixRange])
+            guard let sourceRange = path.range(of: sourceHooksPath),
+                  let replacement = externalAgentHookPathReplacement(
+                    targetHooksDirectory: targetHooksDirectory,
+                    path: path,
+                    sourceHooksStart: path.distance(from: path.startIndex, to: sourceRange.lowerBound),
+                    suffix: suffix
+                  )
+            else {
+                continue
+            }
+            rewritten.replaceSubrange(fullRange, with: replacement)
+        }
+        return rewritten
+    }
+
+    private static func externalAgentHookPathReplacement(
+        targetHooksDirectory: URL,
+        path: String,
+        sourceHooksStart: Int,
+        suffix: String
+    ) -> String? {
+        let prefix = String(path.prefix(sourceHooksStart))
+        guard (prefix.isEmpty || prefix == "./" || prefix.hasSuffix("/")),
+              !prefix.contains(where: externalAgentShellPathBoundary),
+              !suffix.isEmpty,
+              !suffix.contains(where: { "\\$`*?[{}".contains($0) })
+        else {
+            return nil
+        }
+        return shellSingleQuote(targetHooksDirectory.appendingPathComponent(suffix).path)
+    }
+
+    private static func externalAgentShellPathBoundary(_ character: Character) -> Bool {
+        character.isWhitespace || ["=", ";", "|", "&", "<", ">", "(", ")"].contains(character)
+    }
+
+    private static func shellSingleQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func copyExternalAgentHookScripts(sourceExternalAgentDirectory: URL, targetConfigDirectory: URL) throws {
+        let sourceHooks = sourceExternalAgentDirectory.appendingPathComponent("hooks", isDirectory: true)
+        guard isDirectory(path: sourceHooks.path) else {
+            return
+        }
+        let targetHooks = targetConfigDirectory.appendingPathComponent("hooks", isDirectory: true)
+        try copyDirectoryRecursiveSkippingExisting(source: sourceHooks, target: targetHooks)
+    }
+
+    private static func copyDirectoryRecursiveSkippingExisting(source: URL, target: URL) throws {
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        for name in try FileManager.default.contentsOfDirectory(atPath: source.path) {
+            let sourcePath = source.appendingPathComponent(name)
+            let targetPath = target.appendingPathComponent(name)
+            if isDirectory(path: sourcePath.path) {
+                try copyDirectoryRecursiveSkippingExisting(source: sourcePath, target: targetPath)
+            } else if isRegularFile(path: sourcePath.path),
+                      !FileManager.default.fileExists(atPath: targetPath.path) {
+                try FileManager.default.copyItem(at: sourcePath, to: targetPath)
+            }
+        }
     }
 
     private static func externalAgentSkillsPaths(

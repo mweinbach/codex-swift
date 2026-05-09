@@ -2670,12 +2670,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(emptyImportResult.isEmpty)
 
         let unsupportedImport = try appServerResponse(
-            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"HOOKS","description":"Hooks","cwd":null}]}}"#,
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"PLUGINS","description":"Plugins","cwd":null}]}}"#,
             codexHome: temp.url
         )
         let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
         XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
-        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for HOOKS is not implemented")
+        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for PLUGINS is not implemented")
     }
 
     func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
@@ -2802,6 +2802,112 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(migrated.contains(#"FLAG = "true""#))
         XCTAssertFalse(migrated.contains("DROP"))
         XCTAssertFalse(migrated.contains("OBJECT"))
+    }
+
+    func testExternalAgentConfigDetectAndImportHooksWritesHooksJsonAndCopiesScripts() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claude = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: claude.appendingPathComponent("hooks", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "echo copied".write(
+            to: claude.appendingPathComponent("hooks/check.sh", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [
+                  {
+                    "type": "command",
+                    "command": "'./.claude/hooks/check.sh'",
+                    "timeoutSec": "7",
+                    "statusMessage": "Claude hook"
+                  },
+                  {
+                    "type": "command",
+                    "command": "echo skipped",
+                    "async": true
+                  }
+                ]
+              }
+            ],
+            "Stop": [
+              {
+                "matcher": "ignored",
+                "hooks": [
+                  {
+                    "command": "echo done"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """.write(
+            to: claude.appendingPathComponent("settings.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["HOOKS"])
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate hooks from \(claude.path) to \(repo.url.path)/.codex/hooks.json"
+        )
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        XCTAssertEqual(details["hooks"] as? [[String: String]], [["name": "PreToolUse"], ["name": "Stop"]])
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"HOOKS","description":"Hooks","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let hooksPath = repo.url.appendingPathComponent(".codex/hooks.json", isDirectory: false)
+        let hooksPayload = try decode(Data(contentsOf: hooksPath))
+        let hooks = try XCTUnwrap(hooksPayload["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        XCTAssertEqual(preToolUse.count, 1)
+        XCTAssertEqual(preToolUse[0]["matcher"] as? String, "Bash")
+        let preHandlers = try XCTUnwrap(preToolUse[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(preHandlers.count, 1)
+        XCTAssertEqual(preHandlers[0]["type"] as? String, "command")
+        XCTAssertEqual(preHandlers[0]["timeout"] as? Int, 7)
+        XCTAssertEqual(preHandlers[0]["statusMessage"] as? String, "Codex hook")
+        XCTAssertEqual(
+            preHandlers[0]["command"] as? String,
+            "'\(repo.url.path)/.codex/hooks/check.sh'"
+        )
+        let stop = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        XCTAssertNil(stop[0]["matcher"])
+        XCTAssertEqual(
+            try String(contentsOf: repo.url.appendingPathComponent(".codex/hooks/check.sh"), encoding: .utf8),
+            "echo copied"
+        )
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
     }
 
     func testExternalAgentConfigDetectAndImportSkillsCopiesMissingDirectories() throws {
