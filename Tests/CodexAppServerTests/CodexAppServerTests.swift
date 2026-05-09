@@ -3195,6 +3195,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["status"] as? String, "notConfigured")
     }
 
+    func testWindowsSandboxSetupStartReturnsStartedAndCompletionNotificationOffWindows() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"windowsSandbox/setupStart","params":{"mode":"unelevated"}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+
+        let response = messages[0]
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["started"] as? Bool, true)
+
+        let notification = messages[1]
+        XCTAssertEqual(notification["method"] as? String, "windowsSandbox/setupCompleted")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["mode"] as? String, "unelevated")
+        XCTAssertEqual(params["success"] as? Bool, false)
+        XCTAssertEqual(params["error"] as? String, "legacy Windows sandbox setup is only supported on Windows")
+    }
+
+    func testWindowsSandboxSetupStartRejectsRelativeCwdBeforeStarting() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"windowsSandbox/setupStart","params":{"mode":"unelevated","cwd":"relative-root"}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("Invalid request") == true)
+    }
+
     func testExperimentalFeatureListReturnsRustV2ShapeAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """

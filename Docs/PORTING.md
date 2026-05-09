@@ -419,6 +419,8 @@ Source baseline inspected for this scaffold:
   - `modelProvider/capabilities/read` now reloads the active config and returns Rust-shaped provider capability booleans, including the Amazon Bedrock built-in provider's disabled namespace-tools, image-generation, and web-search capabilities.
 - `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox readiness
   - `windowsSandbox/readiness` now returns the Rust-shaped readiness object and reports `notConfigured` on non-Windows platforms.
+- `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox setup start
+  - `windowsSandbox/setupStart` now validates setup mode and absolute `cwd`, returns Rust's immediate `{ started: true }` response, and emits the Rust-shaped `windowsSandbox/setupCompleted` notification with the non-Windows setup error. Real Windows setup execution/persistence remains pending.
 - `codex-rs/app-server/src/request_processors/mcp_processor.rs` MCP config reload
   - `config/mcpServer/reload` now returns Rust's empty response object. Queueing strict refreshes for loaded threads remains pending with the broader live-thread manager port.
 - `codex-rs/app-server/src/request_processors/catalog_processor.rs` collaboration mode listing

@@ -1999,6 +1999,37 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func windowsSandboxSetupStartResult(params: [String: Any]?) throws -> (result: [String: Any], notification: [String: Any]) {
+        let mode = try windowsSandboxSetupModeParam(params?["mode"])
+        _ = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+
+        let error: String?
+        #if os(Windows)
+        error = "Windows sandbox setup is not implemented"
+        #else
+        switch mode {
+        case "elevated":
+            error = "elevated Windows sandbox setup is only supported on Windows"
+        case "unelevated":
+            error = "legacy Windows sandbox setup is only supported on Windows"
+        default:
+            error = nil
+        }
+        #endif
+
+        return (
+            result: ["started": true],
+            notification: [
+                "method": "windowsSandbox/setupCompleted",
+                "params": [
+                    "mode": mode,
+                    "success": error == nil,
+                    "error": nullable(error)
+                ]
+            ]
+        )
+    }
+
     fileprivate static func mcpServerRefreshResult() -> [String: Any] {
         [:]
     }
@@ -3315,6 +3346,18 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
         }
         return path
+    }
+
+    private static func windowsSandboxSetupModeParam(_ value: Any?) throws -> String {
+        guard let mode = stringParam(value), !mode.isEmpty else {
+            throw AppServerError.invalidRequest("missing mode")
+        }
+        switch mode {
+        case "elevated", "unelevated":
+            return mode
+        default:
+            throw AppServerError.invalidRequest("unknown windows sandbox setup mode: \(mode)")
+        }
     }
 
     private static func isValidRemotePluginID(_ pluginID: String) -> Bool {
@@ -6206,6 +6249,10 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: CodexAppServer.windowsSandboxReadinessResult()
                     )
+                case "windowsSandbox/setupStart":
+                    let result = try CodexAppServer.windowsSandboxSetupStartResult(params: params)
+                    response = CodexAppServer.responseObject(id: id, result: result.result)
+                    notifications.append(result.notification)
                 case "mcpServerStatus/list":
                     response = CodexAppServer.responseObject(
                         id: id,
