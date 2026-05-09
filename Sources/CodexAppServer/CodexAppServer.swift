@@ -2903,6 +2903,10 @@ public enum CodexAppServer {
            let item = try detectExternalAgentAgentsMd(cwd: nil, configuration: configuration) {
             items.append(item)
         }
+        if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentSessions(configuration: configuration) {
+            items.append(item)
+        }
         for cwd in params?["cwds"] as? [String] ?? [] {
             guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
                 continue
@@ -2964,6 +2968,8 @@ public enum CodexAppServer {
                 try importExternalAgentMcpServerConfig(cwd: cwd, configuration: configuration)
             case "PLUGINS":
                 try importExternalAgentPlugins(item: item, cwd: cwd, configuration: configuration)
+            case "SESSIONS":
+                try importExternalAgentSessions(item: item, configuration: configuration)
             case "SKILLS":
                 try importExternalAgentSkills(cwd: cwd, configuration: configuration)
             case "SUBAGENTS":
@@ -3119,6 +3125,33 @@ public enum CodexAppServer {
         ]
         item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
         return item
+    }
+
+    private static func detectExternalAgentSessions(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let externalAgentHome = externalAgentHome(configuration: configuration)
+        let sessions = try detectRecentExternalAgentSessions(
+            externalAgentHome: externalAgentHome,
+            codexHome: configuration.codexHome
+        )
+        guard !sessions.isEmpty else {
+            return nil
+        }
+        return [
+            "itemType": "SESSIONS",
+            "description": "Migrate recent sessions from \(externalAgentHome.appendingPathComponent("projects", isDirectory: true).path)",
+            "cwd": NSNull(),
+            "details": [
+                "sessions": sessions.map { session in
+                    [
+                        "path": session.path.path,
+                        "cwd": session.cwd.path,
+                        "title": session.title as Any
+                    ].nullStripped(keepNulls: true)
+                }
+            ]
+        ]
     }
 
     private static func detectExternalAgentAgentsMd(
@@ -3339,6 +3372,42 @@ public enum CodexAppServer {
                     configuration: configuration
                 )
             }
+        }
+    }
+
+    private static func importExternalAgentSessions(
+        item: [String: Any],
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let requestedSessions = try externalAgentSessionMigrationDetails(from: item["details"])
+        for session in requestedSessions {
+            guard try externalAgentSessionSourcePath(
+                session.path,
+                configuration: configuration
+            ) != nil
+            else {
+                throw AppServerError.invalidParams(
+                    "external agent session was not detected for import: \(session.path.path)"
+                )
+            }
+        }
+
+        for session in requestedSessions {
+            guard !externalAgentSessionImportLedgerContainsCurrentSource(
+                codexHome: configuration.codexHome,
+                sourcePath: session.path
+            ),
+                let imported = try loadExternalAgentSessionForImport(session.path),
+                isDirectory(imported.cwd)
+            else {
+                continue
+            }
+            let importedThreadID = try importExternalAgentSession(imported, configuration: configuration)
+            try recordExternalAgentImportedSession(
+                codexHome: configuration.codexHome,
+                sourcePath: session.path,
+                importedThreadID: importedThreadID
+            )
         }
     }
 
@@ -4382,6 +4451,478 @@ public enum CodexAppServer {
                 existing[key] = incomingValue
             }
         }
+    }
+
+    private struct ExternalAgentSessionMigration {
+        var path: URL
+        var cwd: URL
+        var title: String?
+    }
+
+    private struct ExternalAgentSessionSummary {
+        var latestTimestamp: Int
+        var migration: ExternalAgentSessionMigration
+    }
+
+    private struct ImportedExternalAgentSession {
+        var cwd: URL
+        var title: String?
+        var rolloutItems: [RolloutRecordItem]
+    }
+
+    private struct ExternalAgentConversationMessage {
+        enum Role {
+            case user
+            case assistant
+        }
+
+        var role: Role
+        var text: String
+    }
+
+    private static let externalAgentSessionImportMaxCount = 50
+    private static let externalAgentSessionImportMaxAgeSeconds = 30 * 24 * 60 * 60
+    private static let externalAgentSessionImportedMarker = "<EXTERNAL SESSION IMPORTED>"
+
+    private static func externalAgentHome(configuration: CodexAppServerConfiguration) -> URL {
+        let home = configuration.environment["HOME"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+        } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return home.appendingPathComponent(".claude", isDirectory: true)
+    }
+
+    private static func detectRecentExternalAgentSessions(
+        externalAgentHome: URL,
+        codexHome: URL,
+        now: Int = Int(Date().timeIntervalSince1970)
+    ) throws -> [ExternalAgentSessionMigration] {
+        let projectsRoot = externalAgentHome.appendingPathComponent("projects", isDirectory: true)
+        guard isDirectory(projectsRoot) else {
+            return []
+        }
+        var candidates: [ExternalAgentSessionSummary] = []
+        for projectDirectory in try directoryContents(projectsRoot) where isDirectory(projectDirectory) {
+            for path in try directoryContents(projectDirectory) where path.pathExtension == "jsonl" {
+                guard let summary = try summarizeExternalAgentSession(path),
+                      !externalAgentSessionImportLedgerContainsCurrentSource(codexHome: codexHome, sourcePath: path),
+                      summary.latestTimestamp >= now - externalAgentSessionImportMaxAgeSeconds,
+                      isDirectory(summary.migration.cwd)
+                else {
+                    continue
+                }
+                candidates.append(summary)
+            }
+        }
+        candidates.sort {
+            if $0.latestTimestamp != $1.latestTimestamp {
+                return $0.latestTimestamp > $1.latestTimestamp
+            }
+            return $0.migration.path.path < $1.migration.path.path
+        }
+        return candidates.prefix(externalAgentSessionImportMaxCount).map(\.migration)
+    }
+
+    private static func externalAgentSessionSourcePath(
+        _ path: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> URL? {
+        guard let canonicalPath = try? canonicalURL(path),
+              let projectsRoot = try? canonicalURL(
+            externalAgentHome(configuration: configuration)
+                .appendingPathComponent("projects", isDirectory: true)
+        )
+        else {
+            return nil
+        }
+        guard canonicalPath.pathExtension == "jsonl",
+              canonicalPath.path.hasPrefix(projectsRoot.path + "/")
+        else {
+            return nil
+        }
+        return canonicalPath
+    }
+
+    private static func summarizeExternalAgentSession(_ path: URL) throws -> ExternalAgentSessionSummary? {
+        let records = try externalAgentSessionRecords(path)
+        var cwd: URL?
+        var customTitle: String?
+        var aiTitle: String?
+        var firstUserTitle: String?
+        var latestTimestamp: Int?
+        var sawMessage = false
+
+        for record in records {
+            if cwd == nil,
+               let rawCwd = record["cwd"] as? String {
+                cwd = URL(fileURLWithPath: rawCwd, isDirectory: true)
+            }
+            if let title = externalAgentTitle(from: record, type: "custom-title", field: "customTitle") {
+                customTitle = title
+            }
+            if let title = externalAgentTitle(from: record, type: "ai-title", field: "aiTitle") {
+                aiTitle = title
+            }
+            guard let message = externalAgentConversationMessage(from: record) else {
+                continue
+            }
+            sawMessage = true
+            if firstUserTitle == nil, message.role == .user {
+                firstUserTitle = summarizeExternalAgentSessionLabel(message.text)
+            }
+            if let timestamp = (record["timestamp"] as? String).flatMap(parseExternalAgentTimestamp) {
+                latestTimestamp = max(latestTimestamp ?? timestamp, timestamp)
+            }
+        }
+
+        guard let cwd, sawMessage, let latestTimestamp else {
+            return nil
+        }
+        return ExternalAgentSessionSummary(
+            latestTimestamp: latestTimestamp,
+            migration: ExternalAgentSessionMigration(
+                path: path,
+                cwd: cwd,
+                title: customTitle ?? aiTitle ?? firstUserTitle
+            )
+        )
+    }
+
+    private static func loadExternalAgentSessionForImport(_ path: URL) throws -> ImportedExternalAgentSession? {
+        let records = try externalAgentSessionRecords(path)
+        guard let rawCwd = records.lazy.compactMap({ $0["cwd"] as? String }).first else {
+            return nil
+        }
+        let cwd = URL(fileURLWithPath: rawCwd, isDirectory: true)
+        let messages = records.compactMap(externalAgentConversationMessage)
+        let rolloutItems = externalAgentRolloutItems(from: messages)
+        guard !rolloutItems.isEmpty else {
+            return nil
+        }
+        let title = externalAgentSourceTitle(from: records)
+            ?? messages.first(where: { $0.role == .user }).map { summarizeExternalAgentSessionLabel($0.text) }
+        return ImportedExternalAgentSession(cwd: cwd, title: title, rolloutItems: rolloutItems)
+    }
+
+    private static func externalAgentRolloutItems(
+        from messages: [ExternalAgentConversationMessage]
+    ) -> [RolloutRecordItem] {
+        var items: [RolloutRecordItem] = []
+        var hasUserTurn = false
+        for message in messages {
+            switch message.role {
+            case .user:
+                hasUserTurn = true
+                items.append(.responseItem(.message(
+                    role: "user",
+                    content: [.inputText(text: message.text)]
+                )))
+                items.append(.eventMsg(.userMessage(UserMessageEvent(message: message.text))))
+            case .assistant:
+                guard hasUserTurn else {
+                    continue
+                }
+                items.append(.responseItem(.message(
+                    role: "assistant",
+                    content: [.outputText(text: message.text)]
+                )))
+                items.append(.eventMsg(.agentMessage(AgentMessageEvent(message: message.text))))
+            }
+        }
+        if hasUserTurn {
+            items.append(.eventMsg(.agentMessage(AgentMessageEvent(message: externalAgentSessionImportedMarker))))
+        }
+        return items
+    }
+
+    private static func importExternalAgentSession(
+        _ session: ImportedExternalAgentSession,
+        configuration: CodexAppServerConfiguration
+    ) throws -> ConversationId {
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let conversationID = ConversationId()
+        let recorder = try RolloutRecorder.create(
+            codexHome: configuration.codexHome,
+            cwd: session.cwd,
+            conversationID: conversationID,
+            source: .cli,
+            originator: "codex_app_server",
+            cliVersion: configuration.version,
+            modelProvider: runtimeConfig.selectedModelProviderID
+        )
+        try recorder.recordItems(session.rolloutItems)
+        try recorder.shutdown()
+        if let title = session.title,
+           let name = normalizeExternalAgentThreadName(title) {
+            try appendThreadName(threadID: conversationID, name: name, codexHome: configuration.codexHome)
+        }
+        return conversationID
+    }
+
+    private static func externalAgentSessionMigrationDetails(from value: Any?) throws -> [ExternalAgentSessionMigration] {
+        guard let details = value as? [String: Any],
+              let sessions = details["sessions"] as? [[String: Any]]
+        else {
+            throw AppServerError.invalidRequest("sessions migration item is missing details")
+        }
+        return sessions.compactMap { session in
+            guard let path = session["path"] as? String,
+                  let cwd = session["cwd"] as? String,
+                  !path.isEmpty,
+                  !cwd.isEmpty
+            else {
+                return nil
+            }
+            return ExternalAgentSessionMigration(
+                path: URL(fileURLWithPath: path, isDirectory: false),
+                cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                title: session["title"] as? String
+            )
+        }
+    }
+
+    private static func externalAgentSessionRecords(_ path: URL) throws -> [[String: Any]] {
+        let contents = try String(contentsOf: path, encoding: .utf8)
+        return contents.split(whereSeparator: \.isNewline).compactMap { rawLine in
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                return nil
+            }
+            return object
+        }
+    }
+
+    private static func externalAgentConversationMessage(
+        from record: [String: Any]
+    ) -> ExternalAgentConversationMessage? {
+        guard let type = record["type"] as? String,
+              type == "assistant" || type == "user",
+              record["isMeta"] as? Bool != true,
+              record["isSidechain"] as? Bool != true,
+              let message = record["message"] as? [String: Any],
+              let extracted = extractExternalAgentMessageText(message["content"])
+        else {
+            return nil
+        }
+        return ExternalAgentConversationMessage(
+            role: (type == "assistant" || extracted.onlyToolResult) ? .assistant : .user,
+            text: extracted.text
+        )
+    }
+
+    private static func extractExternalAgentMessageText(_ content: Any?) -> (text: String, onlyToolResult: Bool)? {
+        let blocks: [[String: Any]]
+        if let text = content as? String {
+            blocks = [["type": "text", "text": text]]
+        } else {
+            blocks = (content as? [[String: Any]]) ?? []
+        }
+        var parts: [String] = []
+        var onlyToolResult = !blocks.isEmpty
+        for block in blocks {
+            switch block["type"] as? String {
+            case "text":
+                if let text = block["text"] as? String, !text.isEmpty {
+                    parts.append(text)
+                    onlyToolResult = false
+                }
+            case "tool_use":
+                parts.append(externalAgentToolCallNote(block))
+                onlyToolResult = false
+            case "tool_result":
+                parts.append(externalAgentToolResultNote(block))
+            case "thinking":
+                continue
+            case let other?:
+                parts.append("[external unsupported block: \(other)]")
+                onlyToolResult = false
+            case nil:
+                continue
+            }
+        }
+        let text = parts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+        return text.isEmpty ? nil : (text, onlyToolResult)
+    }
+
+    private static func externalAgentToolCallNote(_ block: [String: Any]) -> String {
+        let name = block["name"] as? String ?? "unknown"
+        var lines = ["[external_agent_tool_call: \(name)]"]
+        if let input = block["input"] as? [String: Any] {
+            if let description = input["description"] as? String {
+                lines.append("description: \(description)")
+            }
+            if let command = input["command"] as? String {
+                lines.append("command: \(command)")
+            }
+            if let file = (input["file_path"] as? String) ?? (input["file"] as? String) {
+                lines.append("file: \(file)")
+            }
+            if lines.count == 1,
+               let data = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]),
+               let raw = String(data: data, encoding: .utf8) {
+                lines.append("input: \(truncateExternalAgentText(raw, maxLength: 2_000))")
+            }
+        } else if let input = block["input"] {
+            lines.append("input: \(truncateExternalAgentText(String(describing: input), maxLength: 2_000))")
+        }
+        lines.append("[/external_agent_tool_call]")
+        return lines.joined(separator: "\n")
+    }
+
+    private static func externalAgentToolResultNote(_ block: [String: Any]) -> String {
+        let label = block["is_error"] as? Bool == true
+            ? "[external_agent_tool_result: error]"
+            : "[external_agent_tool_result]"
+        let text = externalAgentToolResultText(block["content"])
+        guard !text.isEmpty else {
+            return "\(label)\n[/external_agent_tool_result]"
+        }
+        return "\(label)\n\(truncateExternalAgentText(text, maxLength: 4_000))\n[/external_agent_tool_result]"
+    }
+
+    private static func externalAgentToolResultText(_ content: Any?) -> String {
+        if let text = content as? String {
+            return text
+        }
+        return ((content as? [[String: Any]]) ?? [])
+            .compactMap { $0["text"] as? String }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func externalAgentSourceTitle(from records: [[String: Any]]) -> String? {
+        for record in records.reversed() {
+            if let title = externalAgentTitle(from: record, type: "custom-title", field: "customTitle") {
+                return title
+            }
+        }
+        for record in records.reversed() {
+            if let title = externalAgentTitle(from: record, type: "ai-title", field: "aiTitle") {
+                return title
+            }
+        }
+        return nil
+    }
+
+    private static func externalAgentTitle(from record: [String: Any], type: String, field: String) -> String? {
+        guard record["type"] as? String == type,
+              let title = record[field] as? String
+        else {
+            return nil
+        }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func summarizeExternalAgentSessionLabel(_ text: String) -> String {
+        let firstLine = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return truncateExternalAgentText(firstLine, maxLength: 120)
+    }
+
+    private static func truncateExternalAgentText(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else {
+            return text
+        }
+        return String(text.prefix(max(0, maxLength - 3))) + "..."
+    }
+
+    private static func parseExternalAgentTimestamp(_ value: String) -> Int? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return Int(date.timeIntervalSince1970)
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value).map { Int($0.timeIntervalSince1970) }
+    }
+
+    private static func externalAgentSessionImportLedgerContainsCurrentSource(
+        codexHome: URL,
+        sourcePath: URL
+    ) -> Bool {
+        guard let canonicalPath = try? canonicalURL(sourcePath),
+              let contentSHA256 = try? externalAgentSessionContentSHA256(canonicalPath),
+              let ledger = try? externalAgentSessionImportLedger(codexHome: codexHome)
+        else {
+            return false
+        }
+        return ledger.contains { record in
+            record["source_path"] as? String == canonicalPath.path &&
+                record["content_sha256"] as? String == contentSHA256
+        }
+    }
+
+    private static func recordExternalAgentImportedSession(
+        codexHome: URL,
+        sourcePath: URL,
+        importedThreadID: ConversationId
+    ) throws {
+        let canonicalPath = try canonicalURL(sourcePath)
+        let contentSHA256 = try externalAgentSessionContentSHA256(canonicalPath)
+        var records = try externalAgentSessionImportLedger(codexHome: codexHome)
+        guard !records.contains(where: {
+            $0["source_path"] as? String == canonicalPath.path &&
+                $0["content_sha256"] as? String == contentSHA256
+        }) else {
+            return
+        }
+        records.append([
+            "source_path": canonicalPath.path,
+            "content_sha256": contentSHA256,
+            "imported_thread_id": importedThreadID.description,
+            "imported_at": Int(Date().timeIntervalSince1970)
+        ])
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(
+            withJSONObject: ["records": records],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: externalAgentSessionImportLedgerPath(codexHome: codexHome), options: .atomic)
+    }
+
+    private static func externalAgentSessionImportLedger(codexHome: URL) throws -> [[String: Any]] {
+        let path = externalAgentSessionImportLedgerPath(codexHome: codexHome)
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return []
+        }
+        let data = try Data(contentsOf: path)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return object?["records"] as? [[String: Any]] ?? []
+    }
+
+    private static func externalAgentSessionImportLedgerPath(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent("external_agent_session_imports.json", isDirectory: false)
+    }
+
+    private static func externalAgentSessionContentSHA256(_ path: URL) throws -> String {
+        let data = try Data(contentsOf: path)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func canonicalURL(_ url: URL) throws -> URL {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        return url.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    private static func directoryContents(_ url: URL) throws -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+    }
+
+    private static func normalizeExternalAgentThreadName(_ title: String) -> String? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : truncateExternalAgentText(trimmed, maxLength: 120)
     }
 
     private struct ExternalAgentPluginMigration {

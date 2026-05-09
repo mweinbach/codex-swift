@@ -2670,12 +2670,98 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(emptyImportResult.isEmpty)
 
         let unsupportedImport = try appServerResponse(
-            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null}]}}"#,
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"UNKNOWN","description":"Unknown","cwd":null}]}}"#,
             codexHome: temp.url
         )
         let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
         XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
-        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for SESSIONS is not implemented")
+        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for UNKNOWN is not implemented")
+    }
+
+    func testExternalAgentConfigDetectAndImportSessionsCreatesRolloutAndLedger() throws {
+        let temp = try TemporaryDirectory()
+        let codexHome = temp.url.appendingPathComponent("codex-home", isDirectory: true)
+        let projectRoot = temp.url.appendingPathComponent("repo", isDirectory: true)
+        let home = temp.url.appendingPathComponent("home", isDirectory: true)
+        let sessionDir = home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects/repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let sessionPath = sessionDir.appendingPathComponent("session.jsonl", isDirectory: false)
+        let recentTimestamp = ISO8601DateFormatter().string(from: Date())
+        let records = [
+            #"{"type":"user","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":"first request"}}"#,
+            #"{"type":"assistant","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":[{"type":"text","text":"first answer"}]}}"#,
+            #"{"type":"custom-title","customTitle":"Imported title"}"#
+        ].joined(separator: "\n")
+        try records.write(to: sessionPath, atomically: true, encoding: .utf8)
+        let config = CodexAppServerConfiguration(
+            codexHome: codexHome,
+            environment: ["HOME": home.path]
+        )
+        let processor = try initializedProcessor(configuration: config)
+
+        let detect = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"includeHome":true}}"#.utf8
+        )))
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        let sessionsItem = try XCTUnwrap(items.first { $0["itemType"] as? String == "SESSIONS" })
+        let details = try XCTUnwrap(sessionsItem["details"] as? [String: Any])
+        let sessions = try XCTUnwrap(details["sessions"] as? [[String: Any]])
+        XCTAssertEqual(sessions.count, 1)
+        let detectedSessionPath = try XCTUnwrap(sessions[0]["path"] as? String)
+        XCTAssertEqual(
+            URL(fileURLWithPath: detectedSessionPath).resolvingSymlinksInPath().standardizedFileURL.path,
+            sessionPath.resolvingSymlinksInPath().standardizedFileURL.path
+        )
+        XCTAssertEqual(sessions[0]["cwd"] as? String, projectRoot.path)
+        XCTAssertEqual(sessions[0]["title"] as? String, "Imported title")
+
+        let importMessage = #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null,"details":{"sessions":[{"path":"\#(detectedSessionPath)","cwd":"\#(projectRoot.path)","title":"Imported title"}]}}]}}"#
+        let messages = try decodeMessages(processor.processLine(Data(importMessage.utf8)))
+        if let error = messages.first?["error"] as? [String: Any] {
+            XCTFail("unexpected import error: \(error)")
+            return
+        }
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let list = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"thread/list","params":{}}"#.utf8
+        )))
+        let threads = try XCTUnwrap((list["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(threads.count, 1)
+        XCTAssertEqual(threads[0]["name"] as? String, "Imported title")
+        let rolloutPath = try XCTUnwrap(threads[0]["path"] as? String)
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains("first request"))
+        XCTAssertTrue(rollout.contains("first answer"))
+        XCTAssertTrue(rollout.contains("<EXTERNAL SESSION IMPORTED>"))
+        let ledgerData = try Data(
+            contentsOf: codexHome.appendingPathComponent("external_agent_session_imports.json", isDirectory: false)
+        )
+        let ledger = try XCTUnwrap(JSONSerialization.jsonObject(with: ledgerData) as? [String: Any])
+        let ledgerRecords = try XCTUnwrap(ledger["records"] as? [[String: Any]])
+        XCTAssertEqual(ledgerRecords.count, 1)
+        XCTAssertEqual(
+            URL(fileURLWithPath: try XCTUnwrap(ledgerRecords[0]["source_path"] as? String))
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+                .path,
+            URL(fileURLWithPath: detectedSessionPath)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+                .path
+        )
+
+        let detectAfterImport = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"externalAgentConfig/detect","params":{"includeHome":true}}"#.utf8
+        )))
+        let afterItems = try XCTUnwrap((detectAfterImport["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertNil(afterItems.first { $0["itemType"] as? String == "SESSIONS" })
     }
 
     func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
