@@ -75,7 +75,7 @@ public func shlexJoin(_ tokens: [String]) -> String {
 }
 
 public func parseCommand(_ command: [String]) -> [ParsedCommand] {
-    dedupeParsed(parseCommandImpl(command))
+    collapseUnknowns(dedupeParsed(parseCommandImpl(command)), originalCommand: command)
 }
 
 private func dedupeParsed(_ parsed: [ParsedCommand]) -> [ParsedCommand] {
@@ -95,8 +95,27 @@ public enum CommandParser {
     }
 
     public static func parseCommand(_ command: [String]) -> [ParsedCommand] {
-        dedupeParsed(parseCommandImpl(command))
+        collapseUnknowns(dedupeParsed(parseCommandImpl(command)), originalCommand: command)
     }
+}
+
+private func collapseUnknowns(_ parsed: [ParsedCommand], originalCommand: [String]) -> [ParsedCommand] {
+    guard parsed.contains(where: { command in
+        if case .unknown = command {
+            return true
+        }
+        return false
+    }) else {
+        return parsed
+    }
+    return [singleUnknown(for: originalCommand)]
+}
+
+private func singleUnknown(for command: [String]) -> ParsedCommand {
+    if let (_, script) = extractShellCommand(command) ?? extractPowerShellCommand(command) {
+        return .unknown(cmd: script)
+    }
+    return .unknown(cmd: shlexJoin(command))
 }
 
 private func parseCommandImpl(_ command: [String]) -> [ParsedCommand] {
@@ -245,43 +264,92 @@ private func summarizeMainTokens(_ mainCommand: [String]) -> ParsedCommand {
 
     let tail = Array(mainCommand.dropFirst())
     switch head {
-    case "ls":
-        let candidates = skipFlagValues(
-            tail,
-            flagsWithValues: ["-I", "-w", "--block-size", "--format", "--time-style", "--color", "--quoting-style"]
-        )
-        let path = candidates.first(where: { !$0.hasPrefix("-") }).map(shortDisplayPath)
+    case "ls", "eza", "exa":
+        let flagsWithValues: Set<String> = head == "ls"
+            ? ["-I", "-w", "--block-size", "--format", "--time-style", "--color", "--quoting-style"]
+            : ["-I", "--ignore-glob", "--color", "--sort", "--time-style", "--time"]
+        let path = firstNonFlagOperand(tail, flagsWithValues: flagsWithValues).map(shortDisplayPath)
         return .listFiles(cmd: commandString(for: mainCommand), path: path)
 
-    case "rg":
+    case "tree":
+        let path = firstNonFlagOperand(
+            tail,
+            flagsWithValues: ["-L", "-P", "-I", "--charset", "--filelimit", "--sort"]
+        ).map(shortDisplayPath)
+        return .listFiles(cmd: commandString(for: mainCommand), path: path)
+
+    case "du":
+        let path = firstNonFlagOperand(
+            tail,
+            flagsWithValues: ["-d", "--max-depth", "-B", "--block-size", "--exclude", "--time-style"]
+        ).map(shortDisplayPath)
+        return .listFiles(cmd: commandString(for: mainCommand), path: path)
+
+    case "rg", "rga", "ripgrep-all":
         let args = trimAtConnector(tail)
         let hasFilesFlag = args.contains("--files")
-        let nonFlags = args.filter { !$0.hasPrefix("-") }
+        let nonFlags = skipFlagValues(
+            args,
+            flagsWithValues: [
+                "-g", "--glob", "--iglob", "-t", "--type", "--type-add", "--type-not",
+                "-m", "--max-count", "-A", "-B", "-C", "--context", "--max-depth",
+            ]
+        ).filter { !$0.hasPrefix("-") }
         let query: String?
         let path: String?
         if hasFilesFlag {
-            query = nil
-            path = nonFlags.first.map(shortDisplayPath)
+            return .listFiles(cmd: commandString(for: mainCommand), path: nonFlags.first.map(shortDisplayPath))
         } else {
             query = nonFlags.first
             path = nonFlags.dropFirst().first.map(shortDisplayPath)
         }
         return .search(cmd: commandString(for: mainCommand), query: query, path: path)
 
+    case "git":
+        guard let subcommand = tail.first else {
+            return .unknown(cmd: commandString(for: mainCommand))
+        }
+        let subTail = Array(tail.dropFirst())
+        if subcommand == "grep" {
+            return parseGrepLike(mainCommand: mainCommand, tail: subTail)
+        }
+        if subcommand == "ls-files" {
+            let path = firstNonFlagOperand(
+                subTail,
+                flagsWithValues: ["--exclude", "--exclude-from", "--pathspec-from-file"]
+            ).map(shortDisplayPath)
+            return .listFiles(cmd: commandString(for: mainCommand), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
     case "fd":
         let (query, path) = parseFDQueryAndPath(tail)
-        return .search(cmd: commandString(for: mainCommand), query: query, path: path)
+        if let query {
+            return .search(cmd: commandString(for: mainCommand), query: query, path: path)
+        }
+        return .listFiles(cmd: commandString(for: mainCommand), path: path)
 
     case "find":
         let (query, path) = parseFindQueryAndPath(tail)
-        return .search(cmd: commandString(for: mainCommand), query: query, path: path)
+        if let query {
+            return .search(cmd: commandString(for: mainCommand), query: query, path: path)
+        }
+        return .listFiles(cmd: commandString(for: mainCommand), path: path)
 
-    case "grep":
+    case "grep", "egrep", "fgrep":
+        return parseGrepLike(mainCommand: mainCommand, tail: tail)
+
+    case "ag", "ack", "pt":
         let args = trimAtConnector(tail)
-        let nonFlags = args.filter { !$0.hasPrefix("-") }
-        let query = nonFlags.first
-        let path = nonFlags.dropFirst().first.map(shortDisplayPath)
-        return .search(cmd: commandString(for: mainCommand), query: query, path: path)
+        let nonFlags = skipFlagValues(
+            args,
+            flagsWithValues: ["-G", "-g", "--file-search-regex", "--ignore-dir", "--ignore-file", "--path-to-ignore"]
+        ).filter { !$0.hasPrefix("-") }
+        return .search(
+            cmd: commandString(for: mainCommand),
+            query: nonFlags.first,
+            path: nonFlags.dropFirst().first.map(shortDisplayPath)
+        )
 
     case "cat":
         let effectiveTail = tail.first == "--" ? Array(tail.dropFirst()) : tail
@@ -354,9 +422,20 @@ private func summarizeMainTokens(_ mainCommand: [String]) -> ParsedCommand {
         return .unknown(cmd: commandString(for: mainCommand))
 
     case "sed":
-        if tail.count >= 3, tail[0] == "-n", isValidSedNArg(tail[1]) {
-            let path = tail[2]
+        if let path = sedReadPath(tail) {
             return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
+    case "awk":
+        if let path = awkDataFileOperand(tail) {
+            return .read(cmd: commandString(for: mainCommand), name: shortDisplayPath(path), path: path)
+        }
+        return .unknown(cmd: commandString(for: mainCommand))
+
+    case let python where isPythonCommand(python):
+        if pythonWalksFiles(tail) {
+            return .listFiles(cmd: commandString(for: mainCommand), path: nil)
         }
         return .unknown(cmd: commandString(for: mainCommand))
 
@@ -513,6 +592,61 @@ private func singleNonFlagOperand(_ args: [String], flagsWithValues: Set<String>
     return operands[0]
 }
 
+private func firstNonFlagOperand(_ args: [String], flagsWithValues: Set<String>) -> String? {
+    skipFlagValues(args, flagsWithValues: flagsWithValues).first { !$0.hasPrefix("-") }
+}
+
+private func parseGrepLike(mainCommand: [String], tail: [String]) -> ParsedCommand {
+    let args = trimAtConnector(tail)
+    var operands: [String] = []
+    var pattern: String?
+    var afterDoubleDash = false
+    var index = 0
+
+    while index < args.count {
+        let arg = args[index]
+        if afterDoubleDash {
+            operands.append(arg)
+            index += 1
+            continue
+        }
+        if arg == "--" {
+            afterDoubleDash = true
+            index += 1
+            continue
+        }
+        if ["-e", "--regexp", "-f", "--file"].contains(arg) {
+            if index + 1 < args.count, pattern == nil {
+                pattern = args[index + 1]
+            }
+            index += 2
+            continue
+        }
+        if [
+            "-m", "--max-count", "-C", "--context", "-A", "--after-context",
+            "-B", "--before-context",
+        ].contains(arg) {
+            index += 2
+            continue
+        }
+        if arg.hasPrefix("-") {
+            index += 1
+            continue
+        }
+        operands.append(arg)
+        index += 1
+    }
+
+    let hasExplicitPattern = pattern != nil
+    let query = pattern ?? operands.first
+    let pathIndex = hasExplicitPattern ? 0 : 1
+    return .search(
+        cmd: commandString(for: mainCommand),
+        query: query,
+        path: operands[safe: pathIndex].map(shortDisplayPath)
+    )
+}
+
 private func isPathish(_ value: String) -> Bool {
     value == "."
         || value == ".."
@@ -574,14 +708,91 @@ private func isValidSedNArg(_ argument: String?) -> Bool {
     }
 }
 
+private func sedReadPath(_ tail: [String]) -> String? {
+    let args = trimAtConnector(tail)
+    guard args.contains("-n") else {
+        return nil
+    }
+
+    var hasRangeScript = false
+    var index = 0
+    while index < args.count {
+        let arg = args[index]
+        if ["-e", "--expression"].contains(arg) {
+            if isValidSedNArg(args[safe: index + 1]) {
+                hasRangeScript = true
+            }
+            index += 2
+            continue
+        }
+        if ["-f", "--file"].contains(arg) {
+            index += 2
+            continue
+        }
+        index += 1
+    }
+
+    if !hasRangeScript {
+        hasRangeScript = args.contains { arg in
+            !arg.hasPrefix("-") && isValidSedNArg(arg)
+        }
+    }
+    guard hasRangeScript else {
+        return nil
+    }
+
+    let nonFlags = skipFlagValues(
+        args,
+        flagsWithValues: ["-e", "-f", "--expression", "--file"]
+    ).filter { !$0.hasPrefix("-") }
+
+    guard let first = nonFlags.first else {
+        return nil
+    }
+    if isValidSedNArg(first) {
+        return nonFlags.dropFirst().first
+    }
+    return first
+}
+
+private func pythonWalksFiles(_ tail: [String]) -> Bool {
+    let args = trimAtConnector(tail)
+    var index = 0
+    while index < args.count {
+        if args[index] == "-c", let script = args[safe: index + 1] {
+            return script.contains("os.walk")
+                || script.contains("os.listdir")
+                || script.contains("os.scandir")
+                || script.contains("glob.glob")
+                || script.contains("glob.iglob")
+                || script.contains("pathlib.Path")
+                || script.contains(".rglob(")
+        }
+        index += 1
+    }
+    return false
+}
+
+private func isPythonCommand(_ command: String) -> Bool {
+    command == "python"
+        || command == "python2"
+        || command == "python3"
+        || command.hasPrefix("python2.")
+        || command.hasPrefix("python3.")
+}
+
 private func isSmallFormattingCommand(_ tokens: [String]) -> Bool {
     guard let command = tokens.first else {
         return false
     }
 
     switch command {
-    case "wc", "tr", "cut", "sort", "uniq", "xargs", "tee", "column", "awk", "yes", "printf":
+    case "wc", "tr", "cut", "sort", "uniq", "tee", "column", "yes", "printf":
         return true
+    case "xargs":
+        return !isMutatingXargsCommand(tokens)
+    case "awk":
+        return awkDataFileOperand(Array(tokens.dropFirst())) == nil
     case "head":
         switch tokens.count {
         case 1:
@@ -609,6 +820,70 @@ private func isSmallFormattingCommand(_ tokens: [String]) -> Bool {
     default:
         return false
     }
+}
+
+private func isMutatingXargsCommand(_ tokens: [String]) -> Bool {
+    guard let subcommand = xargsSubcommand(tokens) else {
+        return false
+    }
+    guard let head = subcommand.first else {
+        return false
+    }
+    let tail = Array(subcommand.dropFirst())
+    switch head {
+    case "perl", "ruby":
+        return xargsHasInPlaceFlag(tail)
+    case "sed":
+        return xargsHasInPlaceFlag(tail) || tail.contains("--in-place")
+    case "rg":
+        return tail.contains("--replace")
+    default:
+        return false
+    }
+}
+
+private func xargsSubcommand(_ tokens: [String]) -> [String]? {
+    guard tokens.first == "xargs" else {
+        return nil
+    }
+
+    var index = 1
+    while index < tokens.count {
+        let token = tokens[index]
+        if token == "--" {
+            let rest = Array(tokens.dropFirst(index + 1))
+            return rest.isEmpty ? nil : rest
+        }
+        if !token.hasPrefix("-") {
+            let rest = Array(tokens.dropFirst(index))
+            return rest.isEmpty ? nil : rest
+        }
+        let takesValue = ["-E", "-e", "-I", "-L", "-n", "-P", "-s"].contains(token)
+        index += takesValue && token.count == 2 ? 2 : 1
+    }
+    return nil
+}
+
+private func xargsHasInPlaceFlag(_ tokens: [String]) -> Bool {
+    tokens.contains { token in
+        token == "-i" || token.hasPrefix("-i") || token == "-pi" || token.hasPrefix("-pi")
+    }
+}
+
+private func awkDataFileOperand(_ args: [String]) -> String? {
+    guard !args.isEmpty else {
+        return nil
+    }
+    let args = trimAtConnector(args)
+    let hasScriptFile = args.contains { $0 == "-f" || $0 == "--file" }
+    let candidates = skipFlagValues(
+        args,
+        flagsWithValues: ["-F", "-v", "-f", "--field-separator", "--assign", "--file"]
+    ).filter { !$0.hasPrefix("-") }
+    if hasScriptFile {
+        return candidates.first
+    }
+    return candidates.count >= 2 ? candidates[1] : nil
 }
 
 private func fileOperandForHead(_ tail: [String]) -> String? {

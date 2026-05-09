@@ -38,9 +38,9 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
-    func testGitPipeWcKeepsPrimaryCommandUnknown() {
+    func testGitPipeWcCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "git status | wc -l"]), [
-            .unknown(cmd: "git status")
+            .unknown(cmd: "git status | wc -l")
         ])
     }
 
@@ -78,9 +78,9 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
-    func testBashCdThenUnknownDropsLeadingCdLikeRust() {
+    func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
-            .unknown(cmd: "bar")
+            .unknown(cmd: "cd foo && bar")
         ])
     }
 
@@ -98,11 +98,11 @@ final class ParsedCommandTests: XCTestCase {
 
     func testSupportsRgFilesWithPathAndPipe() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files webview/src | sed -n"]), [
-            .search(cmd: "rg --files webview/src", query: nil, path: "webview")
+            .listFiles(cmd: "rg --files webview/src", path: "webview")
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | head -n 50"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
     }
 
@@ -116,10 +116,7 @@ final class ParsedCommandTests: XCTestCase {
     func testHandlesComplexBashCommandHead() {
         let inner = "rg --version && node -v && pnpm -v && rg --files | wc -l && rg --files | head -n 40"
         XCTAssertEqual(parseCommand(["bash", "-lc", inner]), [
-            .search(cmd: "rg --version", query: nil, path: nil),
-            .unknown(cmd: "node -v"),
-            .unknown(cmd: "pnpm -v"),
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .unknown(cmd: inner)
         ])
     }
 
@@ -213,7 +210,7 @@ final class ParsedCommandTests: XCTestCase {
 
     func testSearchVariants() {
         XCTAssertEqual(parseCommand(["fd", "-t", "f", "src/"]), [
-            .search(cmd: "fd -t f src/", query: nil, path: "src")
+            .listFiles(cmd: "fd -t f src/", path: "src")
         ])
         XCTAssertEqual(parseCommand(["fd", "main", "src"]), [
             .search(cmd: "fd main src", query: "main", path: "src")
@@ -222,27 +219,65 @@ final class ParsedCommandTests: XCTestCase {
             .search(cmd: "find . -name '*.rs'", query: "*.rs", path: ".")
         ])
         XCTAssertEqual(parseCommand(["find", "src", "-type", "f"]), [
-            .search(cmd: "find src -type f", query: nil, path: "src")
+            .listFiles(cmd: "find src -type f", path: "src")
+        ])
+    }
+
+    func testAdditionalRustParserCommandVariants() {
+        XCTAssertEqual(parseCommand(["git", "grep", "-l", "TODO", "src"]), [
+            .search(cmd: "git grep -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["git", "ls-files", "--exclude", "target", "src"]), [
+            .listFiles(cmd: "git ls-files --exclude target src", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["eza", "--color=always", "src"]), [
+            .listFiles(cmd: "eza '--color=always' src", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["tree", "-L", "2", "src"]), [
+            .listFiles(cmd: "tree -L 2 src", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["du", "-d", "2", "."]), [
+            .listFiles(cmd: "du -d 2 .", path: ".")
+        ])
+        XCTAssertEqual(parseCommand(["ag", "-l", "TODO", "src"]), [
+            .search(cmd: "ag -l TODO src", query: "TODO", path: "src")
+        ])
+        XCTAssertEqual(parseCommand(["rga", "--files", "docs"]), [
+            .listFiles(cmd: "rga --files docs", path: "docs")
+        ])
+    }
+
+    func testAwkPythonAndMutatingXargsParity() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "awk '{print $1}' Cargo.toml"]), [
+            .read(cmd: "awk '{print $1}' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"python3 -c "import glob; print(glob.glob('*.rs'))""#]), [
+            .listFiles(cmd: #"python3 -c 'import glob; print(glob.glob('\''*.rs'\''))'"#, path: nil)
+        ])
+
+        let mutatingPipeline = #"rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'"#
+        XCTAssertEqual(parseCommand(["bash", "-lc", mutatingPipeline]), [
+            .unknown(cmd: mutatingPipeline)
         ])
     }
 
     func testStripsTrueInsideBashLc() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files || true"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
 
         XCTAssertEqual(parseCommand(["true", "&&", "rg", "--files"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
 
         XCTAssertEqual(parseCommand(["rg", "--files", "&&", "true"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
     }
 
     func testSupportsCdAndRgFiles() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd codex-rs && rg --files"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
     }
 
@@ -265,7 +300,7 @@ final class ParsedCommandTests: XCTestCase {
 
     func testDropsFormattingCommandsInPipelines() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "yes | rg --files"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
 
         let printfThenCat = #"printf "\n===== ansi-escape/Cargo.toml =====\n"; cat -- ansi-escape/Cargo.toml"#
@@ -274,7 +309,7 @@ final class ParsedCommandTests: XCTestCase {
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | nl -ba"]), [
-            .search(cmd: "rg --files", query: nil, path: nil)
+            .listFiles(cmd: "rg --files", path: nil)
         ])
 
         XCTAssertEqual(parseCommand(["sed", "-n", "260,640p", "exec/src/event_processor_with_human_output.rs", "|", "nl", "-ba"]), [
@@ -297,34 +332,21 @@ final class ParsedCommandTests: XCTestCase {
 
     func testSplitsSemicolonAndOrConnectorsLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg foo ; echo done"]), [
-            .search(cmd: "rg foo", query: "foo", path: nil),
-            .unknown(cmd: "echo done")
+            .unknown(cmd: "rg foo ; echo done")
         ])
 
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg foo || echo done"]), [
-            .search(cmd: "rg foo", query: "foo", path: nil),
-            .unknown(cmd: "echo done")
+            .unknown(cmd: "rg foo || echo done")
         ])
 
         let mixed = #"pwd; ls -la; rg --files -g '!target' | wc -l; rg -n '^\[workspace\]' -n Cargo.toml || true; cargo --version"#
         XCTAssertEqual(parseCommand(["bash", "-lc", mixed]), [
-            .unknown(cmd: "pwd"),
-            .listFiles(cmd: "ls -la", path: nil),
-            .search(cmd: "rg --files -g '!target'", query: nil, path: "!target"),
-            .search(cmd: ##"rg -n "^\\[workspace\\]" -n Cargo.toml"##, query: #"^\[workspace\]"#, path: "Cargo.toml"),
-            .unknown(cmd: "cargo --version")
+            .unknown(cmd: mixed)
         ])
 
         let fullMixed = #"pwd; ls -la; rg --files -g '!target' | wc -l; rg -n '^\[workspace\]' -n Cargo.toml || true; rg -n '^\[package\]' -n */Cargo.toml || true; cargo --version; rustc --version; cargo clippy --workspace --all-targets --all-features -q"#
         XCTAssertEqual(parseCommand(["bash", "-lc", fullMixed]), [
-            .unknown(cmd: "pwd"),
-            .listFiles(cmd: "ls -la", path: nil),
-            .search(cmd: "rg --files -g '!target'", query: nil, path: "!target"),
-            .search(cmd: ##"rg -n "^\\[workspace\\]" -n Cargo.toml"##, query: #"^\[workspace\]"#, path: "Cargo.toml"),
-            .search(cmd: ##"rg -n "^\\[package\\]" -n '*/Cargo.toml'"##, query: #"^\[package\]"#, path: "Cargo.toml"),
-            .unknown(cmd: "cargo --version"),
-            .unknown(cmd: "rustc --version"),
-            .unknown(cmd: "cargo clippy --workspace --all-targets --all-features -q")
+            .unknown(cmd: fullMixed)
         ])
     }
 
