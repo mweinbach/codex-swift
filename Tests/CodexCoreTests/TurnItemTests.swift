@@ -371,6 +371,116 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [])
     }
 
+    func testMcpToolCallTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.mcpToolCall(McpToolCallItem(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            arguments: .object(["path": .string("/tmp/notes.txt")]),
+            mcpAppResourceURI: "plugin://filesystem",
+            status: .completed,
+            result: McpCallToolResult(content: [.text(McpTextContent(text: "done"))]),
+            duration: ProtocolDuration(secs: 2, nanos: 500)
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "McpToolCall",
+            "id": "mcp-1",
+            "server": "filesystem",
+            "tool": "read_file",
+            "arguments": [
+                "path": "/tmp/notes.txt"
+            ],
+            "mcpAppResourceUri": "plugin://filesystem",
+            "status": "completed",
+            "result": [
+                "content": [
+                    [
+                        "text": "done",
+                        "type": "text"
+                    ]
+                ]
+            ],
+            "duration": [
+                "secs": 2,
+                "nanos": 500
+            ]
+        ])
+        XCTAssertEqual(item.id, "mcp-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .mcpToolCallEnd(McpToolCallEndEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(
+                    server: "filesystem",
+                    tool: "read_file",
+                    arguments: .object(["path": .string("/tmp/notes.txt")])
+                ),
+                mcpAppResourceURI: "plugin://filesystem",
+                duration: ProtocolDuration(secs: 2, nanos: 500),
+                result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "done"))]))
+            ))
+        ])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
+    func testMcpToolCallTurnItemFailedErrorProjection() throws {
+        let item = TurnItem.mcpToolCall(McpToolCallItem(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            arguments: .null,
+            status: .failed,
+            error: McpToolCallError(message: "server disconnected"),
+            duration: ProtocolDuration(secs: 1)
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "McpToolCall",
+            "id": "mcp-1",
+            "server": "filesystem",
+            "tool": "read_file",
+            "arguments": NSNull(),
+            "status": "failed",
+            "error": [
+                "message": "server disconnected"
+            ],
+            "duration": [
+                "secs": 1,
+                "nanos": 0
+            ]
+        ])
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [
+            .mcpToolCallEnd(McpToolCallEndEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+                duration: ProtocolDuration(secs: 1),
+                result: .err("server disconnected")
+            ))
+        ])
+    }
+
+    func testMcpToolCallPendingItemOmitsLegacyEnd() throws {
+        let item = TurnItem.mcpToolCall(McpToolCallItem(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            arguments: .null,
+            status: .inProgress
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "McpToolCall",
+            "id": "mcp-1",
+            "server": "filesystem",
+            "tool": "read_file",
+            "arguments": NSNull(),
+            "status": "inProgress"
+        ])
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [])
+    }
+
     func testLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
         let event = LegacyEventMessage.webSearchEnd(WebSearchEndEvent(callID: "search-1", query: "docs"))
 
@@ -470,6 +580,77 @@ final class TurnItemTests: XCTestCase {
         ), end)
     }
 
+    func testMcpToolCallLegacyEventWireShapesUseRustTags() throws {
+        let begin = LegacyEventMessage.mcpToolCallBegin(McpToolCallBeginEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .object(["path": .string("/tmp/notes.txt")])
+            ),
+            mcpAppResourceURI: "plugin://filesystem"
+        ))
+        let end = LegacyEventMessage.mcpToolCallEnd(McpToolCallEndEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .object(["path": .string("/tmp/notes.txt")])
+            ),
+            mcpAppResourceURI: "plugin://filesystem",
+            duration: ProtocolDuration(secs: 2),
+            result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "done"))]))
+        ))
+
+        try XCTAssertJSONObjectEqual(begin, [
+            "type": "mcp_tool_call_begin",
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": [
+                    "path": "/tmp/notes.txt"
+                ]
+            ],
+            "mcp_app_resource_uri": "plugin://filesystem"
+        ])
+        try XCTAssertJSONObjectEqual(end, [
+            "type": "mcp_tool_call_end",
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": [
+                    "path": "/tmp/notes.txt"
+                ]
+            ],
+            "mcp_app_resource_uri": "plugin://filesystem",
+            "duration": [
+                "secs": 2,
+                "nanos": 0
+            ],
+            "result": [
+                "Ok": [
+                    "content": [
+                        [
+                            "text": "done",
+                            "type": "text"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(begin)
+        ), begin)
+        XCTAssertEqual(try JSONDecoder().decode(
+            LegacyEventMessage.self,
+            from: try JSONEncoder().encode(end)
+        ), end)
+    }
+
     func testImageGenerationLegacyEventWireShapeUsesRustSnakeCaseTags() throws {
         let event = LegacyEventMessage.imageGenerationEnd(ImageGenerationEndEvent(
             callID: "ig-1",
@@ -535,6 +716,19 @@ final class TurnItemTests: XCTestCase {
             )),
             startedAtMilliseconds: 127
         )
+        let mcpToolCall = ItemStartedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .mcpToolCall(McpToolCallItem(
+                id: "mcp-1",
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .null,
+                mcpAppResourceURI: "plugin://filesystem",
+                status: .inProgress
+            )),
+            startedAtMilliseconds: 128
+        )
 
         XCTAssertEqual(webSearch.asLegacyEvents(), [
             .webSearchBegin(WebSearchBeginEvent(callID: "search-1"))
@@ -550,6 +744,13 @@ final class TurnItemTests: XCTestCase {
                 turnID: "turn-1",
                 autoApproved: true,
                 changes: ["Sources/New.swift": .add(content: "let x = 1\n")]
+            ))
+        ])
+        XCTAssertEqual(mcpToolCall.asLegacyEvents(), [
+            .mcpToolCallBegin(McpToolCallBeginEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+                mcpAppResourceURI: "plugin://filesystem"
             ))
         ])
     }
@@ -642,6 +843,36 @@ final class TurnItemTests: XCTestCase {
                 success: false,
                 changes: ["Sources/New.swift": .add(content: "let x = 1\n")],
                 status: .failed
+            ))
+        ])
+    }
+
+    func testItemCompletedEventDelegatesMcpToolCallLegacyEnd() throws {
+        let threadID = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let completed = ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .mcpToolCall(McpToolCallItem(
+                id: "mcp-1",
+                server: "filesystem",
+                tool: "read_file",
+                arguments: .object(["path": .string("/tmp/notes.txt")]),
+                status: .completed,
+                result: McpCallToolResult(content: [.text(McpTextContent(text: "done"))]),
+                duration: ProtocolDuration(secs: 2)
+            ))
+        )
+
+        XCTAssertEqual(completed.asLegacyEvents(showRawAgentReasoning: true), [
+            .mcpToolCallEnd(McpToolCallEndEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(
+                    server: "filesystem",
+                    tool: "read_file",
+                    arguments: .object(["path": .string("/tmp/notes.txt")])
+                ),
+                duration: ProtocolDuration(secs: 2),
+                result: .ok(McpCallToolResult(content: [.text(McpTextContent(text: "done"))]))
             ))
         ])
     }

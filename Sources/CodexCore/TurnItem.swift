@@ -10,6 +10,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
     case imageView(ImageViewItem)
     case imageGeneration(ImageGenerationItem)
     case fileChange(FileChangeItem)
+    case mcpToolCall(McpToolCallItem)
     case contextCompaction(ContextCompactionItem)
 
     private enum CodingKeys: String, CodingKey {
@@ -26,6 +27,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case imageView = "ImageView"
         case imageGeneration = "ImageGeneration"
         case fileChange = "FileChange"
+        case mcpToolCall = "McpToolCall"
         case contextCompaction = "ContextCompaction"
     }
 
@@ -48,6 +50,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .imageGeneration(item):
             return item.id
         case let .fileChange(item):
+            return item.id
+        case let .mcpToolCall(item):
             return item.id
         case let .contextCompaction(item):
             return item.id
@@ -75,6 +79,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .imageGeneration(try ImageGenerationItem(from: decoder))
         case .fileChange:
             self = .fileChange(try FileChangeItem(from: decoder))
+        case .mcpToolCall:
+            self = .mcpToolCall(try McpToolCallItem(from: decoder))
         case .contextCompaction:
             self = .contextCompaction(try ContextCompactionItem(from: decoder))
         }
@@ -110,6 +116,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .fileChange(item):
             try container.encode(ItemType.fileChange, forKey: .type)
             try item.encode(to: encoder)
+        case let .mcpToolCall(item):
+            try container.encode(ItemType.mcpToolCall, forKey: .type)
+            try item.encode(to: encoder)
         case let .contextCompaction(item):
             try container.encode(ItemType.contextCompaction, forKey: .type)
             try item.encode(to: encoder)
@@ -136,6 +145,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return [item.asLegacyEvent()]
         case let .fileChange(item):
             return item.asLegacyEndEvent(turnID: "").map { [$0] } ?? []
+        case let .mcpToolCall(item):
+            return item.asLegacyEndEvent().map { [$0] } ?? []
         case let .contextCompaction(item):
             return [item.asLegacyEvent()]
         }
@@ -477,6 +488,105 @@ public struct FileChangeItem: Equatable, Codable, Sendable {
     }
 }
 
+public enum McpToolCallStatus: String, Codable, Equatable, Sendable {
+    case inProgress
+    case completed
+    case failed
+}
+
+public struct McpToolCallError: Equatable, Codable, Sendable {
+    public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+}
+
+public struct McpToolCallItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let server: String
+    public let tool: String
+    public let arguments: JSONValue
+    public let mcpAppResourceURI: String?
+    public let status: McpToolCallStatus
+    public let result: McpCallToolResult?
+    public let error: McpToolCallError?
+    public let duration: ProtocolDuration?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case server
+        case tool
+        case arguments
+        case mcpAppResourceURI = "mcpAppResourceUri"
+        case status
+        case result
+        case error
+        case duration
+    }
+
+    public init(
+        id: String,
+        server: String,
+        tool: String,
+        arguments: JSONValue,
+        mcpAppResourceURI: String? = nil,
+        status: McpToolCallStatus,
+        result: McpCallToolResult? = nil,
+        error: McpToolCallError? = nil,
+        duration: ProtocolDuration? = nil
+    ) {
+        self.id = id
+        self.server = server
+        self.tool = tool
+        self.arguments = arguments
+        self.mcpAppResourceURI = mcpAppResourceURI
+        self.status = status
+        self.result = result
+        self.error = error
+        self.duration = duration
+    }
+
+    public func asLegacyBeginEvent() -> LegacyEventMessage {
+        .mcpToolCallBegin(McpToolCallBeginEvent(
+            callID: id,
+            invocation: invocation,
+            mcpAppResourceURI: mcpAppResourceURI
+        ))
+    }
+
+    public func asLegacyEndEvent() -> LegacyEventMessage? {
+        let toolResult: McpToolCallResult
+        if let result {
+            toolResult = .ok(result)
+        } else if let error {
+            toolResult = .err(error.message)
+        } else {
+            return nil
+        }
+
+        guard let duration else {
+            return nil
+        }
+
+        return .mcpToolCallEnd(McpToolCallEndEvent(
+            callID: id,
+            invocation: invocation,
+            mcpAppResourceURI: mcpAppResourceURI,
+            duration: duration,
+            result: toolResult
+        ))
+    }
+
+    private var invocation: McpInvocation {
+        McpInvocation(
+            server: server,
+            tool: tool,
+            arguments: arguments == .null ? nil : arguments
+        )
+    }
+}
+
 public struct ContextCompactionItem: Equatable, Codable, Sendable {
     public let id: String
 
@@ -519,6 +629,8 @@ public struct ItemStartedEvent: Equatable, Codable, Sendable {
             return [.imageGenerationBegin(ImageGenerationBeginEvent(callID: item.id))]
         case let .fileChange(item):
             return [item.asLegacyBeginEvent(turnID: turnID)]
+        case let .mcpToolCall(item):
+            return [item.asLegacyBeginEvent()]
         default:
             return []
         }
@@ -556,6 +668,9 @@ public struct ItemCompletedEvent: Equatable, Codable, Sendable {
     public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
         if case let .fileChange(fileChangeItem) = item {
             return fileChangeItem.asLegacyEndEvent(turnID: turnID).map { [$0] } ?? []
+        }
+        if case let .mcpToolCall(mcpToolCallItem) = item {
+            return mcpToolCallItem.asLegacyEndEvent().map { [$0] } ?? []
         }
         return item.asLegacyEvents(showRawAgentReasoning: showRawAgentReasoning)
     }

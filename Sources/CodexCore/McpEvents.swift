@@ -443,36 +443,64 @@ public struct McpInvocation: Equatable, Codable, Sendable {
 public struct McpToolCallBeginEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let invocation: McpInvocation
+    public let mcpAppResourceURI: String?
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
         case invocation
+        case mcpAppResourceURI = "mcp_app_resource_uri"
     }
 
-    public init(callID: String, invocation: McpInvocation) {
+    public init(callID: String, invocation: McpInvocation, mcpAppResourceURI: String? = nil) {
         self.callID = callID
         self.invocation = invocation
+        self.mcpAppResourceURI = mcpAppResourceURI
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(callID, forKey: .callID)
+        try container.encode(invocation, forKey: .invocation)
+        try container.encodeIfPresent(mcpAppResourceURI, forKey: .mcpAppResourceURI)
     }
 }
 
 public struct McpToolCallEndEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let invocation: McpInvocation
+    public let mcpAppResourceURI: String?
     public let duration: ProtocolDuration
     public let result: McpToolCallResult
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
         case invocation
+        case mcpAppResourceURI = "mcp_app_resource_uri"
         case duration
         case result
     }
 
-    public init(callID: String, invocation: McpInvocation, duration: ProtocolDuration, result: McpToolCallResult) {
+    public init(
+        callID: String,
+        invocation: McpInvocation,
+        mcpAppResourceURI: String? = nil,
+        duration: ProtocolDuration,
+        result: McpToolCallResult
+    ) {
         self.callID = callID
         self.invocation = invocation
+        self.mcpAppResourceURI = mcpAppResourceURI
         self.duration = duration
         self.result = result
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(callID, forKey: .callID)
+        try container.encode(invocation, forKey: .invocation)
+        try container.encodeIfPresent(mcpAppResourceURI, forKey: .mcpAppResourceURI)
+        try container.encode(duration, forKey: .duration)
+        try container.encode(result, forKey: .result)
     }
 
     public var isSuccess: Bool {

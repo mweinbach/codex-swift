@@ -284,6 +284,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
     case contextCompacted(ContextCompactedEvent)
     case patchApplyBegin(PatchApplyBeginEvent)
     case patchApplyEnd(PatchApplyEndEvent)
+    case mcpToolCallBegin(McpToolCallBeginEvent)
+    case mcpToolCallEnd(McpToolCallEndEvent)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -306,6 +308,8 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
         case contextCompacted = "context_compacted"
         case patchApplyBegin = "patch_apply_begin"
         case patchApplyEnd = "patch_apply_end"
+        case mcpToolCallBegin = "mcp_tool_call_begin"
+        case mcpToolCallEnd = "mcp_tool_call_end"
     }
 
     public init(from decoder: Decoder) throws {
@@ -343,6 +347,10 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             self = .patchApplyBegin(try PatchApplyBeginEvent(from: decoder))
         case .patchApplyEnd:
             self = .patchApplyEnd(try PatchApplyEndEvent(from: decoder))
+        case .mcpToolCallBegin:
+            self = .mcpToolCallBegin(try McpToolCallBeginEvent(from: decoder))
+        case .mcpToolCallEnd:
+            self = .mcpToolCallEnd(try McpToolCallEndEvent(from: decoder))
         }
     }
 
@@ -396,6 +404,12 @@ public enum LegacyEventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .patchApplyEnd(event):
             try container.encode(EventType.patchApplyEnd, forKey: .type)
+            try event.encode(to: encoder)
+        case let .mcpToolCallBegin(event):
+            try container.encode(EventType.mcpToolCallBegin, forKey: .type)
+            try event.encode(to: encoder)
+        case let .mcpToolCallEnd(event):
+            try container.encode(EventType.mcpToolCallEnd, forKey: .type)
             try event.encode(to: encoder)
         }
     }

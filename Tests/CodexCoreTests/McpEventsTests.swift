@@ -360,10 +360,29 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testToolCallBeginCarriesMcpAppResourceURIWhenPresent() throws {
+        let event = McpToolCallBeginEvent(
+            callID: "mcp-1",
+            invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+            mcpAppResourceURI: "plugin://filesystem"
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "call_id": "mcp-1",
+            "invocation": [
+                "server": "filesystem",
+                "tool": "read_file",
+                "arguments": NSNull()
+            ],
+            "mcp_app_resource_uri": "plugin://filesystem"
+        ])
+    }
+
     func testToolCallEndEventOkWireShapeAndSuccess() throws {
         let event = McpToolCallEndEvent(
             callID: "mcp-1",
             invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+            mcpAppResourceURI: "plugin://filesystem",
             duration: ProtocolDuration(secs: 2, nanos: 500),
             result: .ok(McpCallToolResult(
                 content: [
@@ -384,6 +403,7 @@ final class McpEventsTests: XCTestCase {
                 "tool": "read_file",
                 "arguments": NSNull()
             ],
+            "mcp_app_resource_uri": "plugin://filesystem",
             "duration": [
                 "secs": 2,
                 "nanos": 500
