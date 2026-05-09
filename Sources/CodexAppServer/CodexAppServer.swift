@@ -2875,13 +2875,20 @@ public enum CodexAppServer {
            let item = try detectExternalAgentConfig(cwd: nil, configuration: configuration) {
             items.append(item)
         }
+        if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentSkills(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
         for cwd in params?["cwds"] as? [String] ?? [] {
-            guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)),
-                  let item = try detectExternalAgentConfig(cwd: repoRoot.path, configuration: configuration)
-            else {
+            guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
                 continue
             }
-            items.append(item)
+            if let item = try detectExternalAgentConfig(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentSkills(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
         }
         return ["items": items]
     }
@@ -2905,6 +2912,8 @@ public enum CodexAppServer {
             switch itemType {
             case "CONFIG":
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
+            case "SKILLS":
+                try importExternalAgentSkills(cwd: cwd, configuration: configuration)
             default:
                 throw AppServerError.invalidRequest("external agent config import for \(itemType) is not implemented")
             }
@@ -2959,6 +2968,23 @@ public enum CodexAppServer {
         return item
     }
 
+    private static func detectExternalAgentSkills(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = externalAgentSkillsPaths(cwd: cwd, configuration: configuration)
+        guard try countMissingExternalAgentSkillDirectories(source: paths.sourceSkills, target: paths.targetSkills) > 0 else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "SKILLS",
+            "description": "Migrate skills from \(paths.sourceSkills.path) to \(paths.targetSkills.path)",
+            "details": NSNull()
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
     private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
         let paths: (sourceSettings: URL, targetConfig: URL, cwd: String?)
         if let cwd, !cwd.isEmpty,
@@ -3002,6 +3028,29 @@ public enum CodexAppServer {
         try renderConfigToml(next).write(to: paths.targetConfig, atomically: true, encoding: .utf8)
     }
 
+    private static func importExternalAgentSkills(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = externalAgentSkillsPaths(cwd: cwd, configuration: configuration)
+        guard isDirectory(path: paths.sourceSkills.path) else {
+            return
+        }
+        try FileManager.default.createDirectory(at: paths.targetSkills, withIntermediateDirectories: true)
+        for name in try FileManager.default.contentsOfDirectory(atPath: paths.sourceSkills.path) {
+            let source = paths.sourceSkills.appendingPathComponent(name, isDirectory: true)
+            guard isDirectory(path: source.path) else {
+                continue
+            }
+            let target = paths.targetSkills.appendingPathComponent(name, isDirectory: true)
+            guard !FileManager.default.fileExists(atPath: target.path) else {
+                continue
+            }
+            try copyExternalAgentSkillDirectory(source: source, target: target)
+        }
+    }
+
     private static func externalAgentConfigPaths(
         cwd: String?,
         configuration: CodexAppServerConfiguration
@@ -3028,6 +3077,105 @@ public enum CodexAppServer {
             targetConfig: configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false),
             cwd: nil
         )
+    }
+
+    private static func externalAgentSkillsPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) -> (sourceSkills: URL, targetSkills: URL, cwd: String?) {
+        if let cwd, !cwd.isEmpty,
+           let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) {
+            return (
+                sourceSkills: repoRoot
+                    .appendingPathComponent(".claude", isDirectory: true)
+                    .appendingPathComponent("skills", isDirectory: true),
+                targetSkills: repoRoot
+                    .appendingPathComponent(".agents", isDirectory: true)
+                    .appendingPathComponent("skills", isDirectory: true),
+                cwd: repoRoot.path
+            )
+        }
+        let home = configuration.environment["HOME"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value, isDirectory: true)
+        } ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return (
+            sourceSkills: home
+                .appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("skills", isDirectory: true),
+            targetSkills: homeExternalAgentTargetSkillsDirectory(configuration: configuration),
+            cwd: nil
+        )
+    }
+
+    private static func homeExternalAgentTargetSkillsDirectory(configuration: CodexAppServerConfiguration) -> URL {
+        configuration.codexHome
+            .deletingLastPathComponent()
+            .appendingPathComponent(".agents", isDirectory: true)
+            .appendingPathComponent("skills", isDirectory: true)
+    }
+
+    private static func countMissingExternalAgentSkillDirectories(source: URL, target: URL) throws -> Int {
+        let sourceNames = try externalAgentSkillDirectoryNames(source)
+        let targetNames = try externalAgentSkillDirectoryNames(target)
+        return sourceNames.filter { !targetNames.contains($0) }.count
+    }
+
+    private static func externalAgentSkillDirectoryNames(_ root: URL) throws -> Set<String> {
+        guard isDirectory(path: root.path) else {
+            return []
+        }
+        var names: Set<String> = []
+        for name in try FileManager.default.contentsOfDirectory(atPath: root.path) {
+            if isDirectory(path: root.appendingPathComponent(name, isDirectory: true).path) {
+                names.insert(name)
+            }
+        }
+        return names
+    }
+
+    private static func copyExternalAgentSkillDirectory(source: URL, target: URL) throws {
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        for name in try FileManager.default.contentsOfDirectory(atPath: source.path) {
+            let sourcePath = source.appendingPathComponent(name)
+            let targetPath = target.appendingPathComponent(name)
+            if isDirectory(path: sourcePath.path) {
+                try copyExternalAgentSkillDirectory(source: sourcePath, target: targetPath)
+                continue
+            }
+            guard isRegularFile(path: sourcePath.path) else {
+                continue
+            }
+            if name.lowercased() == "skill.md" {
+                let contents = try String(contentsOf: sourcePath, encoding: .utf8)
+                try rewriteExternalAgentTerms(contents).write(to: targetPath, atomically: true, encoding: .utf8)
+            } else {
+                try FileManager.default.copyItem(at: sourcePath, to: targetPath)
+            }
+        }
+    }
+
+    private static func isRegularFile(path: String) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeRegular
+    }
+
+    private static func rewriteExternalAgentTerms(_ content: String) -> String {
+        var rewritten = replaceCaseInsensitiveTerm(content, needle: "claude.md", replacement: "AGENTS.md")
+        for needle in ["claude code", "claude-code", "claude_code", "claudecode", "claude"] {
+            rewritten = replaceCaseInsensitiveTerm(rewritten, needle: needle, replacement: "Codex")
+        }
+        return rewritten
+    }
+
+    private static func replaceCaseInsensitiveTerm(_ input: String, needle: String, replacement: String) -> String {
+        guard !needle.isEmpty else {
+            return input
+        }
+        let pattern = #"(?<![A-Za-z0-9_])\#(NSRegularExpression.escapedPattern(for: needle))(?![A-Za-z0-9_])"#
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return input
+        }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return expression.stringByReplacingMatches(in: input, range: range, withTemplate: replacement)
     }
 
     private static func externalAgentSettings(at path: URL) throws -> [String: Any]? {

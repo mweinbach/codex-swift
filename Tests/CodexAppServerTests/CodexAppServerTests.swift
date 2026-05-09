@@ -2670,12 +2670,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(emptyImportResult.isEmpty)
 
         let unsupportedImport = try appServerResponse(
-            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SKILLS","description":"Skills","cwd":null}]}}"#,
+            #"{"id":3,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"HOOKS","description":"Hooks","cwd":null}]}}"#,
             codexHome: temp.url
         )
         let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
         XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
-        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for SKILLS is not implemented")
+        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for HOOKS is not implemented")
     }
 
     func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
@@ -2802,6 +2802,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(migrated.contains(#"FLAG = "true""#))
         XCTAssertFalse(migrated.contains("DROP"))
         XCTAssertFalse(migrated.contains("OBJECT"))
+    }
+
+    func testExternalAgentConfigDetectAndImportSkillsCopiesMissingDirectories() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claudeSkills = repo.url.appendingPathComponent(".claude/skills", isDirectory: true)
+        let sourceSkill = claudeSkills.appendingPathComponent("demo", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: sourceSkill.appendingPathComponent("scripts", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: claudeSkills.appendingPathComponent("existing", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try """
+        Use Claude Code with CLAUDE.md.
+        Do not replace claudecodehelper.
+        """.write(
+            to: sourceSkill.appendingPathComponent("SKILL.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "echo claude".write(
+            to: sourceSkill.appendingPathComponent("scripts/run.sh", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let targetExisting = repo.url.appendingPathComponent(".agents/skills/existing", isDirectory: true)
+        try FileManager.default.createDirectory(at: targetExisting, withIntermediateDirectories: true)
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["SKILLS"])
+        XCTAssertEqual(items[0]["cwd"] as? String, repo.url.path)
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate skills from \(repo.url.path)/.claude/skills to \(repo.url.path)/.agents/skills"
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SKILLS","description":"Skills","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let copiedSkill = repo.url.appendingPathComponent(".agents/skills/demo/SKILL.md", isDirectory: false)
+        let copiedSkillContents = try String(contentsOf: copiedSkill, encoding: .utf8)
+        XCTAssertTrue(copiedSkillContents.contains("Use Codex with AGENTS.md."))
+        XCTAssertTrue(copiedSkillContents.contains("Do not replace claudecodehelper."))
+        XCTAssertEqual(
+            try String(contentsOf: repo.url.appendingPathComponent(".agents/skills/demo/scripts/run.sh"), encoding: .utf8),
+            "echo claude"
+        )
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
     }
 
     func testMcpResourceAndToolCallsValidateThreadBeforeLiveDispatch() throws {
