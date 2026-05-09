@@ -459,7 +459,7 @@ private func extractShellCommand(_ command: [String]) -> (String, String)? {
     guard flag == "-c" || flag == "-lc" else {
         return nil
     }
-    guard ["bash", "zsh", "sh"].contains(executableName(shell)) else {
+    guard ["bash", "zsh", "sh"].contains(shellStem(shell)) else {
         return nil
     }
     return (shell, command[2])
@@ -489,6 +489,11 @@ private func extractPowerShellCommand(_ command: [String]) -> (String, String)? 
 
 private func executableName(_ path: String) -> String {
     path.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? path
+}
+
+private func shellStem(_ path: String) -> String {
+    let name = executableName(path).lowercased()
+    return name.hasSuffix(".exe") ? String(name.dropLast(4)) : name
 }
 
 private func normalizeTokens(_ tokens: [String]) -> [String] {

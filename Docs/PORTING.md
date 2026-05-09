@@ -544,6 +544,8 @@ Source baseline inspected for this scaffold:
   - added Swift Rust-style `--` operand handling for read/list summaries so dash-leading paths remain valid operands after the option terminator.
 - `codex-rs/shell-command/src/parse_command.rs` sed pipeline filtering parity
   - aligned Swift small-formatting detection with Rust `sed_read_path` so `sed -n -e <range> <file>` and `sed -n <range> -- <file>` survive pipeline helper filtering as file reads.
+- `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
+  - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
 
 ## Known Gaps
 

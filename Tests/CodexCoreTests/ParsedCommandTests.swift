@@ -191,6 +191,9 @@ final class ParsedCommandTests: XCTestCase {
         XCTAssertEqual(parseCommand(["/bin/bash", "-lc", "sed -n '1,10p' Cargo.toml"]), [
             .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
         ])
+        XCTAssertEqual(parseCommand([#"C:\Program Files\Git\bin\bash.exe"#, "-lc", "cat README.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
         XCTAssertEqual(parseCommand(["bash", "-lc", "bat --theme TwoDark README.md"]), [
             .read(cmd: "bat --theme TwoDark README.md", name: "README.md", path: "README.md")
         ])
