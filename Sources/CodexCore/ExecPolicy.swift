@@ -630,6 +630,11 @@ public struct ExecPolicy: Equatable, Sendable {
 }
 
 public final class PolicyParser {
+    private struct StarlarkFunction {
+        let parameters: [String]
+        let returnExpression: String
+    }
+
     private var policy = ExecPolicy.empty()
     private var pendingExampleValidations: [(rules: [PrefixRule], matches: [[String]], notMatches: [[String]])] = []
 
@@ -639,14 +644,21 @@ public final class PolicyParser {
         let pendingValidationStartIndex = pendingExampleValidations.count
         let source = Self.stripLineComments(from: policyFileContents)
         var constants: [String: ConfigValue] = [:]
-        try parseStatements(Self.topLevelStatements(from: source), identifier: policyIdentifier, constants: &constants)
+        var functions: [String: StarlarkFunction] = [:]
+        try parseStatements(
+            Self.topLevelStatements(from: source),
+            identifier: policyIdentifier,
+            constants: &constants,
+            functions: &functions
+        )
         try validatePendingExamples(from: pendingValidationStartIndex)
     }
 
     private func parseStatements(
         _ statements: [String],
         identifier: String,
-        constants: inout [String: ConfigValue]
+        constants: inout [String: ConfigValue],
+        functions: inout [String: StarlarkFunction]
     ) throws {
         var index = 0
         while index < statements.count {
@@ -654,6 +666,22 @@ public final class PolicyParser {
             let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 index += 1
+                continue
+            }
+
+            if let functionHeader = try Self.parseTopLevelFunctionHeader(statement) {
+                let collected = try Self.collectIndentedBlock(
+                    after: index,
+                    in: statements,
+                    parentIndent: Self.indentationCount(statement),
+                    identifier: identifier,
+                    blockName: "function"
+                )
+                functions[functionHeader.name] = try Self.parseStarlarkFunction(
+                    parameters: functionHeader.parameters,
+                    body: collected.body
+                )
+                index = collected.nextIndex
                 continue
             }
 
@@ -668,7 +696,11 @@ public final class PolicyParser {
                 )
                 let body = collected.body
 
-                let iterable = try Self.parsePolicyLiteral(forLoop.iterableText, constants: constants)
+                let iterable = try Self.parsePolicyLiteral(
+                    forLoop.iterableText,
+                    constants: constants,
+                    functions: functions
+                )
                 guard case let .array(items) = iterable else {
                     throw ConfigOverrideError.invalidLiteral(forLoop.iterableText)
                 }
@@ -676,7 +708,12 @@ public final class PolicyParser {
                 var loopConstants = constants
                 for item in items {
                     loopConstants[forLoop.variable] = item
-                    try parseStatements(body, identifier: identifier, constants: &loopConstants)
+                    try parseStatements(
+                        body,
+                        identifier: identifier,
+                        constants: &loopConstants,
+                        functions: &functions
+                    )
                 }
                 constants = loopConstants
                 index = collected.nextIndex
@@ -723,19 +760,33 @@ public final class PolicyParser {
                 }
 
                 var matchedBranch = false
-                for branch in branches where try Self.evaluateStarlarkCondition(branch.condition, constants: constants) {
-                    try parseStatements(branch.body, identifier: identifier, constants: &constants)
+                for branch in branches where try Self.evaluateStarlarkCondition(
+                    branch.condition,
+                    constants: constants,
+                    functions: functions
+                ) {
+                    try parseStatements(
+                        branch.body,
+                        identifier: identifier,
+                        constants: &constants,
+                        functions: &functions
+                    )
                     matchedBranch = true
                     break
                 }
                 if !matchedBranch, !elseBody.isEmpty {
-                    try parseStatements(elseBody, identifier: identifier, constants: &constants)
+                    try parseStatements(
+                        elseBody,
+                        identifier: identifier,
+                        constants: &constants,
+                        functions: &functions
+                    )
                 }
                 index = nextIndex
                 continue
             }
 
-            try parseStatement(statement, identifier: identifier, constants: &constants)
+            try parseStatement(statement, identifier: identifier, constants: &constants, functions: functions)
             index += 1
         }
     }
@@ -747,9 +798,14 @@ public final class PolicyParser {
     private func parseStatement(
         _ statement: String,
         identifier: String,
-        constants: inout [String: ConfigValue]
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws {
-        if let assignment = try Self.parseTopLevelLiteralAssignment(statement, constants: constants) {
+        if let assignment = try Self.parseTopLevelLiteralAssignment(
+            statement,
+            constants: constants,
+            functions: functions
+        ) {
             constants[assignment.key] = assignment.value
             return
         }
@@ -760,7 +816,7 @@ public final class PolicyParser {
             identifier: identifier
         )
         for body in prefixRuleBodies {
-            try addPrefixRule(from: body, constants: constants)
+            try addPrefixRule(from: body, constants: constants, functions: functions)
         }
         let networkRuleBodies = try Self.extractCallBodies(
             named: "network_rule",
@@ -768,7 +824,7 @@ public final class PolicyParser {
             identifier: identifier
         )
         for body in networkRuleBodies {
-            try addNetworkRule(from: body, constants: constants)
+            try addNetworkRule(from: body, constants: constants, functions: functions)
         }
         let hostExecutableBodies = try Self.extractCallBodies(
             named: "host_executable",
@@ -776,14 +832,19 @@ public final class PolicyParser {
             identifier: identifier
         )
         for body in hostExecutableBodies {
-            try addHostExecutable(from: body, constants: constants)
+            try addHostExecutable(from: body, constants: constants, functions: functions)
         }
     }
 
-    private func addPrefixRule(from body: String, constants: [String: ConfigValue]) throws {
+    private func addPrefixRule(
+        from body: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws {
         let arguments = try Self.parseArguments(
             body,
             constants: constants,
+            functions: functions,
             positionalNames: ["pattern", "decision", "match", "not_match", "justification"]
         )
         guard let patternValue = arguments["pattern"] else {
@@ -826,10 +887,15 @@ public final class PolicyParser {
         pendingExampleValidations.append((rules, matchExamples, notMatchExamples))
     }
 
-    private func addNetworkRule(from body: String, constants: [String: ConfigValue]) throws {
+    private func addNetworkRule(
+        from body: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws {
         let arguments = try Self.parseArguments(
             body,
             constants: constants,
+            functions: functions,
             positionalNames: ["host", "protocol", "decision", "justification"]
         )
         let host = try Self.requireStringArgument(arguments, key: "host", function: "network_rule")
@@ -843,10 +909,15 @@ public final class PolicyParser {
         )
     }
 
-    private func addHostExecutable(from body: String, constants: [String: ConfigValue]) throws {
+    private func addHostExecutable(
+        from body: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws {
         let arguments = try Self.parseArguments(
             body,
             constants: constants,
+            functions: functions,
             positionalNames: ["name", "paths"]
         )
         let name = try Self.requireStringArgument(arguments, key: "name", function: "host_executable")
@@ -1046,7 +1117,8 @@ public final class PolicyParser {
 
     private static func parseTopLevelLiteralAssignment(
         _ statement: String,
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> (key: String, value: ConfigValue)? {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -1062,10 +1134,77 @@ public final class PolicyParser {
         let valueStart = trimmed.index(after: equalsIndex)
         let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            return (key, try parsePolicyLiteral(valueText, constants: constants))
+            return (key, try parsePolicyLiteral(valueText, constants: constants, functions: functions))
         } catch {
             return nil
         }
+    }
+
+    private static func parseTopLevelFunctionHeader(_ statement: String) throws -> (
+        name: String,
+        parameters: [String]
+    )? {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(":"),
+              let defRange = topLevelKeywordRange("def", in: trimmed),
+              defRange.lowerBound == trimmed.startIndex
+        else {
+            return nil
+        }
+
+        let headerEnd = trimmed.index(before: trimmed.endIndex)
+        let signature = String(trimmed[defRange.upperBound..<headerEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard signature.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: signature)
+        else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let name = String(signature[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(name) else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+
+        let parametersStart = signature.index(after: openIndex)
+        let parametersText = String(signature[parametersStart..<signature.index(before: signature.endIndex)])
+        let parameters = try splitTopLevel(parametersText, separator: ",").compactMap { rawParameter -> String? in
+            let parameter = rawParameter.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !parameter.isEmpty else {
+                return nil
+            }
+            guard isStarlarkIdentifier(parameter) else {
+                throw ConfigOverrideError.invalidLiteral(trimmed)
+            }
+            return parameter
+        }
+        guard Set(parameters).count == parameters.count else {
+            throw ConfigOverrideError.invalidLiteral(trimmed)
+        }
+        return (name, parameters)
+    }
+
+    private static func parseStarlarkFunction(
+        parameters: [String],
+        body: [String]
+    ) throws -> StarlarkFunction {
+        let nonEmpty = body
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard nonEmpty.count == 1,
+              let statement = nonEmpty.first,
+              let returnRange = topLevelKeywordRange("return", in: statement),
+              returnRange.lowerBound == statement.startIndex
+        else {
+            throw ConfigOverrideError.invalidLiteral(body.joined(separator: "\n"))
+        }
+
+        let expression = String(statement[returnRange.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(statement)
+        }
+        return StarlarkFunction(parameters: parameters, returnExpression: expression)
     }
 
     private static func parseTopLevelForHeader(_ statement: String) throws -> (
@@ -1234,6 +1373,7 @@ public final class PolicyParser {
     private static func parseArguments(
         _ body: String,
         constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
         positionalNames: [String]
     ) throws -> [String: ConfigValue] {
         var arguments: [String: ConfigValue] = [:]
@@ -1265,7 +1405,7 @@ public final class PolicyParser {
             guard arguments[key] == nil else {
                 throw ExecPolicyError.invalidSyntax("duplicate argument: \(key)")
             }
-            arguments[key] = try parsePolicyLiteral(valueText, constants: constants)
+            arguments[key] = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
         }
         return arguments
     }
@@ -1348,7 +1488,8 @@ public final class PolicyParser {
 
     private static func parsePolicyLiteral(
         _ valueText: String,
-        constants: [String: ConfigValue] = [:]
+        constants: [String: ConfigValue] = [:],
+        functions: [String: StarlarkFunction] = [:]
     ) throws -> ConfigValue {
         let trimmed = strippingEnclosingParentheses(from: valueText.trimmingCharacters(in: .whitespacesAndNewlines))
         if trimmed == "True" {
@@ -1360,17 +1501,24 @@ public final class PolicyParser {
         let additivePieces = splitTopLevelExpression(trimmed, separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         if additivePieces.count > 1 {
-            return try evaluateStarlarkAddition(additivePieces, constants: constants)
+            return try evaluateStarlarkAddition(additivePieces, constants: constants, functions: functions)
         }
         if let constant = constants[trimmed] {
             return constant
         }
-        if let indexed = try parseStarlarkIndexExpression(trimmed, constants: constants) {
+        if let functionCall = try parseStarlarkFunctionCall(trimmed, constants: constants, functions: functions) {
+            return functionCall
+        }
+        if let indexed = try parseStarlarkIndexExpression(trimmed, constants: constants, functions: functions) {
             return indexed
         }
         if trimmed.hasPrefix("["), trimmed.hasSuffix("]") {
             let body = String(trimmed.dropFirst().dropLast())
-            if let comprehension = try parseStarlarkListComprehension(body, constants: constants) {
+            if let comprehension = try parseStarlarkListComprehension(
+                body,
+                constants: constants,
+                functions: functions
+            ) {
                 return .array(comprehension)
             }
             if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1380,10 +1528,10 @@ public final class PolicyParser {
                 guard !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     return nil
                 }
-                return try parsePolicyLiteral(item, constants: constants)
+                return try parsePolicyLiteral(item, constants: constants, functions: functions)
             })
         }
-        if let interpolated = try parseStarlarkFStringLiteral(trimmed, constants: constants) {
+        if let interpolated = try parseStarlarkFStringLiteral(trimmed, constants: constants, functions: functions) {
             return .string(interpolated)
         }
 
@@ -1452,7 +1600,8 @@ public final class PolicyParser {
 
     private static func parseStarlarkFStringLiteral(
         _ text: String,
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> String? {
         guard text.count >= 3,
               let prefix = text.first,
@@ -1499,7 +1648,7 @@ public final class PolicyParser {
                 guard !expression.isEmpty else {
                     throw ConfigOverrideError.invalidLiteral(text)
                 }
-                let value = try parsePolicyLiteral(expression, constants: constants)
+                let value = try parsePolicyLiteral(expression, constants: constants, functions: functions)
                 guard case let .string(interpolated) = value else {
                     throw ConfigOverrideError.invalidLiteral(text)
                 }
@@ -1567,9 +1716,99 @@ public final class PolicyParser {
         }
     }
 
+    private static func parseStarlarkFunctionCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(name),
+              let function = functions[name]
+        else {
+            return nil
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard rawArguments.count == function.parameters.count else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var scopedConstants = constants
+        for (parameter, rawArgument) in zip(function.parameters, rawArguments) {
+            scopedConstants[parameter] = try parsePolicyLiteral(
+                rawArgument,
+                constants: constants,
+                functions: functions
+            )
+        }
+        return try parsePolicyLiteral(function.returnExpression, constants: scopedConstants, functions: functions)
+    }
+
+    private static func matchingTopLevelCallOpen(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var candidate: String.Index?
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "(":
+                if squareDepth == 0, parenDepth == 0 {
+                    candidate = index
+                }
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+                if squareDepth == 0,
+                   parenDepth == 0,
+                   text.index(after: index) != text.endIndex {
+                    candidate = nil
+                }
+            default:
+                break
+            }
+
+            index = text.index(after: index)
+        }
+
+        return squareDepth == 0 && parenDepth == 0 ? candidate : nil
+    }
+
     private static func parseStarlarkIndexExpression(
         _ text: String,
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> ConfigValue? {
         guard text.hasSuffix("]"),
               let openIndex = matchingTopLevelIndexOpen(in: text)
@@ -1588,7 +1827,7 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(text)
         }
 
-        let base = try parsePolicyLiteral(baseText, constants: constants)
+        let base = try parsePolicyLiteral(baseText, constants: constants, functions: functions)
         guard case let .array(items) = base else {
             throw ConfigOverrideError.invalidLiteral(text)
         }
@@ -1652,7 +1891,8 @@ public final class PolicyParser {
 
     private static func parseStarlarkListComprehension(
         _ body: String,
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> [ConfigValue]? {
         guard let forRange = topLevelKeywordRange("for", in: body),
               let inRange = topLevelKeywordRange("in", in: body, startingAt: forRange.upperBound)
@@ -1671,7 +1911,7 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral("[\(body)]")
         }
 
-        let iterable = try parsePolicyLiteral(iterableText, constants: constants)
+        let iterable = try parsePolicyLiteral(iterableText, constants: constants, functions: functions)
         guard case let .array(items) = iterable else {
             throw ConfigOverrideError.invalidLiteral("[\(body)]")
         }
@@ -1679,7 +1919,7 @@ public final class PolicyParser {
         return try items.map { item in
             var scopedConstants = constants
             scopedConstants[variable] = item
-            return try parsePolicyLiteral(expression, constants: scopedConstants)
+            return try parsePolicyLiteral(expression, constants: scopedConstants, functions: functions)
         }
     }
 
@@ -1758,7 +1998,8 @@ public final class PolicyParser {
 
     private static func evaluateStarlarkCondition(
         _ condition: String,
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> Bool {
         let trimmed = strippingEnclosingParentheses(from: condition.trimmingCharacters(in: .whitespacesAndNewlines))
         let orPieces = splitTopLevelKeywordExpression(trimmed, keyword: "or")
@@ -1768,7 +2009,7 @@ public final class PolicyParser {
                 guard !piece.isEmpty else {
                     throw ConfigOverrideError.invalidLiteral(condition)
                 }
-                if try evaluateStarlarkCondition(piece, constants: constants) {
+                if try evaluateStarlarkCondition(piece, constants: constants, functions: functions) {
                     return true
                 }
             }
@@ -1782,7 +2023,7 @@ public final class PolicyParser {
                 guard !piece.isEmpty else {
                     throw ConfigOverrideError.invalidLiteral(condition)
                 }
-                if try !evaluateStarlarkCondition(piece, constants: constants) {
+                if try !evaluateStarlarkCondition(piece, constants: constants, functions: functions) {
                     return false
                 }
             }
@@ -1795,29 +2036,29 @@ public final class PolicyParser {
             guard !operand.isEmpty else {
                 throw ConfigOverrideError.invalidLiteral(condition)
             }
-            return try !evaluateStarlarkCondition(operand, constants: constants)
+            return try !evaluateStarlarkCondition(operand, constants: constants, functions: functions)
         }
 
         if let range = topLevelOperatorRange("==", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
             return lhs == rhs
         }
         if let range = topLevelOperatorRange("!=", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
             return lhs != rhs
         }
         if let range = topLevelKeywordRange("in", in: trimmed) {
-            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants)
-            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants)
+            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
+            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
             guard case let .array(items) = haystack else {
                 throw ConfigOverrideError.invalidLiteral(condition)
             }
             return items.contains(needle)
         }
 
-        return try truthy(parsePolicyLiteral(trimmed, constants: constants))
+        return try truthy(parsePolicyLiteral(trimmed, constants: constants, functions: functions))
     }
 
     private static func splitTopLevelKeywordExpression(_ text: String, keyword: String) -> [String] {
@@ -1852,18 +2093,19 @@ public final class PolicyParser {
 
     private static func evaluateStarlarkAddition(
         _ pieces: [String],
-        constants: [String: ConfigValue]
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
         guard let first = pieces.first, !first.isEmpty else {
             throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
         }
 
-        var result = try parsePolicyLiteral(first, constants: constants)
+        var result = try parsePolicyLiteral(first, constants: constants, functions: functions)
         for piece in pieces.dropFirst() {
             guard !piece.isEmpty else {
                 throw ConfigOverrideError.invalidLiteral(pieces.joined(separator: " + "))
             }
-            let next = try parsePolicyLiteral(piece, constants: constants)
+            let next = try parsePolicyLiteral(piece, constants: constants, functions: functions)
             switch (result, next) {
             case let (.string(lhs), .string(rhs)):
                 result = .string(lhs + rhs)
