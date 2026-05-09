@@ -7013,6 +7013,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testMcpServerReloadAcceptsNullParams() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/mcpServer/reload","params":null}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testMcpServerReloadRejectsObjectParams() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/mcpServer/reload","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "invalid params for config/mcpServer/reload")
+    }
+
+    func testMcpServerReloadReportsConfigLoadFailures() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs"
+        bearer_token = "token"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/mcpServer/reload"}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "failed to refresh MCP servers: failed to reload config: mcp_servers.docs uses unsupported `bearer_token`; set `bearer_token_env_var`."
+        )
+    }
+
     func testMcpServerOAuthLoginRejectsUnknownServer() throws {
         let temp = try TemporaryDirectory()
 

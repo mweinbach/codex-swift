@@ -7059,8 +7059,23 @@ public enum CodexAppServer {
         )
     }
 
-    fileprivate static func mcpServerRefreshResult() -> [String: Any] {
-        [:]
+    fileprivate static func mcpServerRefreshResult(
+        rawParams: Any?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        if let rawParams, !(rawParams is NSNull) {
+            throw AppServerError.invalidParams("invalid params for config/mcpServer/reload")
+        }
+        do {
+            _ = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to refresh MCP servers: failed to reload config: \(error)")
+        }
+        return [:]
     }
 
     fileprivate static func mcpResourceReadResult(
@@ -14533,7 +14548,10 @@ final class CodexAppServerMessageProcessor {
                 case "config/mcpServer/reload":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.mcpServerRefreshResult()
+                        result: try CodexAppServer.mcpServerRefreshResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                 case "mcpServer/resource/read":
                     response = CodexAppServer.responseObject(
