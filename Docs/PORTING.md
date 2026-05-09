@@ -634,6 +634,10 @@ Source baseline inspected for this scaffold:
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
 - `codex-rs/app-server` thread-start override compatibility
   - matched Rust's `thread/start` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
+- `codex-rs/app-server-protocol` thread resume/fork experimental gating
+  - matched Rust's field-level experimental API guards for `thread/resume.permissions`, `thread/resume.excludeTurns`, `thread/resume.persistFullHistory`, `thread/fork.path`, `thread/fork.permissions`, `thread/fork.excludeTurns`, `thread/fork.persistFullHistory`, and nested `askForApproval.granular`.
+- `codex-rs/app-server` thread resume/fork override compatibility
+  - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 
 ## Known Gaps
 

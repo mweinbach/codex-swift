@@ -1298,6 +1298,54 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func requireThreadResumeExperimentalFieldsAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled else {
+            return
+        }
+        try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
+        if let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("thread/resume.permissions requires experimentalApi capability")
+        }
+        if boolParam(params?["excludeTurns"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/resume.excludeTurns requires experimentalApi capability")
+        }
+        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/resume.persistFullHistory requires experimentalApi capability")
+        }
+    }
+
+    fileprivate static func requireThreadForkExperimentalFieldsAPI(
+        params: [String: Any]?,
+        experimentalAPIEnabled: Bool
+    ) throws {
+        guard !experimentalAPIEnabled else {
+            return
+        }
+        try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
+        if let path = params?["path"], !(path is NSNull) {
+            throw AppServerError.invalidRequest("thread/fork.path requires experimentalApi capability")
+        }
+        if let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("thread/fork.permissions requires experimentalApi capability")
+        }
+        if boolParam(params?["excludeTurns"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/fork.excludeTurns requires experimentalApi capability")
+        }
+        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/fork.persistFullHistory requires experimentalApi capability")
+        }
+    }
+
+    fileprivate static func requireThreadContextOverrideCompatibility(params: [String: Any]?) throws {
+        if let sandbox = params?["sandbox"], !(sandbox is NSNull),
+           let permissions = params?["permissions"], !(permissions is NSNull) {
+            throw AppServerError.invalidRequest("`permissions` cannot be combined with `sandbox`")
+        }
+    }
+
     fileprivate static func requireTurnStartExperimentalFieldsAPI(
         params: [String: Any]?,
         experimentalAPIEnabled: Bool
@@ -14029,6 +14077,11 @@ final class CodexAppServerMessageProcessor {
                         message: "thread/turns/items/list is not supported yet"
                     )
                 case "thread/resume":
+                    try CodexAppServer.requireThreadResumeExperimentalFieldsAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
@@ -14037,6 +14090,11 @@ final class CodexAppServerMessageProcessor {
                         subscribeCurrentConnection(toThreadID: threadID)
                     }
                 case "thread/fork":
+                    try CodexAppServer.requireThreadForkExperimentalFieldsAPI(
+                        params: params,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
                     let result = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {

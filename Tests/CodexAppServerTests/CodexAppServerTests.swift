@@ -847,6 +847,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondContent[1]["url"] as? String, "https://example.test/image.png")
     }
 
+    func testThreadResumeExperimentalFieldsRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let cases: [(String, String)] = [
+            (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""permissions":{"profile":"readOnly"}"#, "thread/resume.permissions"),
+            (#""excludeTurns":true"#, "thread/resume.excludeTurns"),
+            (#""persistFullHistory":true"#, "thread/resume.persistFullHistory")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/resume","params":{"threadId":"00000000-0000-0000-0000-000000000000",\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(testCase.1) requires experimentalApi capability")
+        }
+    }
+
+    func testThreadResumeRejectsPermissionsWithSandbox() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/resume","params":{"threadId":"00000000-0000-0000-0000-000000000000","sandbox":"read-only","permissions":{"profile":"readOnly"}}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
+    }
+
     func testThreadReadReturnsMetadataWithoutTurnsByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -892,6 +927,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["gitInfo"] as? NSNull, NSNull())
         XCTAssertEqual(thread["name"] as? NSNull, NSNull())
         XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
+    }
+
+    func testThreadForkExperimentalFieldsRequireExperimentalAPI() throws {
+        let temp = try TemporaryDirectory()
+
+        let cases: [(String, String)] = [
+            (#""path":"/tmp/source.jsonl""#, "thread/fork.path"),
+            (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""permissions":{"profile":"readOnly"}"#, "thread/fork.permissions"),
+            (#""excludeTurns":true"#, "thread/fork.excludeTurns"),
+            (#""persistFullHistory":true"#, "thread/fork.persistFullHistory")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/fork","params":{"threadId":"00000000-0000-0000-0000-000000000000",\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "\(testCase.1) requires experimentalApi capability")
+        }
+    }
+
+    func testThreadForkRejectsPermissionsWithSandbox() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/fork","params":{"threadId":"00000000-0000-0000-0000-000000000000","sandbox":"read-only","permissions":{"profile":"readOnly"}}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
     }
 
     func testThreadForkCreatesNewThreadWithCopiedHistoryAndStartedNotification() throws {
