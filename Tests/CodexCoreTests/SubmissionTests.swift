@@ -540,12 +540,16 @@ final class SubmissionTests: XCTestCase {
             "type": "override_turn_context"
         ])
 
-        try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
+        let set = Op.overrideTurnContext(
             cwd: "/repo",
             approvalPolicy: .onFailure,
             approvalsReviewer: .string("guardian"),
             sandboxPolicy: .readOnly,
             permissionProfile: .external(network: .restricted),
+            activePermissionProfile: ActivePermissionProfile(
+                id: ":workspace",
+                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+            ),
             windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
             effort: .set(.low),
@@ -553,7 +557,8 @@ final class SubmissionTests: XCTestCase {
             serviceTier: .null,
             collaborationMode: .string("solo"),
             personality: .string("codex")
-        ), [
+        )
+        try XCTAssertJSONObjectEqual(set, [
             "type": "override_turn_context",
             "cwd": "/repo",
             "approval_policy": "on-failure",
@@ -565,6 +570,15 @@ final class SubmissionTests: XCTestCase {
                 "type": "external",
                 "network": "restricted"
             ],
+            "active_permission_profile": [
+                "id": ":workspace",
+                "modifications": [
+                    [
+                        "type": "additional_writable_root",
+                        "path": "/repo/tmp"
+                    ]
+                ]
+            ],
             "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",
             "effort": "low",
@@ -573,6 +587,8 @@ final class SubmissionTests: XCTestCase {
             "collaboration_mode": "solo",
             "personality": "codex"
         ])
+        let setData = try JSONEncoder().encode(set)
+        XCTAssertEqual(try JSONDecoder().decode(Op.self, from: setData), set)
 
         let clear = Op.overrideTurnContext(
             cwd: nil,

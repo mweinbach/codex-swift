@@ -502,6 +502,8 @@ Source baseline inspected for this scaffold:
   - `FunctionCallOutputPayload.textContent` now matches Rust's lossy `FunctionCallOutputBody::to_text` behavior by returning plain text bodies unchanged and joining nonblank structured `input_text` items while ignoring images.
 - `codex-rs/protocol/src/protocol.rs` token usage context-window refresh
   - `TokenUsageInfo.newOrAppend` now matches Rust by refreshing an existing `model_context_window` when a new value is supplied, even if no new last-usage delta is appended.
+- `codex-rs/protocol/src/protocol.rs` override turn-context active permission profile
+  - `Op.overrideTurnContext` now carries Rust's `active_permission_profile` override field alongside `permission_profile`, preserving standalone permission-profile selections outside combined user-input operations.
 - `codex-rs/protocol/src/models.rs` reasoning item ID default
   - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
 - `codex-rs/protocol/src/models.rs` legacy ghost snapshot response item
