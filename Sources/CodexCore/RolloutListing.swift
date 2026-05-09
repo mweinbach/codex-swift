@@ -80,9 +80,16 @@ public enum RolloutListing {
         cursor: ConversationCursor? = nil,
         allowedSources: [SessionSource] = [],
         modelProviders: [String]? = nil,
+        archivedOnly: Bool = false,
+        cwdFilters: [String]? = nil,
+        searchTerm: String? = nil,
+        sourceMatcher: SessionSourceMatcher? = nil,
         defaultProvider: String
     ) throws -> ConversationsPage {
-        let root = codexHome.appendingPathComponent(sessionsSubdirectory, isDirectory: true)
+        let root = codexHome.appendingPathComponent(
+            archivedOnly ? RolloutErrors.archivedSessionsSubdirectory : sessionsSubdirectory,
+            isDirectory: true
+        )
         guard FileManager.default.fileExists(atPath: root.path) else {
             return ConversationsPage()
         }
@@ -94,7 +101,10 @@ public enum RolloutListing {
             pageSize: normalizedPageSize,
             anchor: cursor,
             allowedSources: allowedSources,
-            providerMatcher: providerMatcher
+            providerMatcher: providerMatcher,
+            cwdFilters: cwdFilters,
+            searchTerm: searchTerm,
+            sourceMatcher: sourceMatcher
         )
     }
 
@@ -192,7 +202,10 @@ public enum RolloutListing {
         pageSize: Int,
         anchor: ConversationCursor?,
         allowedSources: [SessionSource],
-        providerMatcher: ProviderMatcher?
+        providerMatcher: ProviderMatcher?,
+        cwdFilters: [String]?,
+        searchTerm: String?,
+        sourceMatcher: SessionSourceMatcher?
     ) throws -> ConversationsPage {
         var items: [ConversationItem] = []
         items.reserveCapacity(max(pageSize, 0))
@@ -201,6 +214,105 @@ public enum RolloutListing {
         let anchorTimestamp = anchor?.timestamp ?? Date(timeIntervalSince1970: 0)
         let anchorID = anchor?.uuid ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         var moreMatchesAvailable = false
+
+        func sortedRolloutFiles(in directory: URL) throws -> [RolloutFile] {
+            var files = try collectFiles(directory) { fileName, path -> RolloutFile? in
+                guard let (timestamp, uuid) = parseTimestampUUIDFromFilename(fileName) else {
+                    return nil
+                }
+                return RolloutFile(timestamp: timestamp, uuid: uuid, path: path)
+            }
+            files.sort { lhs, rhs in
+                if lhs.timestamp != rhs.timestamp {
+                    return lhs.timestamp > rhs.timestamp
+                }
+                return uuidCompare(lhs.uuid, rhs.uuid) == .orderedDescending
+            }
+            return files
+        }
+
+        func processRolloutFiles(_ files: [RolloutFile]) throws -> Bool {
+            for file in files {
+                scannedFiles += 1
+                if scannedFiles >= maxScanFiles && items.count >= pageSize {
+                    moreMatchesAvailable = true
+                    return true
+                }
+
+                if !anchorPassed {
+                    if file.timestamp < anchorTimestamp
+                        || (file.timestamp == anchorTimestamp && uuidCompare(file.uuid, anchorID) == .orderedAscending)
+                    {
+                        anchorPassed = true
+                    } else {
+                        continue
+                    }
+                }
+
+                if items.count == pageSize {
+                    moreMatchesAvailable = true
+                    return true
+                }
+
+                let summary = (try? readHeadSummary(path: file.path, headLimit: headRecordLimit)) ?? HeadTailSummary()
+                if !allowedSources.isEmpty {
+                    guard let source = summary.source,
+                          allowedSources.contains(source)
+                    else {
+                        continue
+                    }
+                }
+
+                if let sourceMatcher,
+                   !sourceMatcher.matches(summary.source)
+                {
+                    continue
+                }
+
+                if let providerMatcher,
+                   !providerMatcher.matches(summary.modelProvider)
+                {
+                    continue
+                }
+
+                if let cwdFilters {
+                    guard let cwd = summary.cwd,
+                          cwdFilters.contains(cwd)
+                    else {
+                        continue
+                    }
+                }
+
+                if let searchTerm,
+                   !searchTerm.isEmpty,
+                   summary.preview?.contains(searchTerm) != true
+                {
+                    continue
+                }
+
+                if summary.sawSessionMeta && summary.sawUserEvent {
+                    let updatedAt = summary.updatedAt
+                        ?? fileModifiedRFC3339(file.path)
+                        ?? summary.createdAt
+                    items.append(ConversationItem(
+                        path: file.path.path,
+                        head: summary.head,
+                        createdAt: summary.createdAt,
+                        updatedAt: updatedAt
+                    ))
+                }
+            }
+            return false
+        }
+
+        if try processRolloutFiles(sortedRolloutFiles(in: root)) {
+            return ConversationsPage(
+                items: items,
+                nextCursor: moreMatchesAvailable ? buildNextCursor(items) : nil,
+                numScannedFiles: scannedFiles,
+                reachedScanCap: scannedFiles >= maxScanFiles
+            )
+        }
 
         let yearDirectories: [(Int, URL)] = try collectDirectoriesDescending(root) { Int($0) }
 
@@ -221,67 +333,8 @@ public enum RolloutListing {
                         break outer
                     }
 
-                    var dayFiles = try collectFiles(dayPath) { fileName, path -> RolloutFile? in
-                        guard let (timestamp, uuid) = parseTimestampUUIDFromFilename(fileName) else {
-                            return nil
-                        }
-                        return RolloutFile(timestamp: timestamp, uuid: uuid, path: path)
-                    }
-                    dayFiles.sort { lhs, rhs in
-                        if lhs.timestamp != rhs.timestamp {
-                            return lhs.timestamp > rhs.timestamp
-                        }
-                        return uuidCompare(lhs.uuid, rhs.uuid) == .orderedDescending
-                    }
-
-                    for file in dayFiles {
-                        scannedFiles += 1
-                        if scannedFiles >= maxScanFiles && items.count >= pageSize {
-                            moreMatchesAvailable = true
-                            break outer
-                        }
-
-                        if !anchorPassed {
-                            if file.timestamp < anchorTimestamp
-                                || (file.timestamp == anchorTimestamp && uuidCompare(file.uuid, anchorID) == .orderedAscending)
-                            {
-                                anchorPassed = true
-                            } else {
-                                continue
-                            }
-                        }
-
-                        if items.count == pageSize {
-                            moreMatchesAvailable = true
-                            break outer
-                        }
-
-                        let summary = (try? readHeadSummary(path: file.path, headLimit: headRecordLimit)) ?? HeadTailSummary()
-                        if !allowedSources.isEmpty {
-                            guard let source = summary.source,
-                                  allowedSources.contains(source)
-                            else {
-                                continue
-                            }
-                        }
-
-                        if let providerMatcher,
-                           !providerMatcher.matches(summary.modelProvider)
-                        {
-                            continue
-                        }
-
-                        if summary.sawSessionMeta && summary.sawUserEvent {
-                            let updatedAt = summary.updatedAt
-                                ?? fileModifiedRFC3339(file.path)
-                                ?? summary.createdAt
-                            items.append(ConversationItem(
-                                path: file.path.path,
-                                head: summary.head,
-                                createdAt: summary.createdAt,
-                                updatedAt: updatedAt
-                            ))
-                        }
+                    if try processRolloutFiles(sortedRolloutFiles(in: dayPath)) {
+                        break outer
                     }
                 }
             }
@@ -372,6 +425,7 @@ public enum RolloutListing {
             case let .sessionMeta(sessionMetaLine):
                 summary.source = sessionMetaLine.meta.source
                 summary.modelProvider = sessionMetaLine.meta.modelProvider
+                summary.cwd = sessionMetaLine.meta.cwd
                 if summary.createdAt == nil {
                     summary.createdAt = rolloutLine.timestamp
                 }
@@ -393,7 +447,8 @@ public enum RolloutListing {
                 break
 
             case let .eventMsg(event):
-                if case .userMessage = event {
+                if case let .userMessage(message) = event {
+                    summary.preview = message.message
                     summary.sawUserEvent = true
                 }
             }
@@ -455,8 +510,70 @@ private struct HeadTailSummary {
     var sawUserEvent = false
     var source: SessionSource?
     var modelProvider: String?
+    var cwd: String?
+    var preview: String?
     var createdAt: String?
     var updatedAt: String?
+}
+
+public struct SessionSourceMatcher: Equatable, Sendable {
+    public enum SourceKind: String, Equatable, Sendable {
+        case cli
+        case vscode
+        case exec
+        case appServer
+        case subAgent
+        case subAgentReview
+        case subAgentCompact
+        case subAgentThreadSpawn
+        case subAgentOther
+        case unknown
+    }
+
+    private let kinds: [SourceKind]
+
+    public init(kinds: [SourceKind]) {
+        self.kinds = kinds
+    }
+
+    public func matches(_ source: SessionSource?) -> Bool {
+        guard let source else {
+            return kinds.contains(.unknown)
+        }
+        return kinds.contains { kind in
+            switch kind {
+            case .cli:
+                return source == .cli
+            case .vscode:
+                return source == .vscode
+            case .exec:
+                return source == .exec
+            case .appServer:
+                return source == .mcp
+            case .subAgent:
+                if case .subagent = source {
+                    return true
+                }
+                return false
+            case .subAgentReview:
+                return source == .subagent(.review)
+            case .subAgentCompact:
+                return source == .subagent(.compact)
+            case .subAgentThreadSpawn:
+                if case .subagent(.threadSpawn) = source {
+                    return true
+                }
+                return false
+            case .subAgentOther:
+                if case .subagent(.other) = source {
+                    return true
+                }
+                return false
+            case .unknown:
+                return source == .unknown
+            }
+        }
+    }
 }
 
 private struct ProviderMatcher {

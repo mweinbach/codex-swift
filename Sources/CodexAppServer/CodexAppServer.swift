@@ -718,12 +718,17 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let sourceFilter = try threadListSourceFilter(params?["sourceKinds"])
         let page = try RolloutListing.getConversations(
             codexHome: configuration.codexHome,
             pageSize: listLimit(params?["limit"]),
             cursor: stringParam(params?["cursor"]).flatMap(RolloutListing.parseCursor),
-            allowedSources: interactiveSessionSources,
+            allowedSources: sourceFilter.allowedSources,
             modelProviders: modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider),
+            archivedOnly: boolParam(params?["archived"], defaultValue: false),
+            cwdFilters: try threadListCwdFilters(params?["cwd"]),
+            searchTerm: stringParam(params?["searchTerm"]),
+            sourceMatcher: sourceFilter.matcher,
             defaultProvider: configuration.defaultModelProvider
         )
         return [
@@ -10780,6 +10785,63 @@ public enum CodexAppServer {
             return [defaultProvider]
         }
         return providers.isEmpty ? nil : providers
+    }
+
+    private static func threadListCwdFilters(_ value: Any?) throws -> [String]? {
+        let rawFilters: [String]
+        if let cwd = stringParam(value) {
+            rawFilters = [cwd]
+        } else if let cwds = stringArrayParam(value) {
+            rawFilters = cwds
+        } else {
+            return nil
+        }
+
+        return rawFilters.map { cwd in
+            URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL.path
+        }
+    }
+
+    private static func threadListSourceFilter(
+        _ value: Any?
+    ) throws -> (allowedSources: [SessionSource], matcher: SessionSourceMatcher?) {
+        guard let values = stringArrayParam(value), !values.isEmpty else {
+            return (interactiveSessionSources, nil)
+        }
+
+        let kinds = try values.map { value in
+            guard let kind = SessionSourceMatcher.SourceKind(rawValue: value) else {
+                throw AppServerError.invalidParams("invalid thread/list sourceKind `\(value)`")
+            }
+            return kind
+        }
+
+        let requiresPostFilter = kinds.contains { kind in
+            switch kind {
+            case .cli, .vscode:
+                return false
+            case .exec, .appServer, .subAgent, .subAgentReview, .subAgentCompact,
+                 .subAgentThreadSpawn, .subAgentOther, .unknown:
+                return true
+            }
+        }
+
+        if requiresPostFilter {
+            return ([], SessionSourceMatcher(kinds: kinds))
+        }
+
+        let allowedSources = kinds.compactMap { kind -> SessionSource? in
+            switch kind {
+            case .cli:
+                return .cli
+            case .vscode:
+                return .vscode
+            case .exec, .appServer, .subAgent, .subAgentReview, .subAgentCompact,
+                 .subAgentThreadSpawn, .subAgentOther, .unknown:
+                return nil
+            }
+        }
+        return (allowedSources, SessionSourceMatcher(kinds: kinds))
     }
 
     private static func sanitizeHeaderValue(_ value: String) -> String {

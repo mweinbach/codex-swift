@@ -5353,6 +5353,53 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.map { $0["preview"] as? String }, ["Interactive session"])
     }
 
+    func testThreadListSupportsRustSourceCwdSearchAndArchiveFilters() throws {
+        let temp = try TemporaryDirectory()
+        let repoA = temp.url.appendingPathComponent("repo-a", isDirectory: true).path
+        let repoB = temp.url.appendingPathComponent("repo-b", isDirectory: true).path
+        _ = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "exec target match",
+            provider: "openai",
+            source: .exec,
+            cwd: repoA
+        )
+        _ = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-04T12-00-00",
+            timestamp: "2025-01-04T12:00:00Z",
+            preview: "exec other cwd",
+            provider: "openai",
+            source: .exec,
+            cwd: repoB
+        )
+        _ = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T12-00-00",
+            timestamp: "2025-01-03T12:00:00Z",
+            preview: "archived target match",
+            provider: "openai",
+            archived: true,
+            cwd: repoA
+        )
+
+        let execResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"sourceKinds":["exec"],"cwd":"\#(repoA)","searchTerm":"target"}}"#,
+            codexHome: temp.url
+        )
+        let execData = try XCTUnwrap((execResponse["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(execData.map { $0["preview"] as? String }, ["exec target match"])
+
+        let archivedResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"archived":true,"cwd":["\#(repoA)"],"searchTerm":"target"}}"#,
+            codexHome: temp.url
+        )
+        let archivedData = try XCTUnwrap((archivedResponse["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(archivedData.map { $0["preview"] as? String }, ["archived target match"])
+    }
+
     func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
@@ -10016,11 +10063,13 @@ final class CodexAppServerTests: XCTestCase {
         preview: String,
         provider: String?,
         source: SessionSource = .cli,
-        gitInfo: GitInfo? = nil
+        gitInfo: GitInfo? = nil,
+        archived: Bool = false,
+        cwd: String = "/"
     ) throws -> String {
         let id = UUID().uuidString.lowercased()
         let path = codexHome
-            .appendingPathComponent("sessions/2025/01/02", isDirectory: true)
+            .appendingPathComponent(archived ? "archived_sessions" : "sessions/2025/01/02", isDirectory: true)
             .appendingPathComponent("rollout-\(filenameTimestamp)-\(id).jsonl", isDirectory: false)
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
@@ -10032,7 +10081,7 @@ final class CodexAppServerTests: XCTestCase {
             item: .sessionMeta(SessionMetaLine(meta: SessionMeta(
                 id: conversationID,
                 timestamp: timestamp,
-                cwd: "/",
+                cwd: cwd,
                 originator: "codex_cli_rs",
                 cliVersion: "0.0.0",
                 source: source,
