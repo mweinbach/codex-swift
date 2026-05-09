@@ -81,8 +81,8 @@ public enum StreamEventUtils {
         switch input {
         case let .functionCallOutput(callID, output):
             return .functionCallOutput(callID: callID, output: output)
-        case let .customToolCallOutput(callID, output):
-            return .customToolCallOutput(callID: callID, output: output)
+        case let .customToolCallOutput(callID, name, output):
+            return .customToolCallOutput(callID: callID, name: name, output: output)
         case let .toolSearchOutput(callID, status, execution, tools):
             return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
@@ -154,8 +154,8 @@ public extension ResponseInputItem {
             return .message(role: role, content: content, phase: phase)
         case let .functionCallOutput(callID, output):
             return .functionCallOutput(callID: callID, output: output)
-        case let .customToolCallOutput(callID, output):
-            return .customToolCallOutput(callID: callID, output: output)
+        case let .customToolCallOutput(callID, name, output):
+            return .customToolCallOutput(callID: callID, name: name, output: output)
         case let .toolSearchOutput(callID, status, execution, tools):
             return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):

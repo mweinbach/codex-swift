@@ -216,7 +216,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
     case message(role: String, content: [ContentItem], phase: MessagePhase? = nil)
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
     case mcpToolCallOutput(callID: String, result: McpToolCallResult)
-    case customToolCallOutput(callID: String, output: String)
+    case customToolCallOutput(callID: String, name: String? = nil, output: FunctionCallOutputPayload)
     case toolSearchOutput(callID: String, status: String, execution: String, tools: [JSONValue])
 
     private enum CodingKeys: String, CodingKey {
@@ -225,6 +225,7 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case content
         case phase
         case callID = "call_id"
+        case name
         case output
         case result
         case status
@@ -262,7 +263,8 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
         case .customToolCallOutput:
             self = .customToolCallOutput(
                 callID: try container.decode(String.self, forKey: .callID),
-                output: try container.decode(String.self, forKey: .output)
+                name: try container.decodeIfPresent(String.self, forKey: .name),
+                output: try container.decode(FunctionCallOutputPayload.self, forKey: .output)
             )
         case .toolSearchOutput:
             self = .toolSearchOutput(
@@ -290,9 +292,10 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
             try container.encode(ItemType.mcpToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(result, forKey: .result)
-        case let .customToolCallOutput(callID, output):
+        case let .customToolCallOutput(callID, name, output):
             try container.encode(ItemType.customToolCallOutput, forKey: .type)
             try container.encode(callID, forKey: .callID)
+            try container.encodeIfPresent(name, forKey: .name)
             try container.encode(output, forKey: .output)
         case let .toolSearchOutput(callID, status, execution, tools):
             try container.encode(ItemType.toolSearchOutput, forKey: .type)
@@ -305,6 +308,10 @@ public enum ResponseInputItem: Equatable, Codable, Sendable {
 }
 
 public extension ResponseInputItem {
+    static func customToolCallOutput(callID: String, name: String? = nil, output: String) -> ResponseInputItem {
+        .customToolCallOutput(callID: callID, name: name, output: FunctionCallOutputPayload(content: output))
+    }
+
     init(userInputs: [UserInput]) {
         let content = userInputs.compactMap(Self.contentItem)
         self = .message(role: "user", content: content)
@@ -742,7 +749,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     )
     case functionCallOutput(callID: String, output: FunctionCallOutputPayload)
     case customToolCall(id: String? = nil, status: String? = nil, callID: String, name: String, input: String)
-    case customToolCallOutput(callID: String, output: String)
+    case customToolCallOutput(callID: String, name: String? = nil, output: FunctionCallOutputPayload)
     case toolSearchOutput(callID: String? = nil, status: String, execution: String, tools: [JSONValue])
     case webSearchCall(id: String? = nil, status: String? = nil, action: WebSearchAction?)
     case imageGenerationCall(id: String, status: String, revisedPrompt: String? = nil, result: String)
@@ -866,9 +873,13 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             }
         case "custom_tool_call_output":
             if let callID = try? container.decode(String.self, forKey: .callID),
-               let output = try? container.decode(String.self, forKey: .output)
+               let output = try? container.decode(FunctionCallOutputPayload.self, forKey: .output)
             {
-                self = .customToolCallOutput(callID: callID, output: output)
+                self = .customToolCallOutput(
+                    callID: callID,
+                    name: try container.decodeIfPresent(String.self, forKey: .name),
+                    output: output
+                )
             } else {
                 self = .knownPersisted(type: type)
             }
@@ -969,9 +980,10 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(callID, forKey: .callID)
             try container.encode(name, forKey: .name)
             try container.encode(input, forKey: .input)
-        case let .customToolCallOutput(callID, output):
+        case let .customToolCallOutput(callID, name, output):
             try container.encode("custom_tool_call_output", forKey: .type)
             try container.encode(callID, forKey: .callID)
+            try container.encodeIfPresent(name, forKey: .name)
             try container.encode(output, forKey: .output)
         case let .toolSearchOutput(callID, status, execution, tools):
             try container.encode("tool_search_output", forKey: .type)
@@ -1016,6 +1028,12 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             }
             return false
         }
+    }
+}
+
+public extension ResponseItem {
+    static func customToolCallOutput(callID: String, name: String? = nil, output: String) -> ResponseItem {
+        .customToolCallOutput(callID: callID, name: name, output: FunctionCallOutputPayload(content: output))
     }
 }
 

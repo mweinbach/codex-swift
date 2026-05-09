@@ -1230,8 +1230,8 @@ public enum NonInteractiveExec {
         switch output {
         case let .functionCallOutput(_, payload):
             return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(payload.content))
-        case let .customToolCallOutput(_, output):
-            return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(output))
+        case let .customToolCallOutput(_, _, output):
+            return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(output.content))
         default:
             if case .toolSearchCall = item {
                 return nil
@@ -1313,8 +1313,8 @@ public enum NonInteractiveExec {
                 callID: callID,
                 output: FunctionCallOutputPayload(content: replacement, success: payload.success)
             )
-        case let .customToolCallOutput(callID, _):
-            return .customToolCallOutput(callID: callID, output: replacement)
+        case let .customToolCallOutput(callID, name, _):
+            return .customToolCallOutput(callID: callID, name: name, output: replacement)
         default:
             return output
         }

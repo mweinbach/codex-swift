@@ -328,6 +328,44 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testRoundTripsCustomToolCallOutputPayloadLikeRust() throws {
+        let item = ResponseItem.customToolCallOutput(
+            callID: "custom-1",
+            name: "apply_patch",
+            output: FunctionCallOutputPayload(
+                content: "ignored when content items exist",
+                contentItems: [.inputText(text: "patched")],
+                success: true
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "custom_tool_call_output",
+            "call_id": "custom-1",
+            "name": "apply_patch",
+            "output": [
+                [
+                    "type": "input_text",
+                    "text": "patched"
+                ]
+            ]
+        ])
+        guard case let .customToolCallOutput(decodedCallID, decodedName, decodedOutput) =
+            try JSONDecoder().decode(ResponseItem.self, from: JSONEncoder().encode(item))
+        else {
+            return XCTFail("expected custom tool output")
+        }
+        XCTAssertEqual(decodedCallID, "custom-1")
+        XCTAssertEqual(decodedName, "apply_patch")
+        XCTAssertEqual(decodedOutput.contentItems, [.inputText(text: "patched")])
+
+        try XCTAssertJSONObjectEqual(ResponseItem.customToolCallOutput(callID: "custom-2", output: "done"), [
+            "type": "custom_tool_call_output",
+            "call_id": "custom-2",
+            "output": "done"
+        ])
+    }
+
     func testRoundTripsWebSearchCallActions() throws {
         let json = #"""
         {

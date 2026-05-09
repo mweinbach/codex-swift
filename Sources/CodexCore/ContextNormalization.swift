@@ -42,7 +42,7 @@ public enum ContextNormalization {
 
             case let .customToolCall(_, _, callID, _, _):
                 let hasOutput = items.contains { candidate in
-                    if case let .customToolCallOutput(existing, _) = candidate {
+                    if case let .customToolCallOutput(existing, _, _) = candidate {
                         return existing == callID
                     }
                     return false
@@ -125,7 +125,7 @@ public enum ContextNormalization {
             switch item {
             case let .functionCallOutput(callID, _):
                 return !functionCallIDs.contains(callID) && !localShellCallIDs.contains(callID)
-            case let .customToolCallOutput(callID, _):
+            case let .customToolCallOutput(callID, _, _):
                 return !customToolCallIDs.contains(callID)
             case let .toolSearchOutput(callID, _, execution, _):
                 guard execution != "server", let callID else {
@@ -167,13 +167,13 @@ public enum ContextNormalization {
 
         case let .customToolCall(_, _, callID, _, _):
             removeFirstMatching(from: &items) { candidate in
-                if case let .customToolCallOutput(existing, _) = candidate {
+                if case let .customToolCallOutput(existing, _, _) = candidate {
                     return existing == callID
                 }
                 return false
             }
 
-        case let .customToolCallOutput(callID, _):
+        case let .customToolCallOutput(callID, _, _):
             removeFirstMatching(from: &items) { candidate in
                 if case let .customToolCall(_, _, existing, _, _) = candidate {
                     return existing == callID

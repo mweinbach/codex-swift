@@ -138,11 +138,11 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                     ])
                 ]))
 
-            case let .customToolCallOutput(callID, output):
+            case let .customToolCallOutput(callID, _, output):
                 messages.append(.object([
                     "role": .string("tool"),
                     "tool_call_id": .string(callID),
-                    "content": .string(output)
+                    "content": functionOutputContent(output)
                 ]))
 
             case .reasoning,
