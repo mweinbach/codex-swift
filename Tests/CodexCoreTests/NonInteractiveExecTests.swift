@@ -585,17 +585,28 @@ final class NonInteractiveExecTests: XCTestCase {
 
         let prompts = await script.prompts()
         XCTAssertEqual(prompts.count, 2)
-        XCTAssertTrue(prompts[1].input.contains { item in
+        let continuationFragment = try XCTUnwrap(prompts[1].input.compactMap { item -> HookPromptFragment? in
             if case let .message(_, role, content, _) = item {
-                return role == "user" && content == [.inputText(text: continuation)]
+                guard role == "user" else {
+                    return nil
+                }
+                return HookPromptItem.parseMessage(id: nil, content: content)?.fragments.first
             }
-            return false
-        })
-        XCTAssertEqual(result.transcriptItems, [
-            .message(role: "assistant", content: [.outputText(text: "draft one")]),
-            ResponseInputItem(userInputs: [.text(continuation)]).responseItem(),
-            .message(role: "assistant", content: [.outputText(text: "final draft")])
-        ])
+            return nil
+        }.first)
+        XCTAssertEqual(continuationFragment.text, continuation)
+        XCTAssertFalse(continuationFragment.hookRunID.isEmpty)
+        XCTAssertEqual(result.transcriptItems.count, 3)
+        XCTAssertEqual(result.transcriptItems[0], .message(role: "assistant", content: [.outputText(text: "draft one")]))
+        guard case let .message(_, transcriptRole, transcriptContent, _) = result.transcriptItems[1] else {
+            return XCTFail("expected hook prompt transcript item")
+        }
+        XCTAssertEqual(transcriptRole, "user")
+        XCTAssertEqual(
+            HookPromptItem.parseMessage(id: nil, content: transcriptContent)?.fragments.first,
+            continuationFragment
+        )
+        XCTAssertEqual(result.transcriptItems[2], .message(role: "assistant", content: [.outputText(text: "final draft")]))
 
         let hookInputs = try String(contentsOf: log, encoding: .utf8)
         XCTAssertTrue(hookInputs.contains(#""stop_hook_active":false"#), hookInputs)

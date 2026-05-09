@@ -6,6 +6,9 @@ public enum EventMapping {
         case let .message(id, role, content, phase):
             switch role {
             case "user":
+                if let hookPrompt = HookPromptItem.parseMessage(id: id, content: content) {
+                    return .hookPrompt(hookPrompt)
+                }
                 return parseUserMessage(content).map(TurnItem.userMessage)
             case "assistant":
                 return .agentMessage(parseAgentMessage(id: id, content: content, phase: phase))

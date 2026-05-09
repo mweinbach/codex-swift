@@ -177,6 +177,66 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
     }
 
+    func testHookPromptTurnItemWireShapeUsesRustTags() throws {
+        let item = TurnItem.hookPrompt(HookPromptItem(
+            id: "hook-prompt-1",
+            fragments: [
+                HookPromptFragment(text: "Retry with care & joy.", hookRunID: "hook-run-1")
+            ]
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "HookPrompt",
+            "id": "hook-prompt-1",
+            "fragments": [
+                [
+                    "text": "Retry with care & joy.",
+                    "hookRunId": "hook-run-1"
+                ]
+            ]
+        ])
+        XCTAssertEqual(item.id, "hook-prompt-1")
+        XCTAssertEqual(item.asLegacyEvents(showRawAgentReasoning: false), [])
+
+        let data = try JSONEncoder().encode(item)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
+    }
+
+    func testHookPromptXMLRoundTripsMultipleFragments() throws {
+        let original = [
+            HookPromptFragment.fromSingleHook(text: "Retry with care & joy.", hookRunID: "hook-run-1"),
+            HookPromptFragment.fromSingleHook(text: "Then summarize <cleanly>.", hookRunID: "hook-run-2")
+        ]
+
+        let message = try XCTUnwrap(HookPromptItem.buildMessage(fragments: original))
+        guard case let .message(_, role, content, phase) = message else {
+            return XCTFail("expected hook prompt message, got \(message)")
+        }
+
+        XCTAssertEqual(role, "user")
+        XCTAssertNil(phase)
+        XCTAssertEqual(content.count, 2)
+        guard case let .inputText(firstXML) = content[0] else {
+            return XCTFail("expected input text")
+        }
+        XCTAssertEqual(
+            firstXML,
+            #"<hook_prompt hook_run_id="hook-run-1">Retry with care &amp; joy.</hook_prompt>"#
+        )
+
+        let parsed = try XCTUnwrap(HookPromptItem.parseMessage(id: nil, content: content))
+        XCTAssertEqual(parsed.fragments, original)
+    }
+
+    func testHookPromptParsesLegacySingleHookRunID() throws {
+        let parsed = try XCTUnwrap(HookPromptFragment.parseXML(
+            #"<hook_prompt hook_run_id="hook-run-1">Retry with tests.</hook_prompt>"#
+        ))
+
+        XCTAssertEqual(parsed, HookPromptFragment(text: "Retry with tests.", hookRunID: "hook-run-1"))
+        XCTAssertNil(HookPromptFragment.parseXML(#"<hook_prompt hook_run_id="">Retry.</hook_prompt>"#))
+    }
+
     func testPlanTurnItemWireShapeUsesRustTags() throws {
         let item = TurnItem.plan(PlanItem(id: "plan-1", text: "1. Port protocol events"))
 

@@ -2,6 +2,7 @@ import Foundation
 
 public enum TurnItem: Equatable, Codable, Sendable {
     case userMessage(UserMessageItem)
+    case hookPrompt(HookPromptItem)
     case agentMessage(AgentMessageItem)
     case plan(PlanItem)
     case reasoning(ReasoningItem)
@@ -14,6 +15,7 @@ public enum TurnItem: Equatable, Codable, Sendable {
 
     private enum ItemType: String, Codable {
         case userMessage = "UserMessage"
+        case hookPrompt = "HookPrompt"
         case agentMessage = "AgentMessage"
         case plan = "Plan"
         case reasoning = "Reasoning"
@@ -24,6 +26,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
     public var id: String {
         switch self {
         case let .userMessage(item):
+            return item.id
+        case let .hookPrompt(item):
             return item.id
         case let .agentMessage(item):
             return item.id
@@ -43,6 +47,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         switch try container.decode(ItemType.self, forKey: .type) {
         case .userMessage:
             self = .userMessage(try UserMessageItem(from: decoder))
+        case .hookPrompt:
+            self = .hookPrompt(try HookPromptItem(from: decoder))
         case .agentMessage:
             self = .agentMessage(try AgentMessageItem(from: decoder))
         case .plan:
@@ -61,6 +67,9 @@ public enum TurnItem: Equatable, Codable, Sendable {
         switch self {
         case let .userMessage(item):
             try container.encode(ItemType.userMessage, forKey: .type)
+            try item.encode(to: encoder)
+        case let .hookPrompt(item):
+            try container.encode(ItemType.hookPrompt, forKey: .type)
             try item.encode(to: encoder)
         case let .agentMessage(item):
             try container.encode(ItemType.agentMessage, forKey: .type)
@@ -84,6 +93,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         switch self {
         case let .userMessage(item):
             return [item.asLegacyEvent()]
+        case .hookPrompt:
+            return []
         case let .agentMessage(item):
             return item.asLegacyEvents()
         case .plan:
@@ -95,6 +106,48 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .imageGeneration(item):
             return [item.asLegacyEvent()]
         }
+    }
+}
+
+public struct HookPromptItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let fragments: [HookPromptFragment]
+
+    public init(id: String = UUID().uuidString.lowercased(), fragments: [HookPromptFragment]) {
+        self.id = id
+        self.fragments = fragments
+    }
+
+    public static func fromFragments(id: String?, fragments: [HookPromptFragment]) -> Self {
+        Self(id: id ?? UUID().uuidString.lowercased(), fragments: fragments)
+    }
+
+    public static func parseMessage(id: String?, content: [ContentItem]) -> Self? {
+        let fragments = content.compactMap { contentItem -> HookPromptFragment? in
+            guard case let .inputText(text) = contentItem else {
+                return nil
+            }
+            return HookPromptFragment.parseXML(text)
+        }
+
+        guard fragments.count == content.count, !fragments.isEmpty else {
+            return nil
+        }
+        return fromFragments(id: id, fragments: fragments)
+    }
+
+    public static func buildMessage(fragments: [HookPromptFragment]) -> ResponseItem? {
+        let content = fragments.compactMap { fragment -> ContentItem? in
+            guard let text = fragment.serializedXML() else {
+                return nil
+            }
+            return .inputText(text: text)
+        }
+
+        guard !content.isEmpty else {
+            return nil
+        }
+        return .message(id: UUID().uuidString.lowercased(), role: "user", content: content)
     }
 }
 

@@ -412,9 +412,7 @@ public enum NonInteractiveExec {
     }
 
     private static func stopContinuationItems(_ fragments: [HookPromptFragment]) -> [ResponseItem] {
-        fragments.map { fragment in
-            ResponseInputItem(userInputs: [.text(fragment.text)]).responseItem()
-        }
+        HookPromptItem.buildMessage(fragments: fragments).map { [$0] } ?? []
     }
 
     private static func lastAssistantMessage(from items: [ResponseItem]) -> String? {

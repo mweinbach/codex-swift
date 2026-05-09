@@ -27,6 +27,42 @@ final class EventMappingTests: XCTestCase {
         ])
     }
 
+    func testParsesHookPromptBeforePlainUserMessage() {
+        let item = ResponseItem.message(
+            id: "hook-prompt-1",
+            role: "user",
+            content: [
+                .inputText(text: #"<hook_prompt hook_run_id="hook-run-1">Retry with tests.</hook_prompt>"#),
+                .inputText(text: #"<hook_prompt hook_run_id="hook-run-2">Then summarize cleanly.</hook_prompt>"#)
+            ]
+        )
+
+        let turnItem = EventMapping.parseTurnItem(item)
+
+        XCTAssertEqual(turnItem, .hookPrompt(HookPromptItem(
+            id: "hook-prompt-1",
+            fragments: [
+                HookPromptFragment(text: "Retry with tests.", hookRunID: "hook-run-1"),
+                HookPromptFragment(text: "Then summarize cleanly.", hookRunID: "hook-run-2")
+            ]
+        )))
+    }
+
+    func testInvalidHookPromptFallsBackToUserMessage() {
+        let item = ResponseItem.message(
+            id: "user-1",
+            role: "user",
+            content: [
+                .inputText(text: #"<hook_prompt hook_run_id="">Retry with tests.</hook_prompt>"#)
+            ]
+        )
+
+        guard case let .userMessage(message) = EventMapping.parseTurnItem(item) else {
+            return XCTFail("expected user message fallback")
+        }
+        XCTAssertEqual(message.content, [.text(#"<hook_prompt hook_run_id="">Retry with tests.</hook_prompt>"#)])
+    }
+
     func testSkipsUserInstructionsSkillInstructionsEnvironmentAndShellCommands() {
         let items: [ResponseItem] = [
             .message(role: "user", content: [
