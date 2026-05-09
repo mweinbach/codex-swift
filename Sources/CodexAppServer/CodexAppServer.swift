@@ -1,5 +1,6 @@
 import CodexCore
 import CryptoKit
+import Darwin
 import Dispatch
 import Foundation
 
@@ -215,6 +216,7 @@ private struct AppServerProcessSpawnParams {
     let streamStdoutStderr: Bool
     let timeoutMs: Int?
     let outputBytesCap: Int?
+    let size: AppServerTerminalSize?
     let environmentOverrides: [String: String?]
 }
 
@@ -233,6 +235,7 @@ private struct AppServerCommandExecParams {
     let streamStdoutStderr: Bool
     let timeoutMs: Int?
     let outputBytesCap: Int?
+    let size: AppServerTerminalSize?
     let environmentOverrides: [String: String?]
 }
 
@@ -240,6 +243,11 @@ private struct AppServerCommandExecWriteParams {
     let processID: String
     let delta: Data
     let closeStdin: Bool
+}
+
+private struct AppServerTerminalSize {
+    let rows: Int
+    let cols: Int
 }
 
 private struct AppServerJSONObject: @unchecked Sendable {
@@ -7769,9 +7777,7 @@ public enum CodexAppServer {
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("command/exec size requires tty: true")
         }
-        if let size = params?["size"] as? [String: Any] {
-            try validateCommandExecSize(size)
-        }
+        let size = try commandExecSize(params?["size"])
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("command/exec timeoutMs must be non-negative, got \(timeoutMs)")
         }
@@ -7784,6 +7790,7 @@ public enum CodexAppServer {
             streamStdoutStderr: streamStdoutStderr,
             timeoutMs: optionalIntParam(params?["timeoutMs"] ?? params?["timeout_ms"]),
             outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
+            size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
         )
     }
@@ -7848,6 +7855,10 @@ public enum CodexAppServer {
     }
 
     fileprivate static func validateCommandExecResizeParams(params: [String: Any]?) throws {
+        _ = try commandExecResizeSize(params: params)
+    }
+
+    fileprivate static func commandExecResizeSize(params: [String: Any]?) throws -> AppServerTerminalSize {
         guard let size = params?["size"] as? [String: Any],
               let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
@@ -7857,9 +7868,16 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
         }
+        return AppServerTerminalSize(rows: rows, cols: cols)
     }
 
-    private static func validateCommandExecSize(_ size: [String: Any]) throws {
+    private static func commandExecSize(_ value: Any?) throws -> AppServerTerminalSize? {
+        guard let value else {
+            return nil
+        }
+        guard let size = value as? [String: Any] else {
+            throw AppServerError.invalidParams("command/exec/resize requires size rows and cols")
+        }
         guard let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
         else {
@@ -7868,6 +7886,7 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
         }
+        return AppServerTerminalSize(rows: rows, cols: cols)
     }
 
     fileprivate static func commandExecProcessID(params: [String: Any]?) throws -> String {
@@ -7923,9 +7942,7 @@ public enum CodexAppServer {
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
         }
-        if let size = params?["size"] as? [String: Any] {
-            try validateProcessSize(size)
-        }
+        let size = try processSize(params?["size"])
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("process/spawn timeoutMs must be non-negative, got \(timeoutMs)")
         }
@@ -7938,6 +7955,7 @@ public enum CodexAppServer {
             streamStdoutStderr: boolParam(params?["streamStdoutStderr"], defaultValue: false),
             timeoutMs: optionalIntParam(params?["timeoutMs"]),
             outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
+            size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"])
         )
     }
@@ -7954,6 +7972,10 @@ public enum CodexAppServer {
     }
 
     fileprivate static func validateProcessResizePtyParams(params: [String: Any]?) throws {
+        _ = try processResizePtySize(params: params)
+    }
+
+    fileprivate static func processResizePtySize(params: [String: Any]?) throws -> AppServerTerminalSize {
         guard let size = params?["size"] as? [String: Any],
               let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
@@ -7963,9 +7985,16 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
         }
+        return AppServerTerminalSize(rows: rows, cols: cols)
     }
 
-    private static func validateProcessSize(_ size: [String: Any]) throws {
+    private static func processSize(_ value: Any?) throws -> AppServerTerminalSize? {
+        guard let value else {
+            return nil
+        }
+        guard let size = value as? [String: Any] else {
+            throw AppServerError.invalidParams("process/resizePty requires size rows and cols")
+        }
         guard let rows = size["rows"] as? Int,
               let cols = size["cols"] as? Int
         else {
@@ -7974,6 +8003,7 @@ public enum CodexAppServer {
         guard rows > 0, cols > 0 else {
             throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
         }
+        return AppServerTerminalSize(rows: rows, cols: cols)
     }
 
     fileprivate static func processHandle(params: [String: Any]?) throws -> String {
@@ -11878,6 +11908,91 @@ private final class AppServerProcessExitSignal: @unchecked Sendable {
     }
 }
 
+private final class AppServerPseudoTerminal: @unchecked Sendable {
+    let master: FileHandle
+    let stdinHandle: FileHandle
+    let stdoutHandle: FileHandle
+    let stderrHandle: FileHandle
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var closed = false
+
+    init(size: AppServerTerminalSize?) throws {
+        var masterFD: Int32 = -1
+        var slaveFD: Int32 = -1
+        var windowSize = winsize(
+            ws_row: UInt16(clamping: size?.rows ?? 24),
+            ws_col: UInt16(clamping: size?.cols ?? 80),
+            ws_xpixel: 0,
+            ws_ypixel: 0
+        )
+        guard openpty(&masterFD, &slaveFD, nil, nil, &windowSize) == 0 else {
+            throw POSIXError(.init(rawValue: errno) ?? .EIO)
+        }
+        descriptor = masterFD
+        master = FileHandle(fileDescriptor: masterFD, closeOnDealloc: true)
+        stdinHandle = FileHandle(fileDescriptor: dup(slaveFD), closeOnDealloc: true)
+        stdoutHandle = FileHandle(fileDescriptor: dup(slaveFD), closeOnDealloc: true)
+        stderrHandle = FileHandle(fileDescriptor: dup(slaveFD), closeOnDealloc: true)
+        close(slaveFD)
+    }
+
+    deinit {
+        closeMaster()
+    }
+
+    func write(_ data: Data) throws {
+        guard !data.isEmpty else {
+            return
+        }
+        do {
+            try master.write(contentsOf: data)
+        } catch {
+            throw AppServerError.invalidRequest("stdin is already closed")
+        }
+    }
+
+    func closeStdin() throws {
+        try write(Data([4]))
+    }
+
+    func resize(_ size: AppServerTerminalSize) throws {
+        var windowSize = winsize(
+            ws_row: UInt16(clamping: size.rows),
+            ws_col: UInt16(clamping: size.cols),
+            ws_xpixel: 0,
+            ws_ypixel: 0
+        )
+        if ioctl(descriptor, TIOCSWINSZ, &windowSize) != 0 {
+            throw AppServerError.invalidRequest("failed to resize PTY: \(String(cString: strerror(errno)))")
+        }
+    }
+
+    func closeSlaveHandles() {
+        try? stdinHandle.close()
+        try? stdoutHandle.close()
+        try? stderrHandle.close()
+    }
+
+    func closeMaster() {
+        let shouldClose = lock.withLock {
+            guard !closed else {
+                return false
+            }
+            closed = true
+            return true
+        }
+        if shouldClose {
+            try? master.close()
+        }
+    }
+}
+
+private enum AppServerProcessInput {
+    case pipe(Pipe)
+    case pseudoTerminal(AppServerPseudoTerminal)
+}
+
 private final class AppServerCommandExecProcess: @unchecked Sendable {
     private let params: AppServerCommandExecParams
     private let requestID: Any
@@ -11887,6 +12002,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     private let process = Process()
     private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
+    private var pseudoTerminal: AppServerPseudoTerminal?
     private var stdinClosed = false
     private var terminated = false
     private var timedOut = false
@@ -11928,7 +12044,19 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         process.terminationHandler = { [exitSignal] _ in
             exitSignal.signal()
         }
-        if params.streamStdin || params.tty {
+        if params.tty {
+            let pty = try AppServerPseudoTerminal(size: params.size)
+            pseudoTerminal = pty
+            process.standardInput = pty.stdinHandle
+            process.standardOutput = pty.stdoutHandle
+            process.standardError = pty.stderrHandle
+            try process.run()
+            Task.detached { [self] in
+                await finish(stdout: pty.master, stderr: nil)
+            }
+            return
+        }
+        if params.streamStdin {
             let stdin = Pipe()
             stdinPipe = stdin
             process.standardInput = stdin
@@ -11942,18 +12070,36 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     func writeStdin(delta: Data, closeStdin: Bool) throws {
-        let stdin = try lock.withLock {
-            guard let stdinPipe else {
-                throw AppServerError.invalidRequest("stdin streaming is not enabled for this command/exec")
-            }
+        let stdin = try lock.withLock { () throws -> AppServerProcessInput in
             guard !stdinClosed else {
                 throw AppServerError.invalidRequest("stdin is already closed")
             }
-            return stdinPipe
+            if let pseudoTerminal {
+                return .pseudoTerminal(pseudoTerminal)
+            }
+            guard let stdinPipe else {
+                throw AppServerError.invalidRequest("stdin streaming is not enabled for this command/exec")
+            }
+            return .pipe(stdinPipe)
+        }
+        if case let .pseudoTerminal(pty) = stdin {
+            if !delta.isEmpty {
+                try pty.write(delta)
+            }
+            if closeStdin {
+                lock.withLock {
+                    stdinClosed = true
+                }
+                try pty.closeStdin()
+            }
+            return
+        }
+        guard case let .pipe(stdinPipe) = stdin else {
+            return
         }
         if !delta.isEmpty {
             do {
-                try stdin.fileHandleForWriting.write(contentsOf: delta)
+                try stdinPipe.fileHandleForWriting.write(contentsOf: delta)
             } catch {
                 throw AppServerError.invalidRequest("stdin is already closed")
             }
@@ -11963,15 +12109,18 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
                 stdinClosed = true
             }
             do {
-                try stdin.fileHandleForWriting.close()
+                try stdinPipe.fileHandleForWriting.close()
             } catch {
-                stdin.fileHandleForWriting.closeFile()
+                stdinPipe.fileHandleForWriting.closeFile()
             }
         }
     }
 
-    func resizePty() throws {
-        throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
+    func resizePty(size: AppServerTerminalSize) throws {
+        guard let pseudoTerminal else {
+            throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
+        }
+        try pseudoTerminal.resize(size)
     }
 
     func terminate() {
@@ -11990,6 +12139,10 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: Pipe, stderr: Pipe) async {
+        await finish(stdout: stdout.fileHandleForReading, stderr: stderr.fileHandleForReading)
+    }
+
+    private func finish(stdout: FileHandle, stderr: FileHandle?) async {
         if let timeoutMs = params.timeoutMs {
             let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
             while process.isRunning && Date() < deadline {
@@ -12003,8 +12156,9 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
-        let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        pseudoTerminal?.closeSlaveHandles()
+        let stdoutCapture = Self.capture(Self.readToEnd(stdout), cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(stderr.map(Self.readToEnd) ?? Data(), cap: params.outputBytesCap)
         if params.streamStdoutStderr {
             await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
             await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
@@ -12067,6 +12221,22 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             capReached: capReached
         )
     }
+
+    private static func readToEnd(_ handle: FileHandle) -> Data {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count > 0 {
+                data.append(buffer, count: count)
+            } else if count == -1 && errno == EINTR {
+                continue
+            } else {
+                break
+            }
+        }
+        return data
+    }
 }
 
 private final class AppServerCommandExecRegistry: @unchecked Sendable {
@@ -12115,6 +12285,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private let process = Process()
     private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
+    private var pseudoTerminal: AppServerPseudoTerminal?
     private var stdinClosed = false
     private var terminated = false
     private var timedOut = false
@@ -12157,7 +12328,19 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         process.terminationHandler = { [exitSignal] _ in
             exitSignal.signal()
         }
-        if params.streamStdin || params.tty {
+        if params.tty {
+            let pty = try AppServerPseudoTerminal(size: params.size)
+            pseudoTerminal = pty
+            process.standardInput = pty.stdinHandle
+            process.standardOutput = pty.stdoutHandle
+            process.standardError = pty.stderrHandle
+            try process.run()
+            Task.detached { [self] in
+                await finish(stdout: pty.master, stderr: nil)
+            }
+            return
+        }
+        if params.streamStdin {
             let stdin = Pipe()
             stdinPipe = stdin
             process.standardInput = stdin
@@ -12171,18 +12354,36 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     func writeStdin(delta: Data, closeStdin: Bool) throws {
-        let stdin = try lock.withLock {
-            guard let stdinPipe else {
-                throw AppServerError.invalidRequest("stdin streaming is not enabled for this process")
-            }
+        let stdin = try lock.withLock { () throws -> AppServerProcessInput in
             guard !stdinClosed else {
                 throw AppServerError.invalidRequest("stdin is already closed")
             }
-            return stdinPipe
+            if let pseudoTerminal {
+                return .pseudoTerminal(pseudoTerminal)
+            }
+            guard let stdinPipe else {
+                throw AppServerError.invalidRequest("stdin streaming is not enabled for this process")
+            }
+            return .pipe(stdinPipe)
+        }
+        if case let .pseudoTerminal(pty) = stdin {
+            if !delta.isEmpty {
+                try pty.write(delta)
+            }
+            if closeStdin {
+                lock.withLock {
+                    stdinClosed = true
+                }
+                try pty.closeStdin()
+            }
+            return
+        }
+        guard case let .pipe(stdinPipe) = stdin else {
+            return
         }
         if !delta.isEmpty {
             do {
-                try stdin.fileHandleForWriting.write(contentsOf: delta)
+                try stdinPipe.fileHandleForWriting.write(contentsOf: delta)
             } catch {
                 throw AppServerError.invalidRequest("stdin is already closed")
             }
@@ -12192,15 +12393,18 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
                 stdinClosed = true
             }
             do {
-                try stdin.fileHandleForWriting.close()
+                try stdinPipe.fileHandleForWriting.close()
             } catch {
-                stdin.fileHandleForWriting.closeFile()
+                stdinPipe.fileHandleForWriting.closeFile()
             }
         }
     }
 
-    func resizePty() throws {
-        throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
+    func resizePty(size: AppServerTerminalSize) throws {
+        guard let pseudoTerminal else {
+            throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
+        }
+        try pseudoTerminal.resize(size)
     }
 
     func terminate() {
@@ -12219,6 +12423,10 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     private func finish(stdout: Pipe, stderr: Pipe) async {
+        await finish(stdout: stdout.fileHandleForReading, stderr: stderr.fileHandleForReading)
+    }
+
+    private func finish(stdout: FileHandle, stderr: FileHandle?) async {
         if let timeoutMs = params.timeoutMs {
             let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
             while process.isRunning && Date() < deadline {
@@ -12232,8 +12440,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
-        let stdoutCapture = Self.capture(stdout.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
-        let stderrCapture = Self.capture(stderr.fileHandleForReading.readDataToEndOfFile(), cap: params.outputBytesCap)
+        pseudoTerminal?.closeSlaveHandles()
+        let stdoutCapture = Self.capture(Self.readToEnd(stdout), cap: params.outputBytesCap)
+        let stderrCapture = Self.capture(stderr.map(Self.readToEnd) ?? Data(), cap: params.outputBytesCap)
         if params.streamStdoutStderr {
             await sendOutputDelta(stream: "stdout", data: Data(stdoutCapture.text.utf8), capReached: stdoutCapture.capReached)
             await sendOutputDelta(stream: "stderr", data: Data(stderrCapture.text.utf8), capReached: stderrCapture.capReached)
@@ -12294,6 +12503,22 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             text: TextEncoding.bytesToStringSmart(capped),
             capReached: capReached
         )
+    }
+
+    private static func readToEnd(_ handle: FileHandle) -> Data {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count > 0 {
+                data.append(buffer, count: count)
+            } else if count == -1 && errno == EINTR {
+                continue
+            } else {
+                break
+            }
+        }
+        return data
     }
 }
 
@@ -12782,11 +13007,11 @@ final class CodexAppServerMessageProcessor {
 
     private func commandExecResizeResult(params: [String: Any]?) throws -> [String: Any] {
         let processID = try CodexAppServer.commandExecProcessID(params: params)
-        try CodexAppServer.validateCommandExecResizeParams(params: params)
+        let size = try CodexAppServer.commandExecResizeSize(params: params)
         guard let session = activeCommandExecs.get(processID) else {
             throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
         }
-        try session.resizePty()
+        try session.resizePty(size: size)
         return [:]
     }
 
@@ -12825,11 +13050,11 @@ final class CodexAppServerMessageProcessor {
 
     private func processResizePtyResult(params: [String: Any]?) throws -> [String: Any] {
         let processHandle = try CodexAppServer.processHandle(params: params)
-        try CodexAppServer.validateProcessResizePtyParams(params: params)
+        let size = try CodexAppServer.processResizePtySize(params: params)
         guard let session = activeProcesses.get(processHandle) else {
             throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
         }
-        try session.resizePty()
+        try session.resizePty(size: size)
         return [:]
     }
 

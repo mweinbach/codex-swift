@@ -7322,6 +7322,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
     }
 
+    func testCommandExecTtySessionResizesActiveTerminal() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sleep","5"],"processId":"cmd-pty","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":17,"cols":45}}}"#.utf8
+        )))
+
+        let resize = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/resize","params":{"processId":"cmd-pty","size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        XCTAssertEqual((resize["result"] as? [String: Any])?.isEmpty, true)
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"command/exec/terminate","params":{"processId":"cmd-pty"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+    }
+
     func testCommandExecFollowUpsReportNoActiveProcess() throws {
         let temp = try TemporaryDirectory()
 
@@ -7612,6 +7638,33 @@ final class CodexAppServerTests: XCTestCase {
 
         let kill = try decode(processor.processLine(Data(
             #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-resize"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
+    }
+
+    func testProcessSpawnTtyResizesActiveTerminal() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let spawn = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sleep","5"],"processHandle":"proc-pty","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":18,"cols":46}}}"#.utf8
+        )))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        let resize = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/resizePty","params":{"processHandle":"proc-pty","size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        XCTAssertEqual((resize["result"] as? [String: Any])?.isEmpty, true)
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"process/kill","params":{"processHandle":"proc-pty"}}"#.utf8
         )))
         XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
     }
