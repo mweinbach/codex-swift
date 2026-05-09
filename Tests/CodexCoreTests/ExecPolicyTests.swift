@@ -1031,6 +1031,42 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkStringMethods() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        SUBCOMMAND = "status"
+        HOST_PARTS = ["api", "github", "com"]
+        PATH_PARTS = ["", "usr", "bin", TOOL]
+        HOST = ".".join(HOST_PARTS)
+        PATH = "/".join(PATH_PARTS)
+
+        def command(tool, subcommand):
+            return " ".join([tool, subcommand])
+
+        if HOST.startswith("api.") and HOST.endswith(".com") and command(TOOL, SUBCOMMAND).startswith("git "):
+            prefix_rule(
+                [TOOL, SUBCOMMAND],
+                "prompt",
+                match = [command(TOOL, SUBCOMMAND)],
+                justification = "inspect " + command(TOOL, SUBCOMMAND),
+            )
+            network_rule(HOST, "https", "allow")
+            host_executable(TOOL, [PATH])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "inspect git status"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

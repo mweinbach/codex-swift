@@ -1521,6 +1521,9 @@ public final class PolicyParser {
         if let length = try parseStarlarkLenCall(trimmed, constants: constants, functions: functions) {
             return length
         }
+        if let methodCall = try parseStarlarkStringMethodCall(trimmed, constants: constants, functions: functions) {
+            return methodCall
+        }
         if let functionCall = try parseStarlarkFunctionCall(trimmed, constants: constants, functions: functions) {
             return functionCall
         }
@@ -1777,6 +1780,139 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
+    }
+
+    private static func parseStarlarkStringMethodCall(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        guard text.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: text)
+        else {
+            return nil
+        }
+
+        let callee = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return nil
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !receiverText.isEmpty,
+              ["join", "startswith", "endswith"].contains(methodName)
+        else {
+            return nil
+        }
+
+        let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
+        guard case let .string(receiver) = receiver else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        let bodyStart = text.index(after: openIndex)
+        let body = String(text[bodyStart..<text.index(before: text.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        switch methodName {
+        case "join":
+            guard rawArguments.count == 1,
+                  let rawArgument = rawArguments.first
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            guard case let .array(items) = argument else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let strings = try items.map { item -> String in
+                guard case let .string(value) = item else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                return value
+            }
+            return .string(strings.joined(separator: receiver))
+        case "startswith":
+            let prefix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .bool(receiver.hasPrefix(prefix))
+        case "endswith":
+            let suffix = try parseSingleStringMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
+            return .bool(receiver.hasSuffix(suffix))
+        default:
+            return nil
+        }
+    }
+
+    private static func parseSingleStringMethodArgument(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> String {
+        guard rawArguments.count == 1,
+              let rawArgument = rawArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        guard case let .string(value) = argument else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return value
+    }
+
+    private static func topLevelMethodDotIndex(in text: String) -> String.Index? {
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var candidate: String.Index?
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            case "(":
+                parenDepth += 1
+            case ")":
+                parenDepth -= 1
+            case "." where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
+                candidate = index
+            default:
+                break
+            }
+
+            index = text.index(after: index)
+        }
+
+        return squareDepth == 0 && braceDepth == 0 && parenDepth == 0 ? candidate : nil
     }
 
     private static func parseStarlarkFunctionCall(
