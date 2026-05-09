@@ -673,6 +673,117 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testPermissionsRequestApprovalServerRequestMatchesRustWireShape() throws {
+        let params = AppServerProtocol.PermissionsRequestApprovalParams(
+            threadID: "thr_123",
+            turnID: "turn_123",
+            itemID: "item_123",
+            startedAtMilliseconds: 44,
+            cwd: "/tmp/project",
+            reason: nil,
+            permissions: AppServerProtocol.PermissionsProfile(
+                network: RequestPermissionNetworkPermissions(enabled: true),
+                fileSystem: .object([
+                    "read": .array([.string("/tmp/project")]),
+                    "write": .array([.string("/tmp/project/Sources")])
+                ])
+            )
+        )
+        let request = AppServerProtocol.ServerRequest.permissionsRequestApproval(
+            requestID: .integer(1),
+            params: params
+        )
+
+        XCTAssertEqual(request.id, .integer(1))
+        XCTAssertEqual(request.method, "item/permissions/requestApproval")
+        try XCTAssertJSONObjectEqual(request, [
+            "method": "item/permissions/requestApproval",
+            "id": 1,
+            "params": [
+                "threadId": "thr_123",
+                "turnId": "turn_123",
+                "itemId": "item_123",
+                "startedAtMs": 44,
+                "cwd": "/tmp/project",
+                "reason": NSNull(),
+                "permissions": [
+                    "network": [
+                        "enabled": true
+                    ],
+                    "fileSystem": [
+                        "read": ["/tmp/project"],
+                        "write": ["/tmp/project/Sources"]
+                    ]
+                ]
+            ]
+        ])
+        XCTAssertEqual(
+            AppServerProtocol.ServerRequestPayload.permissionsRequestApproval(params).request(withID: .integer(1)),
+            request
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ServerRequest.self,
+            from: Data(#"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":44,"cwd":"/tmp/project","reason":null,"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"],"write":["/tmp/project/Sources"]}}}}"#.utf8)
+        )
+        XCTAssertEqual(decoded, request)
+    }
+
+    func testPermissionsRequestApprovalServerResponseMatchesRustWireShapeAndDefaults() throws {
+        let response = AppServerProtocol.ServerResponse.permissionsRequestApproval(
+            requestID: .integer(1),
+            response: AppServerProtocol.PermissionsRequestApprovalResponse(
+                permissions: AppServerProtocol.GrantedPermissionProfile(),
+                scope: .turn,
+                strictAutoReview: nil
+            )
+        )
+
+        XCTAssertEqual(response.id, .integer(1))
+        XCTAssertEqual(response.method, "item/permissions/requestApproval")
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/permissions/requestApproval",
+            "id": 1,
+            "response": [
+                "permissions": [String: Any](),
+                "scope": "turn"
+            ]
+        ])
+
+        let decodedWithDefaultScope = try JSONDecoder().decode(
+            AppServerProtocol.ServerResponse.self,
+            from: Data(#"{"method":"item/permissions/requestApproval","id":1,"response":{"permissions":{}}}"#.utf8)
+        )
+        XCTAssertEqual(decodedWithDefaultScope, response)
+    }
+
+    func testPermissionsRequestApprovalServerResponseEncodesStrictAutoReview() throws {
+        let response = AppServerProtocol.ServerResponse.permissionsRequestApproval(
+            requestID: .integer(1),
+            response: AppServerProtocol.PermissionsRequestApprovalResponse(
+                permissions: AppServerProtocol.GrantedPermissionProfile(
+                    network: RequestPermissionNetworkPermissions(enabled: true)
+                ),
+                scope: .session,
+                strictAutoReview: true
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(response, [
+            "method": "item/permissions/requestApproval",
+            "id": 1,
+            "response": [
+                "permissions": [
+                    "network": [
+                        "enabled": true
+                    ]
+                ],
+                "scope": "session",
+                "strictAutoReview": true
+            ]
+        ])
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,

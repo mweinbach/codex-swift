@@ -10,6 +10,7 @@ public enum AppServerProtocol {
         case commandExecutionRequestApproval(requestID: RequestID, params: CommandExecutionRequestApprovalParams)
         case toolRequestUserInput(requestID: RequestID, params: ToolRequestUserInputParams)
         case dynamicToolCall(requestID: RequestID, params: DynamicToolCallParams)
+        case permissionsRequestApproval(requestID: RequestID, params: PermissionsRequestApprovalParams)
 
         public var id: RequestID {
             switch self {
@@ -28,6 +29,8 @@ public enum AppServerProtocol {
             case let .toolRequestUserInput(requestID, _):
                 requestID
             case let .dynamicToolCall(requestID, _):
+                requestID
+            case let .permissionsRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -50,6 +53,8 @@ public enum AppServerProtocol {
                 ToolRequestUserInputParams.method
             case .dynamicToolCall:
                 DynamicToolCallParams.method
+            case .permissionsRequestApproval:
+                PermissionsRequestApprovalParams.method
             }
         }
 
@@ -103,6 +108,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     params: try container.decode(DynamicToolCallParams.self, forKey: .params)
                 )
+            case PermissionsRequestApprovalParams.method:
+                self = .permissionsRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    params: try container.decode(PermissionsRequestApprovalParams.self, forKey: .params)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -133,6 +143,8 @@ public enum AppServerProtocol {
                 try container.encode(params, forKey: .params)
             case let .dynamicToolCall(_, params):
                 try container.encode(params, forKey: .params)
+            case let .permissionsRequestApproval(_, params):
+                try container.encode(params, forKey: .params)
             }
         }
     }
@@ -146,6 +158,7 @@ public enum AppServerProtocol {
         case commandExecutionRequestApproval(CommandExecutionRequestApprovalParams)
         case toolRequestUserInput(ToolRequestUserInputParams)
         case dynamicToolCall(DynamicToolCallParams)
+        case permissionsRequestApproval(PermissionsRequestApprovalParams)
 
         public static func attestationGenerate() -> ServerRequestPayload {
             .attestationGenerate(Attestation.GenerateParams())
@@ -169,6 +182,8 @@ public enum AppServerProtocol {
                 .toolRequestUserInput(requestID: id, params: params)
             case let .dynamicToolCall(params):
                 .dynamicToolCall(requestID: id, params: params)
+            case let .permissionsRequestApproval(params):
+                .permissionsRequestApproval(requestID: id, params: params)
             }
         }
     }
@@ -185,6 +200,7 @@ public enum AppServerProtocol {
         )
         case toolRequestUserInput(requestID: RequestID, response: ToolRequestUserInputResponse)
         case dynamicToolCall(requestID: RequestID, response: DynamicToolCallResponse)
+        case permissionsRequestApproval(requestID: RequestID, response: PermissionsRequestApprovalResponse)
 
         public var id: RequestID {
             switch self {
@@ -203,6 +219,8 @@ public enum AppServerProtocol {
             case let .toolRequestUserInput(requestID, _):
                 requestID
             case let .dynamicToolCall(requestID, _):
+                requestID
+            case let .permissionsRequestApproval(requestID, _):
                 requestID
             }
         }
@@ -225,6 +243,8 @@ public enum AppServerProtocol {
                 ToolRequestUserInputParams.method
             case .dynamicToolCall:
                 DynamicToolCallParams.method
+            case .permissionsRequestApproval:
+                PermissionsRequestApprovalParams.method
             }
         }
 
@@ -278,6 +298,11 @@ public enum AppServerProtocol {
                     requestID: try container.decode(RequestID.self, forKey: .id),
                     response: try container.decode(DynamicToolCallResponse.self, forKey: .response)
                 )
+            case PermissionsRequestApprovalParams.method:
+                self = .permissionsRequestApproval(
+                    requestID: try container.decode(RequestID.self, forKey: .id),
+                    response: try container.decode(PermissionsRequestApprovalResponse.self, forKey: .response)
+                )
             default:
                 throw DecodingError.dataCorruptedError(
                     forKey: .method,
@@ -308,7 +333,138 @@ public enum AppServerProtocol {
                 try container.encode(response, forKey: .response)
             case let .dynamicToolCall(_, response):
                 try container.encode(response, forKey: .response)
+            case let .permissionsRequestApproval(_, response):
+                try container.encode(response, forKey: .response)
             }
+        }
+    }
+
+    public struct PermissionsProfile: Equatable, Codable, Sendable {
+        public let network: RequestPermissionNetworkPermissions?
+        public let fileSystem: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case network
+            case fileSystem
+        }
+
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+            self.network = network
+            self.fileSystem = fileSystem
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(network, forKey: .network)
+            try container.encodeNilOrValue(fileSystem, forKey: .fileSystem)
+        }
+    }
+
+    public struct GrantedPermissionProfile: Equatable, Codable, Sendable {
+        public let network: RequestPermissionNetworkPermissions?
+        public let fileSystem: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case network
+            case fileSystem
+        }
+
+        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: JSONValue? = nil) {
+            self.network = network
+            self.fileSystem = fileSystem
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(network, forKey: .network)
+            try container.encodeIfPresent(fileSystem, forKey: .fileSystem)
+        }
+    }
+
+    public struct PermissionsRequestApprovalParams: Equatable, Codable, Sendable {
+        public static let method = "item/permissions/requestApproval"
+
+        public let threadID: String
+        public let turnID: String
+        public let itemID: String
+        public let startedAtMilliseconds: Int64
+        public let cwd: String
+        public let reason: String?
+        public let permissions: PermissionsProfile
+
+        private enum CodingKeys: String, CodingKey {
+            case threadID = "threadId"
+            case turnID = "turnId"
+            case itemID = "itemId"
+            case startedAtMilliseconds = "startedAtMs"
+            case cwd
+            case reason
+            case permissions
+        }
+
+        public init(
+            threadID: String,
+            turnID: String,
+            itemID: String,
+            startedAtMilliseconds: Int64,
+            cwd: String,
+            reason: String?,
+            permissions: PermissionsProfile
+        ) {
+            self.threadID = threadID
+            self.turnID = turnID
+            self.itemID = itemID
+            self.startedAtMilliseconds = startedAtMilliseconds
+            self.cwd = cwd
+            self.reason = reason
+            self.permissions = permissions
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(threadID, forKey: .threadID)
+            try container.encode(turnID, forKey: .turnID)
+            try container.encode(itemID, forKey: .itemID)
+            try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
+            try container.encode(cwd, forKey: .cwd)
+            try container.encodeNilOrValue(reason, forKey: .reason)
+            try container.encode(permissions, forKey: .permissions)
+        }
+    }
+
+    public struct PermissionsRequestApprovalResponse: Equatable, Codable, Sendable {
+        public let permissions: GrantedPermissionProfile
+        public let scope: PermissionGrantScope
+        public let strictAutoReview: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case permissions
+            case scope
+            case strictAutoReview
+        }
+
+        public init(
+            permissions: GrantedPermissionProfile,
+            scope: PermissionGrantScope = .turn,
+            strictAutoReview: Bool? = nil
+        ) {
+            self.permissions = permissions
+            self.scope = scope
+            self.strictAutoReview = strictAutoReview
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            permissions = try container.decode(GrantedPermissionProfile.self, forKey: .permissions)
+            scope = try container.decodeIfPresent(PermissionGrantScope.self, forKey: .scope) ?? .turn
+            strictAutoReview = try container.decodeIfPresent(Bool.self, forKey: .strictAutoReview)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(permissions, forKey: .permissions)
+            try container.encode(scope, forKey: .scope)
+            try container.encodeIfPresent(strictAutoReview, forKey: .strictAutoReview)
         }
     }
 
