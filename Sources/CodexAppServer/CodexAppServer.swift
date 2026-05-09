@@ -2884,6 +2884,10 @@ public enum CodexAppServer {
             items.append(item)
         }
         if params?["includeHome"] as? Bool == true,
+           let item = try detectExternalAgentSubagents(cwd: nil, configuration: configuration) {
+            items.append(item)
+        }
+        if params?["includeHome"] as? Bool == true,
            let item = try detectExternalAgentAgentsMd(cwd: nil, configuration: configuration) {
             items.append(item)
         }
@@ -2898,6 +2902,9 @@ public enum CodexAppServer {
                 items.append(item)
             }
             if let item = try detectExternalAgentCommands(cwd: repoRoot.path, configuration: configuration) {
+                items.append(item)
+            }
+            if let item = try detectExternalAgentSubagents(cwd: repoRoot.path, configuration: configuration) {
                 items.append(item)
             }
             if let item = try detectExternalAgentAgentsMd(cwd: repoRoot.path, configuration: configuration) {
@@ -2932,6 +2939,8 @@ public enum CodexAppServer {
                 try importExternalAgentConfig(cwd: cwd, configuration: configuration)
             case "SKILLS":
                 try importExternalAgentSkills(cwd: cwd, configuration: configuration)
+            case "SUBAGENTS":
+                try importExternalAgentSubagents(cwd: cwd, configuration: configuration)
             default:
                 throw AppServerError.invalidRequest("external agent config import for \(itemType) is not implemented")
             }
@@ -3041,6 +3050,26 @@ public enum CodexAppServer {
         return item
     }
 
+    private static func detectExternalAgentSubagents(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any]? {
+        let paths = externalAgentSubagentsPaths(cwd: cwd, configuration: configuration)
+        let names = try missingExternalAgentSubagentNames(sourceAgents: paths.sourceAgents, targetAgents: paths.targetAgents)
+        guard !names.isEmpty else {
+            return nil
+        }
+        var item: [String: Any] = [
+            "itemType": "SUBAGENTS",
+            "description": "Migrate subagents from \(paths.sourceAgents.path) to \(paths.targetAgents.path)",
+            "details": [
+                "subagents": names.map { ["name": $0] }
+            ]
+        ]
+        item["cwd"] = paths.cwd.map { $0 as Any } ?? NSNull()
+        return item
+    }
+
     private static func importExternalAgentConfig(cwd: String?, configuration: CodexAppServerConfiguration) throws {
         let paths: (sourceSettings: URL, targetConfig: URL, cwd: String?)
         if let cwd, !cwd.isEmpty,
@@ -3127,6 +3156,33 @@ public enum CodexAppServer {
                 sourceName: externalAgentCommandSourceName(sourceCommands: paths.sourceCommands, sourceFile: source.file)
             )
             .write(to: target.appendingPathComponent("SKILL.md", isDirectory: false), atomically: true, encoding: .utf8)
+        }
+    }
+
+    private static func importExternalAgentSubagents(cwd: String?, configuration: CodexAppServerConfiguration) throws {
+        if let cwd, !cwd.isEmpty,
+           gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) == nil {
+            return
+        }
+        let paths = externalAgentSubagentsPaths(cwd: cwd, configuration: configuration)
+        guard isDirectory(path: paths.sourceAgents.path) else {
+            return
+        }
+        try FileManager.default.createDirectory(at: paths.targetAgents, withIntermediateDirectories: true)
+        for sourceFile in try externalAgentSubagentSourceFiles(paths.sourceAgents) {
+            let target = paths.targetAgents.appendingPathComponent(
+                "\(sourceFile.deletingPathExtension().lastPathComponent).toml",
+                isDirectory: false
+            )
+            guard !FileManager.default.fileExists(atPath: target.path) else {
+                continue
+            }
+            let document = try parseExternalAgentCommandDocument(sourceFile)
+            guard let metadata = externalAgentSubagentMetadata(document) else {
+                continue
+            }
+            try renderExternalAgentSubagentToml(body: document.body, metadata: metadata)
+                .write(to: target, atomically: true, encoding: .utf8)
         }
     }
 
@@ -3283,6 +3339,25 @@ public enum CodexAppServer {
             targetSkills: skillPaths.targetSkills,
             cwd: skillPaths.cwd
         )
+    }
+
+    private static func externalAgentSubagentsPaths(
+        cwd: String?,
+        configuration: CodexAppServerConfiguration
+    ) -> (sourceAgents: URL, targetAgents: URL, cwd: String?) {
+        let skillPaths = externalAgentSkillsPaths(cwd: cwd, configuration: configuration)
+        let sourceAgents = skillPaths.sourceSkills
+            .deletingLastPathComponent()
+            .appendingPathComponent("agents", isDirectory: true)
+        let targetAgents: URL
+        if let cwd = skillPaths.cwd {
+            targetAgents = URL(fileURLWithPath: cwd, isDirectory: true)
+                .appendingPathComponent(".codex", isDirectory: true)
+                .appendingPathComponent("agents", isDirectory: true)
+        } else {
+            targetAgents = configuration.codexHome.appendingPathComponent("agents", isDirectory: true)
+        }
+        return (sourceAgents: sourceAgents, targetAgents: targetAgents, cwd: skillPaths.cwd)
     }
 
     private static func homeExternalAgentTargetSkillsDirectory(configuration: CodexAppServerConfiguration) -> URL {
@@ -3545,6 +3620,103 @@ public enum CodexAppServer {
         }
         let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "migrated" : trimmed
+    }
+
+    private struct ExternalAgentSubagentMetadata {
+        var name: String
+        var description: String
+        var permissionMode: String?
+        var effort: String?
+    }
+
+    private static func missingExternalAgentSubagentNames(sourceAgents: URL, targetAgents: URL) throws -> [String] {
+        var names: [String] = []
+        for sourceFile in try externalAgentSubagentSourceFiles(sourceAgents) {
+            let document = try parseExternalAgentCommandDocument(sourceFile)
+            guard let metadata = externalAgentSubagentMetadata(document) else {
+                continue
+            }
+            let target = targetAgents.appendingPathComponent(
+                "\(sourceFile.deletingPathExtension().lastPathComponent).toml",
+                isDirectory: false
+            )
+            if !FileManager.default.fileExists(atPath: target.path) {
+                names.append(metadata.name)
+            }
+        }
+        return names
+    }
+
+    private static func externalAgentSubagentSourceFiles(_ sourceAgents: URL) throws -> [URL] {
+        guard isDirectory(path: sourceAgents.path) else {
+            return []
+        }
+        var files: [URL] = []
+        for name in try FileManager.default.contentsOfDirectory(atPath: sourceAgents.path) {
+            let path = sourceAgents.appendingPathComponent(name, isDirectory: false)
+            guard isRegularFile(path: path.path),
+                  path.pathExtension == "md",
+                  path.deletingPathExtension().lastPathComponent != "README"
+            else {
+                continue
+            }
+            files.append(path)
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    private static func externalAgentSubagentMetadata(_ document: ExternalAgentCommandDocument) -> ExternalAgentSubagentMetadata? {
+        guard !document.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let name = nonEmptyExternalAgentScalar(document.frontmatter["name"]),
+              let description = nonEmptyExternalAgentScalar(document.frontmatter["description"])
+        else {
+            return nil
+        }
+        return ExternalAgentSubagentMetadata(
+            name: name,
+            description: description,
+            permissionMode: document.frontmatter["permissionMode"],
+            effort: document.frontmatter["effort"]
+        )
+    }
+
+    private static func renderExternalAgentSubagentToml(
+        body: String,
+        metadata: ExternalAgentSubagentMetadata
+    ) -> String {
+        var table: [String: ConfigValue] = [
+            "name": .string(metadata.name),
+            "description": .string(rewriteExternalAgentTerms(metadata.description)),
+            "developer_instructions": .string(renderExternalAgentSubagentBody(body))
+        ]
+        if let effort = metadata.effort.flatMap(mapExternalAgentReasoningEffort) {
+            table["model_reasoning_effort"] = .string(effort)
+        }
+        if let sandboxMode = metadata.permissionMode.flatMap(mapExternalAgentPermissionMode) {
+            table["sandbox_mode"] = .string(sandboxMode)
+        }
+        return renderConfigToml(.table(table))
+    }
+
+    private static func renderExternalAgentSubagentBody(_ body: String) -> String {
+        let body = rewriteExternalAgentTerms(body.trimmingCharacters(in: .whitespacesAndNewlines))
+        return body.isEmpty ? "No subagent instructions were found." : body
+    }
+
+    private static func mapExternalAgentReasoningEffort(_ effort: String) -> String? {
+        let mapped = effort == "max" ? "xhigh" : effort
+        return ["none", "minimal", "low", "medium", "high", "xhigh"].contains(mapped) ? mapped : nil
+    }
+
+    private static func mapExternalAgentPermissionMode(_ permissionMode: String) -> String? {
+        switch permissionMode {
+        case "acceptEdits":
+            return "workspace-write"
+        case "readOnly":
+            return "read-only"
+        default:
+            return nil
+        }
     }
 
     private static func copyExternalAgentSkillDirectory(source: URL, target: URL) throws {

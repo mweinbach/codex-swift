@@ -2988,6 +2988,86 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
     }
 
+    func testExternalAgentConfigDetectAndImportSubagentsRendersTomlAgents() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let agents = repo.url.appendingPathComponent(".claude/agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
+        try """
+        ---
+        name: reviewer
+        description: Claude Code reviewer
+        permissionMode: acceptEdits
+        effort: max
+        ---
+
+        Use Claude and CLAUDE.md for review.
+        """.write(
+            to: agents.appendingPathComponent("reviewer.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        name: empty
+        description: Empty body
+        ---
+
+        """.write(
+            to: agents.appendingPathComponent("empty.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "ignored".write(
+            to: agents.appendingPathComponent("README.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let detect = try appServerResponse(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["itemType"] as? String }, ["SUBAGENTS"])
+        XCTAssertEqual(
+            items[0]["description"] as? String,
+            "Migrate subagents from \(agents.path) to \(repo.url.path)/.codex/agents"
+        )
+        let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
+        XCTAssertEqual(details["subagents"] as? [[String: String]], [["name": "reviewer"]])
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SUBAGENTS","description":"Subagents","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+        let rendered = try String(
+            contentsOf: repo.url.appendingPathComponent(".codex/agents/reviewer.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(rendered.contains(#"name = "reviewer""#))
+        XCTAssertTrue(rendered.contains(#"description = "Codex reviewer""#))
+        XCTAssertTrue(rendered.contains(#"model_reasoning_effort = "xhigh""#))
+        XCTAssertTrue(rendered.contains(#"sandbox_mode = "workspace-write""#))
+        XCTAssertTrue(rendered.contains(#"developer_instructions = "Use Codex and AGENTS.md for review.""#))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repo.url.appendingPathComponent(".codex/agents/empty.toml").path
+        ))
+
+        let afterImport = try appServerResponse(
+            #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":["\#(repo.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        XCTAssertEqual(((afterImport["result"] as? [String: Any])?["items"] as? [Any])?.count, 0)
+    }
+
     func testExternalAgentConfigDetectAndImportAgentsMdUsesRepoSourcePriority() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()
