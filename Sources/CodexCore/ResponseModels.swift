@@ -935,36 +935,31 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .message(id, role, content, phase):
+        case let .message(_, role, content, phase):
             try container.encode("message", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encode(role, forKey: .role)
             try container.encode(content, forKey: .content)
             try container.encodeIfPresent(phase, forKey: .phase)
-        case let .reasoning(id, summary, content, encryptedContent):
+        case let .reasoning(_, summary, content, encryptedContent):
             try container.encode("reasoning", forKey: .type)
-            try container.encode(id, forKey: .id)
             try container.encode(summary, forKey: .summary)
             if !Self.shouldSkipReasoningContent(content) {
                 try container.encode(content, forKey: .content)
             }
             try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
-        case let .localShellCall(id, callID, status, action):
+        case let .localShellCall(_, callID, status, action):
             try container.encode("local_shell_call", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(callID, forKey: .callID)
             try container.encode(status, forKey: .status)
             try container.encode(action, forKey: .action)
-        case let .functionCall(id, name, namespace, arguments, callID):
+        case let .functionCall(_, name, namespace, arguments, callID):
             try container.encode("function_call", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encode(name, forKey: .name)
             try container.encodeIfPresent(namespace, forKey: .namespace)
             try container.encode(arguments, forKey: .arguments)
             try container.encode(callID, forKey: .callID)
-        case let .toolSearchCall(id, callID, status, execution, arguments):
+        case let .toolSearchCall(_, callID, status, execution, arguments):
             try container.encode("tool_search_call", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(callID, forKey: .callID)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encode(execution, forKey: .execution)
@@ -973,9 +968,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode("function_call_output", forKey: .type)
             try container.encode(callID, forKey: .callID)
             try container.encode(output, forKey: .output)
-        case let .customToolCall(id, status, callID, name, input):
+        case let .customToolCall(_, status, callID, name, input):
             try container.encode("custom_tool_call", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encode(callID, forKey: .callID)
             try container.encode(name, forKey: .name)
@@ -991,9 +985,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             try container.encode(status, forKey: .status)
             try container.encode(execution, forKey: .execution)
             try container.encode(tools, forKey: .tools)
-        case let .webSearchCall(id, status, action):
+        case let .webSearchCall(_, status, action):
             try container.encode("web_search_call", forKey: .type)
-            try container.encodeIfPresent(id, forKey: .id)
             try container.encodeIfPresent(status, forKey: .status)
             try container.encodeIfPresent(action, forKey: .action)
         case let .imageGenerationCall(id, status, revisedPrompt, result):

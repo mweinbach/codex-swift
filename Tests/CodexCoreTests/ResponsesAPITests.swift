@@ -146,7 +146,7 @@ final class ResponsesAPITests: XCTestCase {
         let body = try JSONObject(request.body)
         let items = try XCTUnwrap(body["input"] as? [[String: Any]])
         XCTAssertEqual(body["store"] as? Bool, true)
-        XCTAssertEqual(items[0]["id"] as? String, "m1")
+        XCTAssertNil(items[0]["id"])
         XCTAssertEqual(request.headers["x-extra"], "1")
         XCTAssertNil(request.headers["conversation_id"])
     }

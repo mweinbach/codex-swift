@@ -328,6 +328,45 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testResponseItemSkipsRuntimeIDsLikeRust() throws {
+        let messageJSON = #"""
+        {"type":"message","id":"msg-1","role":"assistant","content":[]}
+        """#
+        let message = try JSONDecoder().decode(ResponseItem.self, from: Data(messageJSON.utf8))
+        XCTAssertEqual(message, .message(id: "msg-1", role: "assistant", content: []))
+        try XCTAssertJSONObjectEqual(message, [
+            "type": "message",
+            "role": "assistant",
+            "content": []
+        ])
+
+        let items: [ResponseItem] = [
+            .reasoning(id: "rs_1", summary: [], content: nil, encryptedContent: nil),
+            .localShellCall(
+                id: "shell-id",
+                callID: "shell-call",
+                status: .completed,
+                action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
+            ),
+            .functionCall(id: "fc-id", name: "do_it", arguments: #"{"ok":true}"#, callID: "call-1"),
+            .toolSearchCall(id: "ts-id", callID: "search-1", status: "completed", execution: "client", arguments: .object(["query": .string("docs")])),
+            .customToolCall(id: "ct-id", status: "completed", callID: "tool-1", name: "custom", input: "{}"),
+            .webSearchCall(id: "ws-id", status: "completed", action: .search(query: "weather"))
+        ]
+
+        for item in items {
+            let object = try JSONObject(item)
+            XCTAssertNil(object["id"], "expected id to be skipped for \(object["type"] ?? item)")
+        }
+
+        try XCTAssertJSONObjectEqual(ResponseItem.imageGenerationCall(id: "ig-1", status: "completed", result: "base64"), [
+            "type": "image_generation_call",
+            "id": "ig-1",
+            "status": "completed",
+            "result": "base64"
+        ])
+    }
+
     func testRoundTripsCustomToolCallOutputPayloadLikeRust() throws {
         let item = ResponseItem.customToolCallOutput(
             callID: "custom-1",
@@ -382,7 +421,7 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(item, .webSearchCall(id: "ws_1", status: "completed", action: .search(query: "weather seattle")))
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "web_search_call")
-        XCTAssertEqual(object["id"] as? String, "ws_1")
+        XCTAssertNil(object["id"])
         XCTAssertEqual(object["status"] as? String, "completed")
     }
 
@@ -607,7 +646,7 @@ final class ResponseModelsTests: XCTestCase {
         ))
         let object = try JSONObject(item)
         XCTAssertEqual(object["type"] as? String, "reasoning")
-        XCTAssertEqual(object["id"] as? String, "reasoning_1")
+        XCTAssertNil(object["id"])
         let content = try XCTUnwrap(object["content"] as? [[String: Any]])
         XCTAssertEqual(content.count, 2)
         XCTAssertEqual(content[0]["type"] as? String, "reasoning_text")
@@ -629,14 +668,13 @@ final class ResponseModelsTests: XCTestCase {
     func testRoundTripsCallPairResponseItems() throws {
         let items: [ResponseItem] = [
             .localShellCall(
-                id: "shell-id",
                 callID: "shell-call",
                 status: .completed,
                 action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
             ),
-            .functionCall(id: "fc-id", name: "do_it", arguments: #"{"ok":true}"#, callID: "call-1"),
+            .functionCall(name: "do_it", arguments: #"{"ok":true}"#, callID: "call-1"),
             .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "done")),
-            .customToolCall(id: "ct-id", status: "completed", callID: "tool-1", name: "custom", input: "{}"),
+            .customToolCall(status: "completed", callID: "tool-1", name: "custom", input: "{}"),
             .customToolCallOutput(callID: "tool-1", output: "done")
         ]
 
