@@ -493,6 +493,8 @@ Source baseline inspected for this scaffold:
   - `ResponseItem.reasoning` now decodes missing runtime `id` fields as an empty string like Rust's `#[serde(default, skip_serializing)]` field instead of treating otherwise valid reasoning summaries as partially known persisted items.
 - `codex-rs/protocol/src/models.rs` shell tool approval hints
   - `ShellToolCallParams` and `ShellCommandToolCallParams` now decode Rust's `prefix_rule` and `additional_permissions` fields alongside timeout aliases, sandbox permissions, and justifications, preserving model-provided approval hints for later approval/runtime plumbing.
+- `codex-rs/protocol/src/models.rs` tool-search call params
+  - Added public `SearchToolCallParams` with Rust's `query` and optional `limit` wire shape, and routed `ToolSearchIndex` argument decoding through it so deferred-tool search uses the shared protocol model.
 
 ## Known Gaps
 

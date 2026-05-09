@@ -846,6 +846,21 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.justification, "inspect repo")
     }
 
+    func testSearchToolCallParamsWireShapeLikeRust() throws {
+        let json = #"{"query":"calendar create","limit":2}"#
+        let params = try JSONDecoder().decode(SearchToolCallParams.self, from: Data(json.utf8))
+        XCTAssertEqual(params, SearchToolCallParams(query: "calendar create", limit: 2))
+
+        try XCTAssertJSONObjectEqual(params, [
+            "query": "calendar create",
+            "limit": 2
+        ])
+
+        try XCTAssertJSONObjectEqual(SearchToolCallParams(query: "calendar create"), [
+            "query": "calendar create"
+        ])
+    }
+
     func testSandboxPermissionsWireValues() {
         XCTAssertTrue(SandboxPermissions.requireEscalated.requiresEscalatedPermissions)
         XCTAssertFalse(SandboxPermissions.useDefault.requiresEscalatedPermissions)

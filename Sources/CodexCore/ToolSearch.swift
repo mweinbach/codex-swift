@@ -114,7 +114,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
     }
 
     public func search(arguments: JSONValue) throws -> [JSONValue] {
-        let arguments = try ToolSearchArguments.decode(from: arguments)
+        let arguments = try SearchToolCallParams.decodeToolSearchArguments(from: arguments)
         let query = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             throw ToolSearchError.emptyQuery
@@ -355,14 +355,11 @@ public struct ToolSearchIndex: Equatable, Sendable {
     }
 }
 
-private struct ToolSearchArguments: Decodable {
-    let query: String
-    let limit: Int?
-
-    static func decode(from value: JSONValue) throws -> ToolSearchArguments {
+private extension SearchToolCallParams {
+    static func decodeToolSearchArguments(from value: JSONValue) throws -> SearchToolCallParams {
         do {
             let data = try JSONEncoder().encode(value)
-            return try JSONDecoder().decode(ToolSearchArguments.self, from: data)
+            return try JSONDecoder().decode(SearchToolCallParams.self, from: data)
         } catch {
             throw ToolSearchError.invalidArguments(String(describing: error))
         }

@@ -690,6 +690,16 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
     }
 }
 
+public struct SearchToolCallParams: Equatable, Codable, Sendable {
+    public let query: String
+    public let limit: Int?
+
+    public init(query: String, limit: Int? = nil) {
+        self.query = query
+        self.limit = limit
+    }
+}
+
 public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
     public let cmd: String
     public let workdir: String?
