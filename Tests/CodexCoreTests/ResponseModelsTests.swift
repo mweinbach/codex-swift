@@ -52,6 +52,23 @@ final class ResponseModelsTests: XCTestCase {
         )
     }
 
+    func testContentItemInputImagePreservesOptionalDetailLikeRust() throws {
+        let json = #"{"type":"input_image","image_url":"data:image/png;base64,abc","detail":"high"}"#
+        let item = try JSONDecoder().decode(ContentItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .inputImage(imageURL: "data:image/png;base64,abc", detail: .high))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "input_image",
+            "image_url": "data:image/png;base64,abc",
+            "detail": "high"
+        ])
+
+        try XCTAssertJSONObjectEqual(ContentItem.inputImage(imageURL: "data:image/png;base64,abc"), [
+            "type": "input_image",
+            "image_url": "data:image/png;base64,abc"
+        ])
+    }
+
     func testMcpCallToolResultStructuredContentBecomesOutputPayload() throws {
         let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
             content: [.text(McpTextContent(text: "ignored"))],
@@ -185,7 +202,7 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(role, "user")
         XCTAssertEqual(content, [
             .inputText(text: "hello"),
-            .inputImage(imageURL: "data:image/png;base64,abc")
+            .inputImage(imageURL: "data:image/png;base64,abc", detail: defaultImageDetail)
         ])
     }
 
@@ -197,11 +214,12 @@ final class ResponseModelsTests: XCTestCase {
         let item = ResponseInputItem(userInputs: [.localImage(path: path.path)])
 
         guard case let .message(_, content, _) = item,
-              case let .inputImage(imageURL) = content.first
+              case let .inputImage(imageURL, detail) = content.first
         else {
             return XCTFail("expected local image to become an input image")
         }
 
+        XCTAssertEqual(detail, defaultImageDetail)
         let prefix = "data:image/png;base64,"
         XCTAssertTrue(imageURL.hasPrefix(prefix))
         let encoded = String(imageURL.dropFirst(prefix.count))
@@ -846,6 +864,29 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.justification, "inspect repo")
     }
 
+    func testSandboxPermissionsAdditionalPermissionsWireValueLikeRust() throws {
+        let json = #"""
+        {
+            "command": ["mkdir", "cache"],
+            "sandbox_permissions": "with_additional_permissions",
+            "additional_permissions": {
+                "file_system": {
+                    "write": ["/repo/cache"]
+                }
+            }
+        }
+        """#
+
+        let params = try JSONDecoder().decode(ShellToolCallParams.self, from: Data(json.utf8))
+        XCTAssertEqual(params.sandboxPermissions, .withAdditionalPermissions)
+        XCTAssertFalse(params.sandboxPermissions?.requiresEscalatedPermissions ?? true)
+        XCTAssertTrue(params.sandboxPermissions?.requestsSandboxOverride ?? false)
+        XCTAssertTrue(params.sandboxPermissions?.usesAdditionalPermissions ?? false)
+        XCTAssertEqual(params.additionalPermissions?.fileSystem, .object([
+            "write": .array([.string("/repo/cache")])
+        ]))
+    }
+
     func testSearchToolCallParamsWireShapeLikeRust() throws {
         let json = #"{"query":"calendar create","limit":2}"#
         let params = try JSONDecoder().decode(SearchToolCallParams.self, from: Data(json.utf8))
@@ -864,6 +905,12 @@ final class ResponseModelsTests: XCTestCase {
     func testSandboxPermissionsWireValues() {
         XCTAssertTrue(SandboxPermissions.requireEscalated.requiresEscalatedPermissions)
         XCTAssertFalse(SandboxPermissions.useDefault.requiresEscalatedPermissions)
+        XCTAssertFalse(SandboxPermissions.withAdditionalPermissions.requiresEscalatedPermissions)
+        XCTAssertFalse(SandboxPermissions.useDefault.requestsSandboxOverride)
+        XCTAssertTrue(SandboxPermissions.requireEscalated.requestsSandboxOverride)
+        XCTAssertTrue(SandboxPermissions.withAdditionalPermissions.requestsSandboxOverride)
+        XCTAssertFalse(SandboxPermissions.requireEscalated.usesAdditionalPermissions)
+        XCTAssertTrue(SandboxPermissions.withAdditionalPermissions.usesAdditionalPermissions)
     }
 
     private func writePNG(width: Int, height: Int, to path: URL) throws -> Data {

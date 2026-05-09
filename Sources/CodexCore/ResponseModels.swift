@@ -3,21 +3,31 @@ import Foundation
 public enum SandboxPermissions: String, Codable, Equatable, Sendable {
     case useDefault = "use_default"
     case requireEscalated = "require_escalated"
+    case withAdditionalPermissions = "with_additional_permissions"
 
     public var requiresEscalatedPermissions: Bool {
         self == .requireEscalated
+    }
+
+    public var requestsSandboxOverride: Bool {
+        self != .useDefault
+    }
+
+    public var usesAdditionalPermissions: Bool {
+        self == .withAdditionalPermissions
     }
 }
 
 public enum ContentItem: Equatable, Codable, Sendable {
     case inputText(text: String)
-    case inputImage(imageURL: String)
+    case inputImage(imageURL: String, detail: ImageDetail? = nil)
     case outputText(text: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case text
         case imageURL = "image_url"
+        case detail
     }
 
     private enum ItemType: String, Codable {
@@ -32,7 +42,10 @@ public enum ContentItem: Equatable, Codable, Sendable {
         case .inputText:
             self = .inputText(text: try container.decode(String.self, forKey: .text))
         case .inputImage:
-            self = .inputImage(imageURL: try container.decode(String.self, forKey: .imageURL))
+            self = .inputImage(
+                imageURL: try container.decode(String.self, forKey: .imageURL),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         case .outputText:
             self = .outputText(text: try container.decode(String.self, forKey: .text))
         }
@@ -44,9 +57,10 @@ public enum ContentItem: Equatable, Codable, Sendable {
         case let .inputText(text):
             try container.encode(ItemType.inputText, forKey: .type)
             try container.encode(text, forKey: .text)
-        case let .inputImage(imageURL):
+        case let .inputImage(imageURL, detail):
             try container.encode(ItemType.inputImage, forKey: .type)
             try container.encode(imageURL, forKey: .imageURL)
+            try container.encodeIfPresent(detail, forKey: .detail)
         case let .outputText(text):
             try container.encode(ItemType.outputText, forKey: .type)
             try container.encode(text, forKey: .text)
@@ -323,7 +337,7 @@ public extension ResponseInputItem {
         case let .text(text):
             return .inputText(text: text)
         case let .image(imageURL):
-            return .inputImage(imageURL: imageURL)
+            return .inputImage(imageURL: imageURL, detail: defaultImageDetail)
         case let .localImage(path):
             return localImageContentItem(path: path)
         case .skill:
@@ -334,7 +348,7 @@ public extension ResponseInputItem {
     private static func localImageContentItem(path: String) -> ContentItem {
         do {
             let image = try LocalImageProcessor.loadAndResizeToFit(path: URL(fileURLWithPath: path))
-            return .inputImage(imageURL: image.dataURL)
+            return .inputImage(imageURL: image.dataURL, detail: defaultImageDetail)
         } catch let error as ImageProcessingError {
             if case .read = error {
                 return localImageErrorPlaceholder(path: path, error: error.description)
