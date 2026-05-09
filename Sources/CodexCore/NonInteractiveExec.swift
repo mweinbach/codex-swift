@@ -146,6 +146,17 @@ public enum NonInteractiveExec {
 
     public typealias ResponseStreamer = (Prompt) async -> Result<ResponseEventResults, APIError>
     public typealias FunctionCallExecutor = (ResponseItem) async -> ResponseItem
+    public typealias FunctionCallResultExecutor = (ResponseItem) async -> FunctionCallExecutionResult
+
+    public struct FunctionCallExecutionResult: Equatable, Sendable {
+        public var output: ResponseItem
+        public var additionalContextItems: [ResponseItem]
+
+        public init(output: ResponseItem, additionalContextItems: [ResponseItem] = []) {
+            self.output = output
+            self.additionalContextItems = additionalContextItems
+        }
+    }
 
     public static func runResponsesLoop(
         initialPrompt: Prompt,
@@ -166,6 +177,22 @@ public enum NonInteractiveExec {
         maxToolIterations: Int = 20,
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
+    ) async -> NonInteractiveExecLoopResult {
+        await runResponsesLoopWithTranscript(
+            initialPrompt: initialPrompt,
+            maxToolIterations: maxToolIterations,
+            streamPrompt: streamPrompt,
+            executeFunctionCall: { item in
+                FunctionCallExecutionResult(output: await executeFunctionCall(item))
+            }
+        )
+    }
+
+    public static func runResponsesLoopWithTranscript(
+        initialPrompt: Prompt,
+        maxToolIterations: Int = 20,
+        streamPrompt: ResponseStreamer,
+        executeFunctionCall: FunctionCallResultExecutor
     ) async -> NonInteractiveExecLoopResult {
         var prompt = initialPrompt
         var allEvents: ResponseEventResults = []
@@ -196,9 +223,13 @@ public enum NonInteractiveExec {
             }
 
             for call in toolCalls {
-                let output = await executeFunctionCall(call)
-                prompt.input.append(output)
-                transcriptItems.append(output)
+                let result = await executeFunctionCall(call)
+                prompt.input.append(result.output)
+                transcriptItems.append(result.output)
+                if !result.additionalContextItems.isEmpty {
+                    prompt.input.append(contentsOf: result.additionalContextItems)
+                    transcriptItems.append(contentsOf: result.additionalContextItems)
+                }
             }
         }
 
@@ -374,6 +405,84 @@ public enum NonInteractiveExec {
                 success: false
             )
         }
+    }
+
+    public static func executeFunctionCallWithHooks(
+        _ item: ResponseItem,
+        handlers: [ConfiguredHookHandler],
+        conversationID: ConversationId,
+        turnID: String,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        shell: Shell,
+        truncationPolicy: TruncationPolicy,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        toolSearchIndex: ToolSearchIndex? = nil
+    ) async -> FunctionCallExecutionResult {
+        let hookPayload = toolHookPayload(for: item)
+        if let hookPayload {
+            let preOutcome = await runPreToolUseHooks(
+                handlers: handlers,
+                hookPayload: hookPayload,
+                conversationID: conversationID,
+                turnID: turnID,
+                cwd: cwd,
+                model: model,
+                approvalPolicy: approvalPolicy
+            )
+            var additionalItems = hookAdditionalContextItems(preOutcome.additionalContexts)
+            if preOutcome.shouldBlock {
+                return FunctionCallExecutionResult(
+                    output: blockedToolOutput(for: item, hookPayload: hookPayload, reason: preOutcome.blockReason),
+                    additionalContextItems: additionalItems
+                )
+            }
+
+            let output = await executeFunctionCall(
+                item,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                shell: shell,
+                truncationPolicy: truncationPolicy,
+                environment: environment,
+                toolSearchIndex: toolSearchIndex
+            )
+            guard toolOutputSucceeded(output),
+                  let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
+            else {
+                return FunctionCallExecutionResult(output: output, additionalContextItems: additionalItems)
+            }
+
+            let postOutcome = await runPostToolUseHooks(
+                handlers: handlers,
+                hookPayload: postPayload,
+                conversationID: conversationID,
+                turnID: turnID,
+                cwd: cwd,
+                model: model,
+                approvalPolicy: approvalPolicy
+            )
+            additionalItems.append(contentsOf: hookAdditionalContextItems(postOutcome.additionalContexts))
+            return FunctionCallExecutionResult(
+                output: replacingToolOutputIfNeeded(output, with: postOutcome),
+                additionalContextItems: additionalItems
+            )
+        }
+
+        let output = await executeFunctionCall(
+            item,
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            shell: shell,
+            truncationPolicy: truncationPolicy,
+            environment: environment,
+            toolSearchIndex: toolSearchIndex
+        )
+        return FunctionCallExecutionResult(output: output)
     }
 
     public static func finish(
@@ -775,6 +884,248 @@ public enum NonInteractiveExec {
 
     private static func hookPermissionMode(_ approvalPolicy: AskForApproval) -> String {
         approvalPolicy == .never ? "bypassPermissions" : "default"
+    }
+
+    private struct ToolHookPayload: Equatable, Sendable {
+        var toolName: String
+        var matcherAliases: [String]
+        var toolUseID: String
+        var toolInput: JSONValue
+    }
+
+    private struct PostToolHookPayload: Equatable, Sendable {
+        var prePayload: ToolHookPayload
+        var toolResponse: JSONValue
+    }
+
+    private static func runPreToolUseHooks(
+        handlers: [ConfiguredHookHandler],
+        hookPayload: ToolHookPayload,
+        conversationID: ConversationId,
+        turnID: String,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval
+    ) async -> HookPreToolUseOutcome {
+        do {
+            let request = try HookPreToolUseRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                turnID: turnID,
+                cwd: AbsolutePath(absolutePath: cwd.standardizedFileURL.path),
+                model: model,
+                permissionMode: hookPermissionMode(approvalPolicy),
+                toolName: hookPayload.toolName,
+                matcherAliases: hookPayload.matcherAliases,
+                toolUseID: hookPayload.toolUseID,
+                toolInput: hookPayload.toolInput
+            )
+            return await HookPreToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+        } catch {
+            return HookPreToolUseOutcome(
+                hookEvents: [],
+                shouldBlock: false,
+                blockReason: nil,
+                additionalContexts: []
+            )
+        }
+    }
+
+    private static func runPostToolUseHooks(
+        handlers: [ConfiguredHookHandler],
+        hookPayload: PostToolHookPayload,
+        conversationID: ConversationId,
+        turnID: String,
+        cwd: URL,
+        model: String,
+        approvalPolicy: AskForApproval
+    ) async -> HookPostToolUseOutcome {
+        do {
+            let request = try HookPostToolUseRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                turnID: turnID,
+                cwd: AbsolutePath(absolutePath: cwd.standardizedFileURL.path),
+                model: model,
+                permissionMode: hookPermissionMode(approvalPolicy),
+                toolName: hookPayload.prePayload.toolName,
+                matcherAliases: hookPayload.prePayload.matcherAliases,
+                toolUseID: hookPayload.prePayload.toolUseID,
+                toolInput: hookPayload.prePayload.toolInput,
+                toolResponse: hookPayload.toolResponse
+            )
+            return await HookPostToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+        } catch {
+            return HookPostToolUseOutcome(
+                hookEvents: [],
+                shouldStop: false,
+                stopReason: nil,
+                additionalContexts: [],
+                feedbackMessage: nil
+            )
+        }
+    }
+
+    private static func hookAdditionalContextItems(_ contexts: [String]) -> [ResponseItem] {
+        contexts.map { context in
+            ResponseInputItem(userInputs: [.text(context)]).responseItem()
+        }
+    }
+
+    private static func toolHookPayload(for item: ResponseItem) -> ToolHookPayload? {
+        let decoder = JSONDecoder()
+        switch item {
+        case let .functionCall(_, name, arguments, callID):
+            switch name {
+            case "exec_command":
+                guard let params = try? decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8)) else {
+                    return nil
+                }
+                return ToolHookPayload(
+                    toolName: "Bash",
+                    matcherAliases: [],
+                    toolUseID: callID,
+                    toolInput: .object(["command": .string(params.cmd)])
+                )
+
+            case "shell_command":
+                guard let params = try? decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8)) else {
+                    return nil
+                }
+                return ToolHookPayload(
+                    toolName: "Bash",
+                    matcherAliases: [],
+                    toolUseID: callID,
+                    toolInput: .object(["command": .string(params.command)])
+                )
+
+            case "shell", "container.exec":
+                guard let params = try? decoder.decode(ShellToolCallParams.self, from: Data(arguments.utf8)) else {
+                    return nil
+                }
+                return ToolHookPayload(
+                    toolName: "Bash",
+                    matcherAliases: [],
+                    toolUseID: callID,
+                    toolInput: .object(["command": .string(params.command.joined(separator: " "))])
+                )
+
+            default:
+                guard let toolInput = try? JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8)) else {
+                    return ToolHookPayload(
+                        toolName: name,
+                        matcherAliases: [],
+                        toolUseID: callID,
+                        toolInput: .object([:])
+                    )
+                }
+                return ToolHookPayload(toolName: name, matcherAliases: [], toolUseID: callID, toolInput: toolInput)
+            }
+
+        case let .customToolCall(_, _, callID, name, input):
+            guard name == "apply_patch" else {
+                return nil
+            }
+            return ToolHookPayload(
+                toolName: "apply_patch",
+                matcherAliases: ["Write", "Edit"],
+                toolUseID: callID,
+                toolInput: .object(["command": .string(input)])
+            )
+
+        case let .localShellCall(id, callID, _, action):
+            guard case let .exec(params) = action else {
+                return nil
+            }
+            return ToolHookPayload(
+                toolName: "Bash",
+                matcherAliases: [],
+                toolUseID: callID ?? id ?? "local_shell",
+                toolInput: .object(["command": .string(params.command.joined(separator: " "))])
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    private static func postToolHookPayload(
+        for item: ResponseItem,
+        output: ResponseItem,
+        prePayload: ToolHookPayload
+    ) -> PostToolHookPayload? {
+        switch output {
+        case let .functionCallOutput(_, payload):
+            return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(payload.content))
+        case let .customToolCallOutput(_, output):
+            return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(output))
+        default:
+            if case .toolSearchCall = item {
+                return nil
+            }
+            return nil
+        }
+    }
+
+    private static func toolOutputSucceeded(_ output: ResponseItem) -> Bool {
+        switch output {
+        case let .functionCallOutput(_, payload):
+            return payload.success != false
+        case .customToolCallOutput:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func blockedToolOutput(
+        for item: ResponseItem,
+        hookPayload: ToolHookPayload,
+        reason: String?
+    ) -> ResponseItem {
+        let message = blockedToolMessage(hookPayload: hookPayload, reason: reason)
+        switch item {
+        case let .functionCall(_, _, _, callID):
+            return functionOutput(callID: callID, content: message, success: false)
+        case let .customToolCall(_, _, callID, _, _):
+            return .customToolCallOutput(callID: callID, output: message)
+        case let .localShellCall(id, callID, _, _):
+            return functionOutput(callID: callID ?? id ?? "local_shell", content: message, success: false)
+        default:
+            return functionOutput(callID: hookPayload.toolUseID, content: message, success: false)
+        }
+    }
+
+    private static func blockedToolMessage(hookPayload: ToolHookPayload, reason: String?) -> String {
+        let reason = reason ?? "blocked by PreToolUse hook"
+        if (hookPayload.toolName == "Bash" || hookPayload.toolName == "apply_patch"),
+           case let .object(input) = hookPayload.toolInput,
+           case let .string(command)? = input["command"]
+        {
+            return "Command blocked by PreToolUse hook: \(reason). Command: \(command)"
+        }
+        return "Tool call blocked by PreToolUse hook: \(reason). Tool: \(hookPayload.toolName)"
+    }
+
+    private static func replacingToolOutputIfNeeded(
+        _ output: ResponseItem,
+        with outcome: HookPostToolUseOutcome
+    ) -> ResponseItem {
+        let replacement = outcome.shouldStop
+            ? (outcome.feedbackMessage ?? outcome.stopReason ?? "PostToolUse hook stopped execution")
+            : outcome.feedbackMessage
+        guard let replacement else {
+            return output
+        }
+        switch output {
+        case let .functionCallOutput(callID, payload):
+            return .functionCallOutput(
+                callID: callID,
+                output: FunctionCallOutputPayload(content: replacement, success: payload.success)
+            )
+        case let .customToolCallOutput(callID, _):
+            return .customToolCallOutput(callID: callID, output: replacement)
+        default:
+            return output
+        }
     }
 
     private static func functionOutput(callID: String, content: String, success: Bool) -> ResponseItem {

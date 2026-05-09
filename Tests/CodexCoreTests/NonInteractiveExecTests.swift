@@ -278,6 +278,137 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testResponsesLoopCarriesHookAdditionalContextAfterToolOutput() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let script = ExecLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item -> NonInteractiveExec.FunctionCallExecutionResult in
+                guard case let .functionCall(_, _, _, callID) = item else {
+                    return NonInteractiveExec.FunctionCallExecutionResult(
+                        output: .functionCallOutput(
+                            callID: "bad",
+                            output: FunctionCallOutputPayload(content: "bad", success: false)
+                        )
+                    )
+                }
+                return NonInteractiveExec.FunctionCallExecutionResult(
+                    output: .functionCallOutput(
+                        callID: callID,
+                        output: FunctionCallOutputPayload(content: "ok", success: true)
+                    ),
+                    additionalContextItems: [
+                        ResponseInputItem(userInputs: [.text("hook context")]).responseItem()
+                    ]
+                )
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].input.contains {
+            if case let .message(_, role, content, _) = $0 {
+                return role == "user" && content == [.inputText(text: "hook context")]
+            }
+            return false
+        })
+        XCTAssertEqual(result.transcriptItems, [
+            .functionCall(name: "shell_command", arguments: #"{"command":"echo hi"}"#, callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok", success: true)),
+            ResponseInputItem(userInputs: [.text("hook context")]).responseItem(),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
+    func testPreToolUseHooksBlockShellCommandAndAppendAdditionalContext() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf should-not-run","login":false}"#,
+            callID: "call-shell"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "Bash",
+                    command: #"printf %s '{"decision":"block","reason":"policy","hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"pre ctx"}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "Command blocked by PreToolUse hook: policy. Command: printf should-not-run"
+        )
+        XCTAssertEqual(result.additionalContextItems, [
+            ResponseInputItem(userInputs: [.text("pre ctx")]).responseItem()
+        ])
+    }
+
+    func testPostToolUseHooksAppendAdditionalContextAndReplaceFeedback() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf tool-output","login":false}"#,
+            callID: "call-shell"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .postToolUse,
+                    matcher: "Bash",
+                    command: #"printf %s '{"decision":"block","reason":"post feedback","hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"post ctx"}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.content, "post feedback")
+        XCTAssertEqual(result.additionalContextItems, [
+            ResponseInputItem(userInputs: [.text("post ctx")]).responseItem()
+        ])
+    }
+
     func testResponsesLoopExecutesCustomToolCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "patch")])

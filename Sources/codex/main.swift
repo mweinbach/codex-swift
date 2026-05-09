@@ -851,9 +851,13 @@ private func runNonInteractiveExec(
             )
         },
         executeFunctionCall: { item in
-            await NonInteractiveExec.executeFunctionCall(
+            await NonInteractiveExec.executeFunctionCallWithHooks(
                 item,
+                handlers: hookHandlers,
+                conversationID: conversationID,
+                turnID: "turn-1",
                 cwd: cwd,
+                model: resolvedModel,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
