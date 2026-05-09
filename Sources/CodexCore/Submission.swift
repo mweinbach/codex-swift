@@ -53,7 +53,7 @@ public enum Op: Equatable, Sendable {
         approvalPolicy: AskForApproval,
         approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy,
-        permissionProfile: JSONValue? = nil,
+        permissionProfile: PermissionProfile? = nil,
         model: String,
         effort: ReasoningEffort?,
         summary: ReasoningSummary?,
@@ -69,7 +69,7 @@ public enum Op: Equatable, Sendable {
         approvalPolicy: AskForApproval?,
         approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy?,
-        permissionProfile: JSONValue? = nil,
+        permissionProfile: PermissionProfile? = nil,
         windowsSandboxLevel: JSONValue? = nil,
         model: String?,
         effort: ReasoningEffortOverride?,
@@ -229,7 +229,7 @@ extension Op: Codable {
                 approvalPolicy: try container.decode(AskForApproval.self, forKey: .approvalPolicy),
                 approvalsReviewer: try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer),
                 sandboxPolicy: try container.decode(SandboxPolicy.self, forKey: .sandboxPolicy),
-                permissionProfile: try Self.decodeNullableJSON(from: container, forKey: .permissionProfile),
+                permissionProfile: try container.decodeIfPresent(PermissionProfile.self, forKey: .permissionProfile),
                 model: try container.decode(String.self, forKey: .model),
                 effort: try container.decodeIfPresent(ReasoningEffort.self, forKey: .effort),
                 summary: try container.decodeIfPresent(ReasoningSummary.self, forKey: .summary),
@@ -249,7 +249,7 @@ extension Op: Codable {
                 approvalPolicy: try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy),
                 approvalsReviewer: try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer),
                 sandboxPolicy: try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy),
-                permissionProfile: try Self.decodeNullableJSON(from: container, forKey: .permissionProfile),
+                permissionProfile: try container.decodeIfPresent(PermissionProfile.self, forKey: .permissionProfile),
                 windowsSandboxLevel: try Self.decodeNullableJSON(from: container, forKey: .windowsSandboxLevel),
                 model: try container.decodeIfPresent(String.self, forKey: .model),
                 effort: try Self.decodeEffortOverride(from: container),
@@ -384,7 +384,7 @@ extension Op: Codable {
             try container.encode(approvalPolicy, forKey: .approvalPolicy)
             try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
             try container.encode(sandboxPolicy, forKey: .sandboxPolicy)
-            try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
+            try container.encodeIfPresent(permissionProfile, forKey: .permissionProfile)
             try container.encode(model, forKey: .model)
             try container.encodeIfPresent(effort, forKey: .effort)
             try container.encodeIfPresent(summary, forKey: .summary)
@@ -415,7 +415,7 @@ extension Op: Codable {
             try container.encodeIfPresent(approvalPolicy, forKey: .approvalPolicy)
             try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
             try container.encodeIfPresent(sandboxPolicy, forKey: .sandboxPolicy)
-            try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
+            try container.encodeIfPresent(permissionProfile, forKey: .permissionProfile)
             try Self.encodeNullableJSON(windowsSandboxLevel, into: &container, forKey: .windowsSandboxLevel)
             try container.encodeIfPresent(model, forKey: .model)
             try Self.encode(effortOverride: effort, into: &container)

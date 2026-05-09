@@ -236,6 +236,120 @@ public struct ActivePermissionProfile: Codable, Equatable, Sendable {
     }
 }
 
+public enum NetworkSandboxPolicy: String, Codable, Equatable, Sendable {
+    case restricted
+    case enabled
+
+    public var isEnabled: Bool {
+        self == .enabled
+    }
+}
+
+public enum ManagedFileSystemPermissions: Equatable, Codable, Sendable {
+    case restricted(entries: [FileSystemSandboxEntry], globScanMaxDepth: Int? = nil)
+    case unrestricted
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case entries
+        case globScanMaxDepth = "glob_scan_max_depth"
+    }
+
+    private enum PermissionType: String, Codable {
+        case restricted
+        case unrestricted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(PermissionType.self, forKey: .type) {
+        case .restricted:
+            self = .restricted(
+                entries: try container.decode([FileSystemSandboxEntry].self, forKey: .entries),
+                globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+            )
+        case .unrestricted:
+            self = .unrestricted
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .restricted(entries, globScanMaxDepth):
+            try container.encode(PermissionType.restricted, forKey: .type)
+            try container.encode(entries, forKey: .entries)
+            try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
+        case .unrestricted:
+            try container.encode(PermissionType.unrestricted, forKey: .type)
+        }
+    }
+}
+
+public enum PermissionProfile: Equatable, Codable, Sendable {
+    case managed(fileSystem: ManagedFileSystemPermissions, network: NetworkSandboxPolicy)
+    case disabled
+    case external(network: NetworkSandboxPolicy)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case fileSystem = "file_system"
+        case network
+    }
+
+    private enum ProfileType: String, Codable {
+        case managed
+        case disabled
+        case external
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let type = try container.decodeIfPresent(ProfileType.self, forKey: .type) {
+            switch type {
+            case .managed:
+                self = .managed(
+                    fileSystem: try container.decode(ManagedFileSystemPermissions.self, forKey: .fileSystem),
+                    network: try container.decode(NetworkSandboxPolicy.self, forKey: .network)
+                )
+            case .disabled:
+                self = .disabled
+            case .external:
+                self = .external(network: try container.decode(NetworkSandboxPolicy.self, forKey: .network))
+            }
+            return
+        }
+
+        let network = try container.decodeIfPresent(
+            RequestPermissionNetworkPermissions.self,
+            forKey: .network
+        )
+        let fileSystem = try container.decodeIfPresent(FileSystemPermissions.self, forKey: .fileSystem)
+        let entries = fileSystem?.entries ?? []
+        let globScanMaxDepth = fileSystem?.globScanMaxDepth
+        let networkPolicy: NetworkSandboxPolicy = network?.enabled == true ? .enabled : .restricted
+        self = .managed(
+            fileSystem: .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth),
+            network: networkPolicy
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .managed(fileSystem, network):
+            try container.encode(ProfileType.managed, forKey: .type)
+            try container.encode(fileSystem, forKey: .fileSystem)
+            try container.encode(network, forKey: .network)
+        case .disabled:
+            try container.encode(ProfileType.disabled, forKey: .type)
+        case let .external(network):
+            try container.encode(ProfileType.external, forKey: .type)
+            try container.encode(network, forKey: .network)
+        }
+    }
+}
+
 public struct RequestPermissionProfile: Codable, Equatable, Sendable {
     public let network: RequestPermissionNetworkPermissions?
     public let fileSystem: FileSystemPermissions?

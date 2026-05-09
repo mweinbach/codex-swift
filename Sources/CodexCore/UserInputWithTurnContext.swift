@@ -9,7 +9,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: JSONValue?
     public let sandboxPolicy: SandboxPolicy?
-    public let permissionProfile: JSONValue?
+    public let permissionProfile: PermissionProfile?
     public let activePermissionProfile: ActivePermissionProfile?
     public let windowsSandboxLevel: JSONValue?
     public let model: String?
@@ -48,7 +48,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy? = nil,
-        permissionProfile: JSONValue? = nil,
+        permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
         windowsSandboxLevel: JSONValue? = nil,
         model: String? = nil,
@@ -90,7 +90,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer)
         sandboxPolicy = try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy)
-        permissionProfile = try Self.decodeNullableJSON(from: container, forKey: .permissionProfile)
+        permissionProfile = try container.decodeIfPresent(PermissionProfile.self, forKey: .permissionProfile)
         activePermissionProfile = try container.decodeIfPresent(
             ActivePermissionProfile.self,
             forKey: .activePermissionProfile
@@ -114,7 +114,7 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         try container.encodeIfPresent(approvalPolicy, forKey: .approvalPolicy)
         try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try container.encodeIfPresent(sandboxPolicy, forKey: .sandboxPolicy)
-        try Self.encodeNullableJSON(permissionProfile, into: &container, forKey: .permissionProfile)
+        try container.encodeIfPresent(permissionProfile, forKey: .permissionProfile)
         try container.encodeIfPresent(activePermissionProfile, forKey: .activePermissionProfile)
         try Self.encodeNullableJSON(windowsSandboxLevel, into: &container, forKey: .windowsSandboxLevel)
         try container.encodeIfPresent(model, forKey: .model)

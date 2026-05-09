@@ -110,9 +110,10 @@ final class SubmissionTests: XCTestCase {
                 excludeTmpdirEnvVar: false,
                 excludeSlashTmp: true
             ),
-            permissionProfile: .object([
-                "kind": .string("workspace")
-            ]),
+            permissionProfile: .managed(
+                fileSystem: .unrestricted,
+                network: .enabled
+            ),
             model: "o3",
             effort: .high,
             summary: .detailed,
@@ -145,7 +146,11 @@ final class SubmissionTests: XCTestCase {
                 "exclude_slash_tmp": true
             ],
             "permission_profile": [
-                "kind": "workspace"
+                "type": "managed",
+                "file_system": [
+                    "type": "unrestricted"
+                ],
+                "network": "enabled"
             ],
             "model": "o3",
             "effort": "high",
@@ -181,9 +186,10 @@ final class SubmissionTests: XCTestCase {
             approvalPolicy: .onRequest,
             approvalsReviewer: .string("native"),
             sandboxPolicy: .readOnly,
-            permissionProfile: .object([
-                "type": .string("managed")
-            ]),
+            permissionProfile: .managed(
+                fileSystem: .restricted(entries: []),
+                network: .restricted
+            ),
             activePermissionProfile: ActivePermissionProfile(
                 id: ":workspace",
                 modifications: [.additionalWritableRoot(path: "/repo/tmp")]
@@ -224,7 +230,12 @@ final class SubmissionTests: XCTestCase {
                 "type": "read-only"
             ],
             "permission_profile": [
-                "type": "managed"
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": []
+                ],
+                "network": "restricted"
             ],
             "active_permission_profile": [
                 "id": ":workspace",
@@ -259,6 +270,61 @@ final class SubmissionTests: XCTestCase {
         ])
     }
 
+    func testPermissionProfileTaggedAndLegacyWireShapesLikeRust() throws {
+        let tagged = PermissionProfile.managed(
+            fileSystem: .restricted(
+                entries: [
+                    FileSystemSandboxEntry(path: .globPattern("**/*.env"), access: .none)
+                ],
+                globScanMaxDepth: 2
+            ),
+            network: .restricted
+        )
+
+        try XCTAssertJSONObjectEqual(tagged, [
+            "type": "managed",
+            "file_system": [
+                "type": "restricted",
+                "entries": [
+                    [
+                        "path": [
+                            "type": "glob_pattern",
+                            "pattern": "**/*.env"
+                        ],
+                        "access": "none"
+                    ]
+                ],
+                "glob_scan_max_depth": 2
+            ],
+            "network": "restricted"
+        ])
+
+        let legacy = try JSONDecoder().decode(PermissionProfile.self, from: Data(#"""
+        {
+            "network": {
+                "enabled": true
+            },
+            "file_system": {
+                "read": ["/repo"],
+                "write": ["/repo/Sources"]
+            }
+        }
+        """#.utf8))
+
+        XCTAssertEqual(
+            legacy,
+            .managed(
+                fileSystem: .restricted(
+                    entries: [
+                        FileSystemSandboxEntry(path: .path("/repo"), access: .read),
+                        FileSystemSandboxEntry(path: .path("/repo/Sources"), access: .write)
+                    ]
+                ),
+                network: .enabled
+            )
+        )
+    }
+
     func testOverrideTurnContextOmittedSetAndClearEffortWireShapes() throws {
         try XCTAssertJSONObjectEqual(Op.overrideTurnContext(
             cwd: nil,
@@ -276,9 +342,7 @@ final class SubmissionTests: XCTestCase {
             approvalPolicy: .onFailure,
             approvalsReviewer: .string("guardian"),
             sandboxPolicy: .readOnly,
-            permissionProfile: .object([
-                "type": .string("readonly")
-            ]),
+            permissionProfile: .external(network: .restricted),
             windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
             effort: .set(.low),
@@ -295,7 +359,8 @@ final class SubmissionTests: XCTestCase {
                 "type": "read-only"
             ],
             "permission_profile": [
-                "type": "readonly"
+                "type": "external",
+                "network": "restricted"
             ],
             "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",

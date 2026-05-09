@@ -505,6 +505,8 @@ Source baseline inspected for this scaffold:
   - Added typed `FileSystemPermissions`, `FileSystemSandboxEntry`, `FileSystemPath`, and `FileSystemAccessMode` models for request/additional permissions, including Rust's legacy `read`/`write` roots and canonical `entries` plus `glob_scan_max_depth` wire shapes.
 - `codex-rs/protocol/src/models.rs` active permission profile sidecar
   - Added typed `ActivePermissionProfile` and `ActivePermissionProfileModification` models and wired `UserInputWithTurnContextParams.active_permission_profile` through them, preserving Rust's default empty `modifications` and tagged `additional_writable_root` wire shape.
+- `codex-rs/protocol/src/models.rs` permission profiles
+  - Added typed `PermissionProfile`, `ManagedFileSystemPermissions`, and `NetworkSandboxPolicy` models, including Rust's tagged managed/disabled/external wire shape and legacy `{network,file_system}` rollout decode path, and wired user-turn/turn-context submissions through the typed profile.
 
 ## Known Gaps
 
