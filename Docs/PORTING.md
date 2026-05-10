@@ -980,6 +980,8 @@ Source baseline inspected for this scaffold:
   - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
 - `codex-rs/protocol/src/models.rs` persisted web-search response-item actions
   - locked Swift `ResponseItem.webSearchCall` serialization to Rust's persisted `web_search_call` shapes for search queries, open-page actions, find-in-page actions, and partial status-only calls while preserving Rust's runtime `id` skip behavior.
+- `codex-rs/protocol/src/models.rs` structured tool-output rollout response items
+  - pinned Swift rollout JSONL persistence for structured `function_call_output` and `custom_tool_call_output` response items so nested tool output arrays keep Rust's untagged body shape while internal `success` metadata remains omitted and decodes back as non-persisted metadata.
 
 ## Known Gaps
 
@@ -1003,7 +1005,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - config-layer file IO and full non-apply config loading
 - full apply-patch approval/diff event plumbing across shell-intercept and live-tool paths
 - Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior
-- remaining `RolloutItem` serialization and structured payload models for persisted tool-call/reasoning response items
+- remaining `RolloutItem` serialization and structured payload models for persisted reasoning response items
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
 - full session state and `ContextManager` history recording/replacement around token/rate-limit state
 - live hook command integration of event runtimes into session/tool execution

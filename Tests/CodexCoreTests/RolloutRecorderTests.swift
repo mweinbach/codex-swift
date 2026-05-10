@@ -323,6 +323,72 @@ final class RolloutRecorderTests: XCTestCase {
         XCTAssertEqual(sanitized.replacementHistory, [kept])
     }
 
+    func testPersistsStructuredToolOutputResponseItemsLikeRust() throws {
+        let output = FunctionCallOutputPayload(
+            content: "ignored when content items exist",
+            contentItems: [
+                .inputText(text: "screenshot attached"),
+                .inputImage(imageURL: "data:image/png;base64,AAAA", detail: .high)
+            ],
+            success: false
+        )
+        let line = RolloutLine(
+            timestamp: "2026-05-08T00:00:00.000Z",
+            item: .responseItem(.functionCallOutput(callID: "call-1", output: output))
+        )
+
+        let object = try JSONObject(line)
+        XCTAssertEqual(object["type"] as? String, "response_item")
+        XCTAssertEqual(object["timestamp"] as? String, "2026-05-08T00:00:00.000Z")
+        let payload = try XCTUnwrap(object["payload"] as? [String: Any])
+        XCTAssertEqual(payload["type"] as? String, "function_call_output")
+        XCTAssertEqual(payload["call_id"] as? String, "call-1")
+        XCTAssertNil(payload["success"])
+        let outputItems = try XCTUnwrap(payload["output"] as? [[String: Any]])
+        XCTAssertEqual(outputItems.count, 2)
+        XCTAssertEqual(outputItems[0]["type"] as? String, "input_text")
+        XCTAssertEqual(outputItems[0]["text"] as? String, "screenshot attached")
+        XCTAssertEqual(outputItems[1]["type"] as? String, "input_image")
+        XCTAssertEqual(outputItems[1]["image_url"] as? String, "data:image/png;base64,AAAA")
+        XCTAssertEqual(outputItems[1]["detail"] as? String, "high")
+
+        let decoded = try JSONDecoder().decode(RolloutLine.self, from: JSONEncoder().encode(line))
+        guard case let .responseItem(.functionCallOutput(decodedCallID, decodedOutput)) = decoded.item else {
+            return XCTFail("expected persisted structured function-call output")
+        }
+        XCTAssertEqual(decodedCallID, "call-1")
+        XCTAssertEqual(decodedOutput.contentItems, output.contentItems)
+        XCTAssertEqual(decodedOutput.content, output.description)
+        XCTAssertNil(decodedOutput.success)
+
+        let customLine = RolloutLine(
+            timestamp: "2026-05-08T00:00:01.000Z",
+            item: .responseItem(.customToolCallOutput(
+                callID: "custom-1",
+                name: "apply_patch",
+                output: output
+            ))
+        )
+        let customObject = try JSONObject(customLine)
+        let customPayload = try XCTUnwrap(customObject["payload"] as? [String: Any])
+        XCTAssertEqual(customPayload["type"] as? String, "custom_tool_call_output")
+        XCTAssertEqual(customPayload["call_id"] as? String, "custom-1")
+        XCTAssertEqual(customPayload["name"] as? String, "apply_patch")
+        XCTAssertNil(customPayload["success"])
+        XCTAssertEqual(try XCTUnwrap(customPayload["output"] as? [[String: Any]]).count, 2)
+
+        let customDecoded = try JSONDecoder().decode(RolloutLine.self, from: JSONEncoder().encode(customLine))
+        guard case let .responseItem(.customToolCallOutput(decodedCustomID, decodedName, decodedCustomOutput)) =
+            customDecoded.item
+        else {
+            return XCTFail("expected persisted structured custom-tool output")
+        }
+        XCTAssertEqual(decodedCustomID, "custom-1")
+        XCTAssertEqual(decodedName, "apply_patch")
+        XCTAssertEqual(decodedCustomOutput.contentItems, output.contentItems)
+        XCTAssertNil(decodedCustomOutput.success)
+    }
+
     func testReconstructResponseHistoryUsesResponseItemsAndNormalizesToolPairs() {
         let history = RolloutRecorder.reconstructResponseHistory(from: [
             .sessionMeta(SessionMetaLine(meta: SessionMeta(
