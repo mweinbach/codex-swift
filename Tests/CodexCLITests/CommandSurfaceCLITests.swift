@@ -620,7 +620,18 @@ final class CommandSurfaceCLITests: XCTestCase {
         var receivedAction: CodexCLI.DebugCommandAction?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["debug", "prompt-input", "hello", "--image", "a.png,b.png", "-i", "c.png"],
+            arguments: [
+                "-i",
+                "root-a.png,root-b.png",
+                "--image=root-c.png",
+                "debug",
+                "prompt-input",
+                "hello",
+                "--image",
+                "a.png,b.png",
+                "-i",
+                "c.png"
+            ],
             stderr: { _ in XCTFail("stderr should not be written") },
             debugRunner: { request in
                 receivedAction = request.action
@@ -629,7 +640,10 @@ final class CommandSurfaceCLITests: XCTestCase {
         )
 
         XCTAssertEqual(exitCode, 0)
-        XCTAssertEqual(receivedAction, .promptInput(prompt: "hello", imagePaths: ["a.png", "b.png", "c.png"]))
+        XCTAssertEqual(receivedAction, .promptInput(
+            prompt: "hello",
+            imagePaths: ["root-a.png", "root-b.png", "root-c.png", "a.png", "b.png", "c.png"]
+        ))
     }
 
     func testRunAsyncDebugAppServerSendMessageV2ParsesMessage() async {

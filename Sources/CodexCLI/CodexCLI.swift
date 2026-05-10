@@ -837,9 +837,13 @@ public struct CodexCLI: Sendable {
             let rawArguments = rawCommandArguments(after: spec, in: arguments)
             switch parseDebugCommandAction(rawArguments) {
             case let .success(action):
+                let mergedAction = debugAction(
+                    action,
+                    prependingRootImagePaths: rootImagePaths(before: spec, in: arguments)
+                )
                 do {
                     let result = try await debugRunner(DebugCommandRequest(
-                        action: action,
+                        action: mergedAction,
                         configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                     ))
                     emit(result, stdout: stdout, stderr: stderr)
@@ -1063,6 +1067,60 @@ public struct CodexCLI: Sendable {
             index += 1
         }
         return []
+    }
+
+    private func rootImagePaths(before spec: CommandSpec, in arguments: [String]) -> [String] {
+        var imagePaths: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                break
+            }
+            if spec.matches(argument) {
+                return imagePaths
+            }
+            if argument == "--image" || argument == "-i" {
+                if index + 1 < arguments.count {
+                    imagePaths.append(contentsOf: splitCommaDelimited(arguments[index + 1]))
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--image=") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst("--image=".count))))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
+                index += 1
+                continue
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+
+        return imagePaths
+    }
+
+    private func debugAction(
+        _ action: DebugCommandAction,
+        prependingRootImagePaths rootImagePaths: [String]
+    ) -> DebugCommandAction {
+        guard !rootImagePaths.isEmpty else {
+            return action
+        }
+        switch action {
+        case let .promptInput(prompt, imagePaths):
+            return .promptInput(prompt: prompt, imagePaths: rootImagePaths + imagePaths)
+        case .models, .appServerSendMessageV2, .traceReduce, .clearMemories:
+            return action
+        }
     }
 
     private func configOverrideTokens(_ arguments: [String]) throws -> [String] {
