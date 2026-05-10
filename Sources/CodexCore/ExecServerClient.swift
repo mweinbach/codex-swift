@@ -72,6 +72,88 @@ public struct ClosureExecServerClientTransport: ExecServerClientTransport {
     }
 }
 
+public actor ExecServerLineClientTransport: ExecServerClientTransport {
+    public typealias ReadLine = @Sendable () async throws -> String?
+    public typealias WriteLine = @Sendable (Data) async throws -> Void
+    public typealias NotificationHandler = @Sendable (ExecServerJSONRPCNotification) async throws -> Void
+
+    private let readLine: ReadLine
+    private let writeLine: WriteLine
+    private let notificationHandler: NotificationHandler
+    private let connectionLabel: String
+
+    public init(
+        connectionLabel: String = "exec-server stdio command",
+        readLine: @escaping ReadLine,
+        writeLine: @escaping WriteLine,
+        notificationHandler: @escaping NotificationHandler = { _ in }
+    ) {
+        self.connectionLabel = connectionLabel
+        self.readLine = readLine
+        self.writeLine = writeLine
+        self.notificationHandler = notificationHandler
+    }
+
+    public func send(_ message: ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage? {
+        do {
+            try await writeLine(try ExecServerJSONRPCCodec.encodeLine(message))
+        } catch let error as ExecServerClientError {
+            throw error
+        } catch {
+            throw ExecServerClientError.disconnected(
+                "exec-server transport disconnected: failed to write JSON-RPC message to \(connectionLabel): \(error)"
+            )
+        }
+
+        guard case .request = message else {
+            return nil
+        }
+
+        while true {
+            let line: String?
+            do {
+                line = try await readLine()
+            } catch let error as ExecServerClientError {
+                throw error
+            } catch {
+                throw ExecServerClientError.disconnected(
+                    "exec-server transport disconnected: failed to read JSON-RPC message from \(connectionLabel): \(error)"
+                )
+            }
+
+            guard let line else {
+                return nil
+            }
+            guard let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: line, connectionLabel: connectionLabel) else {
+                continue
+            }
+            switch event {
+            case let .message(.notification(notification)):
+                do {
+                    try await notificationHandler(notification)
+                } catch {
+                    throw ExecServerClientError.disconnected(
+                        "exec-server notification handling failed: \(error)"
+                    )
+                }
+            case let .message(message):
+                return message
+            case let .malformedMessage(reason):
+                throw ExecServerClientError.protocolError(reason)
+            case let .disconnected(reason):
+                throw ExecServerClientError.disconnected(disconnectedMessage(reason: reason))
+            }
+        }
+    }
+
+    private func disconnectedMessage(reason: String?) -> String {
+        if let reason, !reason.isEmpty {
+            return "exec-server transport disconnected: \(reason)"
+        }
+        return "exec-server transport disconnected"
+    }
+}
+
 public actor ExecServerClient {
     private let transport: any ExecServerClientTransport
     private var nextRequestID: Int64 = 1

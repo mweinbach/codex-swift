@@ -168,6 +168,73 @@ final class ExecServerClientTests: XCTestCase {
         )
     }
 
+    func testLineClientTransportWritesStdioLinesAndFansOutNotificationsLikeRust() async throws {
+        let harness = LineClientHarness()
+        let notification = ExecServerJSONRPCNotification(
+            method: execServerProcessOutputDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerOutputDeltaNotification(
+                processId: "proc-1",
+                seq: 1,
+                stream: .stdout,
+                chunk: ExecServerByteChunk(Array("hi".utf8))
+            ))
+        )
+        await harness.enqueueReadLine("   ")
+        await harness.enqueueReadLine(try line(for: .notification(notification)))
+        await harness.enqueueReadLine(try line(for: ExecServerRPC.response(
+            id: .integer(1),
+            result: try ExecServerRPC.jsonValue(from: ExecServerExecResponse(processId: "proc-1"))
+        )))
+        let transport = ExecServerLineClientTransport(
+            readLine: { await harness.readLine() },
+            writeLine: { await harness.writeLine($0) },
+            notificationHandler: { await harness.recordNotification($0) }
+        )
+        let client = ExecServerClient(transport: transport)
+
+        let response = try await client.startProcess(ExecServerExecParams(
+            processId: "proc-1",
+            argv: ["/bin/echo", "hi"],
+            cwd: "/tmp",
+            env: [:],
+            tty: false
+        ))
+
+        XCTAssertEqual(response.processId, "proc-1")
+        let writes = try await harness.writtenMessages()
+        XCTAssertEqual(writes.count, 1)
+        guard case let .request(request) = try XCTUnwrap(writes.first) else {
+            return XCTFail("Expected request")
+        }
+        XCTAssertEqual(request.id, .integer(1))
+        XCTAssertEqual(request.method, execServerProcessStartMethod)
+        let notifications = await harness.notifications
+        XCTAssertEqual(notifications, [notification])
+    }
+
+    func testLineClientTransportMapsMalformedAndClosedReadsLikeRust() async throws {
+        let malformedHarness = LineClientHarness()
+        await malformedHarness.enqueueReadLine("{")
+        let malformedClient = ExecServerClient(transport: ExecServerLineClientTransport(
+            readLine: { await malformedHarness.readLine() },
+            writeLine: { await malformedHarness.writeLine($0) }
+        ))
+        await XCTAssertThrowsExecServerClientError(
+            try await malformedClient.terminateProcess(ExecServerTerminateParams(processId: "proc-1")),
+            descriptionPrefix: "exec-server protocol error: failed to parse JSON-RPC message from exec-server stdio command:"
+        )
+
+        let closedHarness = LineClientHarness()
+        let closedClient = ExecServerClient(transport: ExecServerLineClientTransport(
+            readLine: { await closedHarness.readLine() },
+            writeLine: { await closedHarness.writeLine($0) }
+        ))
+        await XCTAssertThrowsExecServerClientError(
+            try await closedClient.terminateProcess(ExecServerTerminateParams(processId: "proc-1")),
+            description: "exec-server transport disconnected"
+        )
+    }
+
     private func XCTAssertThrowsExecServerClientError<T>(
         _ expression: @autoclosure @escaping () async throws -> T,
         description: String,
@@ -179,6 +246,27 @@ final class ExecServerClientTests: XCTestCase {
             XCTFail("Expected exec-server client error", file: file, line: line)
         } catch let error as ExecServerClientError {
             XCTAssertEqual(error.description, description, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
+    }
+
+    private func XCTAssertThrowsExecServerClientError<T>(
+        _ expression: @autoclosure @escaping () async throws -> T,
+        descriptionPrefix: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server client error", file: file, line: line)
+        } catch let error as ExecServerClientError {
+            XCTAssertTrue(
+                error.description.hasPrefix(descriptionPrefix),
+                "Expected prefix \(descriptionPrefix), got \(error.description)",
+                file: file,
+                line: line
+            )
         } catch {
             XCTFail("Unexpected error: \(error)", file: file, line: line)
         }
@@ -203,6 +291,50 @@ private actor ScriptedExecServerClientTransport: ExecServerClientTransport {
     func snapshot() -> [ExecServerJSONRPCMessage] {
         messages
     }
+}
+
+private actor LineClientHarness {
+    private var readLines: [String] = []
+    private var written: [Data] = []
+    private var observedNotifications: [ExecServerJSONRPCNotification] = []
+
+    var notifications: [ExecServerJSONRPCNotification] {
+        observedNotifications
+    }
+
+    func enqueueReadLine(_ line: String) {
+        readLines.append(line)
+    }
+
+    func readLine() -> String? {
+        guard !readLines.isEmpty else {
+            return nil
+        }
+        return readLines.removeFirst()
+    }
+
+    func writeLine(_ data: Data) {
+        written.append(data)
+    }
+
+    func recordNotification(_ notification: ExecServerJSONRPCNotification) {
+        observedNotifications.append(notification)
+    }
+
+    func writtenMessages() throws -> [ExecServerJSONRPCMessage] {
+        try written.map { data in
+            var line = data
+            if line.last == 0x0A {
+                line.removeLast()
+            }
+            return try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: line)
+        }
+    }
+}
+
+private func line(for message: ExecServerJSONRPCMessage) throws -> String {
+    let data = try ExecServerJSONRPCCodec.encodeLine(message)
+    return String(decoding: data.dropLast(), as: UTF8.self)
 }
 
 private extension ExecServerJSONRPCMessage {
