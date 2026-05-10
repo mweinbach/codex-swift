@@ -182,6 +182,90 @@ final class ToolDiscoveryTests: XCTestCase {
         )
     }
 
+    func testFilterDisallowedConnectorsMatchesRustOriginatorRules() {
+        let connectors = [
+            DiscoverableConnectorInfo(
+                id: "alpha",
+                name: "Alpha",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "connector_openai_hidden",
+                name: "OpenAI Hidden",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "asdk_app_6938a94a61d881918ef32cb999ff937c",
+                name: "Default Hidden",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "connector_0f9c9d4592e54d0a9a12b3f44a1e2010",
+                name: "First Party Hidden",
+                isAccessible: false,
+                isEnabled: true
+            )
+        ]
+
+        XCTAssertEqual(
+            filterDisallowedConnectors(connectors, originatorValue: "codex_cli").map(\.id),
+            ["alpha", "connector_0f9c9d4592e54d0a9a12b3f44a1e2010"]
+        )
+        XCTAssertEqual(
+            filterDisallowedConnectors(connectors, originatorValue: "codex_chatgpt_desktop").map(\.id),
+            ["alpha", "asdk_app_6938a94a61d881918ef32cb999ff937c"]
+        )
+    }
+
+    func testFilterToolSuggestDiscoverableConnectorsKeepsPluginBackedUninstalledApps() {
+        let directoryConnectors = [
+            DiscoverableConnectorInfo(
+                id: "connector_gamma",
+                name: "Gamma",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "connector_alpha",
+                name: "Alpha",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "connector_beta",
+                name: "Beta",
+                isAccessible: false,
+                isEnabled: true
+            ),
+            DiscoverableConnectorInfo(
+                id: "connector_openai_hidden",
+                name: "OpenAI Hidden",
+                isAccessible: false,
+                isEnabled: true
+            )
+        ]
+        let accessibleConnectors = [
+            DiscoverableConnectorInfo(
+                id: "connector_beta",
+                name: "Beta",
+                isAccessible: true,
+                isEnabled: false
+            )
+        ]
+
+        let filtered = filterToolSuggestDiscoverableConnectors(
+            directoryConnectors: directoryConnectors,
+            accessibleConnectors: accessibleConnectors,
+            discoverableConnectorIDs: ["connector_gamma", "connector_alpha", "connector_beta", "connector_openai_hidden"],
+            originatorValue: "codex_cli"
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["connector_alpha", "connector_gamma"])
+    }
+
     func testBuildRequestPluginInstallElicitationRequestUsesExpectedShape() throws {
         let args = RequestPluginInstallArgs(
             toolType: .connector,

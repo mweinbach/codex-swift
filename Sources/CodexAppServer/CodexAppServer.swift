@@ -2893,7 +2893,11 @@ public enum CodexAppServer {
                    runtimeConfig,
                    usesChatGPTBackend
                ) {
-                for app in appInfosForAccessibleConnectors(accessibleConnectors) {
+                let filteredConnectors = filterDisallowedConnectors(
+                    accessibleConnectors,
+                    originatorValue: configuration.originator
+                )
+                for app in appInfosForAccessibleConnectors(filteredConnectors) {
                     guard let id = app["id"] as? String else {
                         continue
                     }
@@ -4435,7 +4439,8 @@ public enum CodexAppServer {
                 guard let id = connector["id"] as? String else {
                     return false
                 }
-                return pluginAppIDs.contains(id) && isAllowedPluginConnectorID(id)
+                return pluginAppIDs.contains(id)
+                    && isConnectorIDAllowed(id, originatorValue: configuration.originator)
             }
             .map { connector in
                 let id = connector["id"] as? String ?? ""
@@ -4448,25 +4453,6 @@ public enum CodexAppServer {
                     "needsAuth": true
                 ].nullStripped(keepNulls: true)
             }
-    }
-
-    private static func isAllowedPluginConnectorID(_ connectorID: String) -> Bool {
-        let disallowedConnectorIDPrefixes = ["connector_openai_"]
-        let disallowedConnectorIDs = Set([
-            "asdk_app_6938a94a61d881918ef32cb999ff937c",
-            "connector_2b0a9009c9c64bf9933a3dae3f2b1254",
-            "connector_3f8d1a79f27c4c7ba1a897ab13bf37dc",
-            "connector_68de829bf7648191acd70a907364c67c",
-            "connector_68e004f14af881919eb50893d3d9f523",
-            "connector_69272cb413a081919685ec3c88d1744e"
-        ])
-        if disallowedConnectorIDs.contains(connectorID) {
-            return false
-        }
-        for prefix in disallowedConnectorIDPrefixes where connectorID.hasPrefix(prefix) {
-            return false
-        }
-        return true
     }
 
     private static func connectorDirectoryApps(
@@ -4491,7 +4477,11 @@ public enum CodexAppServer {
             ) else {
                 return []
             }
-            mergeConnectorDirectoryApps(page["apps"] as? [[String: Any]] ?? [], into: &appsByID)
+            mergeConnectorDirectoryApps(
+                page["apps"] as? [[String: Any]] ?? [],
+                into: &appsByID,
+                originatorValue: configuration.originator
+            )
             token = (
                 (page["next_token"] as? String) ??
                 (page["nextToken"] as? String) ??
@@ -4511,7 +4501,11 @@ public enum CodexAppServer {
                configuration: configuration,
                auth: auth
            ) {
-            mergeConnectorDirectoryApps(workspacePage["apps"] as? [[String: Any]] ?? [], into: &appsByID)
+            mergeConnectorDirectoryApps(
+                workspacePage["apps"] as? [[String: Any]] ?? [],
+                into: &appsByID,
+                originatorValue: configuration.originator
+            )
         }
 
         return sortedAppInfos(Array(appsByID.values))
@@ -4519,10 +4513,14 @@ public enum CodexAppServer {
 
     private static func mergeConnectorDirectoryApps(
         _ apps: [[String: Any]],
-        into appsByID: inout [String: [String: Any]]
+        into appsByID: inout [String: [String: Any]],
+        originatorValue: String
     ) {
         for app in apps where (app["visibility"] as? String) != "HIDDEN" {
             guard let id = stringParam(app["id"]) else {
+                continue
+            }
+            guard isConnectorIDAllowed(id, originatorValue: originatorValue) else {
                 continue
             }
             let incoming = appInfoForDirectoryApp(app, id: id)

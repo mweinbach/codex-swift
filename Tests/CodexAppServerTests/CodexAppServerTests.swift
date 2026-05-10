@@ -4321,6 +4321,75 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testAppListFiltersDisallowedDirectoryAndAccessibleConnectors() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let directoryPage = """
+        {
+          "apps": [
+            {
+              "id": "connector_alpha",
+              "name": "Alpha"
+            },
+            {
+              "id": "connector_openai_hidden",
+              "name": "OpenAI Hidden"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryPage.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            },
+            accessibleConnectorProvider: { _, _ in
+                [
+                    DiscoverableConnectorInfo(
+                        id: "connector_accessible",
+                        name: "Accessible",
+                        isAccessible: true,
+                        isEnabled: true
+                    ),
+                    DiscoverableConnectorInfo(
+                        id: "asdk_app_6938a94a61d881918ef32cb999ff937c",
+                        name: "Default Hidden",
+                        isAccessible: true,
+                        isEnabled: true
+                    )
+                ]
+            }
+        )
+
+        let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, ["connector_accessible", "connector_alpha"])
+    }
+
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

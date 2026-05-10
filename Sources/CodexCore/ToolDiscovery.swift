@@ -5,6 +5,19 @@ public let requestPluginInstallPersistKey = "persist"
 public let requestPluginInstallPersistAlwaysValue = "always"
 public let requestPluginInstallToolName = "request_plugin_install"
 public let codexAppsMCPServerName = "codex_apps"
+public let disallowedConnectorIDPrefix = "connector_openai_"
+public let firstPartyChatOriginators: Set<String> = ["codex_atlas", "codex_chatgpt_desktop"]
+public let disallowedConnectorIDs: Set<String> = [
+    "asdk_app_6938a94a61d881918ef32cb999ff937c",
+    "connector_2b0a9009c9c64bf9933a3dae3f2b1254",
+    "connector_3f8d1a79f27c4c7ba1a897ab13bf37dc",
+    "connector_68de829bf7648191acd70a907364c67c",
+    "connector_68e004f14af881919eb50893d3d9f523",
+    "connector_69272cb413a081919685ec3c88d1744e"
+]
+public let firstPartyChatDisallowedConnectorIDs: Set<String> = [
+    "connector_0f9c9d4592e54d0a9a12b3f44a1e2010"
+]
 
 public enum DiscoverableToolType: String, Codable, Equatable, Sendable {
     case connector
@@ -313,6 +326,47 @@ public func filterRequestPluginInstallDiscoverableToolsForClient(
     }
 }
 
+public func filterToolSuggestDiscoverableConnectors(
+    directoryConnectors: [DiscoverableConnectorInfo],
+    accessibleConnectors: [DiscoverableConnectorInfo],
+    discoverableConnectorIDs: Set<String>,
+    originatorValue: String
+) -> [DiscoverableConnectorInfo] {
+    let accessibleConnectorIDs = Set(
+        accessibleConnectors
+            .filter(\.isAccessible)
+            .map(\.id)
+    )
+    return filterDisallowedConnectors(directoryConnectors, originatorValue: originatorValue)
+        .filter { connector in !accessibleConnectorIDs.contains(connector.id) }
+        .filter { connector in discoverableConnectorIDs.contains(connector.id) }
+        .sorted {
+            if $0.name != $1.name {
+                return $0.name < $1.name
+            }
+            return $0.id < $1.id
+        }
+}
+
+public func filterDisallowedConnectors(
+    _ connectors: [DiscoverableConnectorInfo],
+    originatorValue: String
+) -> [DiscoverableConnectorInfo] {
+    connectors.filter { connector in
+        isConnectorIDAllowed(connector.id, originatorValue: originatorValue)
+    }
+}
+
+public func isConnectorIDAllowed(_ connectorID: String, originatorValue: String) -> Bool {
+    if connectorID.hasPrefix(disallowedConnectorIDPrefix) {
+        return false
+    }
+    if firstPartyChatOriginators.contains(originatorValue) {
+        return !firstPartyChatDisallowedConnectorIDs.contains(connectorID)
+    }
+    return !disallowedConnectorIDs.contains(connectorID)
+}
+
 public func buildRequestPluginInstallElicitationRequest(
     serverName: String,
     threadID: String,
@@ -361,7 +415,8 @@ public func verifiedConnectorInstallCompleted(
 
 public func accessibleConnectorsFromMCPTools(
     _ tools: [String: McpTool],
-    codexAppsServerName: String = codexAppsMCPServerName
+    codexAppsServerName: String = codexAppsMCPServerName,
+    originatorValue: String = "codex_swift"
 ) -> [DiscoverableConnectorInfo] {
     var connectorsByID: [String: (connector: DiscoverableConnectorInfo, pluginDisplayNames: Set<String>)] = [:]
     for (qualifiedName, tool) in tools where mcpToolServerName(from: qualifiedName) == codexAppsServerName {
@@ -416,7 +471,7 @@ public func accessibleConnectorsFromMCPTools(
         }
     }
 
-    return connectorsByID.values
+    let connectors = connectorsByID.values
         .map { entry in
             DiscoverableConnectorInfo(
                 id: entry.connector.id,
@@ -437,6 +492,7 @@ public func accessibleConnectorsFromMCPTools(
             }
             return $0.id < $1.id
         }
+    return filterDisallowedConnectors(connectors, originatorValue: originatorValue)
 }
 
 private extension JSONValue {
