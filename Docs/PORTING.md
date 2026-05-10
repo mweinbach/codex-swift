@@ -817,6 +817,8 @@ Source baseline inspected for this scaffold:
   - added parity coverage for quoted `cmd /c start` URL launches, empty-title `start "" https://...` launches, PowerShell `rm` alias force deletes, `Remove-Item -Recurse -Force`/`-Path` issue-8567 forms, punctuation-adjacent block/bracket/comma forms, and the Rust-safe case where `-Force` appears in a separate PowerShell segment from `Remove-Item`.
 - `codex-rs/shell-command/src/parse_command.rs` shell wrapper parser edge cases
   - added Swift parity coverage for Rust's `bash -c` pipeline parsing plus `/bin/zsh -lc` and `sh -c` read-command extraction, keeping shell wrapper detection aligned with Rust's `extract_bash_command` behavior for bash/zsh/sh executables.
+- `codex-rs/protocol/src/models.rs` reasoning response-item tagged unions
+  - tightened Swift decoding for reasoning summary/content blocks so unknown `type` tags are rejected like Rust's serde-tagged `ReasoningItemReasoningSummary` and `ReasoningItemContent` enums instead of being coerced into text.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/rollout/src/recorder.rs` event persistence mode

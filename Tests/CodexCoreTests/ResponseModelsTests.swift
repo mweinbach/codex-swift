@@ -93,6 +93,22 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testReasoningSummaryRejectsUnknownTypeLikeRustSerdeTag() throws {
+        let json = #"{"type":"summary_markdown","text":"notes"}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ReasoningItemReasoningSummary.self,
+            from: Data(json.utf8)
+        ))
+    }
+
+    func testReasoningContentRejectsUnknownTypeLikeRustSerdeTag() throws {
+        let json = #"{"type":"redacted_reasoning","text":"hidden"}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ReasoningItemContent.self,
+            from: Data(json.utf8)
+        ))
+    }
+
     func testMcpCallToolResultStructuredContentBecomesOutputPayload() throws {
         let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
             content: [.text(McpTextContent(text: "ignored"))],

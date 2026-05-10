@@ -639,8 +639,17 @@ public enum ReasoningItemReasoningSummary: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        _ = try container.decode(String.self, forKey: .type)
-        self = .summaryText(text: try container.decode(String.self, forKey: .text))
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "summary_text":
+            self = .summaryText(text: try container.decode(String.self, forKey: .text))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "unknown reasoning summary type: \(type)"
+            )
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -667,8 +676,14 @@ public enum ReasoningItemContent: Equatable, Codable, Sendable {
         switch try container.decode(String.self, forKey: .type) {
         case "reasoning_text":
             self = .reasoningText(text: try container.decode(String.self, forKey: .text))
-        default:
+        case "text":
             self = .text(try container.decode(String.self, forKey: .text))
+        case let type:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "unknown reasoning content type: \(type)"
+            )
         }
     }
 
