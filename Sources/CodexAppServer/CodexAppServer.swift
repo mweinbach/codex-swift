@@ -8185,6 +8185,38 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func turnPlanUpdatedNotification(
+        threadID: String,
+        turnID: String,
+        planUpdate: UpdatePlanArguments
+    ) -> [String: Any] {
+        [
+            "method": "turn/plan/updated",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "explanation": planUpdate.explanation as Any? ?? NSNull(),
+                "plan": planUpdate.plan.map { item in
+                    [
+                        "step": item.step,
+                        "status": turnPlanStepStatus(item.status)
+                    ]
+                }
+            ]
+        ]
+    }
+
+    private static func turnPlanStepStatus(_ status: StepStatus) -> String {
+        switch status {
+        case .pending:
+            return "pending"
+        case .inProgress:
+            return "inProgress"
+        case .completed:
+            return "completed"
+        }
+    }
+
     fileprivate static func mcpServerStatusUpdatedNotification(_ update: McpStartupUpdateEvent) -> [String: Any] {
         let status: String
         let error: Any
@@ -8584,6 +8616,12 @@ public enum CodexAppServer {
                 threadID: threadID,
                 turnID: turnID,
                 diff: turnDiff.unifiedDiff
+            )
+        case let .planUpdate(planUpdate):
+            return turnPlanUpdatedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                planUpdate: planUpdate
             )
         case let .mcpStartupUpdate(update):
             return mcpServerStatusUpdatedNotification(update)

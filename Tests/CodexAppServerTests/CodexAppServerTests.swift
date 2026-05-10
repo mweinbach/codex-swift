@@ -684,6 +684,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["diff"] as? String, unifiedDiff)
     }
 
+    func testRuntimePlanUpdateEventEmitsRustPlanNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .planUpdate(UpdatePlanArguments(
+                explanation: "working the checklist",
+                plan: [
+                    PlanItemArgument(step: "inspect Rust", status: .completed),
+                    PlanItemArgument(step: "port Swift", status: .inProgress),
+                    PlanItemArgument(step: "verify", status: .pending)
+                ]
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-2",
+            event: .planUpdate(UpdatePlanArguments(explanation: nil, plan: []))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["method"] as? String, "turn/plan/updated")
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, "thread-1")
+        XCTAssertEqual(params["turnId"] as? String, "turn-1")
+        XCTAssertEqual(params["explanation"] as? String, "working the checklist")
+        let plan = try XCTUnwrap(params["plan"] as? [[String: Any]])
+        XCTAssertEqual(plan.count, 3)
+        XCTAssertEqual(plan[0]["step"] as? String, "inspect Rust")
+        XCTAssertEqual(plan[0]["status"] as? String, "completed")
+        XCTAssertEqual(plan[1]["step"] as? String, "port Swift")
+        XCTAssertEqual(plan[1]["status"] as? String, "inProgress")
+        XCTAssertEqual(plan[2]["step"] as? String, "verify")
+        XCTAssertEqual(plan[2]["status"] as? String, "pending")
+
+        let empty = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(empty[0]["method"] as? String, "turn/plan/updated")
+        let emptyParams = try XCTUnwrap(empty[0]["params"] as? [String: Any])
+        XCTAssertEqual(emptyParams["turnId"] as? String, "turn-2")
+        XCTAssertTrue(emptyParams["explanation"] is NSNull)
+        let emptyPlan = try XCTUnwrap(emptyParams["plan"] as? [[String: Any]])
+        XCTAssertTrue(emptyPlan.isEmpty)
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
