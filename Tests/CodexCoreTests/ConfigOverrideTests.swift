@@ -99,6 +99,66 @@ final class ConfigOverrideTests: XCTestCase {
         )
     }
 
+    func testPluginConfigEditorSetEnabledPreservesExistingFields() {
+        var config = ConfigValue.table([
+            "plugins": .table([
+                "demo@market": .table([
+                    "enabled": .bool(false),
+                    "source": .string("/tmp/plugin")
+                ])
+            ])
+        ])
+
+        PluginConfigEditor.setEnabled(id: "demo@market", enabled: true, in: &config)
+
+        XCTAssertEqual(
+            config,
+            .table([
+                "plugins": .table([
+                    "demo@market": .table([
+                        "enabled": .bool(true),
+                        "source": .string("/tmp/plugin")
+                    ])
+                ])
+            ])
+        )
+    }
+
+    func testPluginConfigEditorSetEnabledCreatesPluginEntry() {
+        var config = ConfigValue.table([:])
+
+        PluginConfigEditor.setEnabled(id: "demo@market", enabled: true, in: &config)
+
+        XCTAssertEqual(
+            config,
+            .table([
+                "plugins": .table([
+                    "demo@market": .table(["enabled": .bool(true)])
+                ])
+            ])
+        )
+    }
+
+    func testPluginConfigEditorClearRemovesEmptyPluginsTable() {
+        var config = ConfigValue.table([
+            "plugins": .table([
+                "demo@market": .table(["enabled": .bool(true)])
+            ])
+        ])
+
+        XCTAssertTrue(PluginConfigEditor.clear(id: "demo@market", from: &config))
+
+        XCTAssertEqual(config, .table([:]))
+    }
+
+    func testPluginConfigEditorClearMissingEntryDoesNotMutateConfig() {
+        var config = ConfigValue.table([:])
+
+        XCTAssertFalse(PluginConfigEditor.clear(id: "demo@market", from: &config))
+
+        XCTAssertEqual(config, .table([:]))
+    }
+
     func testInvalidOverrideErrors() {
         XCTAssertThrowsError(try CliConfigOverrides(rawOverrides: ["missing"]).parseOverrides())
         XCTAssertThrowsError(try CliConfigOverrides(rawOverrides: ["=value"]).parseOverrides())

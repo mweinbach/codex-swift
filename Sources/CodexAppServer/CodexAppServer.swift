@@ -4830,26 +4830,11 @@ public enum CodexAppServer {
     }
 
     private static func setLocalPluginEnabled(id: String, enabled: Bool, in config: inout ConfigValue) {
-        var root = configTable(config) ?? [:]
-        var plugins = root["plugins"].flatMap(configTable) ?? [:]
-        plugins[id] = .table(["enabled": .bool(enabled)])
-        root["plugins"] = .table(plugins)
-        config = .table(root)
+        PluginConfigEditor.setEnabled(id: id, enabled: enabled, in: &config)
     }
 
     private static func removeLocalPluginConfig(id: String, from config: inout ConfigValue) {
-        guard var root = configTable(config),
-              var plugins = root["plugins"].flatMap(configTable)
-        else {
-            return
-        }
-        plugins.removeValue(forKey: id)
-        if plugins.isEmpty {
-            root.removeValue(forKey: "plugins")
-        } else {
-            root["plugins"] = .table(plugins)
-        }
-        config = .table(root)
+        PluginConfigEditor.clear(id: id, from: &config)
     }
 
     private static func marketplaceRoot(forManifestPath manifestPath: URL) throws -> URL {

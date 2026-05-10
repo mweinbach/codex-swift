@@ -180,6 +180,46 @@ public enum ConfigTomlRenderer {
     }
 }
 
+public enum PluginConfigEditor {
+    public static func setEnabled(
+        id: String,
+        enabled: Bool,
+        in config: inout ConfigValue
+    ) {
+        var root = configTable(config) ?? [:]
+        var plugins = root["plugins"].flatMap(configTable) ?? [:]
+        var plugin = plugins[id].flatMap(configTable) ?? [:]
+        plugin["enabled"] = .bool(enabled)
+        plugins[id] = .table(plugin)
+        root["plugins"] = .table(plugins)
+        config = .table(root)
+    }
+
+    @discardableResult
+    public static func clear(id: String, from config: inout ConfigValue) -> Bool {
+        guard var root = configTable(config),
+              var plugins = root["plugins"].flatMap(configTable),
+              plugins.removeValue(forKey: id) != nil
+        else {
+            return false
+        }
+        if plugins.isEmpty {
+            root.removeValue(forKey: "plugins")
+        } else {
+            root["plugins"] = .table(plugins)
+        }
+        config = .table(root)
+        return true
+    }
+
+    private static func configTable(_ value: ConfigValue) -> [String: ConfigValue]? {
+        guard case let .table(table) = value else {
+            return nil
+        }
+        return table
+    }
+}
+
 extension ConfigValue: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
