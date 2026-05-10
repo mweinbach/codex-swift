@@ -2807,9 +2807,28 @@ public enum CodexAppServer {
     fileprivate static func appListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        runtimeFeatureEnablement: [String: Bool] = [:]
+        runtimeFeatureEnablement: [String: Bool] = [:],
+        loadedThreadAppsFeatureEnabled: ((String) throws -> Bool)? = nil
     ) throws -> [String: Any] {
-        let apps = try appList(configuration: configuration, runtimeFeatureEnablement: runtimeFeatureEnablement)
+        let forcedAppsFeatureEnabled: Bool?
+        if let threadID = stringParam(params?["threadId"]) {
+            do {
+                _ = try ConversationId(string: threadID)
+            } catch {
+                throw AppServerError.invalidRequest("invalid thread id: \(error)")
+            }
+            guard let loadedThreadAppsFeatureEnabled else {
+                throw AppServerError.invalidRequest("thread not found: \(threadID)")
+            }
+            forcedAppsFeatureEnabled = try loadedThreadAppsFeatureEnabled(threadID)
+        } else {
+            forcedAppsFeatureEnabled = nil
+        }
+        let apps = try appList(
+            configuration: configuration,
+            runtimeFeatureEnablement: runtimeFeatureEnablement,
+            forcedAppsFeatureEnabled: forcedAppsFeatureEnabled
+        )
         let total = apps.count
         var start = 0
         if let cursor = stringParam(params?["cursor"]) {
@@ -2831,7 +2850,8 @@ public enum CodexAppServer {
 
     private static func appList(
         configuration: CodexAppServerConfiguration,
-        runtimeFeatureEnablement: [String: Bool] = [:]
+        runtimeFeatureEnablement: [String: Bool] = [:],
+        forcedAppsFeatureEnabled: Bool? = nil
     ) throws -> [[String: Any]] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
@@ -2856,7 +2876,16 @@ public enum CodexAppServer {
                 to: &runtimeConfig.features,
                 protectedFeatureKeys: protectedFeatureKeys(in: loadedConfig)
             )
+            if let forcedAppsFeatureEnabled {
+                runtimeConfig.features.set(.apps, enabled: forcedAppsFeatureEnabled)
+                runtimeConfig.features.normalizeDependencies()
+            }
             runtimeConfigForApps = runtimeConfig
+        }
+
+        if let runtimeConfig = runtimeConfigForApps,
+           !runtimeConfig.features.isEnabled(.apps) {
+            return []
         }
 
         if let runtimeConfig = runtimeConfigForApps,
@@ -13265,6 +13294,23 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool]
     ) throws -> Bool {
+        guard try appsFeatureEnabledInCurrentConfig(
+            configuration: configuration,
+            runtimeFeatureEnablement: runtimeFeatureEnablement
+        ) else {
+            return false
+        }
+        let auth = try currentAuth(configuration: configuration)
+        if case .chatGPT = auth?.kind {
+            return true
+        }
+        return false
+    }
+
+    fileprivate static func appsFeatureEnabledInCurrentConfig(
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool]
+    ) throws -> Bool {
         let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cliOverrides: configuration.cliConfigOverrides,
@@ -13284,13 +13330,7 @@ public enum CodexAppServer {
             to: &runtimeConfig.features,
             protectedFeatureKeys: protectedFeatureKeys(in: loadedConfig)
         )
-        guard runtimeConfig.features.isEnabled(.apps),
-              let auth = try currentAuth(configuration: configuration),
-              case .chatGPT = auth.kind
-        else {
-            return false
-        }
-        return true
+        return runtimeConfig.features.isEnabled(.apps)
     }
 
     fileprivate static func threadNameUpdatedNotification(threadID: String, threadName: String) -> [String: Any] {
@@ -18563,6 +18603,7 @@ final class CodexAppServerMessageProcessor {
     private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
+    private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
@@ -18637,6 +18678,7 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func subscribeCurrentConnection(toThreadID threadID: String) {
+        rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
         let connectionID = connectionID
         _ = try? CodexAppServer.runAsyncBlocking {
@@ -18669,6 +18711,22 @@ final class CodexAppServerMessageProcessor {
             modelSlug: modelSlug,
             cwd: URL(fileURLWithPath: cwd, isDirectory: true)
         )
+    }
+
+    private func rememberLoadedThreadFeatureState(threadID: String) {
+        loadedThreadAppsFeatureEnabled[threadID] = (try? CodexAppServer.appsFeatureEnabledInCurrentConfig(
+            configuration: configuration,
+            runtimeFeatureEnablement: runtimeFeatureEnablement
+        )) ?? false
+    }
+
+    private func appsFeatureEnabledForLoadedThread(_ threadID: String) throws -> Bool {
+        guard let enabled = loadedThreadAppsFeatureEnabled[threadID],
+              isThreadLoaded(threadID)
+        else {
+            throw AppServerError.invalidRequest("thread not found: \(threadID)")
+        }
+        return enabled
     }
 
     private func trackResolvedTurnForAnalytics(threadID: String, turn: [String: Any]) {
@@ -19818,7 +19876,8 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.appListResult(
                             params: params,
                             configuration: configuration,
-                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                            runtimeFeatureEnablement: runtimeFeatureEnablement,
+                            loadedThreadAppsFeatureEnabled: { try self.appsFeatureEnabledForLoadedThread($0) }
                         )
                     )
                 case "plugin/list":

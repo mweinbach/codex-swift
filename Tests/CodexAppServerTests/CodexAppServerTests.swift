@@ -4107,6 +4107,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["nextCursor"] is NSNull)
     }
 
+    func testAppListUsesLoadedThreadAppsFeatureWhenThreadIDIsProvided() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let directoryPage = """
+        {
+          "apps": [
+            {
+              "id": "beta",
+              "name": "Beta",
+              "description": "Beta connector"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.url?.path, "/backend-api/connectors/directory/list")
+                return URLSessionTransportResponse(statusCode: 200, body: Data(directoryPage.utf8))
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let global = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"app/list","params":{}}"#.utf8
+        )))
+        let globalResult = try XCTUnwrap(global["result"] as? [String: Any])
+        XCTAssertEqual((globalResult["data"] as? [Any])?.count, 0)
+        XCTAssertTrue(globalResult["nextCursor"] is NSNull)
+
+        let scoped = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"app/list","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let scopedResult = try XCTUnwrap(scoped["result"] as? [String: Any])
+        let scopedData = try XCTUnwrap(scopedResult["data"] as? [[String: Any]])
+        XCTAssertEqual(scopedData.map { $0["id"] as? String }, ["beta"])
+        XCTAssertEqual(scopedData[0]["description"] as? String, "Beta connector")
+        XCTAssertTrue(scopedResult["nextCursor"] is NSNull)
+    }
+
+    func testAppListRejectsUnknownLoadedThreadID() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let missingThreadID = "00000000-0000-0000-0000-000000000000"
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"app/list","params":{"threadId":"\#(missingThreadID)"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "thread not found: \(missingThreadID)")
+    }
+
     func testAppListRejectsInvalidAndOutOfRangeCursor() throws {
         let temp = try TemporaryDirectory()
 
