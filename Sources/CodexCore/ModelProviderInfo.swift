@@ -198,6 +198,7 @@ public struct APIProvider: Equatable, Sendable {
 
 public enum ModelProviderError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingEnvironmentVariable(name: String, instructions: String?)
+    case validation(String)
 
     public var description: String {
         switch self {
@@ -206,6 +207,8 @@ public enum ModelProviderError: Error, Equatable, CustomStringConvertible, Senda
                 return "Missing environment variable \(name). \(instructions)"
             }
             return "Missing environment variable \(name)"
+        case let .validation(message):
+            return message
         }
     }
 }
@@ -232,6 +235,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     public let envKey: String?
     public let envKeyInstructions: String?
     public let experimentalBearerToken: String?
+    public let auth: ModelProviderAuthInfo?
     public var aws: ModelProviderAWSAuthInfo?
     public let wireAPI: WireAPI
     public let queryParams: [String: String]?
@@ -240,7 +244,9 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     public let requestMaxRetries: UInt64?
     public let streamMaxRetries: UInt64?
     public let streamIdleTimeoutMilliseconds: UInt64?
+    public let websocketConnectTimeoutMilliseconds: UInt64?
     public let requiresOpenAIAuth: Bool
+    public let supportsWebsockets: Bool
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -248,6 +254,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         case envKey = "env_key"
         case envKeyInstructions = "env_key_instructions"
         case experimentalBearerToken = "experimental_bearer_token"
+        case auth
         case aws
         case wireAPI = "wire_api"
         case queryParams = "query_params"
@@ -256,7 +263,9 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         case requestMaxRetries = "request_max_retries"
         case streamMaxRetries = "stream_max_retries"
         case streamIdleTimeoutMilliseconds = "stream_idle_timeout_ms"
+        case websocketConnectTimeoutMilliseconds = "websocket_connect_timeout_ms"
         case requiresOpenAIAuth = "requires_openai_auth"
+        case supportsWebsockets = "supports_websockets"
     }
 
     public init(
@@ -265,6 +274,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         envKey: String? = nil,
         envKeyInstructions: String? = nil,
         experimentalBearerToken: String? = nil,
+        auth: ModelProviderAuthInfo? = nil,
         aws: ModelProviderAWSAuthInfo? = nil,
         wireAPI: WireAPI = .chat,
         queryParams: [String: String]? = nil,
@@ -273,13 +283,16 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         requestMaxRetries: UInt64? = nil,
         streamMaxRetries: UInt64? = nil,
         streamIdleTimeoutMilliseconds: UInt64? = nil,
-        requiresOpenAIAuth: Bool = false
+        websocketConnectTimeoutMilliseconds: UInt64? = nil,
+        requiresOpenAIAuth: Bool = false,
+        supportsWebsockets: Bool = false
     ) {
         self.name = name
         self.baseURL = baseURL
         self.envKey = envKey
         self.envKeyInstructions = envKeyInstructions
         self.experimentalBearerToken = experimentalBearerToken
+        self.auth = auth
         self.aws = aws
         self.wireAPI = wireAPI
         self.queryParams = queryParams
@@ -288,7 +301,9 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.requestMaxRetries = requestMaxRetries
         self.streamMaxRetries = streamMaxRetries
         self.streamIdleTimeoutMilliseconds = streamIdleTimeoutMilliseconds
+        self.websocketConnectTimeoutMilliseconds = websocketConnectTimeoutMilliseconds
         self.requiresOpenAIAuth = requiresOpenAIAuth
+        self.supportsWebsockets = supportsWebsockets
     }
 
     public init(from decoder: Decoder) throws {
@@ -298,6 +313,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.envKey = try container.decodeIfPresent(String.self, forKey: .envKey)
         self.envKeyInstructions = try container.decodeIfPresent(String.self, forKey: .envKeyInstructions)
         self.experimentalBearerToken = try container.decodeIfPresent(String.self, forKey: .experimentalBearerToken)
+        self.auth = try container.decodeIfPresent(ModelProviderAuthInfo.self, forKey: .auth)
         self.aws = try container.decodeIfPresent(ModelProviderAWSAuthInfo.self, forKey: .aws)
         self.wireAPI = try container.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .chat
         self.queryParams = try container.decodeIfPresent([String: String].self, forKey: .queryParams)
@@ -306,7 +322,12 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.requestMaxRetries = try container.decodeIfPresent(UInt64.self, forKey: .requestMaxRetries)
         self.streamMaxRetries = try container.decodeIfPresent(UInt64.self, forKey: .streamMaxRetries)
         self.streamIdleTimeoutMilliseconds = try container.decodeIfPresent(UInt64.self, forKey: .streamIdleTimeoutMilliseconds)
+        self.websocketConnectTimeoutMilliseconds = try container.decodeIfPresent(
+            UInt64.self,
+            forKey: .websocketConnectTimeoutMilliseconds
+        )
         self.requiresOpenAIAuth = try container.decodeIfPresent(Bool.self, forKey: .requiresOpenAIAuth) ?? false
+        self.supportsWebsockets = try container.decodeIfPresent(Bool.self, forKey: .supportsWebsockets) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -316,6 +337,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         try encodeOptional(envKey, into: &container, forKey: .envKey)
         try encodeOptional(envKeyInstructions, into: &container, forKey: .envKeyInstructions)
         try encodeOptional(experimentalBearerToken, into: &container, forKey: .experimentalBearerToken)
+        try encodeOptional(auth, into: &container, forKey: .auth)
         try encodeOptional(aws, into: &container, forKey: .aws)
         try container.encode(wireAPI, forKey: .wireAPI)
         try encodeOptional(queryParams, into: &container, forKey: .queryParams)
@@ -324,7 +346,13 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         try encodeOptional(requestMaxRetries, into: &container, forKey: .requestMaxRetries)
         try encodeOptional(streamMaxRetries, into: &container, forKey: .streamMaxRetries)
         try encodeOptional(streamIdleTimeoutMilliseconds, into: &container, forKey: .streamIdleTimeoutMilliseconds)
+        try encodeOptional(
+            websocketConnectTimeoutMilliseconds,
+            into: &container,
+            forKey: .websocketConnectTimeoutMilliseconds
+        )
         try container.encode(requiresOpenAIAuth, forKey: .requiresOpenAIAuth)
+        try container.encode(supportsWebsockets, forKey: .supportsWebsockets)
     }
 
     public func apiKey(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> String? {
@@ -349,6 +377,56 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
 
     public func streamIdleTimeoutMS() -> UInt64 {
         streamIdleTimeoutMilliseconds ?? Self.defaultStreamIdleTimeoutMilliseconds
+    }
+
+    public func websocketConnectTimeoutMS() -> UInt64 {
+        websocketConnectTimeoutMilliseconds ?? 10_000
+    }
+
+    public func validate() throws {
+        if aws != nil {
+            if supportsWebsockets {
+                throw ModelProviderError.validation("provider aws cannot be combined with supports_websockets")
+            }
+
+            var conflicts: [String] = []
+            if envKey != nil {
+                conflicts.append("env_key")
+            }
+            if experimentalBearerToken != nil {
+                conflicts.append("experimental_bearer_token")
+            }
+            if auth != nil {
+                conflicts.append("auth")
+            }
+            if requiresOpenAIAuth {
+                conflicts.append("requires_openai_auth")
+            }
+            if !conflicts.isEmpty {
+                throw ModelProviderError.validation("provider aws cannot be combined with \(conflicts.joined(separator: ", "))")
+            }
+        }
+
+        guard let auth else {
+            return
+        }
+        if auth.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ModelProviderError.validation("provider auth.command must not be empty")
+        }
+
+        var conflicts: [String] = []
+        if envKey != nil {
+            conflicts.append("env_key")
+        }
+        if experimentalBearerToken != nil {
+            conflicts.append("experimental_bearer_token")
+        }
+        if requiresOpenAIAuth {
+            conflicts.append("requires_openai_auth")
+        }
+        if !conflicts.isEmpty {
+            throw ModelProviderError.validation("provider auth cannot be combined with \(conflicts.joined(separator: ", "))")
+        }
     }
 
     public func buildHeaderMap(environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
@@ -503,13 +581,16 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
             && envKey == nil
             && envKeyInstructions == nil
             && experimentalBearerToken == nil
+            && auth == nil
             && queryParams == nil
             && httpHeaders == nil
             && envHTTPHeaders == nil
             && requestMaxRetries == nil
             && streamMaxRetries == nil
             && streamIdleTimeoutMilliseconds == nil
+            && websocketConnectTimeoutMilliseconds == nil
             && requiresOpenAIAuth == false
+            && supportsWebsockets == false
             && (wireAPI == .chat || wireAPI == .responses)
     }
 
@@ -517,6 +598,81 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         !name.isEmpty
             && !name.contains { $0.isWhitespace || $0.isNewline || $0 == ":" }
             && !value.contains { $0.isNewline }
+    }
+}
+
+public struct ModelProviderAuthInfo: Codable, Equatable, Sendable {
+    public static let defaultTimeoutMilliseconds: UInt64 = 5_000
+    public static let defaultRefreshIntervalMilliseconds: UInt64 = 300_000
+
+    public let command: String
+    public let args: [String]
+    public let timeoutMilliseconds: UInt64
+    public let refreshIntervalMilliseconds: UInt64
+    public let cwd: AbsolutePath
+
+    private enum CodingKeys: String, CodingKey {
+        case command
+        case args
+        case timeoutMilliseconds = "timeout_ms"
+        case refreshIntervalMilliseconds = "refresh_interval_ms"
+        case cwd
+    }
+
+    public init(
+        command: String,
+        args: [String] = [],
+        timeoutMilliseconds: UInt64 = defaultTimeoutMilliseconds,
+        refreshIntervalMilliseconds: UInt64 = defaultRefreshIntervalMilliseconds,
+        cwd: AbsolutePath? = nil
+    ) throws {
+        guard timeoutMilliseconds > 0 else {
+            throw ModelProviderError.validation("model_providers.<id>.auth.timeout_ms must be non-zero")
+        }
+        self.command = command
+        self.args = args
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.refreshIntervalMilliseconds = refreshIntervalMilliseconds
+        self.cwd = try cwd ?? AbsolutePath.currentDirectory()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.command = try container.decode(String.self, forKey: .command)
+        self.args = try container.decodeIfPresent([String].self, forKey: .args) ?? []
+        self.timeoutMilliseconds = try container.decodeIfPresent(
+            UInt64.self,
+            forKey: .timeoutMilliseconds
+        ) ?? Self.defaultTimeoutMilliseconds
+        guard timeoutMilliseconds > 0 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .timeoutMilliseconds,
+                in: container,
+                debugDescription: "model_providers.<id>.auth.timeout_ms must be non-zero"
+            )
+        }
+        self.refreshIntervalMilliseconds = try container.decodeIfPresent(
+            UInt64.self,
+            forKey: .refreshIntervalMilliseconds
+        ) ?? Self.defaultRefreshIntervalMilliseconds
+        if let cwdText = try container.decodeIfPresent(String.self, forKey: .cwd) {
+            self.cwd = try AbsolutePath.resolve(cwdText, against: FileManager.default.currentDirectoryPath)
+        } else {
+            self.cwd = try AbsolutePath.currentDirectory()
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(command, forKey: .command)
+        try container.encode(args, forKey: .args)
+        try container.encode(timeoutMilliseconds, forKey: .timeoutMilliseconds)
+        try container.encode(refreshIntervalMilliseconds, forKey: .refreshIntervalMilliseconds)
+        try container.encode(cwd, forKey: .cwd)
+    }
+
+    public var refreshIntervalMS: UInt64? {
+        refreshIntervalMilliseconds == 0 ? nil : refreshIntervalMilliseconds
     }
 }
 

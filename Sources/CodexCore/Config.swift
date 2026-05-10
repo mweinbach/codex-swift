@@ -519,6 +519,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case reservedModelProviderOverride([String])
     case unsupportedProviderAWS(String)
     case unsupportedAmazonBedrockOverride
+    case invalidModelProvider(String)
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -547,6 +548,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "model_providers.\(providerID): provider aws is only supported for `amazon-bedrock`"
         case .unsupportedAmazonBedrockOverride:
             return "model_providers.amazon-bedrock only supports changing `aws.profile` and `aws.region`; other non-default provider fields are not supported"
+        case let .invalidModelProvider(message):
+            return message
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -1360,6 +1363,16 @@ private struct ParsedCodexConfigToml {
             if provider.aws != nil {
                 throw CodexConfigLoadError.unsupportedProviderAWS(name)
             }
+            if provider.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw CodexConfigLoadError.invalidModelProvider("model_providers.\(name): provider name must not be empty")
+            }
+            do {
+                try provider.validate()
+            } catch {
+                throw CodexConfigLoadError.invalidModelProvider(
+                    "model_providers.\(name): \(String(describing: error))"
+                )
+            }
             providers[name] = provider
         }
         return providers
@@ -1641,6 +1654,7 @@ private struct ParsedCodexConfigToml {
         key == "query_params"
             || key == "http_headers"
             || key == "env_http_headers"
+            || key == "auth"
             || key == "aws"
     }
 

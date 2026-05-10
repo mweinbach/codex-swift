@@ -73,7 +73,9 @@ private extension SessionThreadConfig {
 
     func configValue(for provider: ModelProviderInfo) throws -> ConfigValue {
         let data = try JSONEncoder().encode(provider)
-        return try JSONDecoder().decode(ConfigValue.self, from: data).removingNoneValues()
+        return try JSONDecoder().decode(ConfigValue.self, from: data)
+            .removingNoneValues()
+            .removingModelProviderThreadConfigDefaults()
     }
 }
 
@@ -102,5 +104,15 @@ private extension ConfigValue {
         default:
             return self
         }
+    }
+
+    func removingModelProviderThreadConfigDefaults() -> ConfigValue {
+        guard case var .table(table) = self else {
+            return self
+        }
+        if case let .bool(value)? = table["supports_websockets"], value == false {
+            table.removeValue(forKey: "supports_websockets")
+        }
+        return .table(table)
     }
 }

@@ -3,6 +3,14 @@ import XCTest
 
 final class ModelProviderInfoTests: XCTestCase {
     func testProviderInfoWireShapeMatchesRustSerdeFields() throws {
+        let cwd = try AbsolutePath(absolutePath: "/tmp/codex-auth")
+        let auth = try ModelProviderAuthInfo(
+            command: "./scripts/print-token",
+            args: ["--format=text"],
+            timeoutMilliseconds: 7_000,
+            refreshIntervalMilliseconds: 60_000,
+            cwd: cwd
+        )
         try XCTAssertJSONObjectEqual(
             ModelProviderInfo(
                 name: "Example",
@@ -10,6 +18,7 @@ final class ModelProviderInfoTests: XCTestCase {
                 envKey: "API_KEY",
                 envKeyInstructions: "Set API_KEY.",
                 experimentalBearerToken: "token",
+                auth: auth,
                 aws: ModelProviderAWSAuthInfo(profile: "codex-bedrock", region: "us-west-2"),
                 wireAPI: .responses,
                 queryParams: ["api-version": "2025-04-01-preview"],
@@ -18,7 +27,9 @@ final class ModelProviderInfoTests: XCTestCase {
                 requestMaxRetries: 7,
                 streamMaxRetries: 8,
                 streamIdleTimeoutMilliseconds: 9_000,
-                requiresOpenAIAuth: true
+                websocketConnectTimeoutMilliseconds: 15_000,
+                requiresOpenAIAuth: true,
+                supportsWebsockets: true
             ),
             [
                 "name": "Example",
@@ -26,6 +37,13 @@ final class ModelProviderInfoTests: XCTestCase {
                 "env_key": "API_KEY",
                 "env_key_instructions": "Set API_KEY.",
                 "experimental_bearer_token": "token",
+                "auth": [
+                    "command": "./scripts/print-token",
+                    "args": ["--format=text"],
+                    "timeout_ms": 7000,
+                    "refresh_interval_ms": 60000,
+                    "cwd": cwd.path
+                ],
                 "aws": [
                     "profile": "codex-bedrock",
                     "region": "us-west-2"
@@ -37,7 +55,9 @@ final class ModelProviderInfoTests: XCTestCase {
                 "request_max_retries": 7,
                 "stream_max_retries": 8,
                 "stream_idle_timeout_ms": 9000,
-                "requires_openai_auth": true
+                "websocket_connect_timeout_ms": 15000,
+                "requires_openai_auth": true,
+                "supports_websockets": true
             ]
         )
     }
@@ -51,6 +71,7 @@ final class ModelProviderInfoTests: XCTestCase {
                 "env_key": NSNull(),
                 "env_key_instructions": NSNull(),
                 "experimental_bearer_token": NSNull(),
+                "auth": NSNull(),
                 "aws": NSNull(),
                 "wire_api": "chat",
                 "query_params": NSNull(),
@@ -59,7 +80,9 @@ final class ModelProviderInfoTests: XCTestCase {
                 "request_max_retries": NSNull(),
                 "stream_max_retries": NSNull(),
                 "stream_idle_timeout_ms": NSNull(),
-                "requires_openai_auth": false
+                "websocket_connect_timeout_ms": NSNull(),
+                "requires_openai_auth": false,
+                "supports_websockets": false
             ]
         )
     }
@@ -77,10 +100,13 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(provider.name, "Azure")
         XCTAssertEqual(provider.baseURL, "https://xxxxx.openai.azure.com/openai")
         XCTAssertEqual(provider.envKey, "AZURE_OPENAI_API_KEY")
+        XCTAssertNil(provider.auth)
         XCTAssertNil(provider.aws)
         XCTAssertEqual(provider.wireAPI, .chat)
         XCTAssertEqual(provider.queryParams, ["api-version": "2025-04-01-preview"])
+        XCTAssertNil(provider.websocketConnectTimeoutMilliseconds)
         XCTAssertFalse(provider.requiresOpenAIAuth)
+        XCTAssertFalse(provider.supportsWebsockets)
     }
 
     func testRetryAndTimeoutDefaultsAndCaps() {
@@ -88,16 +114,96 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(defaults.requestMaxRetryCount(), 4)
         XCTAssertEqual(defaults.streamMaxRetryCount(), 5)
         XCTAssertEqual(defaults.streamIdleTimeoutMS(), 300_000)
+        XCTAssertEqual(defaults.websocketConnectTimeoutMS(), 10_000)
 
         let capped = ModelProviderInfo(
             name: "capped",
             requestMaxRetries: 10_000,
             streamMaxRetries: 10_000,
-            streamIdleTimeoutMilliseconds: 123
+            streamIdleTimeoutMilliseconds: 123,
+            websocketConnectTimeoutMilliseconds: 456
         )
         XCTAssertEqual(capped.requestMaxRetryCount(), 100)
         XCTAssertEqual(capped.streamMaxRetryCount(), 100)
         XCTAssertEqual(capped.streamIdleTimeoutMS(), 123)
+        XCTAssertEqual(capped.websocketConnectTimeoutMS(), 456)
+    }
+
+    func testProviderAuthConfigDefaultsMatchRust() throws {
+        let provider = try JSONDecoder().decode(ModelProviderInfo.self, from: Data("""
+        {
+          "name": "Corp",
+          "auth": {
+            "command": "./scripts/print-token",
+            "args": ["--format=text"]
+          }
+        }
+        """.utf8))
+
+        let auth = try XCTUnwrap(provider.auth)
+        XCTAssertEqual(auth.command, "./scripts/print-token")
+        XCTAssertEqual(auth.args, ["--format=text"])
+        XCTAssertEqual(auth.timeoutMilliseconds, 5_000)
+        XCTAssertEqual(auth.refreshIntervalMilliseconds, 300_000)
+        XCTAssertEqual(auth.refreshIntervalMS, 300_000)
+        XCTAssertEqual(auth.cwd, try AbsolutePath.currentDirectory())
+    }
+
+    func testProviderAuthConfigAllowsZeroRefreshIntervalLikeRust() throws {
+        let provider = try JSONDecoder().decode(ModelProviderInfo.self, from: Data("""
+        {
+          "name": "Corp",
+          "auth": {
+            "command": "./scripts/print-token",
+            "refresh_interval_ms": 0
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(provider.auth?.refreshIntervalMilliseconds, 0)
+        XCTAssertNil(provider.auth?.refreshIntervalMS)
+    }
+
+    func testProviderValidationMatchesRustAuthAndAWSConflicts() throws {
+        let auth = try ModelProviderAuthInfo(command: "print-token")
+        XCTAssertThrowsError(try ModelProviderInfo(
+            name: "Corp",
+            envKey: "API_KEY",
+            auth: auth
+        ).validate()) { error in
+            XCTAssertEqual(String(describing: error), "provider auth cannot be combined with env_key")
+        }
+
+        XCTAssertThrowsError(try ModelProviderInfo(
+            name: "Corp",
+            auth: auth,
+            requiresOpenAIAuth: true
+        ).validate()) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "provider auth cannot be combined with requires_openai_auth"
+            )
+        }
+
+        XCTAssertThrowsError(try ModelProviderInfo(
+            name: "Corp",
+            aws: ModelProviderAWSAuthInfo(),
+            supportsWebsockets: true
+        ).validate()) { error in
+            XCTAssertEqual(String(describing: error), "provider aws cannot be combined with supports_websockets")
+        }
+
+        XCTAssertThrowsError(try ModelProviderInfo(
+            name: "Corp",
+            envKey: "AWS_BEARER_TOKEN_BEDROCK",
+            aws: ModelProviderAWSAuthInfo(),
+            requiresOpenAIAuth: true
+        ).validate()) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "provider aws cannot be combined with env_key, requires_openai_auth"
+            )
+        }
     }
 
     func testAPIKeyUsesNonEmptyEnvironmentValue() throws {

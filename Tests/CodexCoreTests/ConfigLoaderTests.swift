@@ -469,7 +469,9 @@ final class ConfigLoaderTests: XCTestCase {
         request_max_retries = 2
         stream_max_retries = 3
         stream_idle_timeout_ms = 4000
+        websocket_connect_timeout_ms = 15000
         requires_openai_auth = false
+        supports_websockets = true
 
         [model_providers.mock.query_params]
         api-version = "2025-04-01-preview"
@@ -499,10 +501,102 @@ final class ConfigLoaderTests: XCTestCase {
                 requestMaxRetries: 2,
                 streamMaxRetries: 3,
                 streamIdleTimeoutMilliseconds: 4000,
-                requiresOpenAIAuth: false
+                websocketConnectTimeoutMilliseconds: 15000,
+                requiresOpenAIAuth: false,
+                supportsWebsockets: true
             )
         )
         XCTAssertNotNil(config.modelProviders["openai"])
+    }
+
+    func testLoadsCommandBackedModelProviderAuthConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model_provider = "corp"
+
+        [model_providers.corp]
+        name = "Corp"
+        base_url = "https://corp.example/v1"
+        wire_api = "responses"
+
+        [model_providers.corp.auth]
+        command = "./scripts/print-token"
+        args = ["--format=text"]
+        timeout_ms = 7000
+        refresh_interval_ms = 0
+        cwd = "/tmp/corp-auth"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.selectedModelProviderID, "corp")
+        XCTAssertEqual(
+            config.selectedModelProvider?.auth,
+            try ModelProviderAuthInfo(
+                command: "./scripts/print-token",
+                args: ["--format=text"],
+                timeoutMilliseconds: 7_000,
+                refreshIntervalMilliseconds: 0,
+                cwd: AbsolutePath(absolutePath: "/tmp/corp-auth")
+            )
+        )
+    }
+
+    func testModelProviderRejectsEmptyNameLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.corp]
+        base_url = "https://corp.example/v1"
+        wire_api = "responses"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers.corp: provider name must not be empty"
+            )
+        }
+    }
+
+    func testModelProviderRejectsConflictingCommandAuthLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.corp]
+        name = "Corp"
+        base_url = "https://corp.example/v1"
+        wire_api = "responses"
+        env_key = "CORP_API_KEY"
+
+        [model_providers.corp.auth]
+        command = "./scripts/print-token"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers.corp: provider auth cannot be combined with env_key"
+            )
+        }
+    }
+
+    func testModelProviderRejectsEmptyCommandAuthLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.corp]
+        name = "Corp"
+        base_url = "https://corp.example/v1"
+        wire_api = "responses"
+
+        [model_providers.corp.auth]
+        command = "   "
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers.corp: provider auth.command must not be empty"
+            )
+        }
     }
 
     func testModelProvidersFromConfigRejectReservedBuiltInsLikeRust() throws {

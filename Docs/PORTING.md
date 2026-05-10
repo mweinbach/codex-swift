@@ -307,6 +307,8 @@ Source baseline inspected for this scaffold:
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, readiness dispatch/error-wrapping seam, explicit `--local-provider` over `oss_provider` resolution, CLI-model precedence over provider defaults, and non-interactive `--oss` startup readiness wiring
 - `codex-rs/core/src/model_provider_info.rs` plus provider URL/Azure helpers from `codex-rs/codex-api/src/provider.rs`
   - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, Azure Responses endpoint detection, and OpenAI/Azure remote-compaction support detection
+- `codex-rs/model-provider-info/src/lib.rs` and `codex-rs/protocol/src/config_types.rs` provider auth/WebSocket fields
+  - command-backed provider `auth` config wire fields and defaults, zero refresh interval handling, WebSocket support/connection-timeout fields, provider name validation, and Rust-shaped `auth`/`aws` conflict rejection during model-provider config loading
 - `codex-rs/model-provider/src/provider.rs`
   - runtime model-provider abstraction for configured providers and Amazon Bedrock, provider-owned capability dispatch, runtime base-URL lookup, provider auth precedence reuse, ChatGPT-only attestation support detection, Rust-shaped provider account states for unauthenticated/OpenAI API-key/ChatGPT/custom non-OpenAI/Bedrock providers, missing ChatGPT account-detail error text, and Bedrock bypass of OpenAI auth
 - `codex-rs/model-provider-info/src/lib.rs` and `codex-rs/core/src/config/config_tests.rs` Amazon Bedrock provider config
