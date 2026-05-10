@@ -1,11 +1,16 @@
 import Foundation
 
 public actor ExecServerProcessStore {
+    public typealias OutboundNotification = @Sendable (ExecServerJSONRPCNotification) async -> Void
+
     private static let retainedOutputBytesPerProcess = 1024 * 1024
 
+    private let outboundNotification: OutboundNotification
     private var processes: [String: ExecServerProcessState] = [:]
 
-    public init() {}
+    public init(outboundNotification: @escaping OutboundNotification = { _ in }) {
+        self.outboundNotification = outboundNotification
+    }
 
     public func shutdown() {
         for process in processes.values {
@@ -129,7 +134,7 @@ public actor ExecServerProcessStore {
         return ExecServerTerminateResponse(running: false)
     }
 
-    private func handleOutput(_ data: Data, processId: String, stream: ExecServerOutputStream) {
+    private func handleOutput(_ data: Data, processId: String, stream: ExecServerOutputStream) async {
         guard let state = processes[processId] else {
             return
         }
@@ -139,7 +144,7 @@ public actor ExecServerProcessStore {
             } else {
                 state.stderrClosed = true
             }
-            maybeClose(processId: processId, state: state)
+            await maybeClose(processId: processId, state: state)
             return
         }
 
@@ -151,27 +156,49 @@ public actor ExecServerProcessStore {
             let removed = state.output.removeFirst()
             state.retainedBytes = max(0, state.retainedBytes - removed.bytes.count)
         }
+        await sendNotification(
+            method: execServerProcessOutputDeltaMethod,
+            params: ExecServerOutputDeltaNotification(
+                processId: processId,
+                seq: seq,
+                stream: stream,
+                chunk: ExecServerByteChunk(Array(data))
+            )
+        )
     }
 
-    private func handleExit(processId: String, exitCode: Int32) {
+    private func handleExit(processId: String, exitCode: Int32) async {
         guard let state = processes[processId] else {
             return
         }
+        let seq = state.nextSeq
         state.exitCode = exitCode
         state.nextSeq += 1
-        maybeClose(processId: processId, state: state)
+        await sendNotification(
+            method: execServerProcessExitedMethod,
+            params: ExecServerExitedNotification(
+                processId: processId,
+                seq: seq,
+                exitCode: exitCode
+            )
+        )
+        await maybeClose(processId: processId, state: state)
     }
 
-    private func maybeClose(processId: String, state: ExecServerProcessState) {
+    private func maybeClose(processId: String, state: ExecServerProcessState) async {
         guard !state.closed, state.exitCode != nil, state.stdoutClosed, state.stderrClosed else {
             return
         }
+        let seq = state.nextSeq
         state.closed = true
         state.nextSeq += 1
         state.stdout.readabilityHandler = nil
         state.stderr.readabilityHandler = nil
         closeStdin(state)
-        _ = processId
+        await sendNotification(
+            method: execServerProcessClosedMethod,
+            params: ExecServerClosedNotification(processId: processId, seq: seq)
+        )
     }
 
     private func readResponse(
@@ -234,6 +261,13 @@ public actor ExecServerProcessStore {
 
     private func closeStdin(_ state: ExecServerProcessState) {
         try? state.stdin?.close()
+    }
+
+    private func sendNotification<T: Encodable & Sendable>(method: String, params: T) async {
+        guard let params = try? ExecServerRPC.jsonValue(from: params) else {
+            return
+        }
+        await outboundNotification(ExecServerJSONRPCNotification(method: method, params: params))
     }
 }
 

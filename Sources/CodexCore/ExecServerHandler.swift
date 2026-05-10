@@ -16,13 +16,13 @@ public actor ExecServerHandler {
     public init(
         sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
         fileSystem: ExecServerFileSystem = ExecServerFileSystem(),
-        processStore: ExecServerProcessStore = ExecServerProcessStore(),
+        processStore: ExecServerProcessStore? = nil,
         httpClient: ExecServerHTTPClient = ExecServerHTTPClient(),
         outboundNotification: @escaping OutboundNotification = { _ in }
     ) {
         self.sessionRegistry = sessionRegistry
         self.fileSystem = fileSystem
-        self.processStore = processStore
+        self.processStore = processStore ?? ExecServerProcessStore(outboundNotification: outboundNotification)
         self.httpClient = httpClient
         self.outboundNotification = outboundNotification
     }

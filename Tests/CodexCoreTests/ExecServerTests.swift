@@ -303,6 +303,71 @@ final class ExecServerTests: XCTestCase {
         try await runTask.value
     }
 
+    func testStdioTransportWritesProcessLifecycleNotificationsWithoutAdditionalInputLikeRust() async throws {
+        var inputContinuation: AsyncStream<String>.Continuation?
+        let input = AsyncStream<String> { continuation in
+            inputContinuation = continuation
+        }
+        let output = StdioTransportOutput()
+        let transport = ExecServerStdioTransport(server: ExecServerLineServer(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        ))
+
+        let runTask = Task {
+            try await transport.run(lines: input) { line in
+                await output.append(line)
+            }
+        }
+        let continuation = try XCTUnwrap(inputContinuation)
+        continuation.yield(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#)
+        continuation.yield(#"{"method":"initialized","params":{}}"#)
+        continuation.yield(#"{"id":2,"method":"process/start","params":{"processId":"transport-proc","argv":["/bin/sh","-c","printf 'transport-push\n'; sleep 0.05"],"cwd":"/tmp","env":{},"tty":false}}"#)
+
+        let messages = try await output.waitForMessages(count: 5)
+        XCTAssertEqual(messages[0], ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertEqual(messages[1], ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("transport-proc")])
+        ))
+
+        guard case let .notification(outputNotification) = messages[2],
+              case let .notification(exitedNotification) = messages[3],
+              case let .notification(closedNotification) = messages[4] else {
+            return XCTFail("Expected process lifecycle notifications")
+        }
+        XCTAssertEqual(outputNotification.method, execServerProcessOutputDeltaMethod)
+        XCTAssertEqual(exitedNotification.method, execServerProcessExitedMethod)
+        XCTAssertEqual(closedNotification.method, execServerProcessClosedMethod)
+
+        let outputDelta = try decodeJSONValue(
+            try XCTUnwrap(outputNotification.params),
+            as: ExecServerOutputDeltaNotification.self
+        )
+        let exited = try decodeJSONValue(
+            try XCTUnwrap(exitedNotification.params),
+            as: ExecServerExitedNotification.self
+        )
+        let closed = try decodeJSONValue(
+            try XCTUnwrap(closedNotification.params),
+            as: ExecServerClosedNotification.self
+        )
+        XCTAssertEqual(outputDelta.processId, "transport-proc")
+        XCTAssertEqual(outputDelta.seq, 1)
+        XCTAssertEqual(outputDelta.stream, .stdout)
+        XCTAssertEqual(outputDelta.chunk.bytes, Array("transport-push\n".utf8))
+        XCTAssertEqual(exited.processId, "transport-proc")
+        XCTAssertEqual(exited.seq, 2)
+        XCTAssertEqual(exited.exitCode, 0)
+        XCTAssertEqual(closed.processId, "transport-proc")
+        XCTAssertEqual(closed.seq, 3)
+
+        continuation.finish()
+        try await runTask.value
+    }
+
     func testConnectionProcessorHandlesWebSocketCodecEventsLikeRust() async {
         let connection = ExecServerConnection()
         let malformed = await connection.handleWebSocketText("{", connectionLabel: "exec-server websocket peer")
@@ -339,6 +404,44 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(read.output, "session output\n")
         XCTAssertEqual(read.exitCode, 0)
         XCTAssertTrue(read.closed)
+    }
+
+    func testConnectionProcessorPushesProcessLifecycleNotificationsLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+
+        let start = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-notify",
+                argv: ["/bin/sh", "-c", "printf 'push-notify\\n'; sleep 0.05"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+
+        XCTAssertEqual(start?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("proc-notify")])
+        ))
+
+        let notifications = try await collectProcessLifecycleNotifications(
+            from: connection,
+            processId: "proc-notify"
+        )
+        XCTAssertEqual(notifications.output?.seq, 1)
+        XCTAssertEqual(notifications.output?.stream, .stdout)
+        XCTAssertEqual(notifications.output?.chunk.bytes, Array("push-notify\n".utf8))
+        XCTAssertEqual(notifications.exited?.exitCode, 0)
+        XCTAssertEqual(notifications.exited?.seq, 2)
+        XCTAssertEqual(notifications.closed?.seq, 3)
+
+        let retained = try await readProcessUntilClosed(connection, processId: "proc-notify")
+        XCTAssertEqual(retained.output, "push-notify\n")
+        XCTAssertEqual(retained.exitCode, 0)
+        XCTAssertTrue(retained.closed)
     }
 
     func testConnectionProcessorWritesToPipeStdinLikeRust() async throws {
@@ -1919,6 +2022,54 @@ final class ExecServerTests: XCTestCase {
         }
         XCTFail("Timed out waiting for terminal http/request body delta line", file: file, line: line)
         return deltas
+    }
+
+    private func collectProcessLifecycleNotifications(
+        from connection: ExecServerConnection,
+        processId: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> (
+        output: ExecServerOutputDeltaNotification?,
+        exited: ExecServerExitedNotification?,
+        closed: ExecServerClosedNotification?
+    ) {
+        var output: ExecServerOutputDeltaNotification?
+        var exited: ExecServerExitedNotification?
+        var closed: ExecServerClosedNotification?
+
+        for _ in 0..<50 {
+            guard let outbound = try await nextOutbound(from: connection, file: file, line: line) else {
+                continue
+            }
+            guard case let .notification(notification) = outbound else {
+                XCTFail("Expected process lifecycle notification", file: file, line: line)
+                continue
+            }
+            let params = try XCTUnwrap(notification.params, file: file, line: line)
+            switch notification.method {
+            case execServerProcessOutputDeltaMethod:
+                let decoded = try decodeJSONValue(params, as: ExecServerOutputDeltaNotification.self)
+                XCTAssertEqual(decoded.processId, processId, file: file, line: line)
+                output = decoded
+            case execServerProcessExitedMethod:
+                let decoded = try decodeJSONValue(params, as: ExecServerExitedNotification.self)
+                XCTAssertEqual(decoded.processId, processId, file: file, line: line)
+                exited = decoded
+            case execServerProcessClosedMethod:
+                let decoded = try decodeJSONValue(params, as: ExecServerClosedNotification.self)
+                XCTAssertEqual(decoded.processId, processId, file: file, line: line)
+                closed = decoded
+            default:
+                XCTFail("Unexpected process notification method \(notification.method)", file: file, line: line)
+            }
+            if output != nil, exited != nil, closed != nil {
+                return (output, exited, closed)
+            }
+        }
+
+        XCTFail("Timed out waiting for process lifecycle notifications", file: file, line: line)
+        return (output, exited, closed)
     }
 
     private func decodeLine(_ data: Data) throws -> ExecServerJSONRPCMessage {
