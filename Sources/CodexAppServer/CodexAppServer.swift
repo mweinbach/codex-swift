@@ -728,6 +728,12 @@ public enum CodexAppServer {
         let pageSize = listLimit(params?["limit"])
         let modelProviders = modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
         let cwdFilters = try threadListCwdFilters(params?["cwd"])
+        let archivedOnly = boolParam(params?["archived"], defaultValue: false)
+        let searchTerm = stringParam(params?["searchTerm"])
+        let hasExplicitMetadataFilter = params?["cwd"] != nil
+            || params?["modelProviders"] != nil
+            || params?["sourceKinds"] != nil
+            || searchTerm?.isEmpty == false
         if boolParam(params?["useStateDbOnly"], defaultValue: false) {
             return try threadListStateDbOnlyResult(
                 configuration: configuration,
@@ -736,9 +742,9 @@ public enum CodexAppServer {
                 allowedSources: sourceFilter.allowedSources,
                 sourceMatcher: sourceFilter.matcher,
                 modelProviders: modelProviders,
-                archivedOnly: boolParam(params?["archived"], defaultValue: false),
+                archivedOnly: archivedOnly,
                 cwdFilters: cwdFilters,
-                searchTerm: stringParam(params?["searchTerm"]),
+                searchTerm: searchTerm,
                 sortKey: sortKey,
                 sortDirection: sortDirection
             )
@@ -750,9 +756,9 @@ public enum CodexAppServer {
             cursor: cursor,
             allowedSources: sourceFilter.allowedSources,
             modelProviders: modelProviders,
-            archivedOnly: boolParam(params?["archived"], defaultValue: false),
+            archivedOnly: archivedOnly,
             cwdFilters: cwdFilters,
-            searchTerm: stringParam(params?["searchTerm"]),
+            searchTerm: searchTerm,
             sourceMatcher: sourceFilter.matcher,
             sortKey: sortKey,
             sortDirection: sortDirection,
@@ -761,20 +767,21 @@ public enum CodexAppServer {
         try repairStateStoreFromThreadListPage(
             page,
             configuration: configuration,
-            archivedOnly: boolParam(params?["archived"], defaultValue: false)
+            archivedOnly: archivedOnly
         )
-        try reconcileStateStoreSearchHits(
+        try reconcileStateStoreFilteredHits(
             configuration: configuration,
             pageSize: pageSize,
             cursor: cursor,
             allowedSources: sourceFilter.allowedSources,
             sourceMatcher: sourceFilter.matcher,
             modelProviders: modelProviders,
-            archivedOnly: boolParam(params?["archived"], defaultValue: false),
+            archivedOnly: archivedOnly,
             cwdFilters: cwdFilters,
-            searchTerm: stringParam(params?["searchTerm"]),
+            searchTerm: searchTerm,
             sortKey: sortKey,
-            sortDirection: sortDirection
+            sortDirection: sortDirection,
+            hasExplicitMetadataFilter: hasExplicitMetadataFilter
         )
         return [
             "data": try threadObjects(for: page.items, configuration: configuration),
@@ -9744,7 +9751,7 @@ public enum CodexAppServer {
         }
     }
 
-    private static func reconcileStateStoreSearchHits(
+    private static func reconcileStateStoreFilteredHits(
         configuration: CodexAppServerConfiguration,
         pageSize: Int,
         cursor: ConversationCursor?,
@@ -9755,11 +9762,11 @@ public enum CodexAppServer {
         cwdFilters: [String]?,
         searchTerm: String?,
         sortKey: ConversationSortKey,
-        sortDirection: ConversationSortDirection
+        sortDirection: ConversationSortDirection,
+        hasExplicitMetadataFilter: Bool
     ) throws {
         guard let stateStore = configuration.stateStore,
-              let searchTerm,
-              !searchTerm.isEmpty
+              hasExplicitMetadataFilter
         else {
             return
         }
