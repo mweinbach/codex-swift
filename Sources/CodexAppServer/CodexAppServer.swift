@@ -8019,6 +8019,29 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadStatusChangedNotification(threadID: String, status: [String: Any]) -> [String: Any] {
+        [
+            "method": "thread/status/changed",
+            "params": [
+                "threadId": threadID,
+                "status": status
+            ]
+        ]
+    }
+
+    fileprivate static func activeThreadStatus(activeFlags: [String] = []) -> [String: Any] {
+        [
+            "type": "active",
+            "activeFlags": activeFlags
+        ]
+    }
+
+    fileprivate static func idleThreadStatus() -> [String: Any] {
+        [
+            "type": "idle"
+        ]
+    }
+
     fileprivate static func turnDiffUpdatedNotification(threadID: String, turnID: String, diff: String) -> [String: Any] {
         [
             "method": "turn/diff/updated",
@@ -14036,6 +14059,7 @@ final class CodexAppServerMessageProcessor {
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
+    private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
 
@@ -14077,15 +14101,28 @@ final class CodexAppServerMessageProcessor {
         )
     }
 
-    private func markCurrentConnectionInitialized(requestAttestation: Bool) {
+    private func markCurrentConnectionInitialized(
+        requestAttestation: Bool,
+        optOutNotificationMethods: Set<String>
+    ) {
         let manager = threadStateManager
         let connectionID = connectionID
         _ = try? CodexAppServer.runAsyncBlocking {
             await manager.connectionInitialized(
                 connectionID,
-                capabilities: AppServerConnectionCapabilities(requestAttestation: requestAttestation)
+                capabilities: AppServerConnectionCapabilities(
+                    requestAttestation: requestAttestation,
+                    optOutNotificationMethods: optOutNotificationMethods
+                )
             )
         }
+    }
+
+    private func threadStatusChangedNotification(threadID: String, status: [String: Any]) -> [String: Any]? {
+        guard !optOutNotificationMethods.contains("thread/status/changed") else {
+            return nil
+        }
+        return CodexAppServer.threadStatusChangedNotification(threadID: threadID, status: status)
     }
 
     private func subscribeCurrentConnection(toThreadID threadID: String) {
@@ -14725,7 +14762,11 @@ final class CodexAppServerMessageProcessor {
                 let capabilities = params?["capabilities"] as? [String: Any]
                 requestAttestation = (capabilities?["requestAttestation"] as? Bool) ?? false
                 experimentalAPIEnabled = (capabilities?["experimentalApi"] as? Bool) ?? false
-                markCurrentConnectionInitialized(requestAttestation: requestAttestation)
+                optOutNotificationMethods = Set((capabilities?["optOutNotificationMethods"] as? [String]) ?? [])
+                markCurrentConnectionInitialized(
+                    requestAttestation: requestAttestation,
+                    optOutNotificationMethods: optOutNotificationMethods
+                )
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 response = CodexAppServer.responseObject(id: id, result: [
                     "userAgent": userAgent,
@@ -14876,6 +14917,12 @@ final class CodexAppServerMessageProcessor {
                         }
                         trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
+                        if let notification = threadStatusChangedNotification(
+                            threadID: threadID,
+                            status: CodexAppServer.activeThreadStatus()
+                        ) {
+                            notifications.append(notification)
+                        }
                     }
                 case "turn/steer":
                     try CodexAppServer.requireTurnSteerResponsesAPIMetadataExperimentalAPI(
@@ -14904,6 +14951,12 @@ final class CodexAppServerMessageProcessor {
                             turnID: turnID,
                             status: "interrupted"
                         ))
+                        if let notification = threadStatusChangedNotification(
+                            threadID: threadID,
+                            status: CodexAppServer.idleThreadStatus()
+                        ) {
+                            notifications.append(notification)
+                        }
                         trackTurnCompletedForAnalytics(turnID: turnID)
                     }
                 case "review/start":

@@ -421,6 +421,8 @@ Source baseline inspected for this scaffold:
   - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, limit handling, `nextCursor`, and unsubscribe-keeps-loaded behavior.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` out-of-band elicitation counters
   - `thread/increment_elicitation` and `thread/decrement_elicitation` now preserve Rust's `experimentalApi` capability gate, validate loaded thread ids, maintain connection-manager-backed loaded-thread counters, return `{ count, paused }`, and reject zero-count decrements with Rust's invalid-request message. Core session timeout pause wiring remains pending with the broader running-thread runtime.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` thread status notifications
+  - `turn/start` now emits Rust-shaped `thread/status/changed` active notifications after the rollout-backed `turn/started` notification, `turn/interrupt` emits idle status after the interrupted completion notification, and initialize `optOutNotificationMethods` suppresses those notifications. Broader live runtime status, approval/user-input active flags, system-error, and unloaded transitions remain pending with the running-thread runtime.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread unarchive
   - `thread/unarchive` now restores archived rollout files into the dated sessions tree, returns the restored `thread` object, emits `thread/unarchived`, and matches invalid/missing archived-thread errors.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread archive notification

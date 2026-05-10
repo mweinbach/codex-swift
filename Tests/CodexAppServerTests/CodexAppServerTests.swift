@@ -456,7 +456,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"},{"type":"image","url":"https://example.test/one.png"}]}}"#.utf8)))
 
-        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages.count, 3)
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
         let turn = try XCTUnwrap(result["turn"] as? [String: Any])
         XCTAssertNotNil(turn["id"] as? String)
@@ -468,6 +468,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(notificationParams["threadId"] as? String, threadID)
         let notificationTurn = try XCTUnwrap(notificationParams["turn"] as? [String: Any])
         XCTAssertEqual(notificationTurn["id"] as? String, turn["id"] as? String)
+        XCTAssertEqual(messages[2]["method"] as? String, "thread/status/changed")
+        let statusParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual(statusParams["threadId"] as? String, threadID)
+        let status = try XCTUnwrap(statusParams["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "active")
+        XCTAssertEqual(status["activeFlags"] as? [String], [])
 
         let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
         let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
@@ -597,7 +603,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let messages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
 
-        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages.count, 3)
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
         XCTAssertTrue(result.isEmpty)
         XCTAssertEqual(messages[1]["method"] as? String, "turn/completed")
@@ -608,6 +614,11 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((completedTurn["items"] as? [Any])?.count, 0)
         XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
         XCTAssertEqual(completedTurn["error"] as? NSNull, NSNull())
+        XCTAssertEqual(messages[2]["method"] as? String, "thread/status/changed")
+        let statusParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual(statusParams["threadId"] as? String, threadID)
+        let status = try XCTUnwrap(statusParams["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "idle")
 
         let resume = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
         let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
@@ -615,6 +626,31 @@ final class CodexAppServerTests: XCTestCase {
         let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
         XCTAssertEqual(turns.count, 1)
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
+    }
+
+    func testThreadStatusChangedCanBeOptedOut() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            optOutNotificationMethods: ["thread/status/changed"]
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Interrupt me"}]}}"#.utf8)))
+        XCTAssertEqual(turnMessages.count, 2)
+        XCTAssertEqual(turnMessages[1]["method"] as? String, "turn/started")
+        XCTAssertFalse(turnMessages.contains { $0["method"] as? String == "thread/status/changed" })
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let interruptMessages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
+
+        XCTAssertEqual(interruptMessages.count, 2)
+        XCTAssertEqual(interruptMessages[1]["method"] as? String, "turn/completed")
+        XCTAssertFalse(interruptMessages.contains { $0["method"] as? String == "thread/status/changed" })
     }
 
     func testRuntimeTurnDiffEventEmitsUpdatedNotification() async throws {
@@ -10533,11 +10569,32 @@ final class CodexAppServerTests: XCTestCase {
     private func initializedProcessor(
         configuration: CodexAppServerConfiguration,
         notificationSink: AppServerNotificationSink? = nil,
-        experimentalAPIEnabled: Bool = false
+        experimentalAPIEnabled: Bool = false,
+        optOutNotificationMethods: [String] = []
     ) throws -> CodexAppServerMessageProcessor {
         let processor = CodexAppServerMessageProcessor(configuration: configuration, notificationSink: notificationSink)
-        let capabilities = experimentalAPIEnabled ? #","capabilities":{"experimentalApi":true}"# : ""
-        _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}\#(capabilities)}}"#.utf8)))
+        var capabilities: [String: Any] = [:]
+        if experimentalAPIEnabled {
+            capabilities["experimentalApi"] = true
+        }
+        if !optOutNotificationMethods.isEmpty {
+            capabilities["optOutNotificationMethods"] = optOutNotificationMethods
+        }
+        var params: [String: Any] = [
+            "clientInfo": [
+                "name": "test",
+                "version": "0"
+            ]
+        ]
+        if !capabilities.isEmpty {
+            params["capabilities"] = capabilities
+        }
+        let request: [String: Any] = [
+            "id": "init",
+            "method": "initialize",
+            "params": params
+        ]
+        _ = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
         return processor
     }
 

@@ -5,6 +5,12 @@ typealias AppServerConnectionID = Int64
 
 struct AppServerConnectionCapabilities: Equatable, Sendable {
     let requestAttestation: Bool
+    let optOutNotificationMethods: Set<String>
+
+    init(requestAttestation: Bool, optOutNotificationMethods: Set<String> = []) {
+        self.requestAttestation = requestAttestation
+        self.optOutNotificationMethods = optOutNotificationMethods
+    }
 }
 
 enum AppServerElicitationCounterResult: Equatable, Sendable {
