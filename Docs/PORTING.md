@@ -930,6 +930,8 @@ Source baseline inspected for this scaffold:
   - matched Rust config write validation for managed feature requirements on user/profile `features` paths and Rust's `okOverridden` response metadata when a higher-precedence config layer masks a written user value.
 - `codex-rs/app-server/src/config_manager_service.rs` source-preserving config writes
   - added a conservative source-preserving persistence path for simple config-manager replacement writes, matching Rust's `ConfigEditsBuilder` behavior for inserting scalar values into existing TOML tables without reordering unrelated keys or dropping comments; verified nested `apps.*.default_tools_approval_mode` and custom `mcp_servers.*.default_tools_approval_mode` writes through `config/read`.
+- `codex-rs/app-server/src/config_manager_service.rs` session flag config layers
+  - threaded injected CLI config overrides through app-server config-layer loads so `config/read`, config writes, skills/hooks filtering, marketplace reads, requirements reads, and auth restriction checks see the same session flag layer ordering as Rust; added Rust-shaped coverage for managed config overriding both user config and session flags, plus writes that match the managed effective value returning `ok` without override metadata.
 
 ## Known Gaps
 

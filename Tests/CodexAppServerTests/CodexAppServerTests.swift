@@ -10714,6 +10714,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((layers.first?["config"] as? [String: Any])?["model"] as? String, "gpt-user")
     }
 
+    func testConfigReadReportsManagedOverrideOverSessionFlagsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try #"model = "user""#.write(to: configFile, atomically: true, encoding: .utf8)
+        try #"model = "system""#.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"includeLayers":true}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                cliConfigOverrides: CliConfigOverrides(rawOverrides: [#"model="session""#]),
+                configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "system")
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        let modelOrigin = try XCTUnwrap(origins["model"] as? [String: Any])
+        let modelOriginName = try XCTUnwrap(modelOrigin["name"] as? [String: Any])
+        XCTAssertEqual(modelOriginName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual(modelOriginName["file"] as? String, managedConfigFile.standardizedFileURL.path)
+
+        let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
+        XCTAssertEqual((layers[0]["name"] as? [String: Any])?["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual((layers[1]["name"] as? [String: Any])?["type"] as? String, "sessionFlags")
+        XCTAssertEqual((layers[2]["name"] as? [String: Any])?["type"] as? String, "user")
+        XCTAssertEqual(((layers[1]["config"] as? [String: Any])?["model"]) as? String, "session")
+        XCTAssertEqual(((layers[2]["config"] as? [String: Any])?["model"]) as? String, "user")
+    }
+
     func testConfigReadOmitsLayersByDefault() throws {
         let temp = try TemporaryDirectory()
         try #"model = "gpt-user""#.write(
@@ -11205,6 +11238,39 @@ final class CodexAppServerTests: XCTestCase {
         let layerName = try XCTUnwrap(layer["name"] as? [String: Any])
         XCTAssertEqual(layerName["type"] as? String, "legacyManagedConfigTomlFromFile")
         XCTAssertEqual(layerName["file"] as? String, managedConfigFile.standardizedFileURL.path)
+    }
+
+    func testConfigValueWriteReportsOkWhenWriteMatchesManagedEffectiveValueLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try #"approval_policy = "on-request""#.write(to: configFile, atomically: true, encoding: .utf8)
+        try #"approval_policy = "never""#.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+        )
+        let write = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"approval_policy","value":"never","mergeStrategy":"replace"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(write["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertTrue(result["overriddenMetadata"] is NSNull)
+
+        let read = try appServerResponse(
+            #"{"id":2,"method":"config/read","params":{"includeLayers":true}}"#,
+            configuration: configuration
+        )
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(readResult["config"] as? [String: Any])
+        XCTAssertEqual(config["approval_policy"] as? String, "never")
+        let origins = try XCTUnwrap(readResult["origins"] as? [String: Any])
+        let approvalOrigin = try XCTUnwrap(origins["approval_policy"] as? [String: Any])
+        let approvalOriginName = try XCTUnwrap(approvalOrigin["name"] as? [String: Any])
+        XCTAssertEqual(approvalOriginName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual(approvalOriginName["file"] as? String, managedConfigFile.standardizedFileURL.path)
     }
 
     func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
@@ -12840,6 +12906,7 @@ final class CodexAppServerTests: XCTestCase {
         environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil
     ) -> CodexAppServerConfiguration {
@@ -12863,6 +12930,7 @@ final class CodexAppServerTests: XCTestCase {
             authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
+            cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore
         )

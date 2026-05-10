@@ -113,6 +113,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
+    public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
 
@@ -135,6 +136,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil
     ) {
@@ -162,6 +164,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.authDeviceCodeTransport = authDeviceCodeTransport
         self.mcpHTTPTransport = mcpHTTPTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
+        self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
     }
@@ -176,6 +179,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.authCredentialsStoreMode == rhs.authCredentialsStoreMode &&
             lhs.environment == rhs.environment &&
             lhs.activeProfile == rhs.activeProfile &&
+            lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
             lhs.configLayerOverrides == rhs.configLayerOverrides
     }
 }
@@ -4163,6 +4167,7 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
@@ -9432,6 +9437,7 @@ public enum CodexAppServer {
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let configRules = (try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )).map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
@@ -9518,6 +9524,7 @@ public enum CodexAppServer {
         guard let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cwd: cwd,
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         ) else {
@@ -9663,6 +9670,7 @@ public enum CodexAppServer {
         }
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
@@ -9779,6 +9787,7 @@ public enum CodexAppServer {
             cwd: try optionalAbsolutePathParam(params?["cwd"], name: "cwd").map {
                 URL(fileURLWithPath: $0, isDirectory: true)
             },
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
@@ -9804,6 +9813,7 @@ public enum CodexAppServer {
         do {
             let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
                 codexHome: configuration.codexHome,
+                cliOverrides: configuration.cliConfigOverrides,
                 overrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )
@@ -10578,6 +10588,8 @@ public enum CodexAppServer {
     fileprivate static func forcedLoginMethod(configuration: CodexAppServerConfiguration) throws -> String? {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
         guard let table = configTable(stack.effectiveConfig()) else {
@@ -10589,6 +10601,8 @@ public enum CodexAppServer {
     fileprivate static func forcedChatGPTWorkspaceID(configuration: CodexAppServerConfiguration) throws -> String? {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
         guard let table = configTable(stack.effectiveConfig()) else {
@@ -13683,6 +13697,7 @@ public enum CodexAppServer {
 
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
