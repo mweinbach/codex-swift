@@ -479,6 +479,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""https:\/\/example.test\/legacy.png""#))
     }
 
+    func testGetConversationSummaryResolvesRelativeRolloutPathFromCodexHome() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let newConversation = try decode(processor.processLine(Data(#"{"id":1,"method":"newConversation","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let newResult = try XCTUnwrap(newConversation["result"] as? [String: Any])
+        let conversationID = try XCTUnwrap(newResult["conversationId"] as? String)
+        let rolloutPath = URL(fileURLWithPath: try XCTUnwrap(newResult["rolloutPath"] as? String)).standardizedFileURL.path
+        let codexHomePath = temp.url.standardizedFileURL.path
+        XCTAssertTrue(rolloutPath.hasPrefix(codexHomePath + "/"))
+        let relativePath = String(rolloutPath.dropFirst(codexHomePath.count + 1))
+
+        let send = try decode(processor.processLine(Data(#"{"id":2,"method":"sendUserMessage","params":{"conversationId":"\#(conversationID)","items":[{"type":"text","data":{"text":"Relative summary"}}]}}"#.utf8)))
+        XCTAssertTrue(try XCTUnwrap(send["result"] as? [String: Any]).isEmpty)
+
+        let response = try decode(processor.processLine(Data(#"{"id":3,"method":"getConversationSummary","params":{"rolloutPath":"\#(relativePath)"}}"#.utf8)))
+        let summary = try XCTUnwrap((response["result"] as? [String: Any])?["summary"] as? [String: Any])
+        XCTAssertEqual(summary["conversationId"] as? String, conversationID)
+        XCTAssertEqual(
+            URL(fileURLWithPath: try XCTUnwrap(summary["path"] as? String)).standardizedFileURL.path,
+            rolloutPath
+        )
+        XCTAssertEqual(summary["preview"] as? String, "Relative summary")
+        XCTAssertEqual(summary["modelProvider"] as? String, "mock_provider")
+    }
+
     func testLegacySendUserTurnAndInterruptConversation() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

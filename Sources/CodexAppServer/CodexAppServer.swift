@@ -1813,7 +1813,7 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let rolloutPath: String
         if let path = stringParam(params?["rolloutPath"]) ?? stringParam(params?["rollout_path"]) {
-            rolloutPath = path
+            rolloutPath = resolvedRolloutPath(path, configuration: configuration)
         } else {
             let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
             guard let rawID else {
@@ -1833,6 +1833,16 @@ public enum CodexAppServer {
                 defaultProvider: configuration.defaultModelProvider
             )
         ]
+    }
+
+    private static func resolvedRolloutPath(
+        _ path: String,
+        configuration: CodexAppServerConfiguration
+    ) -> String {
+        if (path as NSString).isAbsolutePath {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        return configuration.codexHome.appendingPathComponent(path).standardizedFileURL.path
     }
 
     fileprivate static func archiveConversationResult(
