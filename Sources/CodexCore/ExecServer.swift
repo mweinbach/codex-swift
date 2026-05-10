@@ -601,7 +601,7 @@ public struct ExecServerClosedNotification: Codable, Equatable, Sendable {
     }
 }
 
-public struct ExecServerJSONRPCErrorDetail: Codable, Equatable, Sendable {
+public struct ExecServerJSONRPCErrorDetail: Error, Codable, Equatable, Sendable {
     public let code: Int
     public let message: String
     public let data: JSONValue?

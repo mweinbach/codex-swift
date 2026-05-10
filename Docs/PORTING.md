@@ -372,6 +372,8 @@ Source baseline inspected for this scaffold:
   - Swift now carries Rust's exec-server method constants plus initialize, process start/read/write/terminate, filesystem, HTTP request/streaming body, and process notification wire models, including transparent base64 byte chunks, camelCase field names, defaulted optional fields, `stdio`/`stdout`/`stderr`/`pty` stream tags, and filesystem sandbox-context payloads. The live processor/transport remains pending.
 - `codex-rs/exec-server/src/rpc.rs`
   - Swift now has Rust-shaped exec-server JSON-RPC request/response/error/notification envelopes, outbound response/error/notification constructors, error-code helpers for invalid request/method/params/not-found/internal failures, and the Rust parameter-decoding fallback that treats omitted params as `null` and retries empty `{}` as `null`. The async client, transport reader/writer, and route processor remain pending.
+- `codex-rs/exec-server/src/server/session_registry.rs`
+  - Swift now carries the exec-server session attachment registry semantics for fresh session IDs, one active connection per session, detached-session resume, old-connection eviction checks, TTL expiration, and Rust-shaped invalid-request errors for unknown, expired, and already-attached resume attempts. Process-handler shutdown and notification-sender rebinding remain pending with the live processor port.
 - `codex-rs/exec/src/cli.rs` `codex exec resume`
   - `codex exec resume` now accepts Rust's `--all` provider/cwd bypass flag and subcommand-local `--image`/`-i` attachments, carrying them through non-interactive resume target resolution while preserving the `--last <prompt>` positional reinterpretation.
 - `codex-rs/protocol/src/protocol.rs` session configuration event model

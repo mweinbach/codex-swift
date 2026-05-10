@@ -2,6 +2,82 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testSessionRegistryCreatesNewSessionsWithActiveConnection() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+
+        let handle = try await registry.attach()
+
+        XCTAssertEqual(handle.sessionID, "session-1")
+        XCTAssertEqual(handle.connectionID, "connection-1")
+        let isAttached = await handle.isSessionAttached()
+        let registryContainsSession = await registry.contains(sessionID: "session-1")
+        XCTAssertTrue(isAttached)
+        XCTAssertTrue(registryContainsSession)
+    }
+
+    func testSessionRegistryRejectsUnknownAndActiveResumeLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let handle = try await registry.attach()
+
+        await XCTAssertThrowsExecServerError(
+            try await registry.attach(resumeSessionID: "missing"),
+            code: -32600,
+            message: "unknown session id missing"
+        )
+        await XCTAssertThrowsExecServerError(
+            try await registry.attach(resumeSessionID: handle.sessionID),
+            code: -32600,
+            message: "session session-1 is already attached to another connection"
+        )
+    }
+
+    func testSessionRegistryDetachedSessionCanResumeAndEvictsOldConnection() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let first = try await registry.attach()
+
+        await first.detach()
+        let second = try await registry.attach(resumeSessionID: first.sessionID)
+
+        XCTAssertEqual(second.sessionID, "session-1")
+        XCTAssertEqual(second.connectionID, "connection-2")
+        let firstIsAttached = await first.isSessionAttached()
+        let secondIsAttached = await second.isSessionAttached()
+        XCTAssertFalse(firstIsAttached)
+        XCTAssertTrue(secondIsAttached)
+    }
+
+    func testSessionRegistryExpiredDetachedSessionLooksUnknownLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(
+            detachedSessionTTL: -1,
+            makeID: sequenceIDs(["connection-1", "session-1", "connection-2"])
+        )
+        let handle = try await registry.attach()
+
+        await handle.detach()
+
+        await XCTAssertThrowsExecServerError(
+            try await registry.attach(resumeSessionID: handle.sessionID),
+            code: -32600,
+            message: "unknown session id session-1"
+        )
+        let registryContainsSession = await registry.contains(sessionID: "session-1")
+        XCTAssertFalse(registryContainsSession)
+    }
+
+    func testSessionRegistryOldDetachCannotDetachResumedSession() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let first = try await registry.attach()
+        await first.detach()
+        let second = try await registry.attach(resumeSessionID: first.sessionID)
+
+        await first.detach()
+
+        let firstIsAttached = await first.isSessionAttached()
+        let secondIsAttached = await second.isSessionAttached()
+        XCTAssertFalse(firstIsAttached)
+        XCTAssertTrue(secondIsAttached)
+    }
+
     func testJSONRPCMessagesUseRustShapeWithoutJsonrpcField() throws {
         try XCTAssertJSONObjectEqual(ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
             id: .integer(1),
@@ -95,6 +171,40 @@ final class ExecServerTests: XCTestCase {
             as: NullParams.self
         )) { error in
             XCTAssertTrue(String(describing: error).contains("invalid params:"))
+        }
+    }
+
+    private func sequenceIDs(_ ids: [String]) -> @Sendable () -> String {
+        final class Box: @unchecked Sendable {
+            var ids: [String]
+            init(_ ids: [String]) {
+                self.ids = ids
+            }
+        }
+        let box = Box(ids)
+        return {
+            if box.ids.isEmpty {
+                return "unexpected-id"
+            }
+            return box.ids.removeFirst()
+        }
+    }
+
+    private func XCTAssertThrowsExecServerError(
+        _ expression: @autoclosure () async throws -> some Any,
+        code: Int,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server JSON-RPC error", file: file, line: line)
+        } catch let error as ExecServerJSONRPCErrorDetail {
+            XCTAssertEqual(error.code, code, file: file, line: line)
+            XCTAssertEqual(error.message, message, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
         }
     }
 
