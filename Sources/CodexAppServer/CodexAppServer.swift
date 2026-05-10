@@ -2407,7 +2407,7 @@ public enum CodexAppServer {
     }
 
     private static func threadGoalObject(_ goal: ThreadGoal) -> [String: Any] {
-        [
+        return [
             "threadId": goal.threadID.description,
             "objective": goal.objective,
             "status": goal.status.rawValue,
@@ -2786,9 +2786,10 @@ public enum CodexAppServer {
 
     fileprivate static func appListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
-        let apps = try appList(configuration: configuration)
+        let apps = try appList(configuration: configuration, runtimeFeatureEnablement: runtimeFeatureEnablement)
         let total = apps.count
         var start = 0
         if let cursor = stringParam(params?["cursor"]) {
@@ -2808,7 +2809,10 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func appList(configuration: CodexAppServerConfiguration) throws -> [[String: Any]] {
+    private static func appList(
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
+    ) throws -> [[String: Any]] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
@@ -2817,26 +2821,33 @@ public enum CodexAppServer {
             environment: configuration.environment,
             systemConfigFile: nil
         )
-        let config = try stack?.effectiveConfig() ?? (CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:]))
+        let loadedConfig = try stack?.effectiveConfig() ?? (CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:]))
+        let config = effectiveConfig(loadedConfig, applyingRuntimeFeatureEnablement: runtimeFeatureEnablement)
         var appsByID: [String: [String: Any]] = [:]
 
-        if let runtimeConfig = try? CodexConfigLoader.load(
+        if var runtimeConfig = try? CodexConfigLoader.load(
             codexHome: configuration.codexHome,
             systemConfigFile: nil,
             environment: configuration.environment
-        ),
-           runtimeConfig.features.isEnabled(.apps),
-           let auth = try? currentAuth(configuration: configuration),
-           case .chatGPT = auth.kind {
-            for app in connectorDirectoryApps(
-                runtimeConfig: runtimeConfig,
-                configuration: configuration,
-                auth: auth
-            ) {
-                guard let id = app["id"] as? String else {
-                    continue
+        ) {
+            applyRuntimeFeatureEnablement(
+                runtimeFeatureEnablement,
+                to: &runtimeConfig.features,
+                protectedFeatureKeys: protectedFeatureKeys(in: loadedConfig)
+            )
+            if runtimeConfig.features.isEnabled(.apps),
+               let auth = try? currentAuth(configuration: configuration),
+               case .chatGPT = auth.kind {
+                for app in connectorDirectoryApps(
+                    runtimeConfig: runtimeConfig,
+                    configuration: configuration,
+                    auth: auth
+                ) {
+                    guard let id = app["id"] as? String else {
+                        continue
+                    }
+                    appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
                 }
-                appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
             }
         }
 
@@ -13010,6 +13021,59 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func appListUpdatedNotification(
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool]
+    ) throws -> [String: Any]? {
+        guard try appsFeatureEnabledForCurrentAuth(
+            configuration: configuration,
+            runtimeFeatureEnablement: runtimeFeatureEnablement
+        ) else {
+            return nil
+        }
+        return [
+            "method": "app/list/updated",
+            "params": [
+                "data": try appList(
+                    configuration: configuration,
+                    runtimeFeatureEnablement: runtimeFeatureEnablement
+                )
+            ]
+        ]
+    }
+
+    private static func appsFeatureEnabledForCurrentAuth(
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool]
+    ) throws -> Bool {
+        let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment,
+            systemConfigFile: nil
+        )
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let loadedConfig = try stack?.effectiveConfig() ?? (CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:]))
+        var runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        )
+        applyRuntimeFeatureEnablement(
+            runtimeFeatureEnablement,
+            to: &runtimeConfig.features,
+            protectedFeatureKeys: protectedFeatureKeys(in: loadedConfig)
+        )
+        guard runtimeConfig.features.isEnabled(.apps),
+              let auth = try currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            return false
+        }
+        return true
+    }
+
     fileprivate static func threadNameUpdatedNotification(threadID: String, threadName: String) -> [String: Any] {
         [
             "method": "thread/name/updated",
@@ -19522,7 +19586,11 @@ final class CodexAppServerMessageProcessor {
                 case "app/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.appListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.appListResult(
+                            params: params,
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        )
                     )
                 case "plugin/list":
                     response = CodexAppServer.responseObject(
@@ -19746,6 +19814,7 @@ final class CodexAppServerMessageProcessor {
                         )
                     )
                 case "experimentalFeature/enablement/set":
+                    let refreshAppList = ((params?["enablement"] as? [String: Any])?["apps"] as? Bool) == true
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.experimentalFeatureEnablementSetResult(
@@ -19753,6 +19822,14 @@ final class CodexAppServerMessageProcessor {
                             runtimeFeatureEnablement: &runtimeFeatureEnablement
                         )
                     )
+                    if refreshAppList {
+                        if let notification = try? CodexAppServer.appListUpdatedNotification(
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        ) {
+                            notifications.append(notification)
+                        }
+                    }
                 case "collaborationMode/list":
                     try CodexAppServer.requireExperimentalAPI(
                         method: "collaborationMode/list",

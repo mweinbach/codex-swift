@@ -11672,6 +11672,74 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(features["tool_search"] as? Bool, false)
     }
 
+    func testExperimentalFeatureEnablementSetRefreshesAppListWhenAppsTurnOn() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let directoryPage = """
+        {
+          "apps": [
+            {
+              "id": "alpha",
+              "name": "Alpha",
+              "description": "Alpha v2"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.url?.path, "/backend-api/connectors/directory/list")
+                XCTAssertEqual(request.url?.query, "external_logos=true")
+                return URLSessionTransportResponse(statusCode: 200, body: Data(directoryPage.utf8))
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let disableMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"apps":false}}}"#.utf8
+        )))
+        XCTAssertEqual(disableMessages.count, 1)
+        XCTAssertEqual((disableMessages[0]["result"] as? [String: Any])?["enablement"] as? [String: Bool], ["apps": false])
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"apps":true}}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["id"] as? Int, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?["enablement"] as? [String: Bool], ["apps": true])
+        XCTAssertEqual(messages[1]["method"] as? String, "app/list/updated")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let data = try XCTUnwrap(params["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, ["alpha"])
+        XCTAssertEqual(data[0]["name"] as? String, "Alpha")
+        XCTAssertEqual(data[0]["description"] as? String, "Alpha v2")
+        XCTAssertEqual(data[0]["installUrl"] as? String, "https://chatgpt.com/apps/alpha/alpha")
+        XCTAssertEqual(data[0]["isAccessible"] as? Bool, false)
+        XCTAssertEqual(data[0]["isEnabled"] as? Bool, true)
+        XCTAssertEqual(capture.requests.count, 1)
+        XCTAssertEqual(capture.requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer chatgpt-token")
+        XCTAssertEqual(capture.requests[0].value(forHTTPHeaderField: "chatgpt-account-id"), "account-123")
+    }
+
     func testExperimentalFeatureEnablementSetDoesNotOverrideUserConfig() throws {
         let temp = try TemporaryDirectory()
         try """
