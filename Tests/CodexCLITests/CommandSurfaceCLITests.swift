@@ -481,6 +481,98 @@ final class CommandSurfaceCLITests: XCTestCase {
         ])
     }
 
+    func testRunAsyncForkParsesTargetFlagsRemoteAndOverrides() async {
+        var requests: [CodexCLI.ForkCommandRequest] = []
+
+        for arguments in [
+            ["-c", "model=\"gpt-5.4\"", "fork", "--last", "--all"],
+            ["--remote", "ws://root.example.test", "fork", "123e4567-e89b-12d3-a456-426614174000"],
+            [
+                "--remote",
+                "ws://root.example.test",
+                "--remote-auth-token-env",
+                "ROOT_TOKEN",
+                "fork",
+                "--remote=ws://fork.example.test",
+                "--remote-auth-token-env",
+                "FORK_TOKEN"
+            ]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                forkRunner: { request in
+                    requests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(requests, [
+            CodexCLI.ForkCommandRequest(
+                sessionID: nil,
+                last: true,
+                all: true,
+                configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5.4\""])
+            ),
+            CodexCLI.ForkCommandRequest(
+                sessionID: "123e4567-e89b-12d3-a456-426614174000",
+                last: false,
+                all: false,
+                remote: "ws://root.example.test"
+            ),
+            CodexCLI.ForkCommandRequest(
+                sessionID: nil,
+                last: false,
+                all: false,
+                remote: "ws://fork.example.test",
+                remoteAuthTokenEnv: "FORK_TOKEN"
+            )
+        ])
+    }
+
+    func testRunAsyncForkRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["fork", "--last", "123e4567-e89b-12d3-a456-426614174000"],
+                "codex-swift: argument conflict for command 'fork': SESSION_ID conflicts with --last"
+            ),
+            (
+                ["fork", "123e4567-e89b-12d3-a456-426614174000", "--last"],
+                "codex-swift: argument conflict for command 'fork': --last conflicts with SESSION_ID"
+            ),
+            (
+                ["fork", "--bogus"],
+                "codex-swift: unsupported option for command 'fork': --bogus"
+            ),
+            (
+                ["fork", "--remote"],
+                "codex-swift: missing value for --remote"
+            ),
+            (
+                ["fork", "one", "two"],
+                "codex-swift: unexpected argument for command 'fork': two"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                forkRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncMcpServerDelegatesWithOverrides() async {
         var receivedRequest: CodexCLI.McpServerCommandRequest?
 
@@ -927,7 +1019,6 @@ final class CommandSurfaceCLITests: XCTestCase {
             "app-server",
             "debug",
             "resume",
-            "fork",
             "exec-server"
         ] {
             var stderr: [String] = []

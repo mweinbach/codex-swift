@@ -365,6 +365,7 @@ Source baseline inspected for this scaffold:
   - conversation path response payloads, new/cleared/resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
 - `codex-rs/exec/src/lib.rs` resume target resolution
   - `codex resume` parser-to-runtime bridge for explicit session IDs, `--last`, provider-filtered newest-session lookup, `--all` provider bypass, and non-interactive picker listing over saved rollout files
+  - `codex fork` parser-to-runtime bridge for explicit session IDs, `--last`, `--all`, root and fork-scoped `--remote` / `--remote-auth-token-env` option precedence, provider-filtered newest-session lookup, and picker listing over saved rollout files; the actual interactive fork TUI remains pending with the broader interactive runtime
 - `codex-rs/exec/src/cli.rs` `codex exec resume`
   - `codex exec resume` now accepts Rust's `--all` provider/cwd bypass flag and subcommand-local `--image`/`-i` attachments, carrying them through non-interactive resume target resolution while preserving the `--last <prompt>` positional reinterpretation.
 - `codex-rs/protocol/src/protocol.rs` session configuration event model

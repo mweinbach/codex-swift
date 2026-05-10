@@ -301,6 +301,31 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct ForkCommandRequest: Equatable, Sendable {
+        public let sessionID: String?
+        public let last: Bool
+        public let all: Bool
+        public let remote: String?
+        public let remoteAuthTokenEnv: String?
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            sessionID: String?,
+            last: Bool,
+            all: Bool,
+            remote: String? = nil,
+            remoteAuthTokenEnv: String? = nil,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.sessionID = sessionID
+            self.last = last
+            self.all = all
+            self.remote = remote
+            self.remoteAuthTokenEnv = remoteAuthTokenEnv
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct McpServerCommandRequest: Equatable, Sendable {
         public let configOverrides: CliConfigOverrides
 
@@ -492,6 +517,7 @@ public struct CodexCLI: Sendable {
     public typealias ComputerUseCommandRunner = (ComputerUseCommandRequest) async throws -> CommandExecutionResult
     public typealias ReviewCommandRunner = (ReviewCommandRequest) async throws -> CommandExecutionResult
     public typealias ResumeCommandRunner = (ResumeCommandRequest) async throws -> CommandExecutionResult
+    public typealias ForkCommandRunner = (ForkCommandRequest) async throws -> CommandExecutionResult
     public typealias McpServerCommandRunner = (McpServerCommandRequest) async throws -> CommandExecutionResult
     public typealias AppServerCommandRunner = (AppServerCommandRequest) async throws -> CommandExecutionResult
     public typealias AppCommandRunner = (AppCommandRequest) async throws -> CommandExecutionResult
@@ -619,6 +645,7 @@ public struct CodexCLI: Sendable {
         computerUseRunner: ComputerUseCommandRunner? = nil,
         reviewRunner: ReviewCommandRunner? = nil,
         resumeRunner: ResumeCommandRunner? = nil,
+        forkRunner: ForkCommandRunner? = nil,
         mcpServerRunner: McpServerCommandRunner? = nil,
         appServerRunner: AppServerCommandRunner? = nil,
         appRunner: AppCommandRunner? = nil,
@@ -773,6 +800,26 @@ public struct CodexCLI: Sendable {
             case let .success(request):
                 do {
                     let result = try await resumeRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "fork":
+            guard let forkRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseForkCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await forkRunner(request)
                     emit(result, stdout: stdout, stderr: stderr)
                     return result.exitCode
                 } catch {
@@ -2018,6 +2065,86 @@ public struct CodexCLI: Sendable {
                 sessionID: sessionID,
                 last: last,
                 all: all,
+                configOverrides: configOverrides
+            ))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func parseForkCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ForkCommandRequest> {
+        var sessionID: String?
+        var last = false
+        var all = false
+        var remote: String?
+        var remoteAuthTokenEnv: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--last" {
+                guard sessionID == nil else {
+                    return .failure("codex-swift: argument conflict for command 'fork': --last conflicts with SESSION_ID", 64)
+                }
+                last = true
+                index += 1
+                continue
+            }
+            if argument == "--all" {
+                all = true
+                index += 1
+                continue
+            }
+            if argument == "--remote" || argument == "--remote-auth-token-env" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                if argument == "--remote" {
+                    remote = arguments[index + 1]
+                } else {
+                    remoteAuthTokenEnv = arguments[index + 1]
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--remote=") {
+                remote = String(argument.dropFirst("--remote=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("--remote-auth-token-env=") {
+                remoteAuthTokenEnv = String(argument.dropFirst("--remote-auth-token-env=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'fork': \(argument)", 64)
+            }
+            guard sessionID == nil else {
+                return .failure("codex-swift: unexpected argument for command 'fork': \(argument)", 64)
+            }
+            guard !last else {
+                return .failure("codex-swift: argument conflict for command 'fork': SESSION_ID conflicts with --last", 64)
+            }
+            sessionID = argument
+            index += 1
+        }
+
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            return .success(ForkCommandRequest(
+                sessionID: sessionID,
+                last: last,
+                all: all,
+                remote: remote ?? rootRemoteFlagValue(named: "--remote", beforeCommand: "fork", in: rootArguments),
+                remoteAuthTokenEnv: remoteAuthTokenEnv ?? rootRemoteFlagValue(
+                    named: "--remote-auth-token-env",
+                    beforeCommand: "fork",
+                    in: rootArguments
+                ),
                 configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):

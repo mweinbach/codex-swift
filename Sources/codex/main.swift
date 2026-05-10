@@ -54,6 +54,7 @@ let exitCode = await cli.runAsync(
     computerUseRunner: runComputerUseCommand,
     reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
+    forkRunner: runForkCommand,
     mcpServerRunner: runMcpServerCommand,
     appServerRunner: runAppServerCommand,
     appRunner: runAppCommand,
@@ -1235,6 +1236,29 @@ private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async th
             exitCode: 78,
             stdoutMessage: output,
             stderrMessage: "codex-swift: resume target resolved, but interactive resume runtime is not complete yet."
+        )
+    case .picker:
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+}
+
+private func runForkCommand(_ request: CodexCLI.ForkCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let codexHome = try CodexHome.find()
+    let resumeRequest = CodexCLI.ResumeCommandRequest(
+        sessionID: request.sessionID,
+        last: request.last,
+        all: request.all,
+        configOverrides: request.configOverrides
+    )
+    let resolution = try ResumeCommandResolver.resolve(resumeRequest, codexHome: codexHome)
+    let output = ResumeCommandFormatter.render(resolution)
+
+    switch resolution {
+    case .session:
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stdoutMessage: output,
+            stderrMessage: "codex-swift: fork target resolved, but interactive fork runtime is not complete yet."
         )
     case .picker:
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
