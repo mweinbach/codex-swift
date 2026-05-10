@@ -8553,6 +8553,33 @@ final class CodexAppServerTests: XCTestCase {
             "invalid marketplace source format; expected owner/repo, a git URL, or a local marketplace path"
         )
 
+        let windowsDrive = try appServerResponse(
+            #"{"id":41,"method":"marketplace/add","params":{"source":"C:\\Users\\alice\\marketplace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (windowsDrive["error"] as? [String: Any])?["message"] as? String,
+            "failed to resolve local marketplace source path: No such file or directory (os error 2)"
+        )
+
+        let windowsUNC = try appServerResponse(
+            #"{"id":42,"method":"marketplace/add","params":{"source":"\\\\server\\share\\marketplace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (windowsUNC["error"] as? [String: Any])?["message"] as? String,
+            "failed to resolve local marketplace source path: No such file or directory (os error 2)"
+        )
+
+        let windowsRelative = try appServerResponse(
+            #"{"id":43,"method":"marketplace/add","params":{"source":".\\marketplace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (windowsRelative["error"] as? [String: Any])?["message"] as? String,
+            "failed to resolve local marketplace source path: No such file or directory (os error 2)"
+        )
+
         let missingManifestRoot = temp.url.appendingPathComponent("missing-manifest", isDirectory: true)
         try FileManager.default.createDirectory(at: missingManifestRoot, withIntermediateDirectories: true)
         let missingManifestJSON = jsonString(missingManifestRoot.path)

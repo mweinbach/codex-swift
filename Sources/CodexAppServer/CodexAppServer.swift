@@ -14705,6 +14705,10 @@ public enum CodexAppServer {
     }
 
     private static func parseMarketplaceSource(_ source: String, explicitRef: String?) throws -> ParsedMarketplaceSource {
+        let source = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else {
+            throw AppServerError.invalidRequest("marketplace source must not be empty")
+        }
         let split = splitMarketplaceSourceRef(source)
         let baseSource = split.source
         let refName = explicitRef ?? split.refName
@@ -14764,11 +14768,26 @@ public enum CodexAppServer {
 
     private static func looksLikeLocalMarketplacePath(_ source: String) -> Bool {
         source.hasPrefix("/")
+            || looksLikeWindowsAbsoluteMarketplacePath(source)
             || source.hasPrefix("./")
+            || source.hasPrefix(".\\")
             || source.hasPrefix("../")
+            || source.hasPrefix("..\\")
             || source.hasPrefix("~/")
             || source == "."
             || source == ".."
+    }
+
+    private static func looksLikeWindowsAbsoluteMarketplacePath(_ source: String) -> Bool {
+        if source.hasPrefix("\\\\") {
+            return true
+        }
+        let scalars = Array(source.unicodeScalars)
+        let first = scalars.first?.value ?? 0
+        return scalars.count >= 3
+            && ((65...90).contains(Int(first)) || (97...122).contains(Int(first)))
+            && scalars[1].value == 58
+            && (scalars[2].value == 92 || scalars[2].value == 47)
     }
 
     private static func resolveLocalMarketplaceSourcePath(_ source: String) throws -> URL {
