@@ -5149,6 +5149,37 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadAcceptsTopLevelMcpServerMapLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let pluginRoot = sourceRoot.appendingPathComponent("plugins/weather", isDirectory: true)
+        try """
+        {
+          "$schema": "https://example.com/plugin-mcp.schema.json",
+          "weather": {
+            "type": "http",
+            "url": "https://weather.example/mcp",
+            "scopes": ["forecast.read"]
+          },
+          "broken": {
+            "enabled": true
+          }
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".mcp.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["mcpServers"] as? [String], ["weather"])
+    }
+
     func testPluginReadUsesMarketplaceProjectConfigLikeRust() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)

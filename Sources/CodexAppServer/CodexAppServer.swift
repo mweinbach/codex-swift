@@ -4908,13 +4908,39 @@ public enum CodexAppServer {
 
     private static func localPluginMcpServerNames(root: URL, manifest: LocalPluginManifest) -> [String] {
         let mcpPath = manifest.mcpConfig ?? root.appendingPathComponent(".mcp.json", isDirectory: false)
-        guard let data = try? Data(contentsOf: mcpPath),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let servers = object["mcpServers"] as? [String: Any]
-        else {
+        guard let data = try? Data(contentsOf: mcpPath) else {
             return []
         }
-        return Array(Set(servers.keys)).sorted()
+        return pluginMcpServers(from: data, pluginRoot: root).keys.sorted()
+    }
+
+    private static func pluginMcpServers(from data: Data, pluginRoot: URL) -> [String: McpServerConfig] {
+        guard case let .object(root) = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+            return [:]
+        }
+        let rawServers: [String: JSONValue]
+        if case let .object(servers)? = root["mcpServers"] {
+            rawServers = servers
+        } else {
+            rawServers = root
+        }
+        var servers: [String: McpServerConfig] = [:]
+        for name in rawServers.keys.sorted() {
+            guard case var .object(serverObject)? = rawServers[name] else {
+                continue
+            }
+            serverObject["type"] = nil
+            serverObject["oauth"] = nil
+            if case let .string(cwd)? = serverObject["cwd"],
+               !cwd.hasPrefix("/") {
+                serverObject["cwd"] = .string(pluginRoot.appendingPathComponent(cwd, isDirectory: true).path)
+            }
+            let configValue = JSONToToml.convert(.object([name: .object(serverObject)]))
+            if let parsed = try? McpConfigStore.parseMcpServers(from: configValue)[name] {
+                servers[name] = parsed
+            }
+        }
+        return servers
     }
 
     private static func localPluginManifestPath(root: URL, value: Any?) -> URL? {
