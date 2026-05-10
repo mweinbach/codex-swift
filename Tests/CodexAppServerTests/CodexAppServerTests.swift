@@ -134,6 +134,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartEphemeralRemainsPathlessLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"model":"gpt-test","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","ephemeral":true}}"#.utf8)))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        XCTAssertEqual(thread["sessionId"] as? String, threadID)
+        XCTAssertEqual(thread["ephemeral"] as? Bool, true)
+        XCTAssertEqual(thread["path"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["preview"] as? String, "")
+        XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(thread["cwd"] as? String, cwd.url.path)
+        XCTAssertEqual(thread["source"] as? String, "appServer")
+        XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
+
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/started")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let notificationThread = try XCTUnwrap(notificationParams["thread"] as? [String: Any])
+        XCTAssertEqual(notificationThread["id"] as? String, threadID)
+        XCTAssertEqual(notificationThread["ephemeral"] as? Bool, true)
+        XCTAssertEqual(notificationThread["path"] as? NSNull, NSNull())
+        XCTAssertNil(try RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+    }
+
     func testThreadStartWithWorkspaceWritePersistsTrustedProjectLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

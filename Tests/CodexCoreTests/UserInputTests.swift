@@ -16,6 +16,11 @@ final class UserInputTests: XCTestCase {
             "type": "local_image",
             "path": "/tmp/a.png"
         ])
+        try XCTAssertJSONObjectEqual(UserInput.mention(name: "drive", path: "app://google_drive"), [
+            "type": "mention",
+            "name": "drive",
+            "path": "app://google_drive"
+        ])
     }
 
     func testTextInputCarriesTextElementsWithRustDefaults() throws {
@@ -41,5 +46,18 @@ final class UserInputTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(UserInput.self, from: Data(#"{"type":"text","text":"hello"}"#.utf8))
         XCTAssertEqual(decoded, .text("hello", textElements: []))
+    }
+
+    func testMentionInputRoundTripsLikeRust() throws {
+        let json = #"{"type":"mention","name":"figma","path":"app://figma"}"#
+
+        let decoded = try JSONDecoder().decode(UserInput.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded, .mention(name: "figma", path: "app://figma"))
+        try XCTAssertJSONObjectEqual(decoded, [
+            "type": "mention",
+            "name": "figma",
+            "path": "app://figma"
+        ])
     }
 }

@@ -99,7 +99,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` review decision model
   - approval response wire strings, timeout decision, externally tagged execpolicy/network-policy amendment approval payloads, and denied default
 - `codex-rs/protocol/src/user_input.rs`
-  - tagged user input variants for text, images, local images, and skills, including `text_elements` byte ranges/placeholders
+  - tagged user input variants for text, images, local images, skills, and structured mentions, including `text_elements` byte ranges/placeholders
 - `codex-rs/protocol/src/plan_tool.rs`
   - update-plan argument wire shapes
 - `codex-rs/protocol/src/custom_prompts.rs`
@@ -895,6 +895,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's method-level experimental API guard for `thread/turns/list` and `thread/turns/items/list`, while preserving the unsupported-items-list response once clients opt into `experimentalApi`.
 - `codex-rs/app-server-protocol` experimental memory-route gating
   - matched Rust's method-level experimental API guard for `thread/memoryMode/set` and `memory/reset`, while preserving memory-mode validation and memory-root reset behavior after opt-in.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` ephemeral thread start
+  - matched Rust's `thread/start` `ephemeral: true` response shape by returning a pathless `ephemeral: true` thread, emitting the same shape in `thread/started`, subscribing it as loaded, and skipping rollout materialization.
 - `codex-rs/app-server-protocol` experimental process-route gating
   - matched Rust's method-level experimental API guard for `process/spawn`, `process/writeStdin`, `process/resizePty`, and `process/kill`, preserving live process lifecycle behavior after opt-in.
 - `codex-rs/app-server-protocol` experimental collaboration-mode gating

@@ -343,11 +343,12 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ResponseItem.self, from: JSONEncoder().encode(output)), output)
     }
 
-    func testUserInputsBecomeMessageAndSkipSkills() throws {
+    func testUserInputsBecomeMessageAndSkipToolBodyInputs() throws {
         let item = ResponseInputItem(userInputs: [
             .text("hello"),
             .image(imageURL: "data:image/png;base64,abc"),
-            .skill(name: "sample", path: "/tmp/SKILL.md")
+            .skill(name: "sample", path: "/tmp/SKILL.md"),
+            .mention(name: "drive", path: "app://google_drive")
         ])
 
         guard case let .message(role, content, _) = item else {

@@ -831,11 +831,19 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
-        let item = ConversationItem(path: started.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
-        let thread = try threadObject(
-            for: item,
-            defaultProvider: configuration.defaultModelProvider
-        )
+        let thread: [String: Any]
+        if started.ephemeral {
+            thread = threadObject(for: started)
+        } else {
+            guard let rolloutPath = started.rolloutPath else {
+                throw AppServerError.internalError("persistent thread start did not create a rollout")
+            }
+            let item = ConversationItem(path: rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
+            thread = try threadObject(
+                for: item,
+                defaultProvider: configuration.defaultModelProvider
+            )
+        }
         return [
             "thread": thread,
             "model": started.model,
@@ -861,7 +869,7 @@ public enum CodexAppServer {
             "conversationId": started.conversationID.description,
             "model": started.model,
             "reasoningEffort": started.reasoningEffort ?? NSNull(),
-            "rolloutPath": started.rolloutPath.path
+            "rolloutPath": started.rolloutPath?.path ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
 
@@ -890,6 +898,19 @@ public enum CodexAppServer {
             configuration: configuration
         )
         let conversationID = ConversationId()
+        if boolParam(params?["ephemeral"], defaultValue: false) {
+            return AppServerStartedConversation(
+                conversationID: conversationID,
+                rolloutPath: nil,
+                model: model,
+                modelProvider: modelProvider,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                sandbox: sandbox,
+                reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
+                ephemeral: true
+            )
+        }
         let recorder = try RolloutRecorder.create(
             codexHome: configuration.codexHome,
             cwd: cwd,
@@ -912,7 +933,8 @@ public enum CodexAppServer {
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandbox: sandbox,
-            reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue
+            reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
+            ephemeral: false
         )
     }
 
@@ -8972,6 +8994,12 @@ public enum CodexAppServer {
                 "name": name,
                 "path": path
             ]
+        case let .mention(name, path):
+            return [
+                "type": "mention",
+                "name": name,
+                "path": path
+            ]
         }
     }
 
@@ -11416,6 +11444,31 @@ public enum CodexAppServer {
             "gitInfo": threadListGitInfo(from: metadata) ?? NSNull(),
             "name": NSNull(),
             "turns": turns
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func threadObject(for started: AppServerStartedConversation) -> [String: Any] {
+        let timestamp = Int(Date().timeIntervalSince1970)
+        return [
+            "id": started.conversationID.description,
+            "sessionId": started.conversationID.description,
+            "forkedFromId": NSNull(),
+            "preview": "",
+            "ephemeral": true,
+            "modelProvider": started.modelProvider,
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+            "status": ["type": "notLoaded"],
+            "path": NSNull(),
+            "cwd": started.cwd.path,
+            "cliVersion": "0.0.0",
+            "source": "appServer",
+            "threadSource": NSNull(),
+            "agentNickname": NSNull(),
+            "agentRole": NSNull(),
+            "gitInfo": NSNull(),
+            "name": NSNull(),
+            "turns": []
         ].nullStripped(keepNulls: true)
     }
 
@@ -15177,13 +15230,14 @@ private struct SkillConfigRule {
 
 private struct AppServerStartedConversation {
     let conversationID: ConversationId
-    let rolloutPath: URL
+    let rolloutPath: URL?
     let model: String
     let modelProvider: String
     let cwd: URL
     let approvalPolicy: AskForApproval
     let sandbox: SandboxPolicy
     let reasoningEffort: String?
+    let ephemeral: Bool
 }
 
 fileprivate struct AppServerReviewStartOutcome {

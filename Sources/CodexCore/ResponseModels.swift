@@ -414,7 +414,7 @@ public extension ResponseInputItem {
         case let .localImage(path):
             imageIndex += 1
             return localImageContentItems(path: path, labelNumber: imageIndex)
-        case .skill:
+        case .skill, .mention:
             return []
         }
     }

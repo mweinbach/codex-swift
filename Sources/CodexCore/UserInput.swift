@@ -43,6 +43,7 @@ public enum UserInput: Equatable, Codable, Sendable {
     case image(imageURL: String)
     case localImage(path: String)
     case skill(name: String, path: String)
+    case mention(name: String, path: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -58,6 +59,7 @@ public enum UserInput: Equatable, Codable, Sendable {
         case image
         case localImage = "local_image"
         case skill
+        case mention
     }
 
     public init(from decoder: Decoder) throws {
@@ -74,6 +76,11 @@ public enum UserInput: Equatable, Codable, Sendable {
             self = .localImage(path: try container.decode(String.self, forKey: .path))
         case .skill:
             self = .skill(
+                name: try container.decode(String.self, forKey: .name),
+                path: try container.decode(String.self, forKey: .path)
+            )
+        case .mention:
+            self = .mention(
                 name: try container.decode(String.self, forKey: .name),
                 path: try container.decode(String.self, forKey: .path)
             )
@@ -95,6 +102,10 @@ public enum UserInput: Equatable, Codable, Sendable {
             try container.encode(path, forKey: .path)
         case let .skill(name, path):
             try container.encode(InputType.skill, forKey: .type)
+            try container.encode(name, forKey: .name)
+            try container.encode(path, forKey: .path)
+        case let .mention(name, path):
+            try container.encode(InputType.mention, forKey: .type)
             try container.encode(name, forKey: .name)
             try container.encode(path, forKey: .path)
         }
