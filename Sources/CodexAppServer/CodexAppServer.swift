@@ -8393,6 +8393,228 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func itemStartedNotification(
+        threadID: String,
+        turnID: String,
+        event: ItemStartedEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/started",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "item": threadItemObject(event.item),
+                "startedAtMs": event.startedAtMilliseconds
+            ]
+        ]
+    }
+
+    fileprivate static func itemCompletedNotification(
+        threadID: String,
+        turnID: String,
+        event: ItemCompletedEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/completed",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "item": threadItemObject(event.item),
+                "completedAtMs": event.completedAtMilliseconds
+            ]
+        ]
+    }
+
+    private static func threadItemObject(_ item: TurnItem) -> [String: Any] {
+        switch item {
+        case let .userMessage(item):
+            return [
+                "type": "userMessage",
+                "id": item.id,
+                "content": item.content.map(userInputObject)
+            ]
+        case let .hookPrompt(item):
+            return [
+                "type": "hookPrompt",
+                "id": item.id,
+                "fragments": item.fragments.map(hookPromptFragmentObject)
+            ]
+        case let .agentMessage(item):
+            return [
+                "type": "agentMessage",
+                "id": item.id,
+                "text": agentMessageText(item),
+                "phase": item.phase.map(messagePhaseObject) ?? NSNull(),
+                "memoryCitation": item.memoryCitation.map(memoryCitationObject) ?? NSNull()
+            ]
+        case let .plan(item):
+            return [
+                "type": "plan",
+                "id": item.id,
+                "text": item.text
+            ]
+        case let .reasoning(item):
+            return [
+                "type": "reasoning",
+                "id": item.id,
+                "summary": item.summaryText,
+                "content": item.rawContent
+            ]
+        case let .fileChange(item):
+            return [
+                "type": "fileChange",
+                "id": item.id,
+                "changes": fileUpdateChanges(item.changes),
+                "status": item.status?.rawValue ?? "inProgress"
+            ]
+        case let .mcpToolCall(item):
+            var object: [String: Any] = [
+                "type": "mcpToolCall",
+                "id": item.id,
+                "server": item.server,
+                "tool": item.tool,
+                "status": item.status.rawValue,
+                "arguments": jsonObject(from: item.arguments),
+                "result": item.result.map(encodableJSONObject) ?? NSNull(),
+                "error": item.error.map(mcpToolCallErrorObject) ?? NSNull(),
+                "durationMs": item.duration.map(durationMilliseconds) ?? NSNull()
+            ]
+            if let mcpAppResourceURI = item.mcpAppResourceURI {
+                object["mcpAppResourceUri"] = mcpAppResourceURI
+            }
+            return object
+        case let .webSearch(item):
+            return [
+                "type": "webSearch",
+                "id": item.id,
+                "query": item.query,
+                "action": encodableJSONObject(item.action)
+            ]
+        case let .imageView(item):
+            return [
+                "type": "imageView",
+                "id": item.id,
+                "path": item.path.path
+            ]
+        case let .imageGeneration(item):
+            var object: [String: Any] = [
+                "type": "imageGeneration",
+                "id": item.id,
+                "status": item.status,
+                "revisedPrompt": item.revisedPrompt as Any? ?? NSNull(),
+                "result": item.result
+            ]
+            if let savedPath = item.savedPath {
+                object["savedPath"] = savedPath.path
+            }
+            return object
+        case let .contextCompaction(item):
+            return [
+                "type": "contextCompaction",
+                "id": item.id
+            ]
+        }
+    }
+
+    private static func userInputObject(_ input: UserInput) -> [String: Any] {
+        switch input {
+        case let .text(text, textElements):
+            return [
+                "type": "text",
+                "text": text,
+                "textElements": textElements.map(textElementObject)
+            ]
+        case let .image(imageURL):
+            return [
+                "type": "image",
+                "url": imageURL
+            ]
+        case let .localImage(path):
+            return [
+                "type": "localImage",
+                "path": path
+            ]
+        case let .skill(name, path):
+            return [
+                "type": "skill",
+                "name": name,
+                "path": path
+            ]
+        }
+    }
+
+    private static func textElementObject(_ element: TextElement) -> [String: Any] {
+        [
+            "byteRange": byteRangeObject(element.byteRange),
+            "placeholder": element.placeholder as Any? ?? NSNull()
+        ]
+    }
+
+    private static func byteRangeObject(_ range: ByteRange) -> [String: Any] {
+        [
+            "start": range.start,
+            "end": range.end
+        ]
+    }
+
+    private static func hookPromptFragmentObject(_ fragment: HookPromptFragment) -> [String: Any] {
+        [
+            "text": fragment.text,
+            "hookRunId": fragment.hookRunID
+        ]
+    }
+
+    private static func agentMessageText(_ item: AgentMessageItem) -> String {
+        item.content.map { content in
+            switch content {
+            case let .text(text):
+                return text
+            }
+        }.joined()
+    }
+
+    private static func messagePhaseObject(_ phase: MessagePhase) -> String {
+        switch phase {
+        case .commentary:
+            return "Commentary"
+        case .finalAnswer:
+            return "FinalAnswer"
+        }
+    }
+
+    private static func memoryCitationObject(_ citation: MemoryCitation) -> [String: Any] {
+        [
+            "entries": citation.entries.map(memoryCitationEntryObject),
+            "threadIds": citation.rolloutIDs
+        ]
+    }
+
+    private static func memoryCitationEntryObject(_ entry: MemoryCitationEntry) -> [String: Any] {
+        [
+            "path": entry.path,
+            "lineStart": entry.lineStart,
+            "lineEnd": entry.lineEnd,
+            "note": entry.note
+        ]
+    }
+
+    private static func mcpToolCallErrorObject(_ error: McpToolCallError) -> [String: Any] {
+        ["message": error.message]
+    }
+
+    private static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64 {
+        Int64((duration.timeInterval * 1000).rounded(.towardZero))
+    }
+
+    private static func encodableJSONObject<T: Encodable>(_ value: T) -> Any {
+        guard let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data)
+        else {
+            return NSNull()
+        }
+        return object
+    }
+
     private static func fileUpdateChanges(_ changes: [String: FileChange]) -> [[String: Any]] {
         changes
             .map { path, change in
@@ -8899,6 +9121,10 @@ public enum CodexAppServer {
             return terminalInteractionNotification(threadID: threadID, turnID: turnID, event: event)
         case let .patchApplyUpdated(event):
             return fileChangePatchUpdatedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .itemStarted(event):
+            return itemStartedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .itemCompleted(event):
+            return itemCompletedNotification(threadID: threadID, turnID: turnID, event: event)
         default:
             return nil
         }

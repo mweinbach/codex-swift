@@ -1016,6 +1016,193 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((changes[2]["kind"] as? [String: Any])?["type"] as? String, "delete")
     }
 
+    func testRuntimeItemLifecycleEventsEmitRustNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let eventThreadID = try ConversationId(string: "123e4567-e89b-12d3-a456-426614174000")
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemStarted(ItemStartedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .agentMessage(AgentMessageItem(
+                    id: "agent-1",
+                    content: [.text("Hello "), .text("world")],
+                    phase: .finalAnswer,
+                    memoryCitation: MemoryCitation(
+                        entries: [
+                            MemoryCitationEntry(
+                                path: "MEMORY.md",
+                                lineStart: 1,
+                                lineEnd: 2,
+                                note: "summary"
+                            )
+                        ],
+                        rolloutIDs: ["rollout-1"]
+                    )
+                )),
+                startedAtMilliseconds: 111
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .reasoning(ReasoningItem(
+                    id: "reason-1",
+                    summaryText: ["line one"],
+                    rawContent: ["raw"]
+                )),
+                completedAtMilliseconds: 222
+            ))
+        )
+
+        let startedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(startedMessages[0]["method"] as? String, "item/started")
+        let startedParams = try XCTUnwrap(startedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(startedParams["startedAtMs"] as? Int, 111)
+        let agentItem = try XCTUnwrap(startedParams["item"] as? [String: Any])
+        XCTAssertEqual(agentItem["type"] as? String, "agentMessage")
+        XCTAssertEqual(agentItem["id"] as? String, "agent-1")
+        XCTAssertEqual(agentItem["text"] as? String, "Hello world")
+        XCTAssertEqual(agentItem["phase"] as? String, "FinalAnswer")
+        let memoryCitation = try XCTUnwrap(agentItem["memoryCitation"] as? [String: Any])
+        XCTAssertEqual(memoryCitation["threadIds"] as? [String], ["rollout-1"])
+        let citationEntries = try XCTUnwrap(memoryCitation["entries"] as? [[String: Any]])
+        XCTAssertEqual(citationEntries[0]["path"] as? String, "MEMORY.md")
+        XCTAssertEqual(citationEntries[0]["lineStart"] as? Int, 1)
+        XCTAssertEqual(citationEntries[0]["lineEnd"] as? Int, 2)
+        XCTAssertEqual(citationEntries[0]["note"] as? String, "summary")
+
+        let completedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completedMessages[0]["method"] as? String, "item/completed")
+        let completedParams = try XCTUnwrap(completedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(completedParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(completedParams["completedAtMs"] as? Int, 222)
+        let reasoningItem = try XCTUnwrap(completedParams["item"] as? [String: Any])
+        XCTAssertEqual(reasoningItem["type"] as? String, "reasoning")
+        XCTAssertEqual(reasoningItem["id"] as? String, "reason-1")
+        XCTAssertEqual(reasoningItem["summary"] as? [String], ["line one"])
+        XCTAssertEqual(reasoningItem["content"] as? [String], ["raw"])
+    }
+
+    func testRuntimeItemLifecycleSerializesUserFileAndMcpItems() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let eventThreadID = try ConversationId(string: "123e4567-e89b-12d3-a456-426614174000")
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemStarted(ItemStartedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .userMessage(UserMessageItem(
+                    id: "user-1",
+                    content: [
+                        .text(
+                            "hello",
+                            textElements: [TextElement(byteRange: ByteRange(start: 0, end: 5), placeholder: "hello")]
+                        ),
+                        .image(imageURL: "https://example.test/image.png"),
+                        .localImage(path: "local/image.png"),
+                        .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md")
+                    ]
+                )),
+                startedAtMilliseconds: 10
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .fileChange(FileChangeItem(
+                    id: "patch-1",
+                    changes: [
+                        "b.swift": .update(unifiedDiff: "@@ -1 +1 @@\n-old\n+new", movePath: nil),
+                        "a.swift": .add(content: "let a = 1\n")
+                    ],
+                    status: .completed
+                )),
+                completedAtMilliseconds: 20
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .mcpToolCall(McpToolCallItem(
+                    id: "mcp-1",
+                    server: "docs",
+                    tool: "lookup",
+                    arguments: .object(["query": .string("swift")]),
+                    mcpAppResourceURI: "app://docs",
+                    status: .failed,
+                    error: McpToolCallError(message: "boom"),
+                    duration: ProtocolDuration(secs: 1, nanos: 250_000_000)
+                )),
+                completedAtMilliseconds: 30
+            ))
+        )
+
+        let userMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let userParams = try XCTUnwrap(userMessages[0]["params"] as? [String: Any])
+        let userItem = try XCTUnwrap(userParams["item"] as? [String: Any])
+        XCTAssertEqual(userItem["type"] as? String, "userMessage")
+        let content = try XCTUnwrap(userItem["content"] as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "localImage", "skill"])
+        XCTAssertEqual(content[0]["text"] as? String, "hello")
+        let textElements = try XCTUnwrap(content[0]["textElements"] as? [[String: Any]])
+        XCTAssertEqual((textElements[0]["byteRange"] as? [String: Any])?["start"] as? Int, 0)
+        XCTAssertEqual((textElements[0]["byteRange"] as? [String: Any])?["end"] as? Int, 5)
+        XCTAssertEqual(textElements[0]["placeholder"] as? String, "hello")
+        XCTAssertEqual(content[1]["url"] as? String, "https://example.test/image.png")
+        XCTAssertEqual(content[2]["path"] as? String, "local/image.png")
+        XCTAssertEqual(content[3]["name"] as? String, "skill-creator")
+
+        let fileMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let fileParams = try XCTUnwrap(fileMessages[0]["params"] as? [String: Any])
+        let fileItem = try XCTUnwrap(fileParams["item"] as? [String: Any])
+        XCTAssertEqual(fileItem["type"] as? String, "fileChange")
+        XCTAssertEqual(fileItem["status"] as? String, "completed")
+        let changes = try XCTUnwrap(fileItem["changes"] as? [[String: Any]])
+        XCTAssertEqual(changes.map { $0["path"] as? String }, ["a.swift", "b.swift"])
+        XCTAssertEqual((changes[1]["kind"] as? [String: Any])?["type"] as? String, "update")
+        XCTAssertTrue(((changes[1]["kind"] as? [String: Any])?["movePath"]) is NSNull)
+
+        let mcpMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let mcpParams = try XCTUnwrap(mcpMessages[0]["params"] as? [String: Any])
+        let mcpItem = try XCTUnwrap(mcpParams["item"] as? [String: Any])
+        XCTAssertEqual(mcpItem["type"] as? String, "mcpToolCall")
+        XCTAssertEqual(mcpItem["server"] as? String, "docs")
+        XCTAssertEqual(mcpItem["tool"] as? String, "lookup")
+        XCTAssertEqual(mcpItem["status"] as? String, "failed")
+        XCTAssertEqual(mcpItem["mcpAppResourceUri"] as? String, "app://docs")
+        XCTAssertEqual((mcpItem["arguments"] as? [String: Any])?["query"] as? String, "swift")
+        XCTAssertTrue(mcpItem["result"] is NSNull)
+        XCTAssertEqual((mcpItem["error"] as? [String: Any])?["message"] as? String, "boom")
+        XCTAssertEqual(mcpItem["durationMs"] as? Int, 1250)
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
