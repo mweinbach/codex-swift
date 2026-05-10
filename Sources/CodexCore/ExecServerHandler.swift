@@ -1,24 +1,30 @@
 import Foundation
 
 public actor ExecServerHandler {
+    public typealias OutboundNotification = @Sendable (ExecServerJSONRPCNotification) async -> Void
+
     private let sessionRegistry: ExecServerSessionRegistry
     private let fileSystem: ExecServerFileSystem
     private let processStore: ExecServerProcessStore
     private let httpClient: ExecServerHTTPClient
+    private let outboundNotification: OutboundNotification
     private var session: ExecServerSessionHandle?
     private var initializeRequested = false
     private var initialized = false
+    private var activeHTTPBodyStreams: [String: Task<Void, Never>] = [:]
 
     public init(
         sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
         fileSystem: ExecServerFileSystem = ExecServerFileSystem(),
         processStore: ExecServerProcessStore = ExecServerProcessStore(),
-        httpClient: ExecServerHTTPClient = ExecServerHTTPClient()
+        httpClient: ExecServerHTTPClient = ExecServerHTTPClient(),
+        outboundNotification: @escaping OutboundNotification = { _ in }
     ) {
         self.sessionRegistry = sessionRegistry
         self.fileSystem = fileSystem
         self.processStore = processStore
         self.httpClient = httpClient
+        self.outboundNotification = outboundNotification
     }
 
     public func initialize(_ params: ExecServerInitializeParams) async throws -> ExecServerInitializeResponse {
@@ -60,9 +66,11 @@ public actor ExecServerHandler {
 
     public func shutdown() async {
         guard let session else {
+            cancelHTTPBodyStreams()
             await processStore.shutdown()
             return
         }
+        cancelHTTPBodyStreams()
         await processStore.shutdown()
         await session.detach()
     }
@@ -146,7 +154,84 @@ public actor ExecServerHandler {
 
     public func httpRequest(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {
         _ = try await requireInitialized(for: "http")
-        return try await httpClient.run(params)
+        guard params.streamResponse else {
+            return try await httpClient.run(params)
+        }
+        if activeHTTPBodyStreams[params.requestId] != nil {
+            throw ExecServerRPC.invalidParams(
+                "http/request streamResponse requestId `\(params.requestId)` is already active"
+            )
+        }
+        let streamResponse = try await httpClient.startStreaming(params)
+        activeHTTPBodyStreams[params.requestId] = Task {
+            await self.sendHTTPBodyDeltas(requestId: params.requestId, bodyStream: streamResponse.bodyStream)
+        }
+        return streamResponse.response
+    }
+
+    private func sendHTTPBodyDeltas(requestId: String, bodyStream: APIByteStream) async {
+        var seq: UInt64 = 1
+        for await result in bodyStream {
+            switch result {
+            case let .success(data):
+                guard !data.isEmpty else {
+                    continue
+                }
+                await sendHTTPBodyDelta(
+                    requestId: requestId,
+                    seq: seq,
+                    delta: ExecServerByteChunk(Array(data)),
+                    done: false
+                )
+                seq += 1
+            case let .failure(error):
+                await sendHTTPBodyDelta(
+                    requestId: requestId,
+                    seq: seq,
+                    delta: ExecServerByteChunk([]),
+                    done: true,
+                    error: String(describing: error)
+                )
+                activeHTTPBodyStreams[requestId] = nil
+                return
+            }
+        }
+
+        await sendHTTPBodyDelta(
+            requestId: requestId,
+            seq: seq,
+            delta: ExecServerByteChunk([]),
+            done: true
+        )
+        activeHTTPBodyStreams[requestId] = nil
+    }
+
+    private func sendHTTPBodyDelta(
+        requestId: String,
+        seq: UInt64,
+        delta: ExecServerByteChunk,
+        done: Bool,
+        error: String? = nil
+    ) async {
+        let notification = ExecServerHttpRequestBodyDeltaNotification(
+            requestId: requestId,
+            seq: seq,
+            delta: delta,
+            done: done,
+            error: error
+        )
+        let params = try? ExecServerRPC.jsonValue(from: notification)
+        await outboundNotification(ExecServerJSONRPCNotification(
+            method: execServerHttpRequestBodyDeltaMethod,
+            params: params
+        ))
+    }
+
+    private func cancelHTTPBodyStreams() {
+        for task in activeHTTPBodyStreams.values {
+            task.cancel()
+        }
+        activeHTTPBodyStreams.removeAll()
     }
 }
 

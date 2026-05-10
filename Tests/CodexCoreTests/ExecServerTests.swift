@@ -788,9 +788,24 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(request.timeoutInterval, 5.0, accuracy: 0.001)
     }
 
-    func testRouterReportsPendingStreamingHttpAndUnknownMethodsWithRustStubMessage() async throws {
+    func testRouterRoutesStreamingHttpResponseHeadersLikeRust() async throws {
         let router = ExecServerRouter()
-        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        let handler = ExecServerHandler(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])),
+            httpClient: ExecServerHTTPClient(
+                send: { _ in URLSessionTransportResponse(statusCode: 500) },
+                stream: { _ in
+                    APIStreamResponse(
+                        statusCode: 200,
+                        headers: ["content-type": "text/event-stream"],
+                        byteStream: APIByteStream { continuation in
+                            continuation.yield(.success(Data("hello".utf8)))
+                            continuation.finish()
+                        }
+                    )
+                }
+            )
+        )
         _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
         try await handler.markInitialized()
 
@@ -804,20 +819,131 @@ final class ExecServerTests: XCTestCase {
                 streamResponse: true
             ))
         ), using: handler)
+
+        guard case let .response(.integer(1), result) = streaming else {
+            return XCTFail("Expected streaming http/request header response")
+        }
+        XCTAssertEqual(try decodeJSONValue(result, as: ExecServerHttpRequestResponse.self), ExecServerHttpRequestResponse(
+            status: 200,
+            headers: [ExecServerHttpHeader(name: "content-type", value: "text/event-stream")],
+            body: ExecServerByteChunk([])
+        ))
+    }
+
+    func testRouterReportsUnknownMethodsWithRustStubMessage() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+
         let unknown = await router.handleRequest(ExecServerJSONRPCRequest(
             id: .integer(2),
             method: "made/up",
             params: .object([:])
         ), using: handler)
 
-        XCTAssertEqual(streaming, .error(
-            requestID: .integer(1),
-            error: ExecServerRPC.internalError("http/request streamResponse is not implemented")
-        ))
         XCTAssertEqual(unknown, .error(
             requestID: .integer(2),
             error: ExecServerRPC.methodNotFound("exec-server stub does not implement `made/up` yet")
         ))
+    }
+
+    func testConnectionStreamsHttpBodyDeltaNotificationsLikeRust() async throws {
+        let connection = try await initializedConnection(httpClient: ExecServerHTTPClient(
+            send: { _ in URLSessionTransportResponse(statusCode: 500) },
+            stream: { _ in
+                APIStreamResponse(
+                    statusCode: 200,
+                    headers: ["x-mcp-test": "streaming"],
+                    byteStream: APIByteStream { continuation in
+                        continuation.yield(.success(Data("hello ".utf8)))
+                        continuation.yield(.success(Data("world".utf8)))
+                        continuation.finish()
+                    }
+                )
+            }
+        ))
+
+        let response = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(42),
+            method: execServerHttpRequestMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
+                method: "GET",
+                url: "https://example.test/mcp?case=streaming",
+                headers: [ExecServerHttpHeader(name: "accept", value: "text/event-stream")],
+                requestId: "stream-1",
+                streamResponse: true
+            ))
+        ))))
+        guard case let .response(.integer(42), result) = response else {
+            return XCTFail("Expected streaming http/request response before body deltas")
+        }
+        XCTAssertEqual(try decodeJSONValue(result, as: ExecServerHttpRequestResponse.self), ExecServerHttpRequestResponse(
+            status: 200,
+            headers: [ExecServerHttpHeader(name: "x-mcp-test", value: "streaming")],
+            body: ExecServerByteChunk([])
+        ))
+
+        let deltas = try await collectHTTPBodyDeltas(from: connection, requestId: "stream-1")
+        XCTAssertEqual(deltas.map(\.seq), [1, 2, 3])
+        XCTAssertEqual(
+            deltas.flatMap { $0.delta.bytes },
+            Array("hello world".utf8)
+        )
+        XCTAssertEqual(deltas.last?.done, true)
+        XCTAssertNil(deltas.last?.error)
+    }
+
+    func testStreamingHttpRejectsDuplicateRequestIDWhileActiveLikeRust() async throws {
+        let gate = HTTPStreamGate()
+        let handler = ExecServerHandler(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])),
+            httpClient: ExecServerHTTPClient(
+                send: { _ in URLSessionTransportResponse(statusCode: 500) },
+                stream: { _ in
+                    APIStreamResponse(
+                        statusCode: 200,
+                        byteStream: APIByteStream { continuation in
+                            continuation.yield(.success(Data("hello".utf8)))
+                            Task {
+                                await gate.store(continuation)
+                            }
+                        }
+                    )
+                }
+            )
+        )
+        let router = ExecServerRouter()
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+
+        _ = await router.handleRequest(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerHttpRequestMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
+                method: "GET",
+                url: "https://example.test/mcp",
+                requestId: "stream-dup",
+                streamResponse: true
+            ))
+        ), using: handler)
+        let duplicate = await router.handleRequest(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerHttpRequestMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
+                method: "GET",
+                url: "https://example.test/mcp",
+                requestId: "stream-dup",
+                streamResponse: true
+            ))
+        ), using: handler)
+
+        XCTAssertEqual(duplicate, .error(
+            requestID: .integer(2),
+            error: ExecServerRPC.invalidParams("http/request streamResponse requestId `stream-dup` is already active")
+        ))
+        await gate.finish()
+        await handler.shutdown()
     }
 
     func testHttpRequestRejectsInvalidMethodAndSchemeLikeRust() async throws {
@@ -1549,8 +1675,10 @@ final class ExecServerTests: XCTestCase {
         try AbsolutePath(absolutePath: path)
     }
 
-    private func initializedConnection() async throws -> ExecServerConnection {
-        let connection = ExecServerConnection()
+    private func initializedConnection(
+        httpClient: ExecServerHTTPClient = ExecServerHTTPClient()
+    ) async throws -> ExecServerConnection {
+        let connection = ExecServerConnection(httpClient: httpClient)
         _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
             id: .integer(1),
             method: execServerInitializeMethod,
@@ -1561,6 +1689,49 @@ final class ExecServerTests: XCTestCase {
             params: .object([:])
         ))))
         return connection
+    }
+
+    private func collectHTTPBodyDeltas(
+        from connection: ExecServerConnection,
+        requestId: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> [ExecServerHttpRequestBodyDeltaNotification] {
+        var deltas: [ExecServerHttpRequestBodyDeltaNotification] = []
+        for _ in 0..<20 {
+            guard let outbound = try await nextOutbound(from: connection, file: file, line: line) else {
+                continue
+            }
+            guard case let .notification(notification) = outbound else {
+                XCTFail("Expected http/request body delta notification", file: file, line: line)
+                continue
+            }
+            XCTAssertEqual(notification.method, execServerHttpRequestBodyDeltaMethod, file: file, line: line)
+            let params = try XCTUnwrap(notification.params, file: file, line: line)
+            let delta = try decodeJSONValue(params, as: ExecServerHttpRequestBodyDeltaNotification.self)
+            XCTAssertEqual(delta.requestId, requestId, file: file, line: line)
+            deltas.append(delta)
+            if delta.done {
+                return deltas
+            }
+        }
+        XCTFail("Timed out waiting for terminal http/request body delta", file: file, line: line)
+        return deltas
+    }
+
+    private func nextOutbound(
+        from connection: ExecServerConnection,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> ExecServerOutboundMessage? {
+        for _ in 0..<50 {
+            if let message = await connection.nextOutbound() {
+                return message
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Timed out waiting for outbound exec-server message", file: file, line: line)
+        return nil
     }
 
     private actor HTTPRequestRecorder {
@@ -1578,6 +1749,19 @@ final class ExecServerTests: XCTestCase {
 
         func firstRequest() -> URLRequest? {
             requests.first
+        }
+    }
+
+    private actor HTTPStreamGate {
+        private var continuation: APIByteStream.Continuation?
+
+        func store(_ continuation: APIByteStream.Continuation) {
+            self.continuation = continuation
+        }
+
+        func finish() {
+            continuation?.finish()
+            continuation = nil
         }
     }
 

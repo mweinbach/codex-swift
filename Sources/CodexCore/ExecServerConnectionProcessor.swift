@@ -29,13 +29,23 @@ public actor ExecServerConnectionProcessor {
 public actor ExecServerConnection {
     private let handler: ExecServerHandler
     private let router: ExecServerRouter
+    private let outboundQueue: ExecServerOutboundQueue
     private var closed = false
 
     public init(
         sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
-        router: ExecServerRouter = ExecServerRouter()
+        router: ExecServerRouter = ExecServerRouter(),
+        httpClient: ExecServerHTTPClient = ExecServerHTTPClient()
     ) {
-        self.handler = ExecServerHandler(sessionRegistry: sessionRegistry)
+        let outboundQueue = ExecServerOutboundQueue()
+        self.outboundQueue = outboundQueue
+        self.handler = ExecServerHandler(
+            sessionRegistry: sessionRegistry,
+            httpClient: httpClient,
+            outboundNotification: { notification in
+                await outboundQueue.enqueue(.notification(notification))
+            }
+        )
         self.router = router
     }
 
@@ -83,6 +93,10 @@ public actor ExecServerConnection {
         closed
     }
 
+    public func nextOutbound() async -> ExecServerOutboundMessage? {
+        await outboundQueue.dequeue()
+    }
+
     private func handle(_ message: ExecServerJSONRPCMessage) async -> ExecServerOutboundMessage? {
         switch message {
         case let .request(request):
@@ -106,5 +120,20 @@ public actor ExecServerConnection {
         }
         closed = true
         await handler.shutdown()
+    }
+}
+
+private actor ExecServerOutboundQueue {
+    private var messages: [ExecServerOutboundMessage] = []
+
+    func enqueue(_ message: ExecServerOutboundMessage) {
+        messages.append(message)
+    }
+
+    func dequeue() -> ExecServerOutboundMessage? {
+        guard !messages.isEmpty else {
+            return nil
+        }
+        return messages.removeFirst()
     }
 }

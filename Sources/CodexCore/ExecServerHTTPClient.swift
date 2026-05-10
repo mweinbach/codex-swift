@@ -2,22 +2,35 @@ import Foundation
 
 public struct ExecServerHTTPClient: Sendable {
     public typealias Send = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
+    public typealias Stream = @Sendable (URLRequest) async throws -> APIStreamResponse
 
     private let send: Send
+    private let stream: Stream
 
     public init() {
-        self.init(send: ExecServerHTTPClient.urlSessionSend)
+        self.init(send: ExecServerHTTPClient.urlSessionSend, stream: ExecServerHTTPClient.urlSessionStream)
     }
 
     public init(send: @escaping Send) {
+        self.init(send: send) { request in
+            let response = try await send(request)
+            return APIStreamResponse(
+                statusCode: response.statusCode,
+                headers: response.headers,
+                byteStream: APIByteStream { continuation in
+                    continuation.yield(.success(response.body))
+                    continuation.finish()
+                }
+            )
+        }
+    }
+
+    public init(send: @escaping Send, stream: @escaping Stream) {
         self.send = send
+        self.stream = stream
     }
 
     public func run(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {
-        guard !params.streamResponse else {
-            throw ExecServerRPC.internalError("http/request streamResponse is not implemented")
-        }
-
         var request = try buildRequest(params)
 
         if let timeoutMs = params.timeoutMs {
@@ -38,6 +51,38 @@ public struct ExecServerHTTPClient: Sendable {
                 status: status,
                 headers: headers,
                 body: ExecServerByteChunk(Array(response.body))
+            )
+        } catch let error as ExecServerJSONRPCErrorDetail {
+            throw error
+        } catch {
+            throw ExecServerRPC.internalError("http/request failed: \(Self.errorDescription(error))")
+        }
+    }
+
+    public func startStreaming(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHTTPStreamResponse {
+        var request = try buildRequest(params)
+
+        if let timeoutMs = params.timeoutMs {
+            request.timeoutInterval = Double(timeoutMs) / 1_000
+        }
+
+        do {
+            let response = try await stream(request)
+            guard let status = UInt16(exactly: response.statusCode) else {
+                throw ExecServerRPC.internalError("http/request response status is invalid: \(response.statusCode)")
+            }
+            let headers = response.headers
+                .map { ExecServerHttpHeader(name: $0.key, value: $0.value) }
+                .sorted { lhs, rhs in
+                    lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                }
+            return ExecServerHTTPStreamResponse(
+                response: ExecServerHttpRequestResponse(
+                    status: status,
+                    headers: headers,
+                    body: ExecServerByteChunk([])
+                ),
+                bodyStream: response.byteStream
             )
         } catch let error as ExecServerJSONRPCErrorDetail {
             throw error
@@ -116,18 +161,69 @@ public struct ExecServerHTTPClient: Sendable {
             throw ExecServerHTTPClientError.nonHTTPResponse
         }
 
-        let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+        return URLSessionTransportResponse(
+            statusCode: http.statusCode,
+            headers: headers(from: http),
+            body: data
+        )
+    }
+
+    private static func urlSessionStream(_ request: URLRequest) async throws -> APIStreamResponse {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ExecServerHTTPClientError.nonHTTPResponse
+        }
+
+        let byteStream = APIByteStream { continuation in
+            let task = Task {
+                do {
+                    var buffer = Data()
+                    buffer.reserveCapacity(8_192)
+                    for try await byte in bytes {
+                        buffer.append(byte)
+                        if buffer.count >= 8_192 {
+                            continuation.yield(.success(buffer))
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if !buffer.isEmpty {
+                        continuation.yield(.success(buffer))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.yield(.failure(.network(Self.errorDescription(error))))
+                    continuation.finish()
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+
+        return APIStreamResponse(
+            statusCode: http.statusCode,
+            headers: headers(from: http),
+            byteStream: byteStream
+        )
+    }
+
+    private static func headers(from response: HTTPURLResponse) -> [String: String] {
+        response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
             guard let name = entry.key as? String else {
                 return
             }
             result[name] = String(describing: entry.value)
         }
+    }
+}
 
-        return URLSessionTransportResponse(
-            statusCode: http.statusCode,
-            headers: headers,
-            body: data
-        )
+public struct ExecServerHTTPStreamResponse: Sendable {
+    public let response: ExecServerHttpRequestResponse
+    public let bodyStream: APIByteStream
+
+    public init(response: ExecServerHttpRequestResponse, bodyStream: APIByteStream) {
+        self.response = response
+        self.bodyStream = bodyStream
     }
 }
 
