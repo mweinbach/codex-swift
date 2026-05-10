@@ -20,6 +20,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelVerbosity)
         XCTAssertNil(config.serviceTier)
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
+        XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig())
+        XCTAssertEqual(config.realtime, RealtimeConfig())
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
         XCTAssertNil(config.forcedChatGPTWorkspaceID)
@@ -94,6 +96,16 @@ final class ConfigLoaderTests: XCTestCase {
         mcp_oauth_callback_url = "https://example.com/callback"
         tool_output_token_limit = 12000
         oss_provider = "ollama"
+
+        [audio]
+        microphone = "USB Mic"
+        speaker = "Desk Speakers"
+
+        [realtime]
+        version = "v2"
+        type = "transcription"
+        transport = "webrtc"
+        voice = "cedar"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -108,6 +120,16 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelVerbosity, .low)
         XCTAssertEqual(config.serviceTier, "priority")
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
+        XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig(
+            microphone: "USB Mic",
+            speaker: "Desk Speakers"
+        ))
+        XCTAssertEqual(config.realtime, RealtimeConfig(
+            version: .v2,
+            sessionType: .transcription,
+            transport: .webrtc,
+            voice: .cedar
+        ))
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
@@ -158,6 +180,46 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalRealtimeWSStartupContext, "cli startup context")
         XCTAssertEqual(config.experimentalRealtimeStartInstructions, "cli start instructions")
         XCTAssertEqual(config.experimentalThreadConfigEndpoint, "http://localhost:8061")
+    }
+
+    func testRealtimeConfigPartialTableUsesRustDefaults() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [realtime]
+        voice = "marin"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.realtime, RealtimeConfig(voice: .marin))
+    }
+
+    func testCLIOverridesLoadRealtimeAudioAndRealtimeConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"audio.microphone="CLI Mic""#,
+                #"audio.speaker="CLI Speakers""#,
+                #"realtime.version="v1""#,
+                #"realtime.type="conversational""#,
+                #"realtime.transport="websocket""#,
+                #"realtime.voice="cove""#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig(
+            microphone: "CLI Mic",
+            speaker: "CLI Speakers"
+        ))
+        XCTAssertEqual(config.realtime, RealtimeConfig(
+            version: .v1,
+            sessionType: .conversational,
+            transport: .websocket,
+            voice: .cove
+        ))
     }
 
     func testExperimentalThreadStoreLoadsFromConfigTomlLikeRust() throws {

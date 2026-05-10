@@ -18,6 +18,45 @@ public enum ThreadStoreConfig: Equatable, Sendable {
     case inMemory(id: String)
 }
 
+public struct RealtimeAudioConfig: Equatable, Sendable {
+    public var microphone: String?
+    public var speaker: String?
+
+    public init(microphone: String? = nil, speaker: String? = nil) {
+        self.microphone = microphone
+        self.speaker = speaker
+    }
+}
+
+public enum RealtimeWsMode: String, Codable, Equatable, Sendable {
+    case conversational
+    case transcription
+}
+
+public enum RealtimeTransport: String, Codable, Equatable, Sendable {
+    case webrtc
+    case websocket
+}
+
+public struct RealtimeConfig: Equatable, Sendable {
+    public var version: RealtimeConversationVersion
+    public var sessionType: RealtimeWsMode
+    public var transport: RealtimeTransport
+    public var voice: RealtimeVoice?
+
+    public init(
+        version: RealtimeConversationVersion = .v2,
+        sessionType: RealtimeWsMode = .conversational,
+        transport: RealtimeTransport = .webrtc,
+        voice: RealtimeVoice? = nil
+    ) {
+        self.version = version
+        self.sessionType = sessionType
+        self.transport = transport
+        self.voice = voice
+    }
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -30,6 +69,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
     public var chatgptBaseURL: String
+    public var realtimeAudio: RealtimeAudioConfig
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
     public var forcedChatGPTWorkspaceID: String?
@@ -43,6 +83,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var experimentalUseFreeformApplyPatch: Bool?
     public var experimentalRealtimeWSBaseURL: String?
     public var experimentalRealtimeWSModel: String?
+    public var realtime: RealtimeConfig
     public var experimentalRealtimeWSBackendPrompt: String?
     public var experimentalRealtimeWSStartupContext: String?
     public var experimentalRealtimeStartInstructions: String?
@@ -76,6 +117,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
@@ -89,6 +131,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         experimentalUseFreeformApplyPatch: Bool? = nil,
         experimentalRealtimeWSBaseURL: String? = nil,
         experimentalRealtimeWSModel: String? = nil,
+        realtime: RealtimeConfig = RealtimeConfig(),
         experimentalRealtimeWSBackendPrompt: String? = nil,
         experimentalRealtimeWSStartupContext: String? = nil,
         experimentalRealtimeStartInstructions: String? = nil,
@@ -121,6 +164,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
+        self.realtimeAudio = realtimeAudio
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
@@ -134,6 +178,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
         self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
         self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
+        self.realtime = realtime
         self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
         self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
         self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
@@ -574,6 +619,8 @@ private struct ParsedCodexConfigToml {
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
+    var realtimeAudio: [String: ConfigValue] = [:]
+    var realtime: [String: ConfigValue] = [:]
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -657,6 +704,10 @@ private struct ParsedCodexConfigToml {
                 )
             case .sandboxWorkspaceWrite:
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .audio:
+                parsed.realtimeAudio[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .realtime:
+                parsed.realtime[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .profileFeatures(name):
                 parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -724,6 +775,16 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "sandbox_workspace_write" {
                 sandboxWorkspaceWrite[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "audio" {
+                realtimeAudio[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "realtime" {
+                realtime[parts[1]] = value
                 continue
             }
 
@@ -816,6 +877,14 @@ private struct ParsedCodexConfigToml {
             sandboxWorkspaceWrite[key] = value
         }
 
+        for (key, value) in overlay.realtimeAudio {
+            realtimeAudio[key] = value
+        }
+
+        for (key, value) in overlay.realtime {
+            realtime[key] = value
+        }
+
         for (profileName, profileValues) in overlay.profileFeatures {
             var mergedProfile = profileFeatures[profileName] ?? [:]
             for (key, value) in profileValues {
@@ -856,6 +925,18 @@ private struct ParsedCodexConfigToml {
         if case let .table(workspaceWrite) = table["sandbox_workspace_write"] {
             for (key, value) in workspaceWrite {
                 sandboxWorkspaceWrite[key] = value
+            }
+        }
+
+        if case let .table(audioTable) = table["audio"] {
+            for (key, value) in audioTable {
+                realtimeAudio[key] = value
+            }
+        }
+
+        if case let .table(realtimeTable) = table["realtime"] {
+            for (key, value) in realtimeTable {
+                realtime[key] = value
             }
         }
 
@@ -911,6 +992,8 @@ private struct ParsedCodexConfigToml {
         var config = CodexRuntimeConfig()
 
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
+        config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
+        config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
 
         if let authStore = topLevel["cli_auth_credentials_store"] {
             let rawMode = try Self.stringValue(authStore, key: "cli_auth_credentials_store")
@@ -1423,6 +1506,37 @@ private struct ParsedCodexConfigToml {
         return enumValue
     }
 
+    private static func realtimeAudioConfigValue(_ table: [String: ConfigValue], key: String) throws -> RealtimeAudioConfig {
+        for field in table.keys where !["microphone", "speaker"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return RealtimeAudioConfig(
+            microphone: try table["microphone"].map { try stringValue($0, key: "\(key).microphone") },
+            speaker: try table["speaker"].map { try stringValue($0, key: "\(key).speaker") }
+        )
+    }
+
+    private static func realtimeConfigValue(_ table: [String: ConfigValue], key: String) throws -> RealtimeConfig {
+        for field in table.keys where !["version", "type", "transport", "voice"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        let defaults = RealtimeConfig()
+        return RealtimeConfig(
+            version: try table["version"].map {
+                try stringEnumValue(RealtimeConversationVersion.self, $0, key: "\(key).version")
+            } ?? defaults.version,
+            sessionType: try table["type"].map {
+                try stringEnumValue(RealtimeWsMode.self, $0, key: "\(key).type")
+            } ?? defaults.sessionType,
+            transport: try table["transport"].map {
+                try stringEnumValue(RealtimeTransport.self, $0, key: "\(key).transport")
+            } ?? defaults.transport,
+            voice: try table["voice"].map {
+                try stringEnumValue(RealtimeVoice.self, $0, key: "\(key).voice")
+            } ?? defaults.voice
+        )
+    }
+
     private static func threadStoreConfigValue(_ value: ConfigValue, key: String) throws -> ThreadStoreConfig {
         guard case let .table(table) = value else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -1573,6 +1687,12 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 1, parts[0] == "sandbox_workspace_write" {
             return .sandboxWorkspaceWrite
+        }
+        if parts.count == 1, parts[0] == "audio" {
+            return .audio
+        }
+        if parts.count == 1, parts[0] == "realtime" {
+            return .realtime
         }
         if parts.count == 2, parts[0] == "tools", parts[1] == "web_search" {
             return .toolsWebSearch
@@ -1759,6 +1879,8 @@ private enum ConfigSection {
     case modelProviderMap(String, String)
     case features
     case sandboxWorkspaceWrite
+    case audio
+    case realtime
     case toolsWebSearch
     case toolsWebSearchLocation
     case profileFeatures(String)
