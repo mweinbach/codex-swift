@@ -365,6 +365,45 @@ public struct ResponsesAPIWebSearchUserLocation: Equatable, Codable, Sendable {
     }
 }
 
+public struct WebSearchConfig: Equatable, Sendable {
+    public let filters: ResponsesAPIWebSearchFilters?
+    public let userLocation: ResponsesAPIWebSearchUserLocation?
+    public let searchContextSize: WebSearchContextSize?
+
+    public init(
+        filters: ResponsesAPIWebSearchFilters? = nil,
+        userLocation: ResponsesAPIWebSearchUserLocation? = nil,
+        searchContextSize: WebSearchContextSize? = nil
+    ) {
+        self.filters = filters
+        self.userLocation = userLocation
+        self.searchContextSize = searchContextSize
+    }
+
+    public func merging(overlay: WebSearchConfig) -> WebSearchConfig {
+        WebSearchConfig(
+            filters: overlay.filters ?? filters,
+            userLocation: userLocation?.merging(overlay: overlay.userLocation) ?? overlay.userLocation,
+            searchContextSize: overlay.searchContextSize ?? searchContextSize
+        )
+    }
+}
+
+private extension ResponsesAPIWebSearchUserLocation {
+    func merging(overlay: ResponsesAPIWebSearchUserLocation?) -> ResponsesAPIWebSearchUserLocation {
+        guard let overlay else {
+            return self
+        }
+        return ResponsesAPIWebSearchUserLocation(
+            type: overlay.type,
+            country: overlay.country ?? country,
+            region: overlay.region ?? region,
+            city: overlay.city ?? city,
+            timezone: overlay.timezone ?? timezone
+        )
+    }
+}
+
 public enum ToolSpec: Equatable, Codable, Sendable {
     case function(ResponsesAPITool)
     case namespace(ResponsesAPINamespace)
@@ -537,6 +576,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let shellType: ConfigShellToolType
     public let applyPatchToolType: ApplyPatchToolType?
     public let webSearchMode: WebSearchMode?
+    public let webSearchConfig: WebSearchConfig?
     public let webSearchRequest: Bool
     public let includeViewImageTool: Bool
     public let includeComputerUseTools: Bool
@@ -548,6 +588,7 @@ public struct ToolsConfig: Equatable, Sendable {
         shellType: ConfigShellToolType,
         applyPatchToolType: ApplyPatchToolType? = nil,
         webSearchMode: WebSearchMode? = nil,
+        webSearchConfig: WebSearchConfig? = nil,
         webSearchRequest: Bool = false,
         includeViewImageTool: Bool = true,
         includeComputerUseTools: Bool = false,
@@ -558,6 +599,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
         self.webSearchMode = webSearchMode
+        self.webSearchConfig = webSearchConfig
         self.webSearchRequest = webSearchRequest
         self.includeViewImageTool = includeViewImageTool
         self.includeComputerUseTools = includeComputerUseTools
@@ -623,12 +665,22 @@ public enum ToolSpecFactory {
         switch webSearchMode {
         case .cached:
             specs.append(ConfiguredToolSpec(
-                spec: .webSearch(externalWebAccess: false),
+                spec: .webSearch(
+                    externalWebAccess: false,
+                    filters: config.webSearchConfig?.filters,
+                    userLocation: config.webSearchConfig?.userLocation,
+                    searchContextSize: config.webSearchConfig?.searchContextSize
+                ),
                 supportsParallelToolCalls: false
             ))
         case .live:
             specs.append(ConfiguredToolSpec(
-                spec: .webSearch(externalWebAccess: true),
+                spec: .webSearch(
+                    externalWebAccess: true,
+                    filters: config.webSearchConfig?.filters,
+                    userLocation: config.webSearchConfig?.userLocation,
+                    searchContextSize: config.webSearchConfig?.searchContextSize
+                ),
                 supportsParallelToolCalls: false
             ))
         case .disabled, nil:

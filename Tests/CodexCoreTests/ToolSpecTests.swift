@@ -321,6 +321,37 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(webSearchSpecs(in: disabled), [])
     }
 
+    func testWebSearchConfigIsForwardedToToolSpecLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            webSearchMode: .live,
+            webSearchConfig: WebSearchConfig(
+                filters: ResponsesAPIWebSearchFilters(allowedDomains: ["example.com"]),
+                userLocation: ResponsesAPIWebSearchUserLocation(
+                    country: "US",
+                    region: "California",
+                    city: "San Francisco",
+                    timezone: "America/Los_Angeles"
+                ),
+                searchContextSize: .high
+            )
+        ))
+
+        XCTAssertEqual(webSearchSpecs(in: specs), [
+            .webSearch(
+                externalWebAccess: true,
+                filters: ResponsesAPIWebSearchFilters(allowedDomains: ["example.com"]),
+                userLocation: ResponsesAPIWebSearchUserLocation(
+                    country: "US",
+                    region: "California",
+                    city: "San Francisco",
+                    timezone: "America/Los_Angeles"
+                ),
+                searchContextSize: .high
+            )
+        ])
+    }
+
     private func webSearchSpecs(in specs: [ConfiguredToolSpec]) -> [ToolSpec] {
         specs.map(\.spec).filter { $0.name == "web_search" }
     }

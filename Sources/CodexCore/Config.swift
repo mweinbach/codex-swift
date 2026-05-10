@@ -37,6 +37,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
     public var webSearchMode: WebSearchMode?
+    public var webSearchConfig: WebSearchConfig?
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
     public var features: FeatureStates
@@ -75,6 +76,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
         webSearchMode: WebSearchMode? = nil,
+        webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
         toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
@@ -112,6 +114,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
         self.webSearchMode = webSearchMode
+        self.webSearchConfig = webSearchConfig
         self.toolsWebSearch = toolsWebSearch
         self.toolsViewImage = toolsViewImage
         self.features = features
@@ -353,6 +356,8 @@ public enum CodexConfigLoader {
 }
 
 private struct ParsedCodexConfigToml {
+    private static let webSearchToolConfigKey = "__tools_web_search_config"
+
     var topLevel: [String: ConfigValue] = [:]
     var profiles: [String: [String: ConfigValue]] = [:]
     var features: [String: Bool] = [:]
@@ -377,6 +382,16 @@ private struct ParsedCodexConfigToml {
                     }
                 }
                 if case let .profileFeatures(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
+                if case let .profileToolsWebSearch(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
+                if case let .profileToolsWebSearchLocation(name) = section {
                     if parsed.profiles[name] == nil {
                         parsed.profiles[name] = [:]
                     }
@@ -438,6 +453,30 @@ private struct ParsedCodexConfigToml {
                     ConfigValueParser.parseTomlLiteral(valueText),
                     key: "profiles.\(name).features.\(key)"
                 )
+            case .toolsWebSearch:
+                Self.mergeWebSearchToolConfigField(
+                    key: key,
+                    value: try ConfigValueParser.parseTomlLiteral(valueText),
+                    into: &parsed.topLevel
+                )
+            case .toolsWebSearchLocation:
+                Self.mergeWebSearchToolConfigField(
+                    key: "location.\(key)",
+                    value: try ConfigValueParser.parseTomlLiteral(valueText),
+                    into: &parsed.topLevel
+                )
+            case let .profileToolsWebSearch(name):
+                Self.mergeWebSearchToolConfigField(
+                    key: key,
+                    value: try ConfigValueParser.parseTomlLiteral(valueText),
+                    into: &parsed.profiles[name, default: [:]]
+                )
+            case let .profileToolsWebSearchLocation(name):
+                Self.mergeWebSearchToolConfigField(
+                    key: "location.\(key)",
+                    value: try ConfigValueParser.parseTomlLiteral(valueText),
+                    into: &parsed.profiles[name, default: [:]]
+                )
             case .ignored:
                 continue
             }
@@ -479,6 +518,16 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 3, parts[0] == "tools", parts[1] == "web_search" {
+                Self.mergeWebSearchToolConfigField(key: parts[2], value: value, into: &topLevel)
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "tools", parts[1] == "web_search", parts[2] == "location" {
+                Self.mergeWebSearchToolConfigField(key: "location.\(parts[3])", value: value, into: &topLevel)
+                continue
+            }
+
             if parts.count == 2, parts[0] == "model_providers" {
                 mergeModelProvider(name: parts[1], overlay: value)
                 continue
@@ -506,6 +555,25 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 4, parts[0] == "profiles", parts[2] == "features" {
                 profileFeatures[parts[1], default: [:]][parts[3]] = try Self.boolValue(value, key: path)
+                continue
+            }
+
+            if parts.count == 5, parts[0] == "profiles", parts[2] == "tools", parts[3] == "web_search" {
+                Self.mergeWebSearchToolConfigField(key: parts[4], value: value, into: &profiles[parts[1], default: [:]])
+                continue
+            }
+
+            if parts.count == 6,
+               parts[0] == "profiles",
+               parts[2] == "tools",
+               parts[3] == "web_search",
+               parts[4] == "location"
+            {
+                Self.mergeWebSearchToolConfigField(
+                    key: "location.\(parts[5])",
+                    value: value,
+                    into: &profiles[parts[1], default: [:]]
+                )
             }
         }
     }
@@ -588,6 +656,12 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(toolsTable) = table["tools"],
+           let webSearchValue = toolsTable["web_search"]
+        {
+            Self.mergeWebSearchToolConfig(value: webSearchValue, into: &topLevel)
+        }
+
         if case let .table(profileTable) = table["profiles"] {
             for (profileName, profileValue) in profileTable {
                 guard case let .table(profileValues) = profileValue else {
@@ -611,6 +685,13 @@ private struct ParsedCodexConfigToml {
                                 key: "profiles.\(profileName).features.\(featureKey)"
                             )
                         }
+                    }
+
+                    if key == "tools",
+                       case let .table(toolsTable) = value,
+                       let webSearchValue = toolsTable["web_search"]
+                    {
+                        Self.mergeWebSearchToolConfig(value: webSearchValue, into: &profiles[profileName, default: [:]])
                     }
                 }
             }
@@ -940,6 +1021,13 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)web_search"
             )
         }
+        if let webSearchConfig = values[webSearchToolConfigKey] {
+            let parsedConfig = try Self.webSearchConfigValue(
+                webSearchConfig,
+                key: "\(keyPrefix)tools.web_search"
+            )
+            config.webSearchConfig = config.webSearchConfig?.merging(overlay: parsedConfig) ?? parsedConfig
+        }
         if let webSearch = values["tools_web_search"] {
             config.toolsWebSearch = try boolValue(webSearch, key: "\(keyPrefix)tools_web_search")
         }
@@ -1118,6 +1206,83 @@ private struct ParsedCodexConfigToml {
         return UInt16(integer)
     }
 
+    private static func mergeWebSearchToolConfigField(
+        key: String,
+        value: ConfigValue,
+        into values: inout [String: ConfigValue]
+    ) {
+        let overlay: ConfigValue
+        if key.hasPrefix("location.") {
+            overlay = .table([
+                "location": .table([String(key.dropFirst("location.".count)): value])
+            ])
+        } else {
+            overlay = .table([key: value])
+        }
+        mergeWebSearchToolConfig(value: overlay, into: &values)
+    }
+
+    private static func mergeWebSearchToolConfig(
+        value: ConfigValue,
+        into values: inout [String: ConfigValue]
+    ) {
+        if var existing = values[Self.webSearchToolConfigKey] {
+            existing.merge(overlay: value)
+            values[Self.webSearchToolConfigKey] = existing
+        } else {
+            values[Self.webSearchToolConfigKey] = value
+        }
+    }
+
+    private static func webSearchConfigValue(_ value: ConfigValue, key: String) throws -> WebSearchConfig {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        for field in table.keys where !["context_size", "allowed_domains", "location"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+
+        let filters: ResponsesAPIWebSearchFilters?
+        if let allowedDomains = table["allowed_domains"] {
+            filters = ResponsesAPIWebSearchFilters(
+                allowedDomains: try stringArrayValue(allowedDomains, key: "\(key).allowed_domains")
+            )
+        } else {
+            filters = nil
+        }
+
+        let location = try table["location"].map {
+            try webSearchLocationValue($0, key: "\(key).location")
+        }
+        let contextSize = try table["context_size"].map {
+            try stringEnumValue(WebSearchContextSize.self, $0, key: "\(key).context_size")
+        }
+
+        return WebSearchConfig(
+            filters: filters,
+            userLocation: location,
+            searchContextSize: contextSize
+        )
+    }
+
+    private static func webSearchLocationValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> ResponsesAPIWebSearchUserLocation {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        for field in table.keys where !["country", "region", "city", "timezone"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return ResponsesAPIWebSearchUserLocation(
+            country: try table["country"].map { try stringValue($0, key: "\(key).country") },
+            region: try table["region"].map { try stringValue($0, key: "\(key).region") },
+            city: try table["city"].map { try stringValue($0, key: "\(key).city") },
+            timezone: try table["timezone"].map { try stringValue($0, key: "\(key).timezone") }
+        )
+    }
+
     private static func parseSectionHeader(_ line: String) throws -> ConfigSection {
         guard line.hasSuffix("]") else {
             throw CodexConfigLoadError.invalidTableHeader(line)
@@ -1129,6 +1294,12 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 1, parts[0] == "sandbox_workspace_write" {
             return .sandboxWorkspaceWrite
+        }
+        if parts.count == 2, parts[0] == "tools", parts[1] == "web_search" {
+            return .toolsWebSearch
+        }
+        if parts.count == 3, parts[0] == "tools", parts[1] == "web_search", parts[2] == "location" {
+            return .toolsWebSearchLocation
         }
         if parts.count == 2, parts[0] == "model_providers" {
             return .modelProvider(parts[1])
@@ -1144,6 +1315,17 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
+        }
+        if parts.count == 4, parts[0] == "profiles", parts[2] == "tools", parts[3] == "web_search" {
+            return .profileToolsWebSearch(parts[1])
+        }
+        if parts.count == 5,
+           parts[0] == "profiles",
+           parts[2] == "tools",
+           parts[3] == "web_search",
+           parts[4] == "location"
+        {
+            return .profileToolsWebSearchLocation(parts[1])
         }
         return .ignored
     }
@@ -1298,6 +1480,10 @@ private enum ConfigSection {
     case modelProviderMap(String, String)
     case features
     case sandboxWorkspaceWrite
+    case toolsWebSearch
+    case toolsWebSearchLocation
     case profileFeatures(String)
+    case profileToolsWebSearch(String)
+    case profileToolsWebSearchLocation(String)
     case ignored
 }

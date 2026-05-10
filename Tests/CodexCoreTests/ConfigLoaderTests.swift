@@ -652,6 +652,71 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(config.features.isEnabled(.webSearchCached))
     }
 
+    func testWebSearchToolConfigMergesProfileLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [tools.web_search]
+        context_size = "medium"
+        allowed_domains = ["example.com"]
+
+        [tools.web_search.location]
+        country = "US"
+        region = "California"
+        city = "San Francisco"
+
+        [profiles.work.tools.web_search]
+        context_size = "high"
+        allowed_domains = ["swift.org", "github.com"]
+
+        [profiles.work.tools.web_search.location]
+        city = "Oakland"
+        timezone = "America/Los_Angeles"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        let webSearchConfig = try XCTUnwrap(config.webSearchConfig)
+
+        XCTAssertEqual(webSearchConfig.searchContextSize, .high)
+        XCTAssertEqual(webSearchConfig.filters?.allowedDomains, ["swift.org", "github.com"])
+        XCTAssertEqual(webSearchConfig.userLocation?.type, .approximate)
+        XCTAssertEqual(webSearchConfig.userLocation?.country, "US")
+        XCTAssertEqual(webSearchConfig.userLocation?.region, "California")
+        XCTAssertEqual(webSearchConfig.userLocation?.city, "Oakland")
+        XCTAssertEqual(webSearchConfig.userLocation?.timezone, "America/Los_Angeles")
+    }
+
+    func testWebSearchToolConfigAcceptsCliDottedOverrides() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tools.web_search]
+        context_size = "medium"
+
+        [tools.web_search.location]
+        country = "US"
+        city = "San Francisco"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                "tools.web_search.context_size=\"low\"",
+                "tools.web_search.allowed_domains=[\"openai.com\"]",
+                "tools.web_search.location.city=\"New York\"",
+                "tools.web_search.location.timezone=\"America/New_York\""
+            ]),
+            systemConfigFile: nil
+        )
+        let webSearchConfig = try XCTUnwrap(config.webSearchConfig)
+
+        XCTAssertEqual(webSearchConfig.searchContextSize, .low)
+        XCTAssertEqual(webSearchConfig.filters?.allowedDomains, ["openai.com"])
+        XCTAssertEqual(webSearchConfig.userLocation?.country, "US")
+        XCTAssertEqual(webSearchConfig.userLocation?.city, "New York")
+        XCTAssertEqual(webSearchConfig.userLocation?.timezone, "America/New_York")
+    }
+
     func testMissingProfileMatchesRustError() throws {
         let dir = try CoreTemporaryDirectory()
         try #"profile = "missing""#.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
