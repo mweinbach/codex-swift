@@ -156,7 +156,10 @@ final class ModelProviderTests: XCTestCase {
             ProviderAccountState(account: .amazonBedrock, requiresOpenAIAuth: false)
         )
         XCTAssertFalse(provider.supportsAttestation())
-        XCTAssertEqual(try provider.apiAuth(environment: [:]), StaticAPIAuthProvider())
+        XCTAssertEqual(
+            try provider.apiAuth(environment: ["CODEX_API_KEY": "ignored-openai-key"]),
+            StaticAPIAuthProvider()
+        )
     }
 
     func testConfiguredProviderAPIProviderAndAuthUseProviderConfiguration() throws {

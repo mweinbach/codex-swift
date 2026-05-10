@@ -753,17 +753,28 @@ private func runNonInteractiveExec(
     }
 
     let commandAuthRunner = ProviderAuthCommandRunner()
-    let authResolution = try await resolveExecAuth(
-        codexHome: codexHome,
-        settings: settings,
-        providerInfo: providerResolution.info,
-        environment: environment,
-        commandAuthRunner: commandAuthRunner
-    )
-    let provider = providerResolution.info.toAPIProvider(
-        authMode: authResolution.authMode,
-        environment: environment
-    )
+    let runtimeProvider = ModelProviderFactory.create(providerInfo: providerResolution.info)
+    let authResolution: ExecAuthResolution
+    let provider: APIProvider
+    if providerResolution.info.isAmazonBedrock() {
+        authResolution = ExecAuthResolution(
+            auth: try runtimeProvider.apiAuth(environment: environment),
+            authMode: nil
+        )
+        provider = try runtimeProvider.apiProvider(environment: environment)
+    } else {
+        authResolution = try await resolveExecAuth(
+            codexHome: codexHome,
+            settings: settings,
+            providerInfo: providerResolution.info,
+            environment: environment,
+            commandAuthRunner: commandAuthRunner
+        )
+        provider = providerResolution.info.toAPIProvider(
+            authMode: authResolution.authMode,
+            environment: environment
+        )
+    }
     let resolvedModel = model
         ?? (authResolution.authMode?.isChatGPT == true
             ? ModelsManager.openAIDefaultChatGPTModel
