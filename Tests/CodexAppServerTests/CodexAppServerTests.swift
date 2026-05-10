@@ -7892,6 +7892,12 @@ final class CodexAppServerTests: XCTestCase {
         _ = try decodeMessages(processor.processLine(
             Data(#"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#.utf8)
         ))
+        let oldRestoredThreshold = try appServerDate("2026-01-01T00:00:00Z")
+        let archivedPath = try XCTUnwrap(archivedRolloutPath(codexHome: temp.url, threadID: id))
+        try FileManager.default.setAttributes(
+            [.modificationDate: oldRestoredThreshold],
+            ofItemAtPath: archivedPath
+        )
         let messages = try decodeMessages(processor.processLine(
             Data(#"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(id)"}}"#.utf8)
         ))
@@ -7901,6 +7907,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["id"] as? String, id)
         XCTAssertEqual(thread["preview"] as? String, "restore me")
         XCTAssertEqual(thread["status"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "notLoaded")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(thread["updatedAt"] as? Int),
+            Int(oldRestoredThreshold.timeIntervalSince1970)
+        )
         XCTAssertEqual(messages[1]["method"] as? String, "thread/unarchived")
         let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
         XCTAssertEqual(params["threadId"] as? String, id)

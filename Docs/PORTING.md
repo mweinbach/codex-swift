@@ -438,6 +438,8 @@ Source baseline inspected for this scaffold:
   - `thread/archive` now consults the configured SQLite thread-spawn graph and archives materialized spawned descendants after the parent, emitting Rust-ordered `thread/archived` notifications while skipping missing or failed descendant archives.
 - `codex-rs/thread-store/src/local/archive_thread.rs` / `unarchive_thread.rs` SQLite archive metadata
   - `thread/archive` and `thread/unarchive` now best-effort update configured SQLite thread metadata after rollout moves, matching Rust's active/archived rollout path filters while keeping file-move success independent from metadata update failures.
+- `codex-rs/thread-store/src/local/unarchive_thread.rs` restored rollout timestamp
+  - `thread/unarchive` now updates the restored rollout file's modification time before returning the restored thread, so the response `updatedAt` advances like Rust.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread fork
   - `thread/fork` now creates a new rollout from a source thread/path, preserves copied history without mutating the source rollout, records fork metadata/thread source in session meta, returns the forked thread, subscribes the connection, and emits a `thread/started` notification without hydrated turns.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread name updates

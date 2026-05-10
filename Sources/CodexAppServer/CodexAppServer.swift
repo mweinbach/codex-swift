@@ -1768,7 +1768,12 @@ public enum CodexAppServer {
             rolloutPath: URL(fileURLWithPath: rolloutPath, isDirectory: false),
             configuration: configuration
         )
-        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let item = ConversationItem(
+            path: rolloutPath,
+            head: [],
+            createdAt: nil,
+            updatedAt: modificationDate(forPath: rolloutPath).map(iso8601String)
+        )
         return [
             "thread": try threadObject(for: item, defaultProvider: configuration.defaultModelProvider)
         ]
@@ -13214,6 +13219,7 @@ public enum CodexAppServer {
         do {
             try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: archivedPath, to: destinationPath)
+            try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: destinationPath.path)
         } catch {
             throw AppServerError.internalError("failed to unarchive thread: \(error)")
         }
@@ -13252,6 +13258,16 @@ public enum CodexAppServer {
         try? runAsyncBlocking {
             _ = try await stateStore.markThreadUnarchived(threadID: threadID, rolloutPath: rolloutPath)
         }
+    }
+
+    private static func modificationDate(forPath path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+    }
+
+    private static func iso8601String(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private static func archivedRolloutPathForConversation(
