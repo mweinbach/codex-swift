@@ -66,7 +66,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
     private let environment: @Sendable () -> [String: String]
     private let currentDirectory: @Sendable () -> URL
     private let gitOriginURLs: @Sendable () -> [String]
-    private let applyGitPatch: CloudGitApply?
+    private let applyGitPatch: CloudGitApply
     private let errorLog: CloudTaskErrorLog
 
     public init(
@@ -103,7 +103,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         self.gitOriginURLs = gitOriginURLs ?? {
             GitInfoCollector.remoteURLs(cwd: currentDirectory())
         }
-        self.applyGitPatch = applyGitPatch
+        self.applyGitPatch = applyGitPatch ?? Self.defaultApplyGitPatch
         self.errorLog = errorLog
     }
 
@@ -389,10 +389,6 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
                 status: .error,
                 message: "Expected unified git diff; backend returned an incompatible format."
             ))
-        }
-
-        guard let applyGitPatch else {
-            return .failure(.unimplemented("cloud task apply"))
         }
 
         let request = CloudGitApplyRequest(
@@ -1277,6 +1273,324 @@ private extension CloudHTTPClient {
             _ = lines.popLast()
         }
         return lines
+    }
+
+    static func defaultApplyGitPatch(_ request: CloudGitApplyRequest) async -> CloudTaskResult<CloudGitApplyResult> {
+        do {
+            let result = try await Task.detached {
+                try runGitApply(request)
+            }.value
+            return .success(result)
+        } catch {
+            return .failure(.io("\(error)"))
+        }
+    }
+
+    private static func runGitApply(_ request: CloudGitApplyRequest) throws -> CloudGitApplyResult {
+        let gitRoot = try resolveGitRoot(cwd: request.cwd)
+        let patchDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-cloud-apply-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: patchDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: patchDirectory) }
+
+        let patchPath = patchDirectory.appendingPathComponent("patch.diff")
+        try request.diff.write(to: patchPath, atomically: true, encoding: .utf8)
+
+        let gitConfig = gitApplyConfigArguments(environment: ProcessInfo.processInfo.environment)
+        if request.revert, !request.preflight {
+            _ = try runGit(cwd: gitRoot, config: gitConfig, arguments: ["add", "--"] + extractPathsFromPatch(request.diff))
+        }
+
+        let applyArguments: [String]
+        if request.preflight {
+            applyArguments = ["apply", "--check"] + (request.revert ? ["-R"] : []) + [patchPath.path]
+        } else {
+            applyArguments = ["apply", "--3way"] + (request.revert ? ["-R"] : []) + [patchPath.path]
+        }
+
+        let commandForLog = renderGitCommandForLog(cwd: gitRoot, config: gitConfig, arguments: applyArguments)
+        let output = try runGit(cwd: gitRoot, config: gitConfig, arguments: applyArguments)
+        let parsed = parseGitApplyOutput(stdout: output.stdout, stderr: output.stderr)
+        return CloudGitApplyResult(
+            exitCode: output.exitCode,
+            appliedPaths: parsed.applied,
+            skippedPaths: parsed.skipped,
+            conflictedPaths: parsed.conflicted,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            commandForLog: commandForLog
+        )
+    }
+
+    private static func resolveGitRoot(cwd: URL) throws -> URL {
+        let output = try runGit(cwd: cwd, config: [], arguments: ["rev-parse", "--show-toplevel"])
+        guard output.exitCode == 0 else {
+            throw CloudGitApplyError.message("not a git repository (exit \(output.exitCode)): \(output.stderr)")
+        }
+        let path = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else {
+            throw CloudGitApplyError.message("not a git repository: git returned an empty root")
+        }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    private struct GitProcessOutput {
+        let exitCode: Int32
+        let stdout: String
+        let stderr: String
+    }
+
+    private enum CloudGitApplyError: Error, CustomStringConvertible {
+        case message(String)
+
+        var description: String {
+            switch self {
+            case let .message(message):
+                return message
+            }
+        }
+    }
+
+    private static func runGit(cwd: URL, config: [String], arguments: [String]) throws -> GitProcessOutput {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + config + arguments
+        process.currentDirectoryURL = cwd
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        return GitProcessOutput(
+            exitCode: process.terminationStatus,
+            stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+            stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        )
+    }
+
+    private static func gitApplyConfigArguments(environment: [String: String]) -> [String] {
+        guard let raw = environment["CODEX_APPLY_GIT_CFG"] else {
+            return []
+        }
+        var arguments: [String] = []
+        for pair in raw.split(separator: ",") {
+            let trimmed = pair.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.contains("=") else {
+                continue
+            }
+            arguments.append("-c")
+            arguments.append(trimmed)
+        }
+        return arguments
+    }
+
+    private static func renderGitCommandForLog(cwd: URL, config: [String], arguments: [String]) -> String {
+        let parts = ["git"] + config + arguments
+        return "(cd \(quoteShell(cwd.path)) && \(parts.map(quoteShell).joined(separator: " ")))"
+    }
+
+    private static func quoteShell(_ value: String) -> String {
+        if !value.isEmpty, value.allSatisfy({ $0.isLetter || $0.isNumber || "-_.:/@%+".contains($0) }) {
+            return value
+        }
+        return "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func extractPathsFromPatch(_ diff: String) -> [String] {
+        var paths = Set<String>()
+        for rawLine in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("diff --git ") else {
+                continue
+            }
+            let rest = String(line.dropFirst("diff --git ".count))
+            let tokens = readDiffGitTokens(rest)
+            guard tokens.count >= 2 else {
+                continue
+            }
+            for (token, prefix) in [(tokens[0], "a/"), (tokens[1], "b/")] {
+                guard token.hasPrefix(prefix) else {
+                    continue
+                }
+                let path = String(token.dropFirst(prefix.count))
+                if path != "/dev/null", !path.isEmpty {
+                    paths.insert(path)
+                }
+            }
+        }
+        return paths.sorted()
+    }
+
+    private static func readDiffGitTokens(_ line: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+        var escaped = false
+
+        func flush() {
+            if !current.isEmpty {
+                tokens.append(current)
+                current.removeAll(keepingCapacity: true)
+            }
+        }
+
+        for character in line {
+            if escaped {
+                current.append(character)
+                escaped = false
+                continue
+            }
+            if character == "\\" {
+                escaped = true
+                continue
+            }
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                continue
+            }
+            if character.isWhitespace {
+                flush()
+                continue
+            }
+            current.append(character)
+        }
+        flush()
+        return tokens
+    }
+
+    private static func parseGitApplyOutput(stdout: String, stderr: String) -> (
+        applied: [String],
+        skipped: [String],
+        conflicted: [String]
+    ) {
+        var applied = Set<String>()
+        var skipped = Set<String>()
+        var conflicted = Set<String>()
+        var lastSeenPath: String?
+
+        func add(_ raw: String, to set: inout Set<String>) {
+            let path = unquoteGitPath(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard !path.isEmpty else {
+                return
+            }
+            set.insert(path)
+            lastSeenPath = path
+        }
+
+        for rawLine in [stdout, stderr].filter({ !$0.isEmpty }).joined(separator: "\n").split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("Checking patch "), line.hasSuffix("...") {
+                lastSeenPath = String(line.dropFirst("Checking patch ".count).dropLast(3))
+                continue
+            }
+            if let path = pathBetween(line, prefix: "Applied patch to ", suffix: " cleanly."), !path.isEmpty {
+                let parsed = unquoteGitPath(path)
+                applied.insert(parsed)
+                skipped.remove(parsed)
+                conflicted.remove(parsed)
+                lastSeenPath = parsed
+                continue
+            }
+            if let path = pathBetween(line, prefix: "Applied patch ", suffix: " cleanly."), !path.isEmpty {
+                let parsed = unquoteGitPath(path)
+                applied.insert(parsed)
+                skipped.remove(parsed)
+                conflicted.remove(parsed)
+                lastSeenPath = parsed
+                continue
+            }
+            if let path = pathBetween(line, prefix: "Applied patch to ", suffix: " with conflicts."), !path.isEmpty {
+                let parsed = unquoteGitPath(path)
+                conflicted.insert(parsed)
+                applied.remove(parsed)
+                skipped.remove(parsed)
+                lastSeenPath = parsed
+                continue
+            }
+            if line.hasPrefix("U ") {
+                add(String(line.dropFirst(2)), to: &conflicted)
+                continue
+            }
+            if line == "Failed to perform three-way merge..." || line.lowercased().contains("repository lacks the necessary blob") {
+                if let lastSeenPath {
+                    skipped.insert(lastSeenPath)
+                    applied.remove(lastSeenPath)
+                    conflicted.remove(lastSeenPath)
+                }
+                continue
+            }
+            if line.hasPrefix("error: patch failed: ") {
+                let rest = String(line.dropFirst("error: patch failed: ".count))
+                let path = rest.split(separator: ":", maxSplits: 1).first.map(String.init) ?? rest
+                add(path, to: &skipped)
+                continue
+            }
+            if line.hasPrefix("error: "), let colon = line.dropFirst("error: ".count).firstIndex(of: ":") {
+                let rest = line.dropFirst("error: ".count)
+                let path = String(rest[..<colon])
+                if line.hasSuffix("patch does not apply")
+                    || line.contains("does not match index")
+                    || line.contains("does not exist in index")
+                    || line.contains("already exists in the working directory")
+                    || line.contains("cannot read the current contents of") {
+                    add(path, to: &skipped)
+                    continue
+                }
+            }
+            if let path = pathBetween(line, prefix: "Skipped patch ", suffix: ".") {
+                add(path, to: &skipped)
+                continue
+            }
+            if let rest = pathBetween(line, prefix: "warning: Cannot merge binary files: ", suffix: nil),
+               let path = rest.split(separator: " ", maxSplits: 1).first.map(String.init) {
+                add(path, to: &conflicted)
+            }
+        }
+
+        skipped.subtract(applied)
+        skipped.subtract(conflicted)
+        applied.subtract(conflicted)
+        return (applied.sorted(), skipped.sorted(), conflicted.sorted())
+    }
+
+    private static func pathBetween(_ value: String, prefix: String, suffix: String?) -> String? {
+        guard value.hasPrefix(prefix) else {
+            return nil
+        }
+        var rest = String(value.dropFirst(prefix.count))
+        if let suffix {
+            guard rest.hasSuffix(suffix) else {
+                return nil
+            }
+            rest.removeLast(suffix.count)
+        }
+        return rest
+    }
+
+    private static func unquoteGitPath(_ value: String) -> String {
+        guard value.count >= 2,
+              let first = value.first,
+              first == value.last,
+              first == "\"" || first == "'"
+        else {
+            return value
+        }
+        return String(value.dropFirst().dropLast())
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\'", with: "'")
+            .replacingOccurrences(of: "\\\\", with: "\\")
     }
 }
 

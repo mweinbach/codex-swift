@@ -862,6 +862,8 @@ Source baseline inspected for this scaffold:
   - matched Rust tree-sitter handling for backslash-escaped special characters and spaces in unquoted Bash words so shell-wrapped searches like `rg \$HOME` and `rg foo\ bar` summarize as searches instead of whole-script unknown commands.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection
   - matched Rust's case-sensitive shell executable stem detection and platform-native path separator handling while preserving recursive extension stripping for wrappers such as `powershell.EXE`, so uppercase wrapper names and non-native path separators now fall back to whole-command unknown summaries.
+- `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply
+  - wired Swift's `CloudHTTPClient` default apply path to resolve the git root, write a temporary unified diff, run `git apply --check` for preflight or `git apply --3way` for apply, honor `CODEX_APPLY_GIT_CFG`, parse git output into applied/skipped/conflict paths, and keep the existing injected apply hook for deterministic tests.
 - `codex-rs/agent-graph-store` local SQLite store
   - added `SQLiteAgentGraphStore` with Rust's `thread_spawn_edges` schema/index, child-id upsert behavior, missing-child status no-op, open/closed status filtering, future-status inclusion for unfiltered child lists, reopen persistence, and recursive breadth-first descendant ordering.
 - `codex-rs/state/src/runtime/threads.rs` thread-spawn path lookup

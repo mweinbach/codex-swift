@@ -590,6 +590,48 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertTrue(log.contains("stderr_tail=\nérr"))
         XCTAssertTrue(log.contains("patch_summary: kind=git-diff lines=6 chars=\(diff.utf8.count) cwd=/tmp/project ; head=\n\(String(diff.dropLast()))"))
     }
+
+    func testHTTPClientApplyUsesDefaultGitApplyLikeRust() async throws {
+        let temp = try CloudTaskTemporaryDirectory()
+        try runCloudTaskGit(["init"], cwd: temp.url)
+        try "old\n".write(to: temp.url.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try runCloudTaskGit(["add", "file.txt"], cwd: temp.url)
+
+        let diff = """
+        diff --git a/file.txt b/file.txt
+        --- a/file.txt
+        +++ b/file.txt
+        @@ -1 +1 @@
+        -old
+        +new
+        """ + "\n"
+        let cwd = temp.url
+
+        let logs = CloudLogCapture()
+        let client = CloudHTTPClient(
+            baseURL: "https://example.com",
+            transport: CloudCapturingTransport(),
+            auth: StaticAPIAuthProvider(),
+            currentDirectory: { cwd },
+            errorLog: { logs.messages.append($0) }
+        )
+
+        let preflight = try await client.applyTaskPreflight(id: CloudTaskID("T-git"), diffOverride: diff).get()
+        XCTAssertEqual(preflight.status, .success, "\(preflight.message)\n\(logs.messages.joined(separator: "\n"))")
+        XCTAssertFalse(preflight.applied)
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("file.txt"), encoding: .utf8),
+            "old\n"
+        )
+
+        let applied = try await client.applyTask(id: CloudTaskID("T-git"), diffOverride: diff).get()
+        XCTAssertEqual(applied.status, .success, "\(applied.message)\n\(logs.messages.joined(separator: "\n"))")
+        XCTAssertTrue(applied.applied, applied.message)
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("file.txt"), encoding: .utf8),
+            "new\n"
+        )
+    }
 }
 
 private func fixedCloudDate() -> Date {
@@ -681,4 +723,45 @@ private final class CloudApplyCapture: @unchecked Sendable {
 
 private final class CloudLogCapture: @unchecked Sendable {
     var messages: [String] = []
+}
+
+private final class CloudTaskTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-cloud-task-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+@discardableResult
+private func runCloudTaskGit(_ arguments: [String], cwd: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git"] + arguments
+    process.currentDirectoryURL = cwd
+
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.standardOutput = stdout
+    process.standardError = stderr
+
+    try process.run()
+    process.waitUntilExit()
+
+    let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    let error = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "CloudTaskGit",
+            code: Int(process.terminationStatus),
+            userInfo: [NSLocalizedDescriptionKey: error]
+        )
+    }
+    return output
 }
