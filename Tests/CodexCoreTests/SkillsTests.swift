@@ -214,6 +214,69 @@ final class SkillsTests: XCTestCase {
         ])
     }
 
+    func testOutcomeRenderingUsesAliasesWhenTheyAllowMoreSkillsToFit() throws {
+        let root = "/Users/example/" + String(repeating: "shared-prefix/", count: 8) + ".codex/plugins/cache/openai-curated/example-plugin/0123456789abcdef/skills"
+        let skills = (0..<12).map { index in
+            skill(
+                name: "skill-\(index)",
+                description: "",
+                path: "\(root)/skill-\(index)/SKILL.md",
+                scope: .user
+            )
+        }
+        let outcome = outcome(skills: skills, roots: [root])
+        let budget = try budgetWhereAliasedRenderSelected(outcome, requireAllIncluded: true)
+
+        let absolute = Skills.buildAvailableSkills(skills: skills, budget: .characters(budget))
+        let rendered = Skills.buildAvailableSkills(outcome: outcome, budget: .characters(budget))
+
+        XCTAssertLessThan(absolute?.report.includedCount ?? 0, skills.count)
+        XCTAssertEqual(rendered?.report.includedCount, skills.count)
+        XCTAssertEqual(rendered?.report.omittedCount, 0)
+        XCTAssertEqual(rendered?.skillRootLines, ["- `r0` = `\(root)`"])
+        XCTAssertTrue(rendered?.skillLines.contains("- skill-0: (file: r0/skill-0/SKILL.md)") == true)
+    }
+
+    func testOutcomeRenderingUsesMarketplaceRootForSingleSkillPluginVersions() throws {
+        let marketplaceRoot = "/Users/example/" + String(repeating: "marketplace-prefix/", count: 8) + ".codex/plugins/cache/openai-curated"
+        let searchRoot = "\(marketplaceRoot)/search/1111111111111111/skills"
+        let githubRoot = "\(marketplaceRoot)/github/2222222222222222/skills"
+        let skills = [
+            skill(name: "search", description: "", path: "\(searchRoot)/search/SKILL.md", scope: .user),
+            skill(name: "gh-fix-ci", description: "", path: "\(githubRoot)/gh-fix-ci/SKILL.md", scope: .user)
+        ]
+        let outcome = outcome(skills: skills, roots: [searchRoot, githubRoot])
+        let budget = try budgetWhereAliasedRenderSelected(outcome, requireAllIncluded: true)
+
+        let rendered = Skills.buildAvailableSkills(outcome: outcome, budget: .characters(budget))
+
+        XCTAssertEqual(rendered?.report.includedCount, skills.count)
+        XCTAssertEqual(rendered?.skillRootLines, ["- `r0` = `\(marketplaceRoot)`"])
+        XCTAssertEqual(rendered?.skillLines, [
+            "- gh-fix-ci: (file: r0/github/2222222222222222/skills/gh-fix-ci/SKILL.md)",
+            "- search: (file: r0/search/1111111111111111/skills/search/SKILL.md)"
+        ])
+    }
+
+    func testOutcomeRenderingUsesSkillRootForMultipleSkillsInOnePluginVersion() throws {
+        let root = "/Users/example/" + String(repeating: "plugin-prefix/", count: 8) + ".codex/plugins/cache/openai-curated/github/2222222222222222/skills"
+        let skills = [
+            skill(name: "gh-address-comments", description: "", path: "\(root)/gh-address-comments/SKILL.md", scope: .user),
+            skill(name: "gh-fix-ci", description: "", path: "\(root)/gh-fix-ci/SKILL.md", scope: .user)
+        ]
+        let outcome = outcome(skills: skills, roots: [root])
+        let budget = try budgetWhereAliasedRenderSelected(outcome, requireAllIncluded: true)
+
+        let rendered = Skills.buildAvailableSkills(outcome: outcome, budget: .characters(budget))
+
+        XCTAssertEqual(rendered?.report.includedCount, skills.count)
+        XCTAssertEqual(rendered?.skillRootLines, ["- `r0` = `\(root)`"])
+        XCTAssertEqual(rendered?.skillLines, [
+            "- gh-address-comments: (file: r0/gh-address-comments/SKILL.md)",
+            "- gh-fix-ci: (file: r0/gh-fix-ci/SKILL.md)"
+        ])
+    }
+
     func testCollectExplicitSkillMentionsSelectsKnownSkillOnceInInputOrder() {
         let first = skill(name: "first", path: "/skills/first/SKILL.md")
         let second = skill(name: "second", path: "/skills/second/SKILL.md")
@@ -384,6 +447,37 @@ final class SkillsTests: XCTestCase {
             scope: scope
         )
     }
+
+    private func outcome(skills: [SkillMetadata], roots: [String]) -> SkillLoadOutcome {
+        let rootByPath = Dictionary(uniqueKeysWithValues: skills.map { skill in
+            let root = roots.first { skill.path.hasPrefix($0 + "/") }!
+            return (skill.path, root)
+        })
+        return SkillLoadOutcome(skills: skills, skillRoots: roots, skillRootByPath: rootByPath)
+    }
+
+    private func budgetWhereAliasedRenderSelected(
+        _ outcome: SkillLoadOutcome,
+        requireAllIncluded: Bool = false
+    ) throws -> Int {
+        for budget in 1...12_000 {
+            let absolute = Skills.buildAvailableSkills(skills: outcome.skills, budget: .characters(budget))
+            let aliased = Skills.buildAvailableSkills(outcome: outcome, budget: .characters(budget))
+            guard aliased?.skillRootLines.isEmpty == false else {
+                continue
+            }
+            if requireAllIncluded,
+               aliased?.report.includedCount == outcome.skills.count,
+               (absolute?.report.includedCount ?? 0) < outcome.skills.count {
+                return budget
+            }
+            if !requireAllIncluded {
+                return budget
+            }
+        }
+        XCTFail("could not find a budget where aliases are selected")
+        throw SkillTestFailure()
+    }
 }
 
 private struct SkillReadError: Error, CustomStringConvertible {
@@ -393,3 +487,5 @@ private struct SkillReadError: Error, CustomStringConvertible {
         self.description = description
     }
 }
+
+private struct SkillTestFailure: Error {}

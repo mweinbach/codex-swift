@@ -15777,11 +15777,14 @@ public enum CodexAppServer {
     private static func loadSkills(cwd: URL, codexHome: URL) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
         for root in skillRoots(cwd: cwd, codexHome: codexHome) {
-            discoverSkills(root: root.path, scope: root.scope, outcome: &outcome)
+            let standardizedRoot = root.path.resolvingSymlinksInPath().standardizedFileURL
+            discoverSkills(root: standardizedRoot, scope: root.scope, outcome: &outcome)
         }
 
         var seen: Set<String> = []
         outcome.skills = outcome.skills.filter { seen.insert($0.name).inserted }
+        let retainedSkillPaths = Set(outcome.skills.map(\.path))
+        outcome.skillRootByPath = outcome.skillRootByPath.filter { retainedSkillPaths.contains($0.key) }
         outcome.skills.sort {
             if $0.name != $1.name {
                 return $0.name < $1.name
@@ -16049,6 +16052,9 @@ public enum CodexAppServer {
         guard isDirectory(root) else {
             return
         }
+        if !outcome.skillRoots.contains(root.path) {
+            outcome.skillRoots.append(root.path)
+        }
 
         var queue = [root]
         while !queue.isEmpty {
@@ -16074,7 +16080,9 @@ public enum CodexAppServer {
                 }
                 if values?.isRegularFile == true, entry.lastPathComponent == "SKILL.md" {
                     do {
-                        outcome.skills.append(try parseSkillFile(entry, scope: scope))
+                        let skill = try parseSkillFile(entry, scope: scope)
+                        outcome.skills.append(skill)
+                        outcome.skillRootByPath[skill.path] = root.path
                     } catch {
                         if scope != .system {
                             outcome.errors.append(SkillErrorInfo(path: entry.path, message: String(describing: error)))

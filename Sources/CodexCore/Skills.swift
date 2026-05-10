@@ -70,10 +70,46 @@ public typealias SkillError = SkillErrorInfo
 public struct SkillLoadOutcome: Codable, Equatable, Sendable {
     public var skills: [SkillMetadata]
     public var errors: [SkillErrorInfo]
+    public var skillRoots: [String]
+    public var skillRootByPath: [String: String]
 
-    public init(skills: [SkillMetadata] = [], errors: [SkillErrorInfo] = []) {
+    private enum CodingKeys: String, CodingKey {
+        case skills
+        case errors
+        case skillRoots = "skill_roots"
+        case skillRootByPath = "skill_root_by_path"
+    }
+
+    public init(
+        skills: [SkillMetadata] = [],
+        errors: [SkillErrorInfo] = [],
+        skillRoots: [String] = [],
+        skillRootByPath: [String: String] = [:]
+    ) {
         self.skills = skills
         self.errors = errors
+        self.skillRoots = skillRoots
+        self.skillRootByPath = skillRootByPath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.skills = try container.decodeIfPresent([SkillMetadata].self, forKey: .skills) ?? []
+        self.errors = try container.decodeIfPresent([SkillErrorInfo].self, forKey: .errors) ?? []
+        self.skillRoots = try container.decodeIfPresent([String].self, forKey: .skillRoots) ?? []
+        self.skillRootByPath = try container.decodeIfPresent([String: String].self, forKey: .skillRootByPath) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(skills, forKey: .skills)
+        try container.encode(errors, forKey: .errors)
+        if !skillRoots.isEmpty {
+            try container.encode(skillRoots, forKey: .skillRoots)
+        }
+        if !skillRootByPath.isEmpty {
+            try container.encode(skillRootByPath, forKey: .skillRootByPath)
+        }
     }
 }
 
@@ -270,6 +306,25 @@ public enum Skills {
         )
     }
 
+    public static func buildAvailableSkills(
+        outcome: SkillLoadOutcome,
+        budget: SkillMetadataBudget
+    ) -> AvailableSkills? {
+        guard !outcome.skills.isEmpty else {
+            return nil
+        }
+        guard let absolute = buildAvailableSkills(skills: outcome.skills, budget: budget) else {
+            return nil
+        }
+        if absolute.report.omittedCount == 0, absolute.report.truncatedDescriptionChars == 0 {
+            return absolute
+        }
+        guard let aliased = buildAliasedAvailableSkills(outcome: outcome, budget: budget) else {
+            return absolute
+        }
+        return aliasedRenderIsBetter(aliased, than: absolute, budget: budget) ? aliased : absolute
+    }
+
     public static func buildSkillInjections(
         inputs: [UserInput],
         skills outcome: SkillLoadOutcome?,
@@ -346,6 +401,201 @@ public enum Skills {
             report: report,
             warningMessage: warningMessage
         )
+    }
+
+    private static func buildAliasedAvailableSkills(
+        outcome: SkillLoadOutcome,
+        budget: SkillMetadataBudget
+    ) -> AvailableSkills? {
+        guard let plan = buildAliasPlan(outcome: outcome) else {
+            return nil
+        }
+        let tableCost = aliasedMetadataOverheadCost(budget, skillRootLines: plan.skillRootLines)
+        guard tableCost < budget.limit else {
+            return nil
+        }
+        let adjustedBudget: SkillMetadataBudget
+        switch budget {
+        case .tokens:
+            adjustedBudget = .tokens(budget.limit - tableCost)
+        case .characters:
+            adjustedBudget = .characters(budget.limit - tableCost)
+        }
+        let lines = orderedAliasedSkillLines(outcome.skills, plan: plan)
+        return buildAvailableSkills(
+            lines: lines,
+            totalCount: outcome.skills.count,
+            budget: adjustedBudget,
+            skillRootLines: plan.skillRootLines
+        )
+    }
+
+    private struct SkillAliasPlan {
+        var skillRootLines: [String]
+        var rootAliases: [String: String]
+        var aliasRootByPath: [String: String]
+    }
+
+    private static func buildAliasPlan(outcome: SkillLoadOutcome) -> SkillAliasPlan? {
+        let skillPaths = Set(outcome.skills.map { normalizeSkillPath($0.path) })
+        let skillRootByPath = outcome.skillRootByPath.reduce(into: [String: String]()) { result, entry in
+            let path = normalizeSkillPath(entry.key)
+            guard skillPaths.contains(path) else {
+                return
+            }
+            result[path] = normalizeSkillPath(entry.value)
+        }
+        let usedRoots = outcome.skillRoots
+            .map(normalizeSkillPath)
+            .filter { root in skillRootByPath.values.contains(root) }
+        guard !usedRoots.isEmpty else {
+            return nil
+        }
+
+        let pluginVersionSkillCounts = pluginVersionSkillCounts(for: skillRootByPath.values)
+        let aliasRootBySkillRoot = Dictionary(
+            uniqueKeysWithValues: usedRoots.map { root in
+                (root, aliasRoot(forSkillRoot: root, pluginVersionSkillCounts: pluginVersionSkillCounts))
+            }
+        )
+        var seen: Set<String> = []
+        let aliasRoots = usedRoots.compactMap { root -> String? in
+            guard let aliasRoot = aliasRootBySkillRoot[root], seen.insert(aliasRoot).inserted else {
+                return nil
+            }
+            return aliasRoot
+        }
+        guard !aliasRoots.isEmpty else {
+            return nil
+        }
+        let rootAliases = Dictionary(uniqueKeysWithValues: aliasRoots.enumerated().map { index, root in
+            (root, "r\(index)")
+        })
+        let aliasRootByPath = skillRootByPath.compactMapValues { aliasRootBySkillRoot[$0] }
+        let skillRootLines = aliasRoots.enumerated().map { index, root in
+            "- `r\(index)` = `\(root)`"
+        }
+        return SkillAliasPlan(
+            skillRootLines: skillRootLines,
+            rootAliases: rootAliases,
+            aliasRootByPath: aliasRootByPath
+        )
+    }
+
+    private static func orderedAliasedSkillLines(_ skills: [SkillMetadata], plan: SkillAliasPlan) -> [SkillLine] {
+        skills.sorted { lhs, rhs in
+            let lhsKey = (promptScopeRank(lhs.scope), lhs.name, lhs.path)
+            let rhsKey = (promptScopeRank(rhs.scope), rhs.name, rhs.path)
+            return lhsKey < rhsKey
+        }.map { skill in
+            SkillLine(
+                name: skill.name,
+                description: skill.description,
+                path: renderSkillPathWithAliases(skill, plan: plan)
+            )
+        }
+    }
+
+    private static func renderSkillPathWithAliases(_ skill: SkillMetadata, plan: SkillAliasPlan) -> String {
+        let path = normalizeSkillPath(skill.path)
+        guard let aliasRoot = plan.aliasRootByPath[path],
+              let alias = plan.rootAliases[aliasRoot],
+              let relative = relativePath(path, from: aliasRoot)
+        else {
+            return path
+        }
+        return "\(alias)/\(relative)"
+    }
+
+    private static func aliasedMetadataOverheadCost(
+        _ budget: SkillMetadataBudget,
+        skillRootLines: [String]
+    ) -> Int {
+        let absoluteBody = renderAvailableSkillsBody(skillRootLines: [], skillLines: [])
+        let aliasedBody = renderAvailableSkillsBody(skillRootLines: skillRootLines, skillLines: [])
+        return max(budget.cost(aliasedBody) - budget.cost(absoluteBody), 0)
+    }
+
+    private static func aliasedRenderIsBetter(
+        _ aliased: AvailableSkills,
+        than absolute: AvailableSkills,
+        budget: SkillMetadataBudget
+    ) -> Bool {
+        if aliased.report.includedCount != absolute.report.includedCount {
+            return aliased.report.includedCount > absolute.report.includedCount
+        }
+        if aliased.report.truncatedDescriptionChars != absolute.report.truncatedDescriptionChars {
+            return aliased.report.truncatedDescriptionChars < absolute.report.truncatedDescriptionChars
+        }
+        return availableSkillsCost(budget, aliased) < availableSkillsCost(budget, absolute)
+    }
+
+    private static func availableSkillsCost(_ budget: SkillMetadataBudget, _ available: AvailableSkills) -> Int {
+        let metadataCost = available.skillRootLines.isEmpty
+            ? 0
+            : aliasedMetadataOverheadCost(budget, skillRootLines: available.skillRootLines)
+        return metadataCost + available.skillLines.reduce(0) { $0 + budget.cost($1 + "\n") }
+    }
+
+    private static func pluginVersionSkillCounts<S: Sequence>(for roots: S) -> [String: Int] where S.Element == String {
+        roots.reduce(into: [String: Int]()) { counts, root in
+            guard let base = pluginVersionBase(root) else {
+                return
+            }
+            counts[base, default: 0] += 1
+        }
+    }
+
+    private static func aliasRoot(forSkillRoot root: String, pluginVersionSkillCounts: [String: Int]) -> String {
+        guard let pluginVersionBase = pluginVersionBase(root) else {
+            return root
+        }
+        if (pluginVersionSkillCounts[pluginVersionBase] ?? 0) > 1 {
+            return root
+        }
+        return pluginMarketplaceBase(root) ?? root
+    }
+
+    private static func pluginMarketplaceBase(_ path: String) -> String? {
+        let components = pathComponents(path)
+        guard components.count >= 3 else {
+            return nil
+        }
+        for index in 0..<(components.count - 1) where components[index] == "plugins" && components[index + 1] == "cache" {
+            let end = index + 3
+            guard end <= components.count else {
+                return nil
+            }
+            return "/" + components[..<end].joined(separator: "/")
+        }
+        return nil
+    }
+
+    private static func pluginVersionBase(_ path: String) -> String? {
+        guard let marketplaceBase = pluginMarketplaceBase(path),
+              let relative = relativePath(path, from: marketplaceBase)
+        else {
+            return nil
+        }
+        let parts = relative.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count >= 2 else {
+            return nil
+        }
+        return "\(marketplaceBase)/\(parts[0])/\(parts[1])"
+    }
+
+    private static func relativePath(_ path: String, from root: String) -> String? {
+        if path == root {
+            return ""
+        }
+        guard path.hasPrefix(root + "/") else {
+            return nil
+        }
+        return String(path.dropFirst(root.count + 1))
+    }
+
+    private static func pathComponents(_ path: String) -> [String] {
+        normalizeSkillPath(path).split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     }
 
     private static func renderSkillLines(
