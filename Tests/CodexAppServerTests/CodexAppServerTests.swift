@@ -12022,6 +12022,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullPermissionProfileResult["stdout"] as? String, "hi\n")
     }
 
+    func testCommandExecPermissionProfileDisabledOverridesConfiguredSandboxLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let allowedFile = cwd.url.appendingPathComponent("permission-profile.txt", isDirectory: false)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf profile > permission-profile.txt"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"disabled"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "profile")
+    }
+
+    func testCommandExecPermissionProfileRejectsUnbridgeableWritesLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let outside = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"managed","network":{"enabled":false},"fileSystem":{"type":"restricted","entries":[{"path":{"type":"path","path":"\#(outside.url.path)"},"access":"write"}]}}}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "invalid permission profile: permissions profile requests filesystem writes outside the workspace root, which is not supported until the runtime enforces FileSystemSandboxPolicy directly"
+        )
+    }
+
     func testCommandExecValidatesRustOptionConflicts() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

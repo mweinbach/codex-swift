@@ -261,6 +261,7 @@ private struct AppServerCommandExecParams {
     let size: AppServerTerminalSize?
     let environmentOverrides: [String: String?]
     let sandboxPolicy: SandboxPolicy?
+    let permissionProfile: PermissionProfile?
 }
 
 private struct AppServerSandboxLaunch {
@@ -10127,11 +10128,17 @@ public enum CodexAppServer {
             managedConfigOverrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
+        let sandbox = try commandExecSandboxConfiguration(
+            parsed: parsed,
+            runtimeConfig: runtimeConfig,
+            commandCwd: cwd,
+            configuration: configuration
+        )
         return try runOneOffCommand(
             parsed.command,
             cwd: cwd,
-            sandboxPolicy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
-            sandboxCwd: configuration.cwd,
+            sandboxPolicy: sandbox.policy,
+            sandboxCwd: sandbox.cwd,
             timeoutMilliseconds: parsed.timeoutMs,
             outputBytesCap: parsed.outputBytesCap,
             environment: commandExecEnvironment(
@@ -10171,6 +10178,7 @@ public enum CodexAppServer {
         {
             throw AppServerError.invalidRequest("`permissionProfile` cannot be combined with `sandboxPolicy`")
         }
+        let permissionProfile = try commandExecPermissionProfile(params?["permissionProfile"])
         if processID == nil && (tty || streamStdin || streamStdoutStderr) {
             throw AppServerError.invalidRequest("command/exec tty or streaming requires a client-supplied processId")
         }
@@ -10198,8 +10206,35 @@ public enum CodexAppServer {
             outputBytesCap: disableOutputCap ? nil : commandExecOutputBytesCap(params?["outputBytesCap"]),
             size: size,
             environmentOverrides: processEnvironmentOverrides(params?["env"]),
-            sandboxPolicy: sandboxPolicy
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile
         )
+    }
+
+    fileprivate static func commandExecSandboxConfiguration(
+        parsed: AppServerCommandExecParams,
+        runtimeConfig: CodexRuntimeConfig,
+        commandCwd: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (policy: SandboxPolicy, cwd: URL) {
+        if let permissionProfile = parsed.permissionProfile {
+            return (
+                try legacySandboxPolicy(from: permissionProfile, cwd: commandCwd),
+                commandCwd
+            )
+        }
+        return (parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(), configuration.cwd)
+    }
+
+    private static func legacySandboxPolicy(from permissionProfile: PermissionProfile, cwd: URL) throws -> SandboxPolicy {
+        do {
+            return try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+                networkPolicy: permissionProfile.networkSandboxPolicy,
+                cwd: cwd.standardizedFileURL.path
+            )
+        } catch {
+            throw AppServerError.invalidRequest("invalid permission profile: \(error)")
+        }
     }
 
     fileprivate static func requireCommandExecPermissionProfileExperimentalAPI(
@@ -10393,6 +10428,75 @@ public enum CodexAppServer {
             )
         default:
             throw AppServerError.invalidRequest("invalid sandbox policy")
+        }
+    }
+
+    private static func commandExecPermissionProfile(_ value: Any?) throws -> PermissionProfile? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let object = value as? [String: Any],
+              let type = stringParam(object["type"])
+        else {
+            throw AppServerError.invalidRequest("invalid permission profile")
+        }
+
+        switch type {
+        case "disabled":
+            return .disabled
+        case "external":
+            return .external(network: try permissionProfileNetworkPolicy(object["network"]))
+        case "managed":
+            guard let fileSystemObject = object["fileSystem"] as? [String: Any] else {
+                throw AppServerError.invalidRequest("invalid permission profile")
+            }
+            return .managed(
+                fileSystem: try permissionProfileFileSystemPermissions(fileSystemObject),
+                network: try permissionProfileNetworkPolicy(object["network"])
+            )
+        default:
+            throw AppServerError.invalidRequest("invalid permission profile")
+        }
+    }
+
+    private static func permissionProfileNetworkPolicy(_ value: Any?) throws -> NetworkSandboxPolicy {
+        guard let object = value as? [String: Any],
+              let enabled = object["enabled"] as? Bool
+        else {
+            throw AppServerError.invalidRequest("invalid permission profile")
+        }
+        return enabled ? .enabled : .restricted
+    }
+
+    private static func permissionProfileFileSystemPermissions(
+        _ object: [String: Any]
+    ) throws -> ManagedFileSystemPermissions {
+        guard let type = stringParam(object["type"]) else {
+            throw AppServerError.invalidRequest("invalid permission profile")
+        }
+
+        switch type {
+        case "unrestricted":
+            return .unrestricted
+        case "restricted":
+            let entries = object["entries"] as? [[String: Any]] ?? []
+            var coreObject: [String: Any] = [
+                "type": "restricted",
+                "entries": entries
+            ]
+            if let globScanMaxDepth = object["globScanMaxDepth"] ?? object["glob_scan_max_depth"],
+               !(globScanMaxDepth is NSNull)
+            {
+                coreObject["glob_scan_max_depth"] = globScanMaxDepth
+            }
+            do {
+                let data = try JSONSerialization.data(withJSONObject: coreObject)
+                return try JSONDecoder().decode(ManagedFileSystemPermissions.self, from: data)
+            } catch {
+                throw AppServerError.invalidRequest("invalid permission profile")
+            }
+        default:
+            throw AppServerError.invalidRequest("invalid permission profile")
         }
     }
 
@@ -16687,13 +16791,20 @@ final class CodexAppServerMessageProcessor {
             managedConfigOverrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
+        let commandCwd = CodexAppServer.commandExecCwd(parsed.cwd, configuration: configuration)
+        let sandbox = try CodexAppServer.commandExecSandboxConfiguration(
+            parsed: parsed,
+            runtimeConfig: runtimeConfig,
+            commandCwd: commandCwd,
+            configuration: configuration
+        )
         let registry = activeCommandExecs
         let session = try AppServerCommandExecProcess(
             params: parsed,
             requestID: id,
-            cwd: CodexAppServer.commandExecCwd(parsed.cwd, configuration: configuration),
-            sandboxPolicy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
-            sandboxCwd: configuration.cwd,
+            cwd: commandCwd,
+            sandboxPolicy: sandbox.policy,
+            sandboxCwd: sandbox.cwd,
             environment: configuration.environment,
             notificationSink: notificationSink,
             onExit: { processID in

@@ -881,8 +881,8 @@ Source baseline inspected for this scaffold:
   - added Swift fork-history filtering that keeps stable system/developer/user messages, final assistant messages, compacted records, event messages, and session metadata while dropping turn contexts, runtime/tool response items, non-final assistant messages, unknown roles, known-persisted placeholders, and parent MultiAgentV2 developer usage hints.
 - `codex-rs/core/src/agent/status.rs` collaboration agent status helpers
   - added Swift event-to-status projection for turn start/complete/abort/error/shutdown events, including BudgetLimited-as-interrupted, Rust Debug-style error text for non-interrupted abort reasons, and the pending/running/interrupted non-final set.
-- `codex-rs/app-server-protocol` experimental `command/exec.permissionProfile` gating
-  - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled.
+- `codex-rs/app-server-protocol` experimental `command/exec.permissionProfile` handling
+  - matched Rust's field-level experimental API guard for `command/exec` `permissionProfile`, including `null` handling and preserving the sandbox-policy conflict once experimental API is enabled. Bridgeable v2 permission profiles now apply to one-off and process-id `command/exec` sandbox selection, including disabled/full-access profiles and rejection for filesystem writes outside the command workspace until Swift has direct FileSystemSandboxPolicy runtime enforcement.
 - `codex-rs/app-server-protocol` experimental `account/login/start.chatgptAuthTokens` gating
   - matched Rust's field-level experimental API guard for external ChatGPT token login, while preserving forced-login and forced-workspace validation after opt-in.
 - `codex-rs/app-server-protocol` experimental `thread/goal/*` gating
