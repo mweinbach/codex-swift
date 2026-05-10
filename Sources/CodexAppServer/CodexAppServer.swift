@@ -13732,7 +13732,12 @@ public enum CodexAppServer {
             editedPaths: editedPaths
         )
         try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
-        try renderConfigToml(nextConfig).write(to: configFile, atomically: true, encoding: .utf8)
+        let renderedConfig = configTomlForWrite(
+            nextConfig,
+            edits: edits,
+            existingContents: try? String(contentsOf: configFile, encoding: .utf8)
+        )
+        try renderedConfig.write(to: configFile, atomically: true, encoding: .utf8)
 
         return [
             "status": overridden == nil ? "ok" : "okOverridden",
@@ -13888,6 +13893,99 @@ public enum CodexAppServer {
             _ = removeConfigValue(at: path, in: &config)
         }
         return path
+    }
+
+    private static func configTomlForWrite(
+        _ nextConfig: ConfigValue,
+        edits: [ConfigWriteEdit],
+        existingContents: String?
+    ) -> String {
+        guard let existingContents,
+              let edited = sourcePreservingConfigToml(existingContents, edits: edits)
+        else {
+            return renderConfigToml(nextConfig)
+        }
+        return edited
+    }
+
+    private static func sourcePreservingConfigToml(_ contents: String, edits: [ConfigWriteEdit]) -> String? {
+        guard !edits.isEmpty else {
+            return contents
+        }
+        var lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for edit in edits {
+            guard edit.mergeStrategy == .replace,
+                  let value = edit.value,
+                  sourcePreservingTomlLiteral(value) != nil,
+                  let path = try? configWriteKeyPath(edit.keyPath),
+                  let key = path.last
+            else {
+                return nil
+            }
+            let tablePath = Array(path.dropLast())
+            applySourcePreservingAssignment(
+                key: key,
+                value: value,
+                tablePath: tablePath,
+                lines: &lines
+            )
+        }
+        return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
+    }
+
+    private static func applySourcePreservingAssignment(
+        key: String,
+        value: ConfigValue,
+        tablePath: [String],
+        lines: inout [String]
+    ) {
+        let header = tablePath.isEmpty ? nil : tablePath.map(tomlKey).joined(separator: ".")
+        var range = configSectionRange(header, in: lines)
+        if range.isEmpty, let header {
+            if !lines.isEmpty, lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                lines.append("")
+            }
+            lines.append("[\(header)]")
+            let bodyStart = lines.index(before: lines.endIndex)
+            range = bodyStart..<bodyStart
+        }
+
+        let assignmentKey = tomlKey(key)
+        let assignment = "\(assignmentKey) = \(sourcePreservingTomlLiteral(value) ?? tomlLiteral(value))"
+        for index in range where tomlAssignmentKey(lines[index]) == assignmentKey {
+            lines[index] = assignment
+            return
+        }
+
+        let insertionIndex = sourcePreservingInsertionIndex(for: range, in: lines)
+        lines.insert(assignment, at: insertionIndex)
+    }
+
+    private static func sourcePreservingInsertionIndex(for range: Range<Int>, in lines: [String]) -> Int {
+        var insertionIndex = range.upperBound
+        while insertionIndex > range.lowerBound,
+              lines[lines.index(before: insertionIndex)].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            insertionIndex = lines.index(before: insertionIndex)
+        }
+        return insertionIndex
+    }
+
+    private static func sourcePreservingTomlLiteral(_ value: ConfigValue) -> String? {
+        switch value {
+        case .none, .table:
+            return nil
+        case .string, .integer, .double, .bool:
+            return tomlLiteral(value)
+        case let .array(values):
+            guard values.allSatisfy({
+                if case .none = $0 { return false }
+                if case .table = $0 { return false }
+                return true
+            }) else {
+                return nil
+            }
+            return tomlLiteral(.array(values))
+        }
     }
 
     private static func configWriteKeyPath(_ keyPath: String) throws -> [String] {

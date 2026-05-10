@@ -10945,6 +10945,105 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["model"] as? String, "gpt-new")
     }
 
+    func testConfigValueWritePreservesCommentsAndOrderLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let original = """
+        # Codex user configuration
+        model = "gpt-5.2"
+        approval_policy = "on-request"
+
+        [notice]
+        # Preserve this comment
+        hide_full_access_warning = true
+
+        [features]
+        unified_exec = true
+
+        """
+        try original.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"features.personality","value":true,"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+
+        let expected = """
+        # Codex user configuration
+        model = "gpt-5.2"
+        approval_policy = "on-request"
+
+        [notice]
+        # Preserve this comment
+        hide_full_access_warning = true
+
+        [features]
+        unified_exec = true
+        personality = true
+
+        """
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), expected)
+    }
+
+    func testConfigValueWriteSupportsNestedAppPathsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+
+        let appsValue = #"{"app1":{"enabled":false}}"#
+        let writeApps = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"apps","value":\#(appsValue),"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((writeApps["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let writeNested = try appServerResponse(
+            #"{"id":2,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"apps.app1.default_tools_approval_mode","value":"prompt","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((writeNested["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let read = try appServerResponse(
+            #"{"id":3,"method":"config/read","params":{"includeLayers":false}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let apps = try XCTUnwrap(config["apps"] as? [String: Any])
+        let app1 = try XCTUnwrap(apps["app1"] as? [String: Any])
+        XCTAssertEqual(app1["enabled"] as? Bool, false)
+        XCTAssertEqual(app1["default_tools_approval_mode"] as? String, "prompt")
+    }
+
+    func testConfigValueWriteSupportsCustomMCPServerApprovalModeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        [mcp_servers.docs]
+        command = "docs-server"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let write = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"mcp_servers.docs.default_tools_approval_mode","value":"approve","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((write["result"] as? [String: Any])?["status"] as? String, "ok")
+        XCTAssertTrue(try String(contentsOf: configFile, encoding: .utf8).contains(#"default_tools_approval_mode = "approve""#))
+
+        let read = try appServerResponse(
+            #"{"id":2,"method":"config/read","params":{"includeLayers":false}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let servers = try XCTUnwrap(config["mcp_servers"] as? [String: Any])
+        let docs = try XCTUnwrap(servers["docs"] as? [String: Any])
+        XCTAssertEqual(docs["command"] as? String, "docs-server")
+        XCTAssertEqual(docs["default_tools_approval_mode"] as? String, "approve")
+    }
+
     func testConfigReadAfterPipelinedWriteSeesWrittenValue() throws {
         let temp = try TemporaryDirectory()
         try #"model = "gpt-old""#.write(

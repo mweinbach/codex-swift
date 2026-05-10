@@ -928,6 +928,8 @@ Source baseline inspected for this scaffold:
   - wired Responses prompt streaming through Rust's `History::for_prompt` normalization path for Swift model requests: request input now gets missing tool outputs inserted, orphan outputs removed, and image payloads stripped according to the selected model family's input modalities before the Responses API body is built.
 - `codex-rs/app-server/src/config_manager_service.rs` config write managed constraints
   - matched Rust config write validation for managed feature requirements on user/profile `features` paths and Rust's `okOverridden` response metadata when a higher-precedence config layer masks a written user value.
+- `codex-rs/app-server/src/config_manager_service.rs` source-preserving config writes
+  - added a conservative source-preserving persistence path for simple config-manager replacement writes, matching Rust's `ConfigEditsBuilder` behavior for inserting scalar values into existing TOML tables without reordering unrelated keys or dropping comments; verified nested `apps.*.default_tools_approval_mode` and custom `mcp_servers.*.default_tools_approval_mode` writes through `config/read`.
 
 ## Known Gaps
 
