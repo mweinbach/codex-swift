@@ -369,6 +369,24 @@ public struct ExecPolicy: Equatable, Sendable {
         hostExecutablesByName
     }
 
+    public func mergingOverlay(_ overlay: ExecPolicy) -> ExecPolicy {
+        var combinedRules = rulesByProgram
+        for (program, rules) in overlay.rulesByProgram {
+            combinedRules[program, default: []].append(contentsOf: rules)
+        }
+
+        var combinedHostExecutables = hostExecutablesByName
+        for (name, paths) in overlay.hostExecutablesByName {
+            combinedHostExecutables[name] = paths
+        }
+
+        return ExecPolicy(
+            rulesByProgram: combinedRules,
+            networkRules: networkRulesStorage + overlay.networkRulesStorage,
+            hostExecutables: combinedHostExecutables
+        )
+    }
+
     public func compiledNetworkDomains() -> (allowed: [String], denied: [String]) {
         var allowed: [String] = []
         var denied: [String] = []
@@ -7550,7 +7568,11 @@ public final class ExecPolicyManager: @unchecked Sendable {
             }
         }
 
-        return parser.build()
+        let policy = parser.build()
+        guard let requirementsPolicy = configStack.requirements.execPolicy else {
+            return policy
+        }
+        return policy.mergingOverlay(requirementsPolicy)
     }
 
     public static func collectPolicyFiles(

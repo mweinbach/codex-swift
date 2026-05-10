@@ -3927,6 +3927,46 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertFalse(ExecPolicyInheritance.childUsesParentExecPolicy(parentStack: parent, childStack: child))
     }
 
+    func testLoadExecPolicyMergesRequirementsNetworkRulesLikeRust() throws {
+        let stack = try execPolicyLayerStack(requirements: ConfigRequirements(
+            execPolicy: parsePolicy(#"network_rule(host="blocked.example.com", protocol="https", decision="forbidden")"#)
+        ))
+        let policy = try ExecPolicyManager.load(features: .withDefaults(), configStack: stack).current()
+
+        let domains = policy.compiledNetworkDomains()
+        XCTAssertEqual(domains.allowed, [])
+        XCTAssertEqual(domains.denied, ["blocked.example.com"])
+    }
+
+    func testLoadExecPolicyPreservesHostExecutablesWithRequirementsOverlayLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let projectDotCodex = tempDir.url.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: projectDotCodex.appendingPathComponent("rules", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try #"host_executable(name="git", paths=["/usr/bin/git"])"#.write(
+            to: projectDotCodex.appendingPathComponent("rules/host.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let stack = try ConfigLayerStack(
+            layers: [
+                ConfigLayerEntry(
+                    name: .project(dotCodexFolder: try AbsolutePath(absolutePath: projectDotCodex.path)),
+                    config: .table([:])
+                )
+            ],
+            requirements: ConfigRequirements(
+                execPolicy: parsePolicy(#"network_rule(host="blocked.example.com", protocol="https", decision="forbidden")"#)
+            )
+        )
+        let policy = try ExecPolicyManager.load(features: .withDefaults(), configStack: stack).current()
+
+        XCTAssertEqual(policy.hostExecutables()["git"], ["/usr/bin/git"])
+        XCTAssertEqual(policy.compiledNetworkDomains().denied, ["blocked.example.com"])
+    }
+
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")
