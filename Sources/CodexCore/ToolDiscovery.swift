@@ -3,6 +3,7 @@ import Foundation
 public let requestPluginInstallApprovalKindValue = "tool_suggestion"
 public let requestPluginInstallPersistKey = "persist"
 public let requestPluginInstallPersistAlwaysValue = "always"
+public let requestPluginInstallToolName = "request_plugin_install"
 
 public enum DiscoverableToolType: String, Codable, Equatable, Sendable {
     case connector

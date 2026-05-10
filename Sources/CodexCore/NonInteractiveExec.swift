@@ -157,7 +157,8 @@ public enum NonInteractiveExec {
             includeViewImageTool: config.toolsViewImage ?? true,
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
-            toolSearch: config.features.isEnabled(.toolSearch)
+            toolSearch: config.features.isEnabled(.toolSearch),
+            toolSuggest: config.features.isEnabled(.toolSuggest)
         )
     }
 

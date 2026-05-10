@@ -748,6 +748,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let experimentalSupportedTools: [String]
     public let namespaceTools: Bool
     public let toolSearch: Bool
+    public let toolSuggest: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -759,7 +760,8 @@ public struct ToolsConfig: Equatable, Sendable {
         includeComputerUseTools: Bool = false,
         experimentalSupportedTools: [String] = [],
         namespaceTools: Bool = true,
-        toolSearch: Bool = true
+        toolSearch: Bool = true,
+        toolSuggest: Bool = true
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -771,6 +773,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.experimentalSupportedTools = experimentalSupportedTools
         self.namespaceTools = namespaceTools
         self.toolSearch = toolSearch
+        self.toolSuggest = toolSuggest
     }
 }
 
@@ -778,7 +781,8 @@ public enum ToolSpecFactory {
     public static func buildSpecs(
         config: ToolsConfig,
         mcpTools: [String: McpTool]? = nil,
-        deferredMcpTools: [String: McpTool]? = nil
+        deferredMcpTools: [String: McpTool]? = nil,
+        discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
@@ -804,6 +808,17 @@ public enum ToolSpecFactory {
         if config.toolSearch, let deferredMcpTools, !deferredMcpTools.isEmpty, config.namespaceTools {
             let index = ToolSearchIndex.mcpIndex(from: deferredMcpTools)
             specs.append(ConfiguredToolSpec(spec: index.toolSpec(), supportsParallelToolCalls: true))
+        }
+
+        if config.toolSuggest,
+           let discoverableTools,
+           !discoverableTools.isEmpty {
+            specs.append(ConfiguredToolSpec(
+                spec: createRequestPluginInstallTool(
+                    entries: collectRequestPluginInstallEntries(discoverableTools)
+                ),
+                supportsParallelToolCalls: true
+            ))
         }
 
         switch config.applyPatchToolType {
@@ -900,6 +915,20 @@ public enum ToolSpecFactory {
 
     public static func createMCPTool(fullyQualifiedName: String, tool: McpTool) -> ToolSpec {
         .function(createMCPResponsesAPITool(name: fullyQualifiedName, tool: tool))
+    }
+
+    public static func createRequestPluginInstallTool(entries: [RequestPluginInstallEntry]) -> ToolSpec {
+        functionTool(
+            name: requestPluginInstallToolName,
+            description: requestPluginInstallToolDescription(entries: entries),
+            properties: [
+                "tool_type": .string(description: "Type of discoverable tool to suggest. Use \"connector\" or \"plugin\"."),
+                "action_type": .string(description: "Suggested action for the tool. Use \"install\"."),
+                "tool_id": .string(description: "Connector or plugin id to suggest."),
+                "suggest_reason": .string(description: "Concise one-line user-facing reason why this plugin or connector can help with the current request.")
+            ],
+            required: ["tool_type", "action_type", "tool_id", "suggest_reason"]
+        )
     }
 
     public static func defaultNamespaceDescription(_ namespaceName: String) -> String {
@@ -1309,6 +1338,75 @@ public enum ToolSpecFactory {
                 )
             )
         )
+    }
+
+    private static func requestPluginInstallToolDescription(entries: [RequestPluginInstallEntry]) -> String {
+        let discoverableTools = entries
+            .sorted { left, right in
+                if left.name == right.name {
+                    return left.id < right.id
+                }
+                return left.name < right.name
+            }
+            .map { entry in
+                "- \(entry.name) (id: `\(entry.id)`, type: \(entry.toolType.rawValue), action: install): \(requestPluginInstallDescription(for: entry))"
+            }
+            .joined(separator: "\n")
+
+        return """
+        # Request plugin/connector install
+
+        Use this tool only to ask the user to install one known plugin or connector from the list below. The list contains known candidates that are not currently installed.
+
+        Use this ONLY when all of the following are true:
+        - The user explicitly asks to use a specific plugin or connector that is not already available in the current context or active `tools` list.
+        - `tool_search` is not available, or it has already been called and did not find or make the requested tool callable.
+        - The plugin or connector is one of the known installable plugins or connectors listed below. Only ask to install plugins or connectors from this list.
+
+        Do not use this tool for adjacent capabilities, broad recommendations, or tools that merely seem useful. Only use when the user explicitly asks to use that exact listed plugin or connector.
+
+        Known plugins/connectors available to install:
+        \(discoverableTools)
+
+        Workflow:
+
+        1. Check the current context and active `tools` list first. If current active tools aren't relevant and `tool_search` is available, only call this tool after `tool_search` has already been tried and found no relevant tool.
+        2. Match the user's explicit request against the known plugin/connector list above. Only proceed when one listed plugin or connector exactly fits.
+        3. If we found both connectors and plugins to install, use plugins first, only use connectors if the corresponding plugin is installed but the connector is not.
+        4. If one plugin or connector clearly fits, call `request_plugin_install` with:
+           - `tool_type`: `connector` or `plugin`
+           - `action_type`: `install`
+           - `tool_id`: exact id from the known plugin/connector list above
+           - `suggest_reason`: concise one-line user-facing reason this plugin or connector can help with the current request
+        5. After the request flow completes:
+           - if the user finished the install flow, continue by searching again or using the newly available plugin or connector
+           - if the user did not finish, continue without that plugin or connector, and don't request it again unless the user explicitly asks for it.
+
+        IMPORTANT: DO NOT call this tool in parallel with other tools.
+        """
+    }
+
+    private static func requestPluginInstallDescription(for entry: RequestPluginInstallEntry) -> String {
+        if let description = entry.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !description.isEmpty {
+            return description
+        }
+
+        guard entry.toolType == .plugin else {
+            return "No description provided."
+        }
+
+        var capabilities: [String] = []
+        if entry.hasSkills {
+            capabilities.append("skills")
+        }
+        if !entry.mcpServerNames.isEmpty {
+            capabilities.append("MCP servers: \(entry.mcpServerNames.joined(separator: ", "))")
+        }
+        if !entry.appConnectorIDs.isEmpty {
+            capabilities.append("app connectors: \(entry.appConnectorIDs.joined(separator: ", "))")
+        }
+        return capabilities.isEmpty ? "No description provided." : capabilities.joined(separator: "; ")
     }
 
     private static func jsonCompatibleValue(_ value: JSONValue) -> Any {

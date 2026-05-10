@@ -411,6 +411,102 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
+    func testRequestPluginInstallCanRegisterWithoutSearchTool() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                includeViewImageTool: false,
+                toolSearch: false,
+                toolSuggest: true
+            ),
+            discoverableTools: [
+                .connector(DiscoverableConnectorInfo(
+                    id: "connector_2128aebfecb84f64a069897515042a44",
+                    name: "Google Calendar",
+                    description: "Plan events and schedules.",
+                    isAccessible: false,
+                    isEnabled: true
+                ))
+            ]
+        )
+
+        XCTAssertEqual(specs.map { $0.spec.name }, [
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+            "update_plan",
+            "request_plugin_install"
+        ])
+        XCTAssertEqual(specs.last?.supportsParallelToolCalls, true)
+    }
+
+    func testRequestPluginInstallDoesNotRegisterWithoutToolSuggest() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                toolSuggest: false
+            ),
+            discoverableTools: [
+                .connector(DiscoverableConnectorInfo(
+                    id: "connector_2128aebfecb84f64a069897515042a44",
+                    name: "Google Calendar",
+                    description: "Plan events and schedules.",
+                    isAccessible: false,
+                    isEnabled: true
+                ))
+            ]
+        )
+
+        XCTAssertFalse(specs.contains { $0.spec.name == requestPluginInstallToolName })
+    }
+
+    func testRequestPluginInstallToolUsesRustDescriptionAndSchema() throws {
+        let tool = ToolSpecFactory.createRequestPluginInstallTool(entries: [
+            RequestPluginInstallEntry(
+                id: "slack@openai-curated",
+                name: "Slack",
+                toolType: .connector,
+                hasSkills: false,
+                mcpServerNames: [],
+                appConnectorIDs: []
+            ),
+            RequestPluginInstallEntry(
+                id: "github",
+                name: "GitHub",
+                toolType: .plugin,
+                hasSkills: true,
+                mcpServerNames: ["github-mcp"],
+                appConnectorIDs: ["github-app"]
+            )
+        ])
+
+        guard case let .function(function) = tool else {
+            return XCTFail("expected function tool")
+        }
+
+        XCTAssertEqual(function.name, "request_plugin_install")
+        XCTAssertFalse(function.strict)
+        XCTAssertNil(function.outputSchema)
+        XCTAssertTrue(function.description.contains("Use this tool only to ask the user to install one known plugin or connector from the list below."))
+        XCTAssertTrue(function.description.contains("- GitHub (id: `github`, type: plugin, action: install): skills; MCP servers: github-mcp; app connectors: github-app"))
+        XCTAssertTrue(function.description.contains("- Slack (id: `slack@openai-curated`, type: connector, action: install): No description provided."))
+        XCTAssertTrue(function.description.contains("IMPORTANT: DO NOT call this tool in parallel with other tools."))
+        XCTAssertFalse(function.description.contains("{{discoverable_tools}}"))
+        XCTAssertEqual(
+            function.parameters,
+            .object(
+                properties: [
+                    "tool_type": .string(description: "Type of discoverable tool to suggest. Use \"connector\" or \"plugin\"."),
+                    "action_type": .string(description: "Suggested action for the tool. Use \"install\"."),
+                    "tool_id": .string(description: "Connector or plugin id to suggest."),
+                    "suggest_reason": .string(description: "Concise one-line user-facing reason why this plugin or connector can help with the current request.")
+                ],
+                required: ["tool_type", "action_type", "tool_id", "suggest_reason"],
+                additionalProperties: .boolean(false)
+            )
+        )
+    }
+
     func testWebSearchModeControlsExternalWebAccessLikeRust() throws {
         let live = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: .disabled, webSearchMode: .live))
         XCTAssertEqual(webSearchSpecs(in: live), [.webSearch(externalWebAccess: true)])
