@@ -259,6 +259,11 @@ private struct AppServerCommandExecParams {
     let environmentOverrides: [String: String?]
 }
 
+private struct AppServerSandboxLaunch {
+    let command: [String]
+    let environment: [String: String]
+}
+
 private struct AppServerCommandExecWriteParams {
     let processID: String
     let delta: Data
@@ -9949,9 +9954,17 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("live command/exec session is not implemented")
         }
         let cwd = commandExecCwd(parsed.cwd, configuration: configuration)
+        let runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
         return try runOneOffCommand(
             parsed.command,
             cwd: cwd,
+            sandboxPolicy: runtimeConfig.legacySandboxPolicy(),
+            sandboxCwd: configuration.cwd,
             timeoutMilliseconds: parsed.timeoutMs,
             outputBytesCap: parsed.outputBytesCap,
             environment: commandExecEnvironment(
@@ -10043,6 +10056,38 @@ public enum CodexAppServer {
             }
         }
         return environment
+    }
+
+    fileprivate static func sandboxedLaunch(
+        command: [String],
+        sandboxPolicy: SandboxPolicy,
+        sandboxCwd: URL,
+        environment: [String: String]
+    ) throws -> AppServerSandboxLaunch {
+        guard sandboxPolicy != .dangerFullAccess else {
+            return AppServerSandboxLaunch(command: command, environment: environment)
+        }
+        let absoluteCwd: AbsolutePath
+        do {
+            absoluteCwd = try AbsolutePath(absolutePath: sandboxCwd.standardizedFileURL.path)
+        } catch {
+            throw AppServerError.internalError("invalid sandbox cwd: \(sandboxCwd.path)")
+        }
+
+        var sandboxEnvironment = environment
+        sandboxEnvironment["CODEX_SANDBOX"] = SeatbeltSandbox.sandboxEnvironmentValue
+        if !sandboxPolicy.hasFullNetworkAccess {
+            sandboxEnvironment["CODEX_SANDBOX_NETWORK_DISABLED"] = "1"
+        }
+        return AppServerSandboxLaunch(
+            command: [SeatbeltSandbox.executablePath] + SeatbeltSandbox.commandArguments(
+                command: command,
+                sandboxPolicy: sandboxPolicy,
+                sandboxPolicyCwd: absoluteCwd,
+                environment: environment
+            ),
+            environment: sandboxEnvironment
+        )
     }
 
     fileprivate static func processSpawnEnvironment(
@@ -13045,22 +13090,30 @@ public enum CodexAppServer {
     private static func runOneOffCommand(
         _ command: [String],
         cwd: URL?,
+        sandboxPolicy: SandboxPolicy,
+        sandboxCwd: URL,
         timeoutMilliseconds: Int?,
         outputBytesCap: Int?,
         environment: [String: String]
     ) throws -> [String: Any] {
+        let launch = try sandboxedLaunch(
+            command: command,
+            sandboxPolicy: sandboxPolicy,
+            sandboxCwd: sandboxCwd,
+            environment: environment
+        )
         let process = Process()
-        if command[0].contains("/") {
-            process.executableURL = URL(fileURLWithPath: command[0])
-            process.arguments = Array(command.dropFirst())
+        if launch.command[0].contains("/") {
+            process.executableURL = URL(fileURLWithPath: launch.command[0])
+            process.arguments = Array(launch.command.dropFirst())
         } else {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = command
+            process.arguments = launch.command
         }
         if let cwd {
             process.currentDirectoryURL = cwd
         }
-        process.environment = environment
+        process.environment = launch.environment
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -15107,26 +15160,35 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         params: AppServerCommandExecParams,
         requestID: Any,
         cwd: URL,
+        sandboxPolicy: SandboxPolicy,
+        sandboxCwd: URL,
         environment: [String: String],
         notificationSink: AppServerNotificationSink?,
         onExit: @escaping @Sendable (String) -> Void
-    ) {
+    ) throws {
         self.params = params
         self.requestID = requestID
         self.notificationSink = notificationSink
         self.onExit = onExit
-        if params.command[0].contains("/") {
-            process.executableURL = URL(fileURLWithPath: params.command[0])
-            process.arguments = Array(params.command.dropFirst())
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = params.command
-        }
-        process.currentDirectoryURL = cwd
-        process.environment = CodexAppServer.commandExecEnvironment(
+        let environment = CodexAppServer.commandExecEnvironment(
             base: environment,
             overrides: params.environmentOverrides
         )
+        let launch = try CodexAppServer.sandboxedLaunch(
+            command: params.command,
+            sandboxPolicy: sandboxPolicy,
+            sandboxCwd: sandboxCwd,
+            environment: environment
+        )
+        if launch.command[0].contains("/") {
+            process.executableURL = URL(fileURLWithPath: launch.command[0])
+            process.arguments = Array(launch.command.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = launch.command
+        }
+        process.currentDirectoryURL = cwd
+        process.environment = launch.environment
     }
 
     deinit {
@@ -16391,11 +16453,19 @@ final class CodexAppServerMessageProcessor {
         if activeCommandExecs.contains(processID) {
             throw AppServerError.invalidRequest("duplicate active command/exec process id: \"\(processID)\"")
         }
+        let runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
         let registry = activeCommandExecs
-        let session = AppServerCommandExecProcess(
+        let session = try AppServerCommandExecProcess(
             params: parsed,
             requestID: id,
             cwd: CodexAppServer.commandExecCwd(parsed.cwd, configuration: configuration),
+            sandboxPolicy: runtimeConfig.legacySandboxPolicy(),
+            sandboxCwd: configuration.cwd,
             environment: configuration.environment,
             notificationSink: notificationSink,
             onExit: { processID in

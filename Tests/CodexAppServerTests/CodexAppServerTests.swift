@@ -11690,6 +11690,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "err\n")
     }
 
+    func testCommandExecUsesConfiguredReadOnlySandboxLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let blockedFile = cwd.url.appendingPathComponent("blocked.txt", isDirectory: false)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf nope > blocked.txt"],"cwd":"\#(cwd.url.path)"}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertNotEqual(result["exitCode"] as? Int, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: blockedFile.path))
+    }
+
     func testCommandExecResolvesRelativeCwdAgainstConfiguredServerCwd() throws {
         let codexHome = try TemporaryDirectory()
         let serverCwd = try TemporaryDirectory()

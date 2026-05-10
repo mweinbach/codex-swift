@@ -895,6 +895,8 @@ Source baseline inspected for this scaffold:
   - pinned Swift `command/exec` parity for terminating a non-streaming process-id session: `command/exec/terminate` returns an empty object immediately and the original deferred request still completes with a nonzero exit code and empty buffered stdout/stderr.
 - `codex-rs/app-server/tests/suite/v2/command_exec.rs` request validation
   - pinned Swift `command/exec` parity for Rust's negative `timeoutMs` rejection and process-id-required streaming/tty requests, preserving exact JSON-RPC error codes and messages.
+- `codex-rs/app-server/src/request_processors/command_exec_processor.rs` configured sandbox execution
+  - routed Swift `command/exec` one-off and process-id sessions through the configured runtime sandbox policy before spawning commands, matching Rust's default `build_exec_request` path for read-only/workspace-write command execution; added coverage proving the default read-only sandbox blocks writes in the command working directory.
 - `codex-rs/shell-command/src/bash.rs` heredoc command-prefix parsing
   - tightened Swift's `parseShellLcSingleCommandPrefix` to match Rust's literal word/number-only heredoc prefix contract, so quoted, escaped, arithmetic-expanded, or otherwise non-literal prefix words are no longer accepted for exec-policy prefix matching.
 - `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply
