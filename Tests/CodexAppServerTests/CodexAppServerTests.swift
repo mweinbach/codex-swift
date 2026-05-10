@@ -5535,6 +5535,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(scannedData.isEmpty)
     }
 
+    func testThreadListStateDbOnlyDropsMissingRolloutPaths() async throws {
+        let temp = try TemporaryDirectory()
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let staleThreadID = try ThreadId(string: "00000000-0000-0000-0000-000000009010")
+        let staleRolloutPath = temp.url
+            .appendingPathComponent("sessions/2099/01/01/rollout-2099-01-01T00-00-00-\(staleThreadID).jsonl")
+            .path
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: staleThreadID,
+            rolloutPath: staleRolloutPath,
+            createdAt: try appServerDate("2025-01-03T13:00:00Z"),
+            updatedAt: try appServerDate("2025-01-03T13:00:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "stale state db path",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "stale row should be dropped"
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":10,"useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let storedPath = try await stateStore.findRolloutPath(threadID: staleThreadID, archiveFilter: .all)
+
+        XCTAssertTrue(data.isEmpty)
+        XCTAssertNil(storedPath)
+    }
+
     func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(

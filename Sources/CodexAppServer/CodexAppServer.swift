@@ -10924,7 +10924,21 @@ public enum CodexAppServer {
             searchTerm: searchTerm
         )
         let page = try runAsyncBlocking {
-            try await stateStore.listThreads(pageSize: pageSize, filters: filters)
+            let page = try await stateStore.listThreads(pageSize: pageSize, filters: filters)
+            var validItems: [ThreadMetadata] = []
+            validItems.reserveCapacity(page.items.count)
+            for item in page.items {
+                if FileManager.default.fileExists(atPath: item.rolloutPath) {
+                    validItems.append(item)
+                } else {
+                    _ = try? await stateStore.deleteThread(threadID: item.id)
+                }
+            }
+            return ThreadsPage(
+                items: validItems,
+                nextAnchor: page.nextAnchor,
+                numScannedRows: page.numScannedRows
+            )
         }
         let visibleItems = page.items.filter { item in
             sourceMatcher?.matches(threadListSessionSource(from: item.source)) ?? true
