@@ -78,11 +78,16 @@ public enum DebugCommandRuntime {
                 message
             )
         case let .promptInput(prompt, imagePaths):
-            return try runPromptInput(prompt: prompt, imagePaths: imagePaths, request: request, dependencies: dependencies)
+            return try runPromptInput(
+                prompt: prompt,
+                imagePaths: imagePaths,
+                configOverrides: request.configOverrides,
+                dependencies: dependencies
+            )
         case let .traceReduce(traceBundle, output):
             return try runTraceReduce(traceBundle: traceBundle, output: output)
         case .clearMemories:
-            return try await runClearMemories(request: request, dependencies: dependencies)
+            return try await runClearMemories(configOverrides: request.configOverrides, dependencies: dependencies)
         }
     }
 
@@ -286,11 +291,11 @@ public enum DebugCommandRuntime {
     private static func runPromptInput(
         prompt: String?,
         imagePaths: [String],
-        request: CodexCLI.DebugCommandRequest,
+        configOverrides: CliConfigOverrides,
         dependencies: Dependencies
     ) throws -> CodexCLI.CommandExecutionResult {
         let codexHome = try dependencies.findCodexHome()
-        let config = try dependencies.loadConfig(codexHome, request.configOverrides)
+        let config = try dependencies.loadConfig(codexHome, configOverrides)
         let input = makePromptInput(
             prompt: prompt,
             imagePaths: imagePaths,
@@ -369,11 +374,11 @@ public enum DebugCommandRuntime {
     }
 
     private static func runClearMemories(
-        request: CodexCLI.DebugCommandRequest,
+        configOverrides: CliConfigOverrides,
         dependencies: Dependencies
     ) async throws -> CodexCLI.CommandExecutionResult {
         let codexHome = try dependencies.findCodexHome()
-        let config = try dependencies.loadConfig(codexHome, request.configOverrides)
+        let config = try dependencies.loadConfig(codexHome, configOverrides)
         let statePath = stateDatabasePath(codexHome: codexHome)
 
         let clearedStateDB: Bool
