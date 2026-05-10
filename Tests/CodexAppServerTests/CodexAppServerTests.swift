@@ -6918,6 +6918,8 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("GET", "/linear.tar.gz", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
                 case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
@@ -6942,12 +6944,21 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["authPolicy"] as? String, "ON_USE")
         XCTAssertEqual((result["appsNeedingAuth"] as? [Any])?.count, 0)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "POST", "GET", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "GET", "POST", "GET", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.url?.query }, [
+            "includeDownloadUrls=true",
+            "scope=GLOBAL",
+            nil,
+            nil,
+            "scope=GLOBAL&includeDownloadUrls=true",
+            "scope=WORKSPACE&includeDownloadUrls=true"
+        ])
         XCTAssertEqual(
             try String(contentsOf: installedMarker, encoding: .utf8),
             "from-remote-bundle"
         )
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer chatgpt-token",
             "Bearer chatgpt-token",
             nil,
             "Bearer chatgpt-token",
@@ -6955,6 +6966,7 @@ final class CodexAppServerTests: XCTestCase {
             "Bearer chatgpt-token"
         ])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
+            "account-123",
             "account-123",
             nil,
             "account-123",
@@ -7095,6 +7107,8 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("GET", "/linear.tar.gz", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: linearBundleBytes)
                 case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
@@ -7124,6 +7138,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staleCacheRoot.path))
         XCTAssertEqual(capture.requests.map { $0.url?.path ?? "" }, [
             "/backend-api/ps/plugins/\(pluginID)",
+            "/backend-api/ps/plugins/installed",
             "/linear.tar.gz",
             "/backend-api/ps/plugins/\(pluginID)/install",
             "/backend-api/ps/plugins/installed",
@@ -7163,6 +7178,15 @@ final class CodexAppServerTests: XCTestCase {
             releaseVersion: "1.2.3",
             bundleDownloadURL: "https://bundles.example/linear.tar.gz"
         )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
         let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -7171,6 +7195,8 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
@@ -7184,7 +7210,7 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "remote plugin \(pluginID) is not available for install")
-        XCTAssertEqual(capture.requests.count, 1)
+        XCTAssertEqual(capture.requests.count, 2)
     }
 
     func testPluginInstallRemoteRejectsBundleLinksBeforeExtraction() throws {
@@ -7233,6 +7259,15 @@ final class CodexAppServerTests: XCTestCase {
             releaseVersion: "1.2.3",
             bundleDownloadURL: "https://bundles.example/linear.tar.gz"
         )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
         let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -7241,6 +7276,8 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("GET", "/linear.tar.gz", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
                 default:
@@ -7256,7 +7293,7 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32603)
         XCTAssertTrue((error["message"] as? String)?.contains("remote plugin bundle tar entry `./link-to-marker` is a link") == true)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "GET"])
         let cacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/linear", isDirectory: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheRoot.path))
     }
@@ -7562,6 +7599,8 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("GET", "/linear.tar.gz", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
                 case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
@@ -7590,8 +7629,9 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(appsNeedingAuth[0]["description"] as? String, "Weather connector")
         XCTAssertEqual(appsNeedingAuth[0]["installUrl"] as? String, "https://chatgpt.com/apps/weather/connector_weather")
         XCTAssertEqual(appsNeedingAuth[0]["needsAuth"] as? Bool, true)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod }, ["GET", "GET", "POST", "GET", "GET", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod }, ["GET", "GET", "GET", "POST", "GET", "GET", "GET"])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer chatgpt-token",
             "Bearer chatgpt-token",
             nil,
             "Bearer chatgpt-token",
@@ -7600,6 +7640,7 @@ final class CodexAppServerTests: XCTestCase {
             "Bearer chatgpt-token"
         ])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
+            "account-123",
             "account-123",
             nil,
             "account-123",

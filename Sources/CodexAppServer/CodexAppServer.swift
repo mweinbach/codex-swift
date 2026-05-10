@@ -5822,6 +5822,15 @@ public enum CodexAppServer {
             auth: auth,
             failurePrefix: "read remote plugin details before install"
         )
+        let scope = detail["scope"] as? String ?? "GLOBAL"
+        _ = try remotePluginPagesOrThrow(
+            path: "/ps/plugins/installed",
+            queryItems: [URLQueryItem(name: "scope", value: scope == "WORKSPACE" ? "WORKSPACE" : "GLOBAL")],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "read remote plugin details before install"
+        )
         if remotePluginAvailability(detail["status"] as? String) == "DISABLED_BY_ADMIN" {
             let pluginID = detail["id"] as? String ?? remotePluginID
             throw AppServerError.invalidRequest("remote plugin \(pluginID) is disabled by admin")
