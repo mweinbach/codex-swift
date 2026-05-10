@@ -11718,6 +11718,19 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "yep")
     }
 
+    func testCommandExecReadOnlySandboxPolicyCanOverrideNetworkAccessLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","if [ -z \"${CODEX_SANDBOX_NETWORK_DISABLED+x}\" ]; then printf enabled; else printf disabled; fi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"readOnly","networkAccess":true}}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "enabled")
+    }
+
     func testCommandExecResolvesRelativeCwdAgainstConfiguredServerCwd() throws {
         let codexHome = try TemporaryDirectory()
         let serverCwd = try TemporaryDirectory()

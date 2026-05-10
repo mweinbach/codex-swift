@@ -12,6 +12,7 @@ public enum NetworkAccess: String, Codable, Equatable, Sendable {
 public enum SandboxPolicy: Equatable, Sendable {
     case dangerFullAccess
     case readOnly
+    case readOnlyWithNetworkAccess
     case externalSandbox(networkAccess: NetworkAccess)
     case workspaceWrite(
         writableRoots: [AbsolutePath],
@@ -52,7 +53,7 @@ public enum SandboxPolicy: Equatable, Sendable {
         switch self {
         case .dangerFullAccess, .externalSandbox:
             return true
-        case .readOnly, .workspaceWrite:
+        case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
             return false
         }
     }
@@ -65,6 +66,8 @@ public enum SandboxPolicy: Equatable, Sendable {
             return networkAccess.isEnabled
         case .readOnly:
             return false
+        case .readOnlyWithNetworkAccess:
+            return true
         case let .workspaceWrite(_, networkAccess, _, _):
             return networkAccess
         }
@@ -93,7 +96,9 @@ extension SandboxPolicy: Codable {
         case .dangerFullAccess:
             self = .dangerFullAccess
         case .readOnly:
-            self = .readOnly
+            self = try container.decodeIfPresent(Bool.self, forKey: .networkAccess) == true
+                ? .readOnlyWithNetworkAccess
+                : .readOnly
         case .externalSandbox:
             self = .externalSandbox(networkAccess: try container.decodeIfPresent(NetworkAccess.self, forKey: .networkAccess) ?? .restricted)
         case .workspaceWrite:
@@ -113,6 +118,9 @@ extension SandboxPolicy: Codable {
             try container.encode(PolicyType.dangerFullAccess, forKey: .type)
         case .readOnly:
             try container.encode(PolicyType.readOnly, forKey: .type)
+        case .readOnlyWithNetworkAccess:
+            try container.encode(PolicyType.readOnly, forKey: .type)
+            try container.encode(true, forKey: .networkAccess)
         case let .externalSandbox(networkAccess):
             try container.encode(PolicyType.externalSandbox, forKey: .type)
             try container.encode(networkAccess, forKey: .networkAccess)

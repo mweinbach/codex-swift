@@ -1239,7 +1239,10 @@ final class SubmissionTests: XCTestCase {
             try fullWrite.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
             .dangerFullAccess
         )
-        XCTAssertEqual(try readOnly.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path), .readOnly)
+        XCTAssertEqual(
+            try readOnly.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
+            .readOnlyWithNetworkAccess
+        )
         XCTAssertEqual(
             try workspaceWrite.toLegacySandboxPolicy(networkPolicy: .enabled, cwd: cwd.path),
             .workspaceWrite(

@@ -401,7 +401,7 @@ public enum SandboxEnforcement: String, Codable, Equatable, Sendable {
             return .disabled
         case .externalSandbox:
             return .external
-        case .readOnly, .workspaceWrite:
+        case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
             return .managed
         }
     }
@@ -552,7 +552,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
             return .unrestricted
         case .externalSandbox:
             return .externalSandbox
-        case .readOnly:
+        case .readOnly, .readOnlyWithNetworkAccess:
             return .restricted(entries: [
                 FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read)
             ])
@@ -898,7 +898,7 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
                 throw FileSystemSandboxPolicyError.unbridgeableWritesOutsideWorkspace
             }
 
-            return .readOnly
+            return networkPolicy.isEnabled ? .readOnlyWithNetworkAccess : .readOnly
         }
     }
 
@@ -1838,7 +1838,15 @@ public enum PermissionProfile: Equatable, Codable, Sendable {
         case let .externalSandbox(networkAccess):
             return .external(network: networkAccess.isEnabled ? .enabled : .restricted)
         case .readOnly:
-            return .readOnly()
+            return .managed(
+                fileSystem: .readOnly(),
+                network: .restricted
+            )
+        case .readOnlyWithNetworkAccess:
+            return .managed(
+                fileSystem: .readOnly(),
+                network: .enabled
+            )
         case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):
             return .workspaceWriteWith(
                 writableRoots: writableRoots,

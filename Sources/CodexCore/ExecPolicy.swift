@@ -7893,7 +7893,7 @@ public func defaultExecApprovalRequirement(
         switch sandboxPolicy {
         case .dangerFullAccess, .externalSandbox:
             needsApproval = false
-        case .readOnly, .workspaceWrite:
+        case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
             needsApproval = true
         }
     case .unlessTrusted:

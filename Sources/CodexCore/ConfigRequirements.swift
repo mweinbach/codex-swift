@@ -636,7 +636,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             approvalsReviewer = .allowAnyFromDefault()
         }
 
-        let defaultSandboxPolicy = SandboxPolicy.readOnly
+        let defaultSandboxPolicy = SandboxPolicy.newReadOnlyPolicy()
         let sandboxPolicy: Constrained<SandboxPolicy>
         if let modes = allowedSandboxModes {
             guard modes.contains(.readOnly) else {
@@ -1447,7 +1447,7 @@ public enum SandboxModeRequirement: String, Codable, CaseIterable, Equatable, Se
 
     public init(sandboxPolicy: SandboxPolicy) {
         switch sandboxPolicy {
-        case .readOnly:
+        case .readOnly, .readOnlyWithNetworkAccess:
             self = .readOnly
         case .workspaceWrite:
             self = .workspaceWrite
@@ -1514,7 +1514,9 @@ extension SandboxPolicy {
         case .dangerFullAccess:
             return "DangerFullAccess"
         case .readOnly:
-            return "ReadOnly"
+            return "ReadOnly { network_access: false }"
+        case .readOnlyWithNetworkAccess:
+            return "ReadOnly { network_access: true }"
         case let .externalSandbox(networkAccess):
             return "ExternalSandbox { network_access: \(networkAccess.rustDebugDescription) }"
         case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):

@@ -81,6 +81,20 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertFalse(args.contains { $0.hasPrefix("-DDARWIN_USER_CACHE_DIR=") })
     }
 
+    func testReadOnlyNetworkAccessUsesRustSeatbeltNetworkPolicy() throws {
+        let cwd = try AbsolutePath(absolutePath: FileManager.default.currentDirectoryPath)
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["curl", "https://example.com"],
+            sandboxPolicy: .readOnlyWithNetworkAccess,
+            sandboxPolicyCwd: cwd,
+            environment: [:]
+        )
+
+        XCTAssertTrue(args[1].contains("; allow read-only file operations\n(allow file-read*)"))
+        XCTAssertFalse(args[1].contains("(allow file-write*"))
+        XCTAssertTrue(args[1].contains(#"(allow network-outbound)"#))
+    }
+
     func testFullAutoSelectsWorkspaceWritePolicy() {
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: false), .readOnly)
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: true), .newWorkspaceWritePolicy())

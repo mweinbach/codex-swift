@@ -18,8 +18,9 @@ final class SandboxPolicyTests: XCTestCase {
         XCTAssertTrue(SandboxPolicy.dangerFullAccess.hasFullDiskReadAccess)
         XCTAssertTrue(SandboxPolicy.dangerFullAccess.hasFullDiskWriteAccess)
         XCTAssertTrue(SandboxPolicy.dangerFullAccess.hasFullNetworkAccess)
-        XCTAssertFalse(SandboxPolicy.readOnly.hasFullDiskWriteAccess)
-        XCTAssertFalse(SandboxPolicy.readOnly.hasFullNetworkAccess)
+        XCTAssertFalse(SandboxPolicy.newReadOnlyPolicy().hasFullDiskWriteAccess)
+        XCTAssertFalse(SandboxPolicy.newReadOnlyPolicy().hasFullNetworkAccess)
+        XCTAssertTrue(SandboxPolicy.readOnlyWithNetworkAccess.hasFullNetworkAccess)
         XCTAssertTrue(SandboxPolicy.externalSandbox(networkAccess: .enabled).hasFullNetworkAccess)
         XCTAssertFalse(SandboxPolicy.externalSandbox(networkAccess: .restricted).hasFullNetworkAccess)
     }
@@ -36,6 +37,14 @@ final class SandboxPolicyTests: XCTestCase {
         try XCTAssertJSONObjectEqual(SandboxPolicy.externalSandbox(networkAccess: .restricted), [
             "type": "external-sandbox",
             "network_access": "restricted"
+        ])
+
+        try XCTAssertJSONObjectEqual(SandboxPolicy.newReadOnlyPolicy(), [
+            "type": "read-only"
+        ])
+        try XCTAssertJSONObjectEqual(SandboxPolicy.readOnlyWithNetworkAccess, [
+            "type": "read-only",
+            "network_access": true
         ])
 
         let encoded = try JSONEncoder().encode(policy)

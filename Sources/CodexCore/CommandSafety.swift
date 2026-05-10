@@ -126,7 +126,7 @@ public enum CommandSafety {
             switch sandboxPolicy {
             case .dangerFullAccess, .externalSandbox:
                 return commandMightBeDangerous(command)
-            case .readOnly, .workspaceWrite:
+            case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
                 if sandboxPermissions.requiresEscalatedPermissions {
                     return true
                 }
@@ -168,7 +168,7 @@ public enum CommandSafety {
             switch sandboxPolicy {
             case .dangerFullAccess, .externalSandbox:
                 return isDangerousPowerShellWords(command)
-            case .readOnly, .workspaceWrite:
+            case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
                 if sandboxPermissions.requiresEscalatedPermissions {
                     return true
                 }

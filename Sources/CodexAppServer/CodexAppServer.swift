@@ -10208,7 +10208,7 @@ public enum CodexAppServer {
             if legacyReadOnlyAccessIsRestricted(object["access"]) {
                 throw AppServerError.invalidRequest("readOnly.access is no longer supported; use permissionProfile for restricted reads")
             }
-            return .readOnly
+            return boolParam(object["networkAccess"], defaultValue: false) ? .readOnlyWithNetworkAccess : .readOnly
         case "externalSandbox":
             let networkAccess = try networkAccessParam(object["networkAccess"]) ?? .restricted
             return .externalSandbox(networkAccess: networkAccess)

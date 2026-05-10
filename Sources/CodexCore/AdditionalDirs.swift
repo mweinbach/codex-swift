@@ -9,7 +9,7 @@ public func addDirWarningMessage(additionalDirs: [String], sandboxPolicy: Sandbo
     switch sandboxPolicy {
     case .workspaceWrite, .dangerFullAccess, .externalSandbox:
         return nil
-    case .readOnly:
+    case .readOnly, .readOnlyWithNetworkAccess:
         return formatAddDirWarning(additionalDirs: additionalDirs)
     }
 }

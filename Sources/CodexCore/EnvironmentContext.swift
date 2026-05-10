@@ -126,7 +126,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         switch sandboxPolicy {
         case .dangerFullAccess, .externalSandbox:
             return .dangerFullAccess
-        case .readOnly:
+        case .readOnly, .readOnlyWithNetworkAccess:
             return .readOnly
         case .workspaceWrite:
             return .workspaceWrite
@@ -139,6 +139,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             return .enabled
         case .readOnly:
             return .restricted
+        case .readOnlyWithNetworkAccess:
+            return .enabled
         case let .externalSandbox(networkAccess):
             return networkAccess
         case let .workspaceWrite(_, networkAccess, _, _):

@@ -1388,7 +1388,7 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         switch policy {
         case .dangerFullAccess:
             return "danger-full-access"
-        case .readOnly:
+        case .readOnly, .readOnlyWithNetworkAccess:
             return "read-only"
         case .externalSandbox:
             return "external-sandbox"

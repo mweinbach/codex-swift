@@ -80,6 +80,7 @@ public enum PatchSafety {
                  .externalSandbox:
                 return .autoApprove(sandboxType: .none, userExplicitlyApproved: false)
             case .readOnly,
+                 .readOnlyWithNetworkAccess,
                  .workspaceWrite:
                 guard let sandboxType = getPlatformSandbox() else {
                     return .askUser
@@ -114,7 +115,7 @@ public enum PatchSafety {
     ) -> Bool {
         let writableRoots: [WritableRoot]
         switch sandboxPolicy {
-        case .readOnly:
+        case .readOnly, .readOnlyWithNetworkAccess:
             return false
         case .dangerFullAccess,
              .externalSandbox:
