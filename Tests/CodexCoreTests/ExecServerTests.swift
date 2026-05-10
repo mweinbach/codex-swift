@@ -144,6 +144,91 @@ final class ExecServerTests: XCTestCase {
         XCTAssertTrue(error.message.hasPrefix("failed to parse JSON-RPC message from exec-server stdio:"))
     }
 
+    func testLineServerServesNewlineDelimitedStdioMessagesLikeRust() async throws {
+        let server = ExecServerLineServer(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        )
+
+        let blankLines = try await server.receiveLine(" \t")
+        let initializeLines = try await server.receiveLine(
+            #"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#
+        )
+        let initializedLines = try await server.receiveLine(#"{"method":"initialized","params":{}}"#)
+        let terminateLines = try await server.receiveLine(
+            #"{"id":2,"method":"process/terminate","params":{"processId":"missing"}}"#
+        )
+
+        XCTAssertEqual(blankLines, [])
+        XCTAssertEqual(initializeLines.count, 1)
+        XCTAssertEqual(try decodeLine(initializeLines[0]), ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertEqual(initializedLines, [])
+        XCTAssertEqual(terminateLines.count, 1)
+        XCTAssertEqual(try decodeLine(terminateLines[0]), ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["running": .bool(false)])
+        ))
+    }
+
+    func testLineServerReportsMalformedStdioLinesAndContinuesLikeRust() async throws {
+        let server = ExecServerLineServer(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        )
+
+        let malformedLines = try await server.receiveLine("{")
+        let initializeLines = try await server.receiveLine(
+            #"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#
+        )
+
+        XCTAssertEqual(malformedLines.count, 1)
+        guard case let .error(errorEnvelope) = try decodeLine(malformedLines[0]) else {
+            return XCTFail("Expected malformed line error")
+        }
+        XCTAssertEqual(errorEnvelope.id, .integer(-1))
+        XCTAssertEqual(errorEnvelope.error.code, -32600)
+        XCTAssertTrue(errorEnvelope.error.message.hasPrefix("failed to parse JSON-RPC message from exec-server stdio:"))
+        XCTAssertEqual(initializeLines.count, 1)
+        XCTAssertEqual(try decodeLine(initializeLines[0]), ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+    }
+
+    func testLineServerDrainsQueuedNotificationsLikeRustOutboundTask() async throws {
+        let server = ExecServerLineServer(httpClient: ExecServerHTTPClient(
+            send: { _ in URLSessionTransportResponse(statusCode: 500) },
+            stream: { _ in
+                APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: APIByteStream { continuation in
+                        continuation.yield(.success(Data("hello".utf8)))
+                        continuation.finish()
+                    }
+                )
+            }
+        ))
+        _ = try await server.receiveLine(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#)
+        _ = try await server.receiveLine(#"{"method":"initialized","params":{}}"#)
+
+        let responseLines = try await server.receiveLine(#"{"id":2,"method":"http/request","params":{"method":"GET","url":"https://example.test/mcp","requestId":"stream-stdio","streamResponse":true}}"#)
+
+        XCTAssertEqual(responseLines.count, 1)
+        XCTAssertEqual(try decodeLine(responseLines[0]), ExecServerRPC.response(
+            id: .integer(2),
+            result: .object([
+                "bodyBase64": .string(""),
+                "headers": .array([]),
+                "status": .integer(200)
+            ])
+        ))
+        let deltas = try await collectHTTPBodyDeltaLines(from: server, requestId: "stream-stdio")
+        XCTAssertEqual(deltas.map(\.seq), [1, 2])
+        XCTAssertEqual(deltas.flatMap { $0.delta.bytes }, Array("hello".utf8))
+        XCTAssertEqual(deltas.last?.done, true)
+    }
+
     func testConnectionProcessorHandlesWebSocketCodecEventsLikeRust() async {
         let connection = ExecServerConnection()
         let malformed = await connection.handleWebSocketText("{", connectionLabel: "exec-server websocket peer")
@@ -1732,6 +1817,39 @@ final class ExecServerTests: XCTestCase {
         }
         XCTFail("Timed out waiting for outbound exec-server message", file: file, line: line)
         return nil
+    }
+
+    private func collectHTTPBodyDeltaLines(
+        from server: ExecServerLineServer,
+        requestId: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> [ExecServerHttpRequestBodyDeltaNotification] {
+        var deltas: [ExecServerHttpRequestBodyDeltaNotification] = []
+        for _ in 0..<50 {
+            for rawLine in try await server.drainQueuedLines() {
+                guard case let .notification(notification) = try decodeLine(rawLine) else {
+                    XCTFail("Expected http/request body delta notification", file: file, line: line)
+                    continue
+                }
+                XCTAssertEqual(notification.method, execServerHttpRequestBodyDeltaMethod, file: file, line: line)
+                let params = try XCTUnwrap(notification.params, file: file, line: line)
+                let delta = try decodeJSONValue(params, as: ExecServerHttpRequestBodyDeltaNotification.self)
+                XCTAssertEqual(delta.requestId, requestId, file: file, line: line)
+                deltas.append(delta)
+                if delta.done {
+                    return deltas
+                }
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Timed out waiting for terminal http/request body delta line", file: file, line: line)
+        return deltas
+    }
+
+    private func decodeLine(_ data: Data) throws -> ExecServerJSONRPCMessage {
+        XCTAssertEqual(data.last, 0x0A)
+        return try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(data.dropLast()))
     }
 
     private actor HTTPRequestRecorder {
