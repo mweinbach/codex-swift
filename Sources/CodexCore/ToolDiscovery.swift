@@ -413,6 +413,106 @@ public func verifiedConnectorInstallCompleted(
     accessibleConnectors.first { $0.id == toolID }?.isAccessible == true
 }
 
+public func requestPluginInstallResponseRequestsPersistentDisable(
+    action: String,
+    meta: JSONValue?
+) -> Bool {
+    guard action == "decline",
+          case let .object(metaObject)? = meta,
+          case let .string(persistValue)? = metaObject[requestPluginInstallPersistKey]
+    else {
+        return false
+    }
+    return persistValue == requestPluginInstallPersistAlwaysValue
+}
+
+public func disabledInstallRequest(for tool: DiscoverableTool) -> ToolSuggestDisabledTool {
+    switch tool {
+    case let .connector(connector):
+        return ToolSuggestDisabledTool(type: .connector, id: connector.id)
+    case let .plugin(plugin):
+        return ToolSuggestDisabledTool(type: .plugin, id: plugin.id)
+    }
+}
+
+@discardableResult
+public func persistDisabledInstallRequest(
+    codexHome: URL,
+    tool: DiscoverableTool,
+    fileManager: FileManager = .default
+) throws -> ConfigValue {
+    let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+    var config = try CodexConfigLayerLoader.readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
+    addToolSuggestDisabledTool(disabledInstallRequest(for: tool), to: &config)
+    try fileManager.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    try ConfigTomlRenderer.render(config).write(to: configFile, atomically: true, encoding: .utf8)
+    return config
+}
+
+public func addToolSuggestDisabledTool(
+    _ disabledTool: ToolSuggestDisabledTool,
+    to config: inout ConfigValue
+) {
+    guard let normalizedNew = disabledTool.normalized() else {
+        return
+    }
+    var root: [String: ConfigValue]
+    if case let .table(table) = config {
+        root = table
+    } else {
+        root = [:]
+    }
+    var toolSuggest: [String: ConfigValue]
+    if case let .table(table)? = root["tool_suggest"] {
+        toolSuggest = table
+    } else {
+        toolSuggest = [:]
+    }
+
+    var seen: Set<ToolSuggestDisabledTool> = []
+    var disabledTools: [ToolSuggestDisabledTool] = []
+    for existing in existingToolSuggestDisabledTools(from: toolSuggest["disabled_tools"]) + [normalizedNew] {
+        guard let normalized = existing.normalized(),
+              seen.insert(normalized).inserted
+        else {
+            continue
+        }
+        disabledTools.append(normalized)
+    }
+    toolSuggest["disabled_tools"] = .array(disabledTools.map(configValue))
+    root["tool_suggest"] = .table(toolSuggest)
+    config = .table(root)
+}
+
+private func existingToolSuggestDisabledTools(from value: ConfigValue?) -> [ToolSuggestDisabledTool] {
+    guard case let .array(entries)? = value else {
+        return []
+    }
+    return entries.compactMap { entry in
+        guard case let .table(table) = entry,
+              case let .string(type)? = table["type"],
+              case let .string(id)? = table["id"]
+        else {
+            return nil
+        }
+        switch type {
+        case "connector":
+            return ToolSuggestDisabledTool(type: .connector, id: id)
+        case "plugin":
+            return ToolSuggestDisabledTool(type: .plugin, id: id)
+        default:
+            return nil
+        }
+    }
+}
+
+private func configValue(for disabledTool: ToolSuggestDisabledTool) -> ConfigValue {
+    .table([
+        "type": .string(disabledTool.type.rawValue),
+        "id": .string(disabledTool.id)
+    ])
+}
+
 public func accessibleConnectorsFromMCPTools(
     _ tools: [String: McpTool],
     codexAppsServerName: String = codexAppsMCPServerName,

@@ -352,6 +352,113 @@ final class ToolDiscoveryTests: XCTestCase {
         XCTAssertEqual(metaObject["tool_name"], .string("Sample Plugin"))
     }
 
+    func testRequestPluginInstallResponsePersistsOnlyDeclineAlwaysMode() {
+        XCTAssertTrue(requestPluginInstallResponseRequestsPersistentDisable(
+            action: "decline",
+            meta: .object([requestPluginInstallPersistKey: .string(requestPluginInstallPersistAlwaysValue)])
+        ))
+        XCTAssertFalse(requestPluginInstallResponseRequestsPersistentDisable(
+            action: "accept",
+            meta: .object([requestPluginInstallPersistKey: .string(requestPluginInstallPersistAlwaysValue)])
+        ))
+        XCTAssertFalse(requestPluginInstallResponseRequestsPersistentDisable(
+            action: "decline",
+            meta: .object([requestPluginInstallPersistKey: .string("session")])
+        ))
+        XCTAssertFalse(requestPluginInstallResponseRequestsPersistentDisable(
+            action: "decline",
+            meta: nil
+        ))
+    }
+
+    func testPersistDisabledInstallRequestWritesConnectorConfig() throws {
+        let dir = try ToolDiscoveryTemporaryDirectory()
+        let tool = DiscoverableTool.connector(DiscoverableConnectorInfo(
+            id: "connector_calendar",
+            name: "Google Calendar",
+            isAccessible: false,
+            isEnabled: true
+        ))
+
+        try persistDisabledInstallRequest(codexHome: dir.url, tool: tool)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        XCTAssertEqual(
+            config.toolSuggest,
+            ToolSuggestConfig(disabledTools: [
+                ToolSuggestDisabledTool(type: .connector, id: "connector_calendar")
+            ])
+        )
+    }
+
+    func testPersistDisabledInstallRequestWritesPluginConfig() throws {
+        let dir = try ToolDiscoveryTemporaryDirectory()
+        let tool = DiscoverableTool.plugin(DiscoverablePluginInfo(
+            id: "slack@openai-curated",
+            name: "Slack",
+            description: nil,
+            hasSkills: true,
+            mcpServerNames: [],
+            appConnectorIDs: []
+        ))
+
+        try persistDisabledInstallRequest(codexHome: dir.url, tool: tool)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        XCTAssertEqual(
+            config.toolSuggest,
+            ToolSuggestConfig(disabledTools: [
+                ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+            ])
+        )
+    }
+
+    func testPersistDisabledInstallRequestDedupesExistingDisabledTools() throws {
+        let dir = try ToolDiscoveryTemporaryDirectory()
+        try """
+        [tool_suggest]
+        discoverables = [{ type = "plugin", id = "sample@openai-curated" }]
+
+        [[tool_suggest.disabled_tools]]
+        type = "connector"
+        id = " connector_calendar "
+
+        [[tool_suggest.disabled_tools]]
+        type = "connector"
+        id = "connector_calendar"
+
+        [[tool_suggest.disabled_tools]]
+        type = "connector"
+        id = "   "
+
+        [[tool_suggest.disabled_tools]]
+        type = "plugin"
+        id = "slack@openai-curated"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let tool = DiscoverableTool.connector(DiscoverableConnectorInfo(
+            id: "connector_calendar",
+            name: "Google Calendar",
+            isAccessible: false,
+            isEnabled: true
+        ))
+
+        try persistDisabledInstallRequest(codexHome: dir.url, tool: tool)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        XCTAssertEqual(
+            config.toolSuggest,
+            ToolSuggestConfig(
+                discoverables: [
+                    ToolSuggestDiscoverable(type: .plugin, id: "sample@openai-curated")
+                ],
+                disabledTools: [
+                    ToolSuggestDisabledTool(type: .connector, id: "connector_calendar"),
+                    ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+                ]
+            )
+        )
+    }
+
     func testConnectorCompletionRequiresAccessibleConnector() {
         let accessibleConnectors = [
             DiscoverableConnectorInfo(
@@ -388,5 +495,19 @@ private struct ToolDiscoveryEnumProbe: Encodable {
     private enum CodingKeys: String, CodingKey {
         case toolType = "tool_type"
         case actionType = "action_type"
+    }
+}
+
+private final class ToolDiscoveryTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ToolDiscoveryTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

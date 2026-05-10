@@ -35,6 +35,151 @@ public indirect enum ConfigValue: Equatable, Sendable {
     }
 }
 
+public enum ConfigTomlRenderer {
+    public static func render(_ value: ConfigValue) -> String {
+        guard case let .table(table) = value else {
+            return ""
+        }
+        var lines: [String] = []
+        renderTable(table, path: [], lines: &lines)
+        guard !lines.isEmpty else {
+            return ""
+        }
+        return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
+    }
+
+    private static func renderTable(_ table: [String: ConfigValue], path: [String], lines: inout [String]) {
+        let scalarKeys = table.keys.sorted { left, right in
+            let leftRank = scalarSortRank(left, path: path)
+            let rightRank = scalarSortRank(right, path: path)
+            if leftRank.rank != rightRank.rank {
+                return leftRank.rank < rightRank.rank
+            }
+            return leftRank.key < rightRank.key
+        }.filter { key in
+            if case .table = table[key] { return false }
+            if isArrayOfTables(table[key], key: key, path: path) { return false }
+            return true
+        }
+        for key in scalarKeys {
+            guard let value = table[key] else { continue }
+            lines.append("\(tomlKey(key)) = \(tomlLiteral(value))")
+        }
+
+        let arrayTableKeys = table.keys.sorted().filter { key in
+            isArrayOfTables(table[key], key: key, path: path)
+        }
+        for key in arrayTableKeys {
+            guard case let .array(entries)? = table[key] else { continue }
+            let nextPath = path + [key]
+            for entry in entries {
+                guard case let .table(child) = entry else { continue }
+                if !lines.isEmpty, lines.last?.isEmpty == false {
+                    lines.append("")
+                }
+                lines.append("[[\(nextPath.map(tomlKey).joined(separator: "."))]]")
+                renderTable(child, path: nextPath, lines: &lines)
+            }
+        }
+
+        let tableKeys = table.keys.sorted().filter { key in
+            if case .table = table[key] { return true }
+            return false
+        }
+        for key in tableKeys {
+            guard case let .table(child)? = table[key] else { continue }
+            let nextPath = path + [key]
+            if !child.isEmpty,
+               child.keys.allSatisfy({ isArrayOfTables(child[$0], key: $0, path: nextPath) }) {
+                renderTable(child, path: nextPath, lines: &lines)
+                continue
+            }
+            if !lines.isEmpty, lines.last?.isEmpty == false {
+                lines.append("")
+            }
+            lines.append("[\(nextPath.map(tomlKey).joined(separator: "."))]")
+            renderTable(child, path: nextPath, lines: &lines)
+        }
+    }
+
+    private static func scalarSortRank(_ key: String, path: [String]) -> (rank: Int, key: String) {
+        if path == ["skills", "config"] {
+            switch key {
+            case "path":
+                return (0, key)
+            case "name":
+                return (1, key)
+            case "enabled":
+                return (2, key)
+            default:
+                return (3, key)
+            }
+        }
+        return (0, key)
+    }
+
+    private static func isArrayOfTables(_ value: ConfigValue?, key: String, path: [String]) -> Bool {
+        if path == ["tool_suggest"], ["discoverables", "disabled_tools"].contains(key) {
+            return false
+        }
+        guard case let .array(values)? = value else {
+            return false
+        }
+        return !values.isEmpty && values.allSatisfy { element in
+            if case .table = element {
+                return true
+            }
+            return false
+        }
+    }
+
+    private static func tomlLiteral(_ value: ConfigValue) -> String {
+        switch value {
+        case .none:
+            return "null"
+        case let .string(string):
+            return tomlString(string)
+        case let .integer(integer):
+            return String(integer)
+        case let .double(double):
+            return String(double)
+        case let .bool(bool):
+            return bool ? "true" : "false"
+        case let .array(array):
+            return "[\(array.map(tomlLiteral).joined(separator: ", "))]"
+        case let .table(table):
+            let body = table.keys.sorted().map { key in
+                "\(tomlKey(key)) = \(tomlLiteral(table[key]!))"
+            }.joined(separator: ", ")
+            return "{\(body)}"
+        }
+    }
+
+    private static func tomlKey(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        if !value.isEmpty, value.unicodeScalars.allSatisfy({ allowed.contains($0) }) {
+            return value
+        }
+        return tomlString(value)
+    }
+
+    private static func tomlString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return "\"\(escaped)\""
+    }
+
+    private static func trimTrailingBlankLines(_ text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while lines.last == "" {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 extension ConfigValue: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
