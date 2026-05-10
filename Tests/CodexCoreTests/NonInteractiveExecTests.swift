@@ -17,9 +17,33 @@ final class NonInteractiveExecTests: XCTestCase {
 
         XCTAssertEqual(prompt.tools, [])
         XCTAssertEqual(prompt.outputSchema, schema)
-        XCTAssertEqual(prompt.input.count, 2)
+        XCTAssertEqual(prompt.input.count, 3)
 
-        guard case let .message(_, role, content, _) = prompt.input[1] else {
+        guard case let .message(_, developerRole, developerContent, _) = prompt.input[0] else {
+            return XCTFail("expected permissions developer message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertTrue(developerContent.contains {
+            guard case let .inputText(text) = $0 else {
+                return false
+            }
+            return text.contains("<permissions instructions>")
+                && text.contains("`sandbox_mode` is `read-only`")
+        })
+
+        guard case let .message(_, environmentRole, environmentContent, _) = prompt.input[1] else {
+            return XCTFail("expected environment message")
+        }
+        XCTAssertEqual(environmentRole, "user")
+        XCTAssertTrue(environmentContent.contains {
+            guard case let .inputText(text) = $0 else {
+                return false
+            }
+            return text.contains("<environment_context>")
+                && text.contains("<cwd>/tmp/project</cwd>")
+        })
+
+        guard case let .message(_, role, content, _) = prompt.input[2] else {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(role, "user")
@@ -28,6 +52,27 @@ final class NonInteractiveExecTests: XCTestCase {
             return XCTFail("expected prompt text")
         }
         XCTAssertEqual(text, "ship it")
+    }
+
+    func testMakePromptHonorsInitialContextInstructionGatesLikeRust() {
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            includeEnvironmentContext: false,
+            includePermissionsInstructions: false
+        )
+
+        XCTAssertEqual(prompt.input.count, 1)
+        guard case let .message(_, role, content, _) = prompt.input[0] else {
+            return XCTFail("expected user message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertEqual(content, [.inputText(text: "ship it")])
     }
 
     func testMakePromptPlacesResumeHistoryBeforeNewUserInput() {
@@ -46,9 +91,9 @@ final class NonInteractiveExecTests: XCTestCase {
             history: history
         )
 
-        XCTAssertEqual(prompt.input.count, 4)
-        XCTAssertEqual(Array(prompt.input[1...2]), history)
-        guard case let .message(_, role, content, _) = prompt.input[3] else {
+        XCTAssertEqual(prompt.input.count, 5)
+        XCTAssertEqual(Array(prompt.input[2...3]), history)
+        guard case let .message(_, role, content, _) = prompt.input[4] else {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(role, "user")
@@ -143,6 +188,7 @@ final class NonInteractiveExecTests: XCTestCase {
             sandboxPolicy: .readOnly,
             shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
         )
+        let inputCountBeforeHook = prompt.input.count
         let outcome = await NonInteractiveExec.runUserPromptSubmitHooks(
             handlers: [
                 ConfiguredHookHandler(
@@ -164,8 +210,8 @@ final class NonInteractiveExecTests: XCTestCase {
         )
 
         XCTAssertEqual(outcome.additionalContexts, ["remember hook context"])
-        XCTAssertEqual(prompt.input.count, 3)
-        guard case let .message(_, role, content, _) = prompt.input[2] else {
+        XCTAssertEqual(prompt.input.count, inputCountBeforeHook + 1)
+        guard case let .message(_, role, content, _) = prompt.input[inputCountBeforeHook] else {
             return XCTFail("expected hook context message")
         }
         XCTAssertEqual(role, "user")
@@ -243,6 +289,7 @@ final class NonInteractiveExecTests: XCTestCase {
             sandboxPolicy: .readOnly,
             shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
         )
+        let inputCountBeforeHook = prompt.input.count
         let outcome = await NonInteractiveExec.runSessionStartHooks(
             handlers: [
                 ConfiguredHookHandler(
@@ -263,8 +310,8 @@ final class NonInteractiveExecTests: XCTestCase {
         )
 
         XCTAssertEqual(outcome.additionalContexts, ["session hook context"])
-        XCTAssertEqual(prompt.input.count, 3)
-        guard case let .message(_, role, content, _) = prompt.input[2] else {
+        XCTAssertEqual(prompt.input.count, inputCountBeforeHook + 1)
+        guard case let .message(_, role, content, _) = prompt.input[inputCountBeforeHook] else {
             return XCTFail("expected hook context message")
         }
         XCTAssertEqual(role, "user")

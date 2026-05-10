@@ -50,6 +50,8 @@ public enum NonInteractiveExec {
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
+        includeEnvironmentContext: Bool = true,
+        includePermissionsInstructions: Bool = true,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
@@ -59,11 +61,28 @@ public enum NonInteractiveExec {
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy
         )
-        var input = [
-            EnvironmentContext
-                .fromTurnContext(context, shell: shell)
-                .asResponseItem()
-        ]
+        var input: [ResponseItem] = []
+        if includePermissionsInstructions {
+            input.append(
+                .message(
+                    role: "developer",
+                    content: [
+                        .inputText(text: PermissionsInstructions.fromPolicy(
+                            sandboxPolicy,
+                            config: PermissionsPromptConfig(approvalPolicy: approvalPolicy),
+                            cwd: cwd.path
+                        ).render())
+                    ]
+                )
+            )
+        }
+        if includeEnvironmentContext {
+            input.append(
+                EnvironmentContext
+                    .fromTurnContext(context, shell: shell)
+                    .asResponseItem()
+            )
+        }
         input.append(contentsOf: history)
 
         let userInputs = imagePaths.map { UserInput.localImage(path: $0) } + [.text(prompt)]

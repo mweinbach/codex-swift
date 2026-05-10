@@ -779,6 +779,8 @@ private func runNonInteractiveExec(
         approvalPolicy: approvalPolicy,
         sandboxPolicy: sandboxPolicy,
         shell: shell,
+        includeEnvironmentContext: settings.includeEnvironmentContext,
+        includePermissionsInstructions: settings.includePermissionsInstructions,
         history: history,
         tools: configuredTools.map(\.spec),
         parallelToolCalls: modelFamily.supportsParallelToolCalls
