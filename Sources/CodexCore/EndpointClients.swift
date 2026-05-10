@@ -865,6 +865,75 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     }
 }
 
+public extension ResponsesClient where Auth == StaticAPIAuthProvider {
+    func streamRetryingProviderCommandAuth(
+        body: JSONValue,
+        extraHeaders: [String: String] = [:],
+        providerInfo: ModelProviderInfo,
+        commandRunner: ProviderAuthCommandRunner
+    ) async -> Result<ResponseEventResults, APIError> {
+        let result = await stream(body: body, extraHeaders: extraHeaders)
+        guard result.isUnauthorized,
+              let providerAuth = providerInfo.auth,
+              let refreshedToken = try? await commandRunner.refreshToken(config: providerAuth)
+        else {
+            return result
+        }
+
+        return await ResponsesClient(
+            transport: streaming.transport,
+            provider: streaming.provider,
+            auth: StaticAPIAuthProvider(bearerToken: refreshedToken),
+            attestationProvider: attestationProvider
+        )
+        .stream(body: body, extraHeaders: extraHeaders)
+    }
+
+    func streamPromptRetryingProviderCommandAuth(
+        model: String,
+        instructions: String,
+        prompt: Prompt,
+        options: ResponsesOptions = ResponsesOptions(),
+        providerInfo: ModelProviderInfo,
+        commandRunner: ProviderAuthCommandRunner
+    ) async -> Result<ResponseEventResults, APIError> {
+        let result = await streamPrompt(
+            model: model,
+            instructions: instructions,
+            prompt: prompt,
+            options: options
+        )
+        guard result.isUnauthorized,
+              let providerAuth = providerInfo.auth,
+              let refreshedToken = try? await commandRunner.refreshToken(config: providerAuth)
+        else {
+            return result
+        }
+
+        return await ResponsesClient(
+            transport: streaming.transport,
+            provider: streaming.provider,
+            auth: StaticAPIAuthProvider(bearerToken: refreshedToken),
+            attestationProvider: attestationProvider
+        )
+        .streamPrompt(
+            model: model,
+            instructions: instructions,
+            prompt: prompt,
+            options: options
+        )
+    }
+}
+
+private extension Result where Success == ResponseEventResults, Failure == APIError {
+    var isUnauthorized: Bool {
+        guard case let .failure(.transport(.http(statusCode, _, _))) = self else {
+            return false
+        }
+        return statusCode == 401
+    }
+}
+
 public struct ChatClient<Transport: APITransport, Auth: APIAuthProvider> {
     public let streaming: StreamingAPIClient<Transport, Auth>
 

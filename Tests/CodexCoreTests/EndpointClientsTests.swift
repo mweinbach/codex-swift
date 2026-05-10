@@ -132,6 +132,55 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(request.headers["authorization"], "Bearer tok")
     }
 
+    func testResponsesClientRefreshesProviderCommandAuthAfter401LikeRust() async throws {
+        let script = try EndpointProviderAuthScript(tokens: ["first-token", "second-token"])
+        let providerInfo = try ModelProviderInfo(
+            name: "corp",
+            baseURL: "https://example.com/v1",
+            auth: script.authConfig(),
+            wireAPI: .responses,
+            streamMaxRetries: 0
+        )
+        let transport = CapturingTransport(
+            streamResults: [
+                .failure(.http(statusCode: 401, headers: nil, body: "unauthorized")),
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.created","response":{}}
+
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let commandRunner = ProviderAuthCommandRunner()
+        let initialAuth = try await APIAuthResolver.authProvider(
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "unused-api-key", tokens: nil, lastRefresh: nil),
+            provider: providerInfo,
+            commandRunner: commandRunner
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: providerInfo.toAPIProvider(authMode: .apiKey),
+            auth: initialAuth
+        )
+
+        let result = await client.streamRetryingProviderCommandAuth(
+            body: .object(["model": .string("gpt-test")]),
+            providerInfo: providerInfo,
+            commandRunner: commandRunner
+        )
+
+        XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.created),
+            .success(.completed(responseID: "resp_1", tokenUsage: nil))
+        ]))
+        XCTAssertEqual(transport.streamRequests.map { $0.headers["authorization"] }, [
+            "Bearer first-token",
+            "Bearer second-token"
+        ])
+    }
+
     func testResponsesClientParsesStreamingChunksAcrossUTF8AndSSEBoundaries() async {
         let delta = "hel\u{1F30A}"
         let sse = """
@@ -738,5 +787,38 @@ private actor CountingAttestationProvider: AttestationProvider {
 
     func recordedCalls() -> [Attestation.Context] {
         calls
+    }
+}
+
+private struct EndpointProviderAuthScript {
+    let directory: URL
+
+    init(tokens: [String]) throws {
+        self.directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-endpoint-provider-auth-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try (tokens.joined(separator: "\n") + "\n").write(
+            to: directory.appendingPathComponent("tokens.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let executable = directory.appendingPathComponent("print-token.sh")
+        try """
+        #!/bin/sh
+        first_line=$(sed -n '1p' tokens.txt)
+        printf '%s\\n' "$first_line"
+        tail -n +2 tokens.txt > tokens.next
+        mv tokens.next tokens.txt
+        """.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+    }
+
+    func authConfig() throws -> ModelProviderAuthInfo {
+        try ModelProviderAuthInfo(
+            command: "./print-token.sh",
+            timeoutMilliseconds: 10_000,
+            refreshIntervalMilliseconds: 300_000,
+            cwd: AbsolutePath(absolutePath: directory.path)
+        )
     }
 }

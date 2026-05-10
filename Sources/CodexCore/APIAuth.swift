@@ -57,8 +57,10 @@ public enum APIAuthResolver {
             return StaticAPIAuthProvider(bearerToken: token)
         }
 
-        if let providerAuth = provider.auth,
-           let token = try? await commandRunner.resolveToken(config: providerAuth) {
+        if let providerAuth = provider.auth {
+            guard let token = try? await commandRunner.resolveToken(config: providerAuth) else {
+                return StaticAPIAuthProvider()
+            }
             return StaticAPIAuthProvider(bearerToken: token)
         }
 

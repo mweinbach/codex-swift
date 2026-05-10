@@ -220,9 +220,14 @@ final class APIAuthTests: XCTestCase {
     func testProviderCommandAuthFailuresReturnUnauthenticatedLikeRust() async throws {
         let script = try ProviderAuthScript.failing()
         let provider = try ModelProviderInfo(name: "Provider", auth: script.authConfig())
+        let auth = AuthDotJSON(
+            openAIAPIKey: "auth-json-key",
+            tokens: tokenData(accessToken: "chatgpt-token", accountID: "acct"),
+            lastRefresh: nil
+        )
 
         let resolved = try await APIAuthResolver.authProvider(
-            auth: nil,
+            auth: auth,
             provider: provider,
             commandRunner: ProviderAuthCommandRunner()
         )

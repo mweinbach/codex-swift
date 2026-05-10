@@ -752,11 +752,13 @@ private func runNonInteractiveExec(
         )
     }
 
+    let commandAuthRunner = ProviderAuthCommandRunner()
     let authResolution = try await resolveExecAuth(
         codexHome: codexHome,
         settings: settings,
         providerInfo: providerResolution.info,
-        environment: environment
+        environment: environment,
+        commandAuthRunner: commandAuthRunner
     )
     let provider = providerResolution.info.toAPIProvider(
         authMode: authResolution.authMode,
@@ -874,7 +876,7 @@ private func runNonInteractiveExec(
     let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
         streamPrompt: { nextPrompt in
-            await client.streamPrompt(
+            await client.streamPromptRetryingProviderCommandAuth(
                 model: resolvedModel,
                 instructions: nextPrompt.fullInstructions(for: modelFamily),
                 prompt: nextPrompt,
@@ -886,7 +888,9 @@ private func runNonInteractiveExec(
                     verbosity: settings.modelVerbosity,
                     serviceTier: settings.serviceTier,
                     outputSchema: outputSchema
-                )
+                ),
+                providerInfo: providerResolution.info,
+                commandRunner: commandAuthRunner
             )
         },
         stopHookContext: NonInteractiveExec.StopHookContext(
@@ -1036,8 +1040,22 @@ private func resolveExecAuth(
     codexHome: URL,
     settings: CodexRuntimeConfig,
     providerInfo: ModelProviderInfo,
-    environment: [String: String]
+    environment: [String: String],
+    commandAuthRunner: ProviderAuthCommandRunner = ProviderAuthCommandRunner()
 ) async throws -> ExecAuthResolution {
+    if providerInfo.envKey != nil || providerInfo.experimentalBearerToken != nil || providerInfo.auth != nil {
+        let auth = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: providerInfo,
+            environment: environment,
+            commandRunner: commandAuthRunner
+        )
+        return ExecAuthResolution(
+            auth: auth,
+            authMode: auth.accountID == nil || providerInfo.auth != nil ? .apiKey : .chatGPT
+        )
+    }
+
     if let apiKey = CodexAuthStorage.readCodexAPIKeyFromEnvironment(environment) {
         return ExecAuthResolution(auth: StaticAPIAuthProvider(bearerToken: apiKey), authMode: .apiKey)
     }
@@ -1046,18 +1064,6 @@ private func resolveExecAuth(
         codexHome: codexHome,
         mode: settings.cliAuthCredentialsStoreMode
     )
-
-    if providerInfo.envKey != nil || providerInfo.experimentalBearerToken != nil {
-        let auth = try APIAuthResolver.authProvider(
-            auth: storedAuth,
-            provider: providerInfo,
-            environment: environment
-        )
-        return ExecAuthResolution(
-            auth: auth,
-            authMode: auth.accountID == nil ? .apiKey : .chatGPT
-        )
-    }
 
     if let apiKey = storedAuth?.openAIAPIKey {
         return ExecAuthResolution(auth: StaticAPIAuthProvider(bearerToken: apiKey), authMode: .apiKey)
