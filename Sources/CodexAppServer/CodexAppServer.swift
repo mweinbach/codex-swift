@@ -5205,7 +5205,10 @@ public enum CodexAppServer {
             )
         }
         let validatedShareTargets = try validatePluginShareTargets(shareTargets)
-        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(configuration: configuration)
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
+            configuration: configuration,
+            failurePrefix: "save remote plugin share"
+        )
         let result = try saveRemotePluginShare(
             pluginPath: pluginPath,
             remotePluginID: remotePluginID,
@@ -5488,7 +5491,10 @@ public enum CodexAppServer {
         }
         _ = try pluginShareUpdateDiscoverability(params?["discoverability"])
         let shareTargets = try validatePluginShareTargets(params?["shareTargets"], required: true)
-        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(configuration: configuration)
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
+            configuration: configuration,
+            failurePrefix: "update remote plugin share targets"
+        )
         let requestedTargets = shareTargets
         let discoverability = stringParam(params?["discoverability"]) ?? ""
         let object = try remotePluginObject(
@@ -5526,7 +5532,10 @@ public enum CodexAppServer {
         params _: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(configuration: configuration)
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
+            configuration: configuration,
+            failurePrefix: "list remote plugin shares"
+        )
         let createdPlugins = try remotePluginPagesOrThrow(
             path: "/ps/plugins/workspace/created",
             queryItems: [URLQueryItem(name: "limit", value: "200")],
@@ -5570,7 +5579,10 @@ public enum CodexAppServer {
         if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
-        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(configuration: configuration)
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
+            configuration: configuration,
+            failurePrefix: "delete remote plugin share"
+        )
         try remotePluginEmptyResponseRequest(
             path: "/public/plugins/workspace/\(remotePluginID)",
             runtimeConfig: runtimeConfig,
@@ -5686,16 +5698,22 @@ public enum CodexAppServer {
     }
 
     private static func pluginShareRuntimeConfigAndAuth(
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        failurePrefix: String
     ) throws -> (CodexRuntimeConfig, AppServerAuth) {
         let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
         guard runtimeConfig.features.isEnabled(.plugins) else {
             throw AppServerError.invalidRequest("plugin sharing is not enabled")
         }
-        guard let auth = try? currentAuth(configuration: configuration),
-              case .chatGPT = auth.kind
-        else {
-            throw AppServerError.invalidRequest("plugin sharing is not enabled")
+        guard let auth = try? currentAuth(configuration: configuration) else {
+            throw AppServerError.invalidRequest(
+                "\(failurePrefix): chatgpt authentication required for remote plugin catalog"
+            )
+        }
+        guard case .chatGPT = auth.kind else {
+            throw AppServerError.invalidRequest(
+                "\(failurePrefix): chatgpt authentication required for remote plugin catalog; api key auth is not supported"
+            )
         }
         return (runtimeConfig, auth)
     }
