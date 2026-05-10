@@ -869,6 +869,12 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerStartedConversation {
         let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
+            mcpServers: runtimeConfig.mcpServers,
+            environment: configuration.environment
+        ) {
+            throw AppServerError.internalError(message)
+        }
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)

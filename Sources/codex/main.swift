@@ -723,6 +723,12 @@ private func runNonInteractiveExec(
         environment: environment,
         arguments: arguments
     )
+    if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
+        mcpServers: settings.mcpServers,
+        environment: environment
+    ) {
+        return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: message)
+    }
     guard providerResolution.info.wireAPI == .responses else {
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,

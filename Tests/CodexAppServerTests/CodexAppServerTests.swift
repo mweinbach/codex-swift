@@ -134,6 +134,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.required_broken]
+        command = "codex-definitely-not-a-real-binary"
+        required = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: ["PATH": ""]
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        let message = try XCTUnwrap(error["message"] as? String)
+        XCTAssertTrue(message.contains("required MCP servers failed to initialize: required_broken"))
+        XCTAssertTrue(message.contains("codex-definitely-not-a-real-binary"))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("sessions", isDirectory: true).path
+        ))
+    }
+
     func testThreadPersistExtendedHistoryEmitsDeprecationNoticeLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(
