@@ -290,6 +290,29 @@ final class ExecServerClientTests: XCTestCase {
         XCTAssertEqual(envLine, "env-value")
     }
 
+    func testConnectWebSocketInitializesJSONRPCClientLikeRust() async throws {
+        let urlString = try await startWebSocketExecServer()
+
+        let client = try await ExecServerClient.connectWebSocket(RemoteExecServerConnectArgs(
+            websocketURL: urlString,
+            clientName: "websocket-test-client",
+            connectTimeoutSeconds: 1,
+            initializeTimeoutSeconds: 1
+        ))
+
+        let sessionID = await client.sessionID
+        XCTAssertEqual(sessionID, "session-1")
+    }
+
+    func testConnectForTransportInitializesWebSocketLikeRustEnvironmentTransport() async throws {
+        let urlString = try await startWebSocketExecServer()
+
+        let client = try await ExecServerClient.connectForTransport(.webSocketURL(urlString))
+
+        let sessionID = await client.sessionID
+        XCTAssertEqual(sessionID, "session-1")
+    }
+
     func testConnectStdioCommandTerminatesProcessOnMalformedInitializeLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let markerPath = temp.url.appendingPathComponent("marker").path
@@ -443,6 +466,52 @@ private actor LineClientHarness {
 private func line(for message: ExecServerJSONRPCMessage) throws -> String {
     let data = try ExecServerJSONRPCCodec.encodeLine(message)
     return String(decoding: data.dropLast(), as: UTF8.self)
+}
+
+private func startWebSocketExecServer() async throws -> String {
+    let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+    let transport = ExecServerWebSocketTransport(processor: ExecServerConnectionProcessor(
+        sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+    ))
+    let serverTask = Task.detached {
+        try await transport.run(host: "127.0.0.1", port: 0) { url in
+            continuation.yield(url.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+    Task {
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        serverTask.cancel()
+    }
+    var iterator = stream.makeAsyncIterator()
+    guard let url = await iterator.next() else {
+        throw NSError(domain: "ExecServerClientTests", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "websocket listen URL was not announced"
+        ])
+    }
+    return url
+}
+
+private func sequenceIDs(_ ids: [String]) -> @Sendable () -> String {
+    let sequence = LockedStringSequence(ids)
+    return { sequence.next() }
+}
+
+private final class LockedStringSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: [String]
+
+    init(_ values: [String]) {
+        remaining = values
+    }
+
+    func next() -> String {
+        lock.withLock {
+            if remaining.isEmpty {
+                return "exhausted"
+            }
+            return remaining.removeFirst()
+        }
+    }
 }
 
 private func shellQuote(_ value: String) -> String {

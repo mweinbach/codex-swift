@@ -55,8 +55,37 @@ public struct StdioExecServerConnectArgs: Equatable, Sendable {
     }
 }
 
+public struct RemoteExecServerConnectArgs: Equatable, Sendable {
+    public let websocketURL: String
+    public let clientName: String
+    public let connectTimeoutSeconds: TimeInterval
+    public let initializeTimeoutSeconds: TimeInterval
+    public let resumeSessionID: String?
+
+    public init(
+        websocketURL: String,
+        clientName: String,
+        connectTimeoutSeconds: TimeInterval = 10,
+        initializeTimeoutSeconds: TimeInterval = 10,
+        resumeSessionID: String? = nil
+    ) {
+        self.websocketURL = websocketURL
+        self.clientName = clientName
+        self.connectTimeoutSeconds = connectTimeoutSeconds
+        self.initializeTimeoutSeconds = initializeTimeoutSeconds
+        self.resumeSessionID = resumeSessionID
+    }
+}
+
+public enum ExecServerTransportParams: Equatable, Sendable {
+    case webSocketURL(String)
+    case stdioCommand(StdioExecServerCommand)
+}
+
 public enum ExecServerClientError: Error, Equatable, CustomStringConvertible, Sendable {
     case initializeTimedOut(timeoutSeconds: TimeInterval)
+    case webSocketConnectTimedOut(url: String, timeoutSeconds: TimeInterval)
+    case webSocketConnect(url: String, message: String)
     case closed
     case json(String)
     case protocolError(String)
@@ -67,6 +96,10 @@ public enum ExecServerClientError: Error, Equatable, CustomStringConvertible, Se
         switch self {
         case let .initializeTimedOut(timeoutSeconds):
             return "timed out waiting for exec-server initialize handshake after \(Self.formatSeconds(timeoutSeconds))"
+        case let .webSocketConnectTimedOut(url, timeoutSeconds):
+            return "timed out connecting to exec-server websocket `\(url)` after \(Self.formatSeconds(timeoutSeconds))"
+        case let .webSocketConnect(url, message):
+            return "failed to connect to exec-server websocket `\(url)`: \(message)"
         case .closed:
             return "exec-server transport closed"
         case let .json(message):
@@ -85,6 +118,147 @@ public enum ExecServerClientError: Error, Equatable, CustomStringConvertible, Se
             return "\(Int(seconds))s"
         }
         return "\(seconds)s"
+    }
+}
+
+public actor ExecServerWebSocketClientTransport: ExecServerClientTransport {
+    public typealias NotificationHandler = @Sendable (ExecServerJSONRPCNotification) async throws -> Void
+
+    private let socket: ExecServerClientURLSessionWebSocket
+    private let connectionLabel: String
+    private let websocketURL: String
+    private let notificationHandler: NotificationHandler
+
+    public init(
+        websocketURL: String,
+        notificationHandler: @escaping NotificationHandler = { _ in }
+    ) throws {
+        guard let url = URL(string: websocketURL) else {
+            throw ExecServerClientError.webSocketConnect(url: websocketURL, message: "invalid URL")
+        }
+        self.socket = ExecServerClientURLSessionWebSocket(url: url)
+        self.connectionLabel = "exec-server websocket \(websocketURL)"
+        self.websocketURL = websocketURL
+        self.notificationHandler = notificationHandler
+    }
+
+    deinit {
+        let socket = socket
+        Task { [socket] in
+            await socket.close()
+        }
+    }
+
+    public func send(_ message: ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage? {
+        do {
+            try await socket.sendText(try ExecServerJSONRPCCodec.encodeWebSocketText(message))
+        } catch let error as ExecServerClientError {
+            throw error
+        } catch {
+            throw ExecServerClientError.webSocketConnect(url: websocketURL, message: String(describing: error))
+        }
+
+        guard case .request = message else {
+            return nil
+        }
+
+        while true {
+            let event: ExecServerConnectionEvent
+            do {
+                switch try await socket.receive() {
+                case let .text(text):
+                    event = ExecServerJSONRPCCodec.webSocketTextEvent(text, connectionLabel: connectionLabel)
+                case let .data(data):
+                    event = ExecServerJSONRPCCodec.webSocketBinaryEvent(data, connectionLabel: connectionLabel)
+                }
+            } catch {
+                throw ExecServerClientError.disconnected(
+                    "exec-server transport disconnected: failed to read JSON-RPC message from \(connectionLabel): \(error)"
+                )
+            }
+
+            switch event {
+            case let .message(.notification(notification)):
+                do {
+                    try await notificationHandler(notification)
+                    continue
+                } catch {
+                    throw ExecServerClientError.disconnected(
+                        "exec-server notification handling failed: \(error)"
+                    )
+                }
+            case let .message(message):
+                return message
+            case let .malformedMessage(reason):
+                throw ExecServerClientError.protocolError(reason)
+            case let .disconnected(reason):
+                throw ExecServerClientError.disconnected(disconnectedMessage(reason: reason))
+            }
+        }
+    }
+
+    public func waitUntilConnected() async throws {
+        do {
+            try await socket.sendPing()
+        } catch {
+            throw ExecServerClientError.webSocketConnect(url: websocketURL, message: String(describing: error))
+        }
+    }
+
+    public func close() async {
+        await socket.close()
+    }
+
+    private func disconnectedMessage(reason: String?) -> String {
+        if let reason, !reason.isEmpty {
+            return "exec-server transport disconnected: \(reason)"
+        }
+        return "exec-server transport disconnected"
+    }
+}
+
+private enum ExecServerClientWebSocketIncoming: Sendable {
+    case text(String)
+    case data(Data)
+}
+
+private actor ExecServerClientURLSessionWebSocket {
+    private let task: URLSessionWebSocketTask
+
+    init(url: URL) {
+        task = URLSession.shared.webSocketTask(with: url)
+        task.resume()
+    }
+
+    func receive() async throws -> ExecServerClientWebSocketIncoming {
+        switch try await task.receive() {
+        case let .string(text):
+            return .text(text)
+        case let .data(data):
+            return .data(data)
+        @unknown default:
+            return .data(Data())
+        }
+    }
+
+    func sendText(_ text: String) async throws {
+        try await task.send(.string(text))
+    }
+
+    func sendPing() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            task.sendPing { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    func close() {
+        task.cancel(with: .normalClosure, reason: nil)
     }
 }
 
@@ -383,6 +557,58 @@ public actor ExecServerClient {
         self.transport = transport
     }
 
+    public static func connectForTransport(
+        _ transportParams: ExecServerTransportParams,
+        notificationHandler: @escaping ExecServerLineClientTransport.NotificationHandler = { _ in }
+    ) async throws -> ExecServerClient {
+        switch transportParams {
+        case let .webSocketURL(websocketURL):
+            return try await connectWebSocket(RemoteExecServerConnectArgs(
+                websocketURL: websocketURL,
+                clientName: "codex-environment",
+                connectTimeoutSeconds: 5,
+                initializeTimeoutSeconds: 5
+            ), notificationHandler: notificationHandler)
+        case let .stdioCommand(command):
+            return try await connectStdioCommand(StdioExecServerConnectArgs(
+                command: command,
+                clientName: "codex-environment",
+                initializeTimeoutSeconds: 5
+            ), notificationHandler: notificationHandler)
+        }
+    }
+
+    public static func connectWebSocket(
+        _ args: RemoteExecServerConnectArgs,
+        notificationHandler: @escaping ExecServerWebSocketClientTransport.NotificationHandler = { _ in }
+    ) async throws -> ExecServerClient {
+        let transport = try ExecServerWebSocketClientTransport(
+            websocketURL: args.websocketURL,
+            notificationHandler: notificationHandler
+        )
+        let client = ExecServerClient(transport: transport)
+        do {
+            try await withTimeout(
+                seconds: args.connectTimeoutSeconds,
+                timeoutError: .webSocketConnectTimedOut(
+                    url: args.websocketURL,
+                    timeoutSeconds: args.connectTimeoutSeconds
+                )
+            ) {
+                try await transport.waitUntilConnected()
+            }
+            _ = try await client.initialize(options: ExecServerClientConnectOptions(
+                clientName: args.clientName,
+                initializeTimeoutSeconds: args.initializeTimeoutSeconds,
+                resumeSessionID: args.resumeSessionID
+            ))
+            return client
+        } catch {
+            await transport.close()
+            throw error
+        }
+    }
+
     public static func connectStdioCommand(
         _ args: StdioExecServerConnectArgs,
         notificationHandler: @escaping ExecServerLineClientTransport.NotificationHandler = { _ in }
@@ -561,6 +787,25 @@ public actor ExecServerClient {
         seconds: TimeInterval,
         operation: @escaping @Sendable () async throws -> R
     ) async throws -> R {
+        try await Self.withTimeout(
+            seconds: seconds,
+            timeoutError: .initializeTimedOut(timeoutSeconds: seconds),
+            operation: operation
+        )
+    }
+
+    private func disconnectedMessage(reason: String?) -> String {
+        if let reason, !reason.isEmpty {
+            return "exec-server transport disconnected: \(reason)"
+        }
+        return "exec-server transport disconnected"
+    }
+
+    private static func withTimeout<R: Sendable>(
+        seconds: TimeInterval,
+        timeoutError: ExecServerClientError,
+        operation: @escaping @Sendable () async throws -> R
+    ) async throws -> R {
         guard seconds > 0 else {
             return try await operation()
         }
@@ -570,7 +815,7 @@ public actor ExecServerClient {
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw ExecServerClientError.initializeTimedOut(timeoutSeconds: seconds)
+                throw timeoutError
             }
             guard let result = try await group.next() else {
                 throw ExecServerClientError.closed
@@ -578,13 +823,6 @@ public actor ExecServerClient {
             group.cancelAll()
             return result
         }
-    }
-
-    private func disconnectedMessage(reason: String?) -> String {
-        if let reason, !reason.isEmpty {
-            return "exec-server transport disconnected: \(reason)"
-        }
-        return "exec-server transport disconnected"
     }
 }
 
