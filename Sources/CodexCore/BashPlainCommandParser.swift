@@ -25,7 +25,7 @@ public enum BashPlainCommandParser {
         guard !script[redirectRange.upperBound...].hasPrefix("<") else { return nil }
 
         let prefix = String(script[..<redirectRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let commands = parseWordOnlyCommandsSequence(prefix), commands.count == 1 else {
+        guard let command = parseLiteralSingleCommandPrefix(prefix) else {
             return nil
         }
 
@@ -56,7 +56,7 @@ public enum BashPlainCommandParser {
             return nil
         }
 
-        return commands[0]
+        return command
     }
 
     public static func parseWordOnlyCommandsSequence(_ source: String) -> [[String]]? {
@@ -210,6 +210,39 @@ public enum BashPlainCommandParser {
             return false
         }
         return name.dropFirst().allSatisfy { $0 == "_" || $0.isASCIIAlpha || $0.isNumber }
+    }
+
+    private static func parseLiteralSingleCommandPrefix(_ prefix: String) -> [String]? {
+        var words: [String] = []
+        var currentWord = ""
+
+        func finishWord() -> Bool {
+            guard !currentWord.isEmpty else {
+                return true
+            }
+            if words.isEmpty, isAssignmentWord(currentWord) {
+                return false
+            }
+            words.append(currentWord)
+            currentWord = ""
+            return true
+        }
+
+        for character in prefix {
+            switch character {
+            case " ", "\t", "\r", "\n":
+                guard finishWord() else { return nil }
+            case "'", "\"", "\\", "$", "`", "(", ")", "{", "}", "<", ">", "|", "&", ";", "#":
+                return nil
+            default:
+                currentWord.append(character)
+            }
+        }
+
+        guard finishWord(), !words.isEmpty else {
+            return nil
+        }
+        return words
     }
 }
 

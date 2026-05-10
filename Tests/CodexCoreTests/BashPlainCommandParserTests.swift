@@ -189,5 +189,20 @@ final class BashPlainCommandParserTests: XCTestCase {
             "-lc",
             #"python3 <<< "$(rm -rf /)""#,
         ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "python3 'quoted-arg' <<'PY'\nprint('hello')\nPY",
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            #"python3 escaped\ arg <<'PY'\nprint('hello')\nPY"#,
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "python3 $((1<<2)) <<'PY'\nprint('hello')\nPY",
+        ]))
     }
 }
