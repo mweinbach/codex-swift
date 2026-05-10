@@ -660,7 +660,11 @@ public enum NonInteractiveExec {
                      .reasoningSummaryDelta,
                      .reasoningContentDelta,
                      .reasoningSummaryPartAdded,
-                     .rateLimits:
+                     .rateLimits,
+                     .serverModel,
+                     .modelVerifications,
+                     .serverReasoningIncluded,
+                     .modelsETag:
                     continue
                 }
             }

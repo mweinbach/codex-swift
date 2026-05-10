@@ -258,10 +258,21 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
             taskBox: taskBox
         )
         let task = Task {
+            var lastServerModel: String?
+            if let model = response.headers.caseInsensitiveValue(for: "openai-model") {
+                continuation.yield(.success(.serverModel(model)))
+                lastServerModel = model
+            }
             if includeRateLimits {
                 for snapshot in RateLimitSnapshot.parseAllRateLimits(headers: response.headers) {
                     continuation.yield(.success(.rateLimits(snapshot)))
                 }
+            }
+            if let etag = response.headers.caseInsensitiveValue(for: "x-models-etag") {
+                continuation.yield(.success(.modelsETag(etag)))
+            }
+            if response.headers.caseInsensitiveValue(for: "x-reasoning-included") != nil {
+                continuation.yield(.success(.serverReasoningIncluded(true)))
             }
 
             var parser = makeParser()
@@ -283,7 +294,8 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
                     appendResponseEvents(
                         from: frameDecoder.receive(textDecoder.receive(data)),
                         using: &parser,
-                        to: continuation
+                        to: continuation,
+                        lastServerModel: &lastServerModel
                     )
                     pollStart = timeout.startPoll()
                 case let .failure(error):
@@ -302,7 +314,8 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
             appendResponseEvents(
                 from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
                 using: &parser,
-                to: continuation
+                to: continuation,
+                lastServerModel: &lastServerModel
             )
             for event in parser.finish() {
                 continuation.yield(event)
@@ -321,9 +334,15 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
 private func appendResponseEvents<Parser: ResponseEventFrameParsing>(
     from frames: [String],
     using parser: inout Parser,
-    to continuation: ResponseEventStream.Continuation
+    to continuation: ResponseEventStream.Continuation,
+    lastServerModel: inout String?
 ) {
     for frame in frames {
+        if let model = frame.responseModelFromSSEDataFrame(),
+           lastServerModel != model {
+            continuation.yield(.success(.serverModel(model)))
+            lastServerModel = model
+        }
         for event in parser.receive(frame: frame) {
             continuation.yield(event)
         }
@@ -434,6 +453,69 @@ private struct BufferedEventFrameParser: ResponseEventFrameParsing {
 
     mutating func finish() -> ResponseEventResults {
         parse(text)
+    }
+}
+
+private extension Dictionary where Key == String, Value == String {
+    func caseInsensitiveValue(for name: String) -> String? {
+        first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
+}
+
+private extension String {
+    func responseModelFromSSEDataFrame() -> String? {
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(utf8)),
+              case let .object(object) = value
+        else {
+            return nil
+        }
+        if let responseHeaders = object["response"]?.objectValue?["headers"]?.objectValue,
+           let model = Self.headerOpenAIModelValue(responseHeaders) {
+            return model
+        }
+        if let headers = object["headers"]?.objectValue,
+           let model = Self.headerOpenAIModelValue(headers) {
+            return model
+        }
+        return nil
+    }
+
+    private static func headerOpenAIModelValue(_ headers: [String: JSONValue]) -> String? {
+        for (name, value) in headers {
+            guard name.caseInsensitiveCompare("openai-model") == .orderedSame
+                || name.caseInsensitiveCompare("x-openai-model") == .orderedSame
+            else {
+                continue
+            }
+            if let string = value.stringValue {
+                return string
+            }
+            return value.arrayValue?.first?.stringValue
+        }
+        return nil
+    }
+}
+
+private extension JSONValue {
+    var objectValue: [String: JSONValue]? {
+        if case let .object(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var arrayValue: [JSONValue]? {
+        if case let .array(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var stringValue: String? {
+        if case let .string(value) = self {
+            return value
+        }
+        return nil
     }
 }
 

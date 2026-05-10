@@ -48,6 +48,18 @@ public struct ResponseEventAggregator: Sendable {
         case let .rateLimits(snapshot):
             return [.success(.rateLimits(snapshot))]
 
+        case let .serverModel(model):
+            return [.success(.serverModel(model))]
+
+        case let .modelVerifications(verifications):
+            return [.success(.modelVerifications(verifications))]
+
+        case let .serverReasoningIncluded(included):
+            return [.success(.serverReasoningIncluded(included))]
+
+        case let .modelsETag(etag):
+            return [.success(.modelsETag(etag))]
+
         case let .completed(responseID, tokenUsage):
             var events: [Result<ResponseEvent, APIError>] = []
             if !cumulativeReasoning.isEmpty {

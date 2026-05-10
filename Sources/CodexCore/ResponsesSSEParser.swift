@@ -4,6 +4,10 @@ public enum ResponseEvent: Equatable, Sendable {
     case created
     case outputItemDone(ResponseItem)
     case outputItemAdded(ResponseItem)
+    case serverModel(String)
+    case modelVerifications([ModelVerification])
+    case serverReasoningIncluded(Bool)
+    case modelsETag(String)
     case completed(responseID: String, tokenUsage: TokenUsage?)
     case outputTextDelta(String)
     case reasoningSummaryDelta(delta: String, summaryIndex: Int64)
@@ -24,6 +28,9 @@ public struct ResponsesSSEParser: Sendable {
         }
 
         switch event.kind {
+        case "response.metadata":
+            return event.modelVerifications.map { [.modelVerifications($0)] } ?? []
+
         case "response.output_item.done":
             guard let item = event.item.flatMap({ decodeJSONValue($0, as: ResponseItem.self) }) else {
                 return []
@@ -176,14 +183,37 @@ private struct SSEEvent: Decodable {
     let kind: String
     let response: JSONValue?
     let item: JSONValue?
+    let metadata: JSONValue?
     let delta: String?
     let summaryIndex: Int64?
     let contentIndex: Int64?
+
+    var modelVerifications: [ModelVerification]? {
+        guard kind == "response.metadata",
+              let raw = metadata?.objectValue?["openai_verification_recommendation"],
+              let values = raw.arrayValue
+        else {
+            return nil
+        }
+
+        var verifications: [ModelVerification] = []
+        for value in values {
+            guard let rawValue = value.stringValue,
+                  let verification = ModelVerification(rawValue: rawValue),
+                  !verifications.contains(verification)
+            else {
+                continue
+            }
+            verifications.append(verification)
+        }
+        return verifications.isEmpty ? nil : verifications
+    }
 
     private enum CodingKeys: String, CodingKey {
         case kind = "type"
         case response
         case item
+        case metadata
         case delta
         case summaryIndex = "summary_index"
         case contentIndex = "content_index"
@@ -250,6 +280,29 @@ private struct ResponseCompletedOutputTokensDetails: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case reasoningTokens = "reasoning_tokens"
+    }
+}
+
+private extension JSONValue {
+    var objectValue: [String: JSONValue]? {
+        if case let .object(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var arrayValue: [JSONValue]? {
+        if case let .array(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var stringValue: String? {
+        if case let .string(value) = self {
+            return value
+        }
+        return nil
     }
 }
 

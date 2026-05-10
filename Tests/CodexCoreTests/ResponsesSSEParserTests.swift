@@ -42,6 +42,20 @@ final class ResponsesSSEParserTests: XCTestCase {
         ])
     }
 
+    func testMetadataEventEmitsDedupedModelVerificationsLikeRust() {
+        let text = sse([
+            #"{"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber","unknown","trusted_access_for_cyber"]}}"#,
+            #"{"type":"response.completed","response":{"id":"resp_verify"}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .success(.modelVerifications([.trustedAccessForCyber])),
+            .success(.completed(responseID: "resp_verify", tokenUsage: nil))
+        ])
+    }
+
     func testMissingCompletedReturnsStreamErrorAfterPriorEvents() {
         let text = sse([
             #"{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}"#

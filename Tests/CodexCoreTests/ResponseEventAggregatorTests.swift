@@ -107,6 +107,17 @@ final class ResponseEventAggregatorTests: XCTestCase {
         ])
     }
 
+    func testForwardsRustServerMetadataEvents() {
+        let events: [Result<ResponseEvent, APIError>] = [
+            .success(.serverModel("gpt-rerouted")),
+            .success(.modelVerifications([.trustedAccessForCyber])),
+            .success(.serverReasoningIncluded(true)),
+            .success(.modelsETag("etag-1"))
+        ]
+
+        XCTAssertEqual(ResponseEventAggregator.aggregate(events), events)
+    }
+
     func testAggregatesAsyncEventStream() async {
         let stream = responseEventStream([
             .success(.outputTextDelta("hel")),

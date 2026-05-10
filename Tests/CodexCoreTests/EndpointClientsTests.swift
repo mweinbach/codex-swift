@@ -238,6 +238,52 @@ final class EndpointClientsTests: XCTestCase {
         ])
     }
 
+    func testResponsesClientEmitsRustServerMetadataEvents() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    headers: [
+                        "OpenAI-Model": "gpt-header",
+                        "X-Models-Etag": "models-etag",
+                        "X-Reasoning-Included": "true"
+                    ],
+                    sseText: """
+                    data: {"type":"response.created","response":{"headers":{"x-openai-model":["gpt-event"]}}}
+
+                    data: {"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber"]}}
+
+                    data: {"type":"response.completed","response":{"id":"resp_metadata","usage":null}}
+
+                    """
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.streamEvents(body: .object([:]))
+
+        guard case let .success(stream) = result else {
+            return XCTFail("expected event stream, got \(result)")
+        }
+        let events = await collect(stream)
+
+        XCTAssertEqual(events, [
+            .success(.serverModel("gpt-header")),
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .success(.modelsETag("models-etag")),
+            .success(.serverReasoningIncluded(true)),
+            .success(.serverModel("gpt-event")),
+            .success(.created),
+            .success(.modelVerifications([.trustedAccessForCyber])),
+            .success(.completed(responseID: "resp_metadata", tokenUsage: nil))
+        ])
+    }
+
     func testChatClientStreamEventsDoesNotEmitRateLimits() async {
         let transport = CapturingTransport(
             streamResults: [
