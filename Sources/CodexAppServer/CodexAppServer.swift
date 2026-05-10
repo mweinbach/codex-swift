@@ -724,7 +724,7 @@ public enum CodexAppServer {
         let page = try RolloutListing.getConversations(
             codexHome: configuration.codexHome,
             pageSize: listLimit(params?["limit"]),
-            cursor: stringParam(params?["cursor"]).flatMap(RolloutListing.parseCursor),
+            cursor: try threadListCursor(params?["cursor"]),
             allowedSources: sourceFilter.allowedSources,
             modelProviders: modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider),
             archivedOnly: boolParam(params?["archived"], defaultValue: false),
@@ -10805,6 +10805,16 @@ public enum CodexAppServer {
         return rawFilters.map { cwd in
             URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL.path
         }
+    }
+
+    private static func threadListCursor(_ value: Any?) throws -> ConversationCursor? {
+        guard let cursor = stringParam(value) else {
+            return nil
+        }
+        guard !cursor.contains("|"), let parsed = RolloutListing.parseCursor(cursor) else {
+            throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
+        }
+        return parsed
     }
 
     private static func threadListSortKey(_ value: Any?) throws -> ConversationSortKey {

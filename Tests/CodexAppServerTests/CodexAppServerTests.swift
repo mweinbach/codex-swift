@@ -5457,6 +5457,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedData.map { $0["preview"] as? String }, ["oldest", "newest", "middle"])
     }
 
+    func testThreadListRejectsInvalidCursorWithRustErrorCode() throws {
+        let temp = try TemporaryDirectory()
+
+        let invalidTimestampResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"cursor":"not-a-cursor","limit":2}}"#,
+            codexHome: temp.url
+        )
+        let invalidTimestampError = try XCTUnwrap(invalidTimestampResponse["error"] as? [String: Any])
+        XCTAssertEqual(invalidTimestampError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidTimestampError["message"] as? String, "invalid cursor: not-a-cursor")
+
+        let legacySwiftCursorResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"cursor":"2025-01-01T12-00-00|01234567-89ab-cdef-0123-456789abcdef"}}"#,
+            codexHome: temp.url
+        )
+        let legacySwiftCursorError = try XCTUnwrap(legacySwiftCursorResponse["error"] as? [String: Any])
+        XCTAssertEqual(legacySwiftCursorError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            legacySwiftCursorError["message"] as? String,
+            "invalid cursor: 2025-01-01T12-00-00|01234567-89ab-cdef-0123-456789abcdef"
+        )
+    }
+
     func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
