@@ -6,6 +6,11 @@ public enum ContextUpdateBuilder {
         current: TurnContextItem,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
+        includePermissionsInstructions: Bool = true,
+        approvalsReviewer: ApprovalsReviewer = .user,
+        execPolicy: ExecPolicy = .empty(),
+        execPermissionApprovalsEnabled: Bool = false,
+        requestPermissionsToolEnabled: Bool = false,
         previousModel: String? = nil,
         currentModelInfo: ModelInfo? = nil,
         personalityFeatureEnabled: Bool = true,
@@ -19,6 +24,15 @@ public enum ContextUpdateBuilder {
                 previousModel: previousModel,
                 current: current,
                 currentModelInfo: currentModelInfo
+            ),
+            buildPermissionsUpdateText(
+                previous: previous,
+                current: current,
+                includePermissionsInstructions: includePermissionsInstructions,
+                approvalsReviewer: approvalsReviewer,
+                execPolicy: execPolicy,
+                execPermissionApprovalsEnabled: execPermissionApprovalsEnabled,
+                requestPermissionsToolEnabled: requestPermissionsToolEnabled
             ),
             buildCollaborationModeUpdateText(previous: previous, current: current),
             buildRealtimeUpdateText(
@@ -63,6 +77,36 @@ public enum ContextUpdateBuilder {
         }
 
         return environmentItem(from: currentEnvironment.diff(from: previous))
+    }
+
+    public static func buildPermissionsUpdateText(
+        previous: TurnContextItem?,
+        current: TurnContextItem,
+        includePermissionsInstructions: Bool,
+        approvalsReviewer: ApprovalsReviewer = .user,
+        execPolicy: ExecPolicy = .empty(),
+        execPermissionApprovalsEnabled: Bool = false,
+        requestPermissionsToolEnabled: Bool = false
+    ) -> String? {
+        guard includePermissionsInstructions,
+              let previous,
+              previous.effectivePermissionProfile != current.effectivePermissionProfile
+                || previous.approvalPolicy != current.approvalPolicy
+        else {
+            return nil
+        }
+
+        return PermissionsInstructions.fromPermissionProfile(
+            current.effectivePermissionProfile,
+            config: PermissionsPromptConfig(
+                approvalPolicy: current.approvalPolicy,
+                approvalsReviewer: approvalsReviewer,
+                execPolicy: execPolicy,
+                execPermissionApprovalsEnabled: execPermissionApprovalsEnabled,
+                requestPermissionsToolEnabled: requestPermissionsToolEnabled
+            ),
+            cwd: current.cwd
+        ).render()
     }
 
     public static func buildModelInstructionsUpdateText(
@@ -213,7 +257,7 @@ public enum ContextUpdateBuilder {
         return .message(role: role, content: textSections.map { .inputText(text: $0) })
     }
 
-    private static func contextualFragment(openTag: String, closeTag: String, body: String) -> String {
+    public static func contextualFragment(openTag: String, closeTag: String, body: String) -> String {
         "\(openTag)\n\(body)\n\(closeTag)"
     }
 }

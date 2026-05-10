@@ -369,6 +369,55 @@ public struct ExecPolicy: Equatable, Sendable {
         hostExecutablesByName
     }
 
+    public func allowedPrefixes() -> [[String]] {
+        var prefixes: [[String]] = []
+        for rules in rulesByProgram.values {
+            for rule in rules where rule.decision == .allow {
+                prefixes.append([rule.pattern.first] + rule.pattern.rest.map(\.policyText))
+            }
+        }
+        prefixes.sort { $0.lexicographicallyPrecedes($1) }
+        prefixes = prefixes.reduce(into: []) { result, prefix in
+            if result.last != prefix {
+                result.append(prefix)
+            }
+        }
+        return prefixes
+    }
+
+    public func formattedAllowedPrefixes() -> String? {
+        Self.formatAllowedPrefixes(allowedPrefixes()).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    public static func formatAllowedPrefixes(_ prefixes: [[String]]) -> String? {
+        let maxRenderedPrefixes = 100
+        let maxAllowPrefixTextBytes = 5_000
+        let truncatedMarker = "...\n[Some commands were truncated]"
+        var truncated = prefixes.count > maxRenderedPrefixes
+        let sortedPrefixes = prefixes.sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count < rhs.count
+            }
+            let lhsLength = lhs.reduce(0) { $0 + $1.count }
+            let rhsLength = rhs.reduce(0) { $0 + $1.count }
+            if lhsLength != rhsLength {
+                return lhsLength < rhsLength
+            }
+            return lhs.lexicographicallyPrecedes(rhs)
+        }
+        let fullText = sortedPrefixes
+            .prefix(maxRenderedPrefixes)
+            .map { "- \(renderCommandPrefix($0))" }
+            .joined(separator: "\n")
+
+        var output = fullText
+        if let byteIndex = output.utf8Index(atOffset: maxAllowPrefixTextBytes) {
+            truncated = true
+            output = String(output[..<byteIndex])
+        }
+        return truncated ? "\(output)\(truncatedMarker)" : output
+    }
+
     public func mergingOverlay(_ overlay: ExecPolicy) -> ExecPolicy {
         var combinedRules = rulesByProgram
         for (program, rules) in overlay.rulesByProgram {
@@ -644,6 +693,41 @@ public struct ExecPolicy: Equatable, Sendable {
                 justification: justification
             )
         }
+    }
+}
+
+private extension PatternToken {
+    var policyText: String {
+        switch self {
+        case let .single(value):
+            return value
+        case let .alts(alternatives):
+            return "[\(alternatives.joined(separator: "|"))]"
+        }
+    }
+}
+
+private func renderCommandPrefix(_ prefix: [String]) -> String {
+    let tokens = prefix.map { token in
+        (try? JSONEncoder().encode(token))
+            .map { String(decoding: $0, as: UTF8.self) } ?? String(describing: token)
+    }
+    return "[\(tokens.joined(separator: ", "))]"
+}
+
+private extension String {
+    func utf8Index(atOffset offset: Int) -> String.Index? {
+        var byteCount = 0
+        for index in indices {
+            if byteCount == offset {
+                return index
+            }
+            byteCount += self[index].utf8.count
+            if byteCount > offset {
+                return nil
+            }
+        }
+        return byteCount == offset ? endIndex : nil
     }
 }
 

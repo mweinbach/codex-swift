@@ -160,6 +160,71 @@ final class ContextUpdateBuilderTests: XCTestCase {
         XCTAssertEqual(developerTexts(in: items), [])
     }
 
+    func testBuildSettingsUpdateItemsEmitsPermissionsBeforeCollaborationLikeRust() throws {
+        let previous = contextItem(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            permissionProfile: .readOnly(),
+            collaborationMode: CollaborationMode(
+                mode: .defaultMode,
+                settings: CollaborationModeSettings(model: "gpt-5.4")
+            )
+        )
+        let current = contextItem(
+            cwd: "/repo",
+            approvalPolicy: .onRequest,
+            permissionProfile: .workspaceWrite(),
+            collaborationMode: CollaborationMode(
+                mode: .plan,
+                settings: CollaborationModeSettings(
+                    model: "gpt-5.4",
+                    developerInstructions: "Plan before editing."
+                )
+            )
+        )
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            execPermissionApprovalsEnabled: true
+        )
+        let texts = developerTexts(in: items)
+
+        XCTAssertEqual(texts.count, 2)
+        XCTAssertTrue(texts[0].contains("<permissions instructions>"))
+        XCTAssertTrue(texts[0].contains("`sandbox_mode` is `workspace-write`"))
+        XCTAssertTrue(texts[0].contains("with_additional_permissions"))
+        XCTAssertEqual(texts[1], """
+        <collaboration_mode>
+        Plan before editing.
+        </collaboration_mode>
+        """)
+    }
+
+    func testBuildSettingsUpdateItemsOmitsPermissionsWhenUnchangedOrDisabledLikeRust() {
+        let previous = contextItem(cwd: "/repo", approvalPolicy: .onRequest, permissionProfile: .readOnly())
+        let current = contextItem(cwd: "/repo", approvalPolicy: .onRequest, permissionProfile: .readOnly())
+
+        XCTAssertEqual(
+            developerTexts(in: ContextUpdateBuilder.buildSettingsUpdateItems(
+                previous: previous,
+                current: current,
+                shell: shell()
+            )),
+            []
+        )
+        XCTAssertEqual(
+            developerTexts(in: ContextUpdateBuilder.buildSettingsUpdateItems(
+                previous: previous,
+                current: contextItem(cwd: "/repo", approvalPolicy: .never, permissionProfile: .readOnly()),
+                shell: shell(),
+                includePermissionsInstructions: false
+            )),
+            []
+        )
+    }
+
     func testBuildSettingsUpdateItemsEmitsCollaborationModeInstructionsLikeRust() {
         let previous = contextItem(
             cwd: "/repo",
@@ -350,6 +415,8 @@ private func contextItem(
     currentDate: String? = nil,
     timezone: String? = nil,
     network: TurnContextNetworkItem? = nil,
+    approvalPolicy: AskForApproval = .onRequest,
+    permissionProfile: PermissionProfile? = nil,
     model: String = "gpt-5.4",
     personality: Personality? = nil,
     collaborationMode: CollaborationMode? = nil,
@@ -359,8 +426,9 @@ private func contextItem(
         cwd: cwd,
         currentDate: currentDate,
         timezone: timezone,
-        approvalPolicy: .onRequest,
+        approvalPolicy: approvalPolicy,
         sandboxPolicy: .readOnly,
+        permissionProfile: permissionProfile,
         network: network,
         model: model,
         personality: personality,

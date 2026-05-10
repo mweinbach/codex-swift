@@ -995,7 +995,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/context_manager/history.rs` Codex-generated item classifier
   - added Swift parity for Rust's `is_codex_generated_item` helper, classifying function/tool-search/custom-tool outputs and developer messages as Codex-generated while leaving model-generated assistant/tool-call items under the separate model-generated classifier.
 - `codex-rs/core/src/context_manager/updates.rs` persisted context update helpers
-  - added Swift `ContextUpdateBuilder` parity for environment diffs from persisted `TurnContextItem` baselines, full environment reinjection when the baseline is missing, `include_environment_context` suppression, model-switch developer updates, collaboration-mode developer updates, realtime start/end developer updates, custom realtime start instructions, personality-spec developer updates, and Rust's previous-turn realtime fallback for older records without `realtime_active`.
+  - added Swift `ContextUpdateBuilder` parity for environment diffs from persisted `TurnContextItem` baselines, full environment reinjection when the baseline is missing, `include_environment_context` suppression, model-switch developer updates, permission-profile/approval-policy developer updates, collaboration-mode developer updates, realtime start/end developer updates, custom realtime start instructions, personality-spec developer updates, and Rust's previous-turn realtime fallback for older records without `realtime_active`.
 
 ## Known Gaps
 
