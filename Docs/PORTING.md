@@ -935,7 +935,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/config/src/thread_config.rs` thread-scoped config sources
   - added Swift typed `SessionThreadConfig`, `UserThreadConfig`, and `ThreadConfigSource` conversion into config-layer entries, preserving Rust's rule that non-empty session thread config becomes a `sessionFlags` layer above CLI overrides while user thread config and empty session config produce no layer yet.
 - `codex-rs/core/src/config/mod.rs` experimental runtime config fields
-  - loaded Rust's top-level realtime websocket override strings, realtime start instructions, and `experimental_thread_config_endpoint` into Swift runtime config from config files and CLI overrides; preserved Rust's load-time rejection for the removed `experimental_thread_store_endpoint`.
+  - loaded Rust's top-level realtime websocket override strings, realtime start instructions, `experimental_thread_config_endpoint`, and tagged `experimental_thread_store` (`local` / `in_memory`) into Swift runtime config from config files and CLI overrides; preserved Rust's load-time rejection for the removed `experimental_thread_store_endpoint`.
 - `codex-rs/utils/absolute-path/src/lib.rs` home-directory path expansion
   - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
 - `codex-rs/protocol/src/models.rs` persisted web-search response-item actions

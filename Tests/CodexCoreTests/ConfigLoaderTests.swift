@@ -37,6 +37,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.experimentalRealtimeWSStartupContext)
         XCTAssertNil(config.experimentalRealtimeStartInstructions)
         XCTAssertNil(config.experimentalThreadConfigEndpoint)
+        XCTAssertEqual(config.experimentalThreadStore, .local)
         XCTAssertNil(config.toolsWebSearch)
         XCTAssertNil(config.toolsViewImage)
         XCTAssertTrue(config.features.isEnabled(.shellTool))
@@ -124,6 +125,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalRealtimeWSStartupContext, "startup context from config")
         XCTAssertEqual(config.experimentalRealtimeStartInstructions, "start instructions from config")
         XCTAssertEqual(config.experimentalThreadConfigEndpoint, "http://127.0.0.1:8061")
+        XCTAssertEqual(config.experimentalThreadStore, .local)
         XCTAssertEqual(config.webSearchMode, .cached)
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, false)
@@ -156,6 +158,38 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalRealtimeWSStartupContext, "cli startup context")
         XCTAssertEqual(config.experimentalRealtimeStartInstructions, "cli start instructions")
         XCTAssertEqual(config.experimentalThreadConfigEndpoint, "http://localhost:8061")
+    }
+
+    func testExperimentalThreadStoreLoadsFromConfigTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"experimental_thread_store = { type = "in_memory", id = "store-1" }"#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.experimentalThreadStore, .inMemory(id: "store-1"))
+    }
+
+    func testExperimentalThreadStoreDefaultsToLocalLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.experimentalThreadStore, .local)
+    }
+
+    func testCLIOverridesLoadExperimentalThreadStoreLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"experimental_thread_store={ type = "in_memory", id = "cli-store" }"#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.experimentalThreadStore, .inMemory(id: "cli-store"))
     }
 
     func testLegacyRemoteThreadStoreEndpointIsRejectedLikeRust() throws {

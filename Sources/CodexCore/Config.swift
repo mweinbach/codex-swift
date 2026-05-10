@@ -13,6 +13,11 @@ public enum WebSearchMode: String, Codable, Equatable, Sendable {
     case live
 }
 
+public enum ThreadStoreConfig: Equatable, Sendable {
+    case local
+    case inMemory(id: String)
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -42,6 +47,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var experimentalRealtimeWSStartupContext: String?
     public var experimentalRealtimeStartInstructions: String?
     public var experimentalThreadConfigEndpoint: String?
+    public var experimentalThreadStore: ThreadStoreConfig
     public var webSearchMode: WebSearchMode?
     public var webSearchConfig: WebSearchConfig?
     public var toolsWebSearch: Bool?
@@ -87,6 +93,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         experimentalRealtimeWSStartupContext: String? = nil,
         experimentalRealtimeStartInstructions: String? = nil,
         experimentalThreadConfigEndpoint: String? = nil,
+        experimentalThreadStore: ThreadStoreConfig = .local,
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
@@ -131,6 +138,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
         self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
         self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
+        self.experimentalThreadStore = experimentalThreadStore
         self.webSearchMode = webSearchMode
         self.webSearchConfig = webSearchConfig
         self.toolsWebSearch = toolsWebSearch
@@ -216,6 +224,100 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             experimentalRealtimeWSStartupContext: nil,
             experimentalRealtimeStartInstructions: nil,
             experimentalThreadConfigEndpoint: nil,
+            experimentalThreadStore: .local,
+            webSearchMode: webSearchMode,
+            webSearchConfig: webSearchConfig,
+            toolsWebSearch: toolsWebSearch,
+            toolsViewImage: toolsViewImage,
+            features: features,
+            mcpServers: mcpServers,
+            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
+            mcpOAuthCallbackPort: mcpOAuthCallbackPort,
+            mcpOAuthCallbackURL: mcpOAuthCallbackURL,
+            activeProfile: activeProfile,
+            projectRootMarkers: projectRootMarkers,
+            projectDocMaxBytes: projectDocMaxBytes,
+            projectDocFallbackFilenames: projectDocFallbackFilenames,
+            toolOutputTokenLimit: toolOutputTokenLimit,
+            ossProvider: ossProvider
+        )
+    }
+
+    public init(
+        model: String?,
+        modelProvider: String?,
+        modelProviders: [String: ModelProviderInfo],
+        approvalPolicy: AskForApproval?,
+        sandboxMode: SandboxMode?,
+        sandboxPolicy: SandboxPolicy?,
+        modelReasoningEffort: ReasoningEffort?,
+        modelReasoningSummary: ReasoningSummary?,
+        modelVerbosity: Verbosity?,
+        serviceTier: String?,
+        chatgptBaseURL: String,
+        cliAuthCredentialsStoreMode: AuthCredentialsStoreMode,
+        forcedLoginMethod: ForcedLoginMethod?,
+        forcedChatGPTWorkspaceID: String?,
+        experimentalInstructionsFile: String?,
+        experimentalCompactPromptFile: String?,
+        baseInstructions: String?,
+        developerInstructions: String?,
+        compactPrompt: String?,
+        includeApplyPatchTool: Bool?,
+        experimentalUseUnifiedExecTool: Bool?,
+        experimentalUseFreeformApplyPatch: Bool?,
+        experimentalRealtimeWSBaseURL: String?,
+        experimentalRealtimeWSModel: String?,
+        experimentalRealtimeWSBackendPrompt: String?,
+        experimentalRealtimeWSStartupContext: String?,
+        experimentalRealtimeStartInstructions: String?,
+        experimentalThreadConfigEndpoint: String?,
+        webSearchMode: WebSearchMode?,
+        webSearchConfig: WebSearchConfig?,
+        toolsWebSearch: Bool?,
+        toolsViewImage: Bool?,
+        features: FeatureStates,
+        mcpServers: [String: McpServerConfig],
+        mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode,
+        mcpOAuthCallbackPort: UInt16?,
+        mcpOAuthCallbackURL: String?,
+        activeProfile: String?,
+        projectRootMarkers: [String],
+        projectDocMaxBytes: Int,
+        projectDocFallbackFilenames: [String],
+        toolOutputTokenLimit: Int?,
+        ossProvider: String?
+    ) {
+        self.init(
+            model: model,
+            modelProvider: modelProvider,
+            modelProviders: modelProviders,
+            approvalPolicy: approvalPolicy,
+            sandboxMode: sandboxMode,
+            sandboxPolicy: sandboxPolicy,
+            modelReasoningEffort: modelReasoningEffort,
+            modelReasoningSummary: modelReasoningSummary,
+            modelVerbosity: modelVerbosity,
+            serviceTier: serviceTier,
+            chatgptBaseURL: chatgptBaseURL,
+            cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
+            forcedLoginMethod: forcedLoginMethod,
+            forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
+            experimentalInstructionsFile: experimentalInstructionsFile,
+            experimentalCompactPromptFile: experimentalCompactPromptFile,
+            baseInstructions: baseInstructions,
+            developerInstructions: developerInstructions,
+            compactPrompt: compactPrompt,
+            includeApplyPatchTool: includeApplyPatchTool,
+            experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
+            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
+            experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
+            experimentalRealtimeWSModel: experimentalRealtimeWSModel,
+            experimentalRealtimeWSBackendPrompt: experimentalRealtimeWSBackendPrompt,
+            experimentalRealtimeWSStartupContext: experimentalRealtimeWSStartupContext,
+            experimentalRealtimeStartInstructions: experimentalRealtimeStartInstructions,
+            experimentalThreadConfigEndpoint: experimentalThreadConfigEndpoint,
+            experimentalThreadStore: .local,
             webSearchMode: webSearchMode,
             webSearchConfig: webSearchConfig,
             toolsWebSearch: toolsWebSearch,
@@ -1160,6 +1262,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)experimental_thread_config_endpoint"
             )
         }
+        if let threadStore = values["experimental_thread_store"] {
+            config.experimentalThreadStore = try threadStoreConfigValue(
+                threadStore,
+                key: "\(keyPrefix)experimental_thread_store"
+            )
+        }
         if let webSearch = values["web_search"] {
             config.webSearchMode = try stringEnumValue(
                 WebSearchMode.self,
@@ -1212,6 +1320,7 @@ private struct ParsedCodexConfigToml {
             || key == "experimental_realtime_start_instructions"
             || key == "experimental_thread_config_endpoint"
             || key == "experimental_thread_store_endpoint"
+            || key == "experimental_thread_store"
             || key == "web_search"
             || key == "tools_web_search"
             || key == "tools_view_image"
@@ -1312,6 +1421,23 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidStringValue(key)
         }
         return enumValue
+    }
+
+    private static func threadStoreConfigValue(_ value: ConfigValue, key: String) throws -> ThreadStoreConfig {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+
+        let type = try stringValue(table["type"] ?? .none, key: "\(key).type")
+        switch type {
+        case "local":
+            return .local
+        case "in_memory":
+            let id = try stringValue(table["id"] ?? .none, key: "\(key).id")
+            return .inMemory(id: id)
+        default:
+            throw CodexConfigLoadError.invalidStringValue("\(key).type")
+        }
     }
 
     private static func stringArrayValue(_ value: ConfigValue, key: String) throws -> [String] {
