@@ -984,6 +984,8 @@ Source baseline inspected for this scaffold:
   - pinned Swift rollout JSONL persistence for structured `function_call_output` and `custom_tool_call_output` response items so nested tool output arrays keep Rust's untagged body shape while internal `success` metadata remains omitted and decodes back as non-persisted metadata.
 - `codex-rs/protocol/src/models.rs` persisted reasoning response items
   - pinned Swift rollout JSONL persistence for Rust `reasoning` response items, including skipped runtime `id`, summary/content wire tags, nullable `encrypted_content`, text-only content omission, rollout reload, and response-history reconstruction.
+- `codex-rs/core/src/context_manager/history.rs` model-visible byte estimator
+  - ported Rust's response-item byte estimator for encrypted reasoning, compaction, context compaction, ordinary serialized items, inline base64 image data URL discounting, and original-detail image patch sizing so future context accounting and remote compaction work share the same heuristic.
 
 ## Known Gaps
 
