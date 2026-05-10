@@ -2808,7 +2808,9 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool] = [:],
-        loadedThreadAppsFeatureEnabled: ((String) throws -> Bool)? = nil
+        loadedThreadAppsFeatureEnabled: ((String) throws -> Bool)? = nil,
+        cachedApps: [[String: Any]]? = nil,
+        cacheAppList: (([[String: Any]]) -> Void)? = nil
     ) throws -> [String: Any] {
         let forcedAppsFeatureEnabled: Bool?
         if let threadID = stringParam(params?["threadId"]) {
@@ -2824,11 +2826,21 @@ public enum CodexAppServer {
         } else {
             forcedAppsFeatureEnabled = nil
         }
+        if let cachedApps {
+            return try appListPage(apps: cachedApps, params: params)
+        }
+        let forceRefetch = boolParam(params?["forceRefetch"], defaultValue: false)
         let apps = try appList(
             configuration: configuration,
             runtimeFeatureEnablement: runtimeFeatureEnablement,
-            forcedAppsFeatureEnabled: forcedAppsFeatureEnabled
+            forcedAppsFeatureEnabled: forcedAppsFeatureEnabled,
+            failOnRemoteConnectorLoadFailure: forceRefetch
         )
+        cacheAppList?(apps)
+        return try appListPage(apps: apps, params: params)
+    }
+
+    private static func appListPage(apps: [[String: Any]], params: [String: Any]?) throws -> [String: Any] {
         let total = apps.count
         var start = 0
         if let cursor = stringParam(params?["cursor"]) {
@@ -2851,7 +2863,8 @@ public enum CodexAppServer {
     private static func appList(
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool] = [:],
-        forcedAppsFeatureEnabled: Bool? = nil
+        forcedAppsFeatureEnabled: Bool? = nil,
+        failOnRemoteConnectorLoadFailure: Bool = false
     ) throws -> [[String: Any]] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
@@ -2892,10 +2905,11 @@ public enum CodexAppServer {
            runtimeConfig.features.isEnabled(.apps),
            let auth = try? currentAuth(configuration: configuration),
            case .chatGPT = auth.kind {
-            for app in connectorDirectoryApps(
+            for app in try connectorDirectoryApps(
                 runtimeConfig: runtimeConfig,
                 configuration: configuration,
-                auth: auth
+                auth: auth,
+                failOnLoadFailure: failOnRemoteConnectorLoadFailure
             ) {
                 guard let id = app["id"] as? String else {
                     continue
@@ -4464,11 +4478,11 @@ public enum CodexAppServer {
         guard !pluginAppIDs.isEmpty else {
             return []
         }
-        let connectors = connectorDirectoryApps(
+        let connectors = (try? connectorDirectoryApps(
             runtimeConfig: runtimeConfig,
             configuration: configuration,
             auth: auth
-        )
+        )) ?? []
         return connectors
             .filter { connector in
                 guard let id = connector["id"] as? String else {
@@ -4493,8 +4507,9 @@ public enum CodexAppServer {
     private static func connectorDirectoryApps(
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration,
-        auth: AppServerAuth
-    ) -> [[String: Any]] {
+        auth: AppServerAuth,
+        failOnLoadFailure: Bool = false
+    ) throws -> [[String: Any]] {
         var appsByID: [String: [String: Any]] = [:]
         var token: String?
         repeat {
@@ -4510,6 +4525,9 @@ public enum CodexAppServer {
                 configuration: configuration,
                 auth: auth
             ) else {
+                if failOnLoadFailure {
+                    throw AppServerError.internalError("failed to list apps")
+                }
                 return []
             }
             mergeConnectorDirectoryApps(
@@ -4541,6 +4559,8 @@ public enum CodexAppServer {
                 into: &appsByID,
                 originatorValue: configuration.originator
             )
+        } else if isWorkspaceChatGPTAuth(auth), failOnLoadFailure {
+            throw AppServerError.internalError("failed to list apps")
         }
 
         return sortedAppInfos(Array(appsByID.values))
@@ -18604,6 +18624,8 @@ final class CodexAppServerMessageProcessor {
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
+    private var cachedAppList: [[String: Any]]?
+    private var lastGlobalAppListRefreshFailed = false
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
@@ -18727,6 +18749,34 @@ final class CodexAppServerMessageProcessor {
             throw AppServerError.invalidRequest("thread not found: \(threadID)")
         }
         return enabled
+    }
+
+    private func appListResult(params: [String: Any]?) throws -> [String: Any] {
+        let forceRefetch = CodexAppServer.boolParam(params?["forceRefetch"], defaultValue: false)
+        let isThreadScoped = CodexAppServer.stringParam(params?["threadId"]) != nil
+        let cachedApps = !forceRefetch && !isThreadScoped && lastGlobalAppListRefreshFailed ? cachedAppList : nil
+        do {
+            let result = try CodexAppServer.appListResult(
+                params: params,
+                configuration: configuration,
+                runtimeFeatureEnablement: runtimeFeatureEnablement,
+                loadedThreadAppsFeatureEnabled: { try self.appsFeatureEnabledForLoadedThread($0) },
+                cachedApps: cachedApps,
+                cacheAppList: { apps in
+                    guard !isThreadScoped else {
+                        return
+                    }
+                    self.cachedAppList = apps
+                    self.lastGlobalAppListRefreshFailed = false
+                }
+            )
+            return result
+        } catch {
+            if forceRefetch && !isThreadScoped {
+                lastGlobalAppListRefreshFailed = true
+            }
+            throw error
+        }
     }
 
     private func trackResolvedTurnForAnalytics(threadID: String, turn: [String: Any]) {
@@ -19873,12 +19923,7 @@ final class CodexAppServerMessageProcessor {
                 case "app/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.appListResult(
-                            params: params,
-                            configuration: configuration,
-                            runtimeFeatureEnablement: runtimeFeatureEnablement,
-                            loadedThreadAppsFeatureEnabled: { try self.appsFeatureEnabledForLoadedThread($0) }
-                        )
+                        result: try appListResult(params: params)
                     )
                 case "plugin/list":
                     response = CodexAppServer.responseObject(

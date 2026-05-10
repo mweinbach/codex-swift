@@ -4189,6 +4189,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "thread not found: \(missingThreadID)")
     }
 
+    func testAppListForceRefetchPreservesPreviousCacheOnFailure() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let transport = AppListDirectoryTransport(
+            successBody: """
+            {
+              "apps": [
+                {
+                  "id": "beta",
+                  "name": "Beta App",
+                  "description": "Beta connector"
+                }
+              ],
+              "next_token": null
+            }
+            """
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                transport.response(for: request)
+            }
+        ))
+
+        let initial = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"app/list","params":{"forceRefetch":false}}"#.utf8
+        )))
+        let initialResult = try XCTUnwrap(initial["result"] as? [String: Any])
+        let initialData = try XCTUnwrap(initialResult["data"] as? [[String: Any]])
+        XCTAssertEqual(initialData.map { $0["id"] as? String }, ["beta"])
+        XCTAssertEqual(initialData[0]["description"] as? String, "Beta connector")
+        XCTAssertTrue(initialResult["nextCursor"] is NSNull)
+
+        transport.setFailing(true)
+        let refetch = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"app/list","params":{"forceRefetch":true}}"#.utf8
+        )))
+        let refetchError = try XCTUnwrap(refetch["error"] as? [String: Any])
+        XCTAssertEqual(refetchError["code"] as? Int, -32603)
+        XCTAssertEqual(refetchError["message"] as? String, "failed to list apps")
+
+        let cached = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"app/list","params":{"forceRefetch":false}}"#.utf8
+        )))
+        let cachedResult = try XCTUnwrap(cached["result"] as? [String: Any])
+        let cachedData = try XCTUnwrap(cachedResult["data"] as? [[String: Any]])
+        XCTAssertEqual(cachedData.map { $0["id"] as? String }, ["beta"])
+        XCTAssertEqual(cachedData[0]["description"] as? String, "Beta connector")
+        XCTAssertTrue(cachedResult["nextCursor"] is NSNull)
+        XCTAssertEqual(transport.requestCount, 2)
+    }
+
     func testAppListRejectsInvalidAndOutOfRangeCursor() throws {
         let temp = try TemporaryDirectory()
 
@@ -16489,6 +16558,43 @@ private final class MCPHTTPTransportCapture: @unchecked Sendable {
         lock.lock()
         storedRequests.append(request)
         lock.unlock()
+    }
+}
+
+private final class AppListDirectoryTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private let successBody: String
+    private var failing = false
+    private var requests = 0
+
+    init(successBody: String) {
+        self.successBody = successBody
+    }
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+
+    func setFailing(_ failing: Bool) {
+        lock.lock()
+        self.failing = failing
+        lock.unlock()
+    }
+
+    func response(for request: URLRequest) -> URLSessionTransportResponse {
+        lock.lock()
+        requests += 1
+        let shouldFail = failing
+        lock.unlock()
+
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/backend-api/connectors/directory/list")
+        if shouldFail {
+            return URLSessionTransportResponse(statusCode: 401, body: Data("unauthorized".utf8))
+        }
+        return URLSessionTransportResponse(statusCode: 200, body: Data(successBody.utf8))
     }
 }
 
