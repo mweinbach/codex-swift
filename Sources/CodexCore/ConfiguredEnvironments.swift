@@ -106,7 +106,7 @@ public enum ConfiguredEnvironmentLoader {
         fileManager: FileManager = .default
     ) throws -> ConfiguredEnvironmentSnapshot {
         let configFile = codexHome.appendingPathComponent(environmentsFilename, isDirectory: false)
-        guard fileManager.fileExists(atPath: configFile.path) else {
+        guard try environmentConfigExists(configFile, fileManager: fileManager) else {
             return legacyEnvironmentSnapshot(environment: environment)
         }
 
@@ -346,6 +346,23 @@ private extension ConfiguredEnvironmentLoader {
         return EnvironmentsToml(defaultID: defaultID, environments: environments)
     }
 
+    static func environmentConfigExists(
+        _ configFile: URL,
+        fileManager: FileManager
+    ) throws -> Bool {
+        do {
+            _ = try fileManager.attributesOfItem(atPath: configFile.path)
+            return true
+        } catch let error as NSError {
+            if error.isMissingFile {
+                return false
+            }
+            throw ConfiguredEnvironmentLoadError.protocolError(
+                "failed to inspect environment config `\(configFile.path)`: \(error)"
+            )
+        }
+    }
+
     static func applyEnvironmentField(
         key: String,
         valueText: String,
@@ -543,5 +560,15 @@ private extension ConfiguredEnvironmentLoadError {
 private extension ComparisonResult {
     var isOrderedSame: Bool {
         self == .orderedSame
+    }
+}
+
+private extension NSError {
+    var isMissingFile: Bool {
+        if domain == NSCocoaErrorDomain, code == NSFileReadNoSuchFileError {
+            return true
+        }
+        let underlying = userInfo[NSUnderlyingErrorKey] as? NSError
+        return underlying.map { $0.domain == NSPOSIXErrorDomain && $0.code == ENOENT } ?? false
     }
 }

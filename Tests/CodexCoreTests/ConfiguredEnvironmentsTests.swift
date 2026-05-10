@@ -37,6 +37,23 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         XCTAssertEqual(snapshot.defaultEnvironmentIDs(), [])
     }
 
+    func testInvalidCodexHomePathWrapsEnvironmentConfigInspectErrorLikeRust() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        let codexHomeFile = temp.url.appendingPathComponent("codex-home", isDirectory: false)
+        try "not a directory".write(to: codexHomeFile, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.load(
+            codexHome: codexHomeFile,
+            environment: [
+                ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://legacy.example"
+            ]
+        )) { error in
+            let description = (error as? ConfiguredEnvironmentLoadError)?.description ?? ""
+            XCTAssertTrue(description.contains("failed to inspect environment config"))
+            XCTAssertTrue(description.contains("environments.toml"))
+        }
+    }
+
     func testLoadCodexHomeEnvironmentsTomlUsesDefaultFirstSelections() throws {
         let temp = try ConfiguredEnvironmentTemporaryDirectory()
         try """
@@ -214,6 +231,39 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
                 (error as? ConfiguredEnvironmentLoadError)?.description,
                 "exec-server protocol error: environment url `ws://` is invalid"
             )
+        }
+    }
+
+    func testEnvironmentsTomlRejectsOverlongIDEmptyDefaultAndRelativeCwdWithoutConfigDir() throws {
+        let overlongID = String(repeating: "a", count: ConfiguredEnvironmentLoader.maxEnvironmentIDLength + 1)
+        let cases: [(String, String)] = [
+            (
+                """
+                [[environments]]
+                id = "\(overlongID)"
+                url = "ws://127.0.0.1:8765"
+                """,
+                "environment id `\(overlongID)` cannot be longer than \(ConfiguredEnvironmentLoader.maxEnvironmentIDLength) characters"
+            ),
+            (
+                #"default = " ""#,
+                "default environment id cannot be empty"
+            ),
+            (
+                """
+                [[environments]]
+                id = "ssh-dev"
+                program = "ssh"
+                cwd = "workspace"
+                """,
+                "environment `ssh-dev` cwd must be absolute"
+            )
+        ]
+
+        for (toml, expected) in cases {
+            XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: toml)) { error in
+                XCTAssertEqual((error as? ConfiguredEnvironmentLoadError)?.description, "exec-server protocol error: \(expected)")
+            }
         }
     }
 
