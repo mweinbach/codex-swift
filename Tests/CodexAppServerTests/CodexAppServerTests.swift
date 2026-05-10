@@ -11704,6 +11704,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: blockedFile.path))
     }
 
+    func testCommandExecSandboxPolicyCanOverrideConfiguredReadOnlyLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let allowedFile = cwd.url.appendingPathComponent("allowed.txt", isDirectory: false)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf yep > allowed.txt"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"dangerFullAccess"}}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "yep")
+    }
+
     func testCommandExecResolvesRelativeCwdAgainstConfiguredServerCwd() throws {
         let codexHome = try TemporaryDirectory()
         let serverCwd = try TemporaryDirectory()
@@ -11879,7 +11893,7 @@ final class CodexAppServerTests: XCTestCase {
             experimentalAPIEnabled: true
         )
         let sandboxAndProfile = try decode(processor.processLine(Data(
-            #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{},"permissionProfile":"on-request"}}"#.utf8
+            #"{"id":3,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"dangerFullAccess"},"permissionProfile":"on-request"}}"#.utf8
         )))
         let sandboxAndProfileError = try XCTUnwrap(sandboxAndProfile["error"] as? [String: Any])
         XCTAssertEqual(sandboxAndProfileError["code"] as? Int, -32600)
@@ -11887,6 +11901,36 @@ final class CodexAppServerTests: XCTestCase {
             sandboxAndProfileError["message"] as? String,
             "`permissionProfile` cannot be combined with `sandboxPolicy`"
         )
+
+        let legacyReadOnly = try appServerResponse(
+            #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"readOnly","access":{"type":"restricted"}}}}"#,
+            codexHome: codexHome.url
+        )
+        let legacyReadOnlyError = try XCTUnwrap(legacyReadOnly["error"] as? [String: Any])
+        XCTAssertEqual(legacyReadOnlyError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            legacyReadOnlyError["message"] as? String,
+            "readOnly.access is no longer supported; use permissionProfile for restricted reads"
+        )
+
+        let legacyWorkspaceWrite = try appServerResponse(
+            #"{"id":9,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"workspaceWrite","readOnlyAccess":{"type":"restricted"}}}}"#,
+            codexHome: codexHome.url
+        )
+        let legacyWorkspaceWriteError = try XCTUnwrap(legacyWorkspaceWrite["error"] as? [String: Any])
+        XCTAssertEqual(legacyWorkspaceWriteError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            legacyWorkspaceWriteError["message"] as? String,
+            "workspaceWrite.readOnlyAccess is no longer supported; use permissionProfile for restricted reads"
+        )
+
+        let invalidNetworkAccess = try appServerResponse(
+            #"{"id":10,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"externalSandbox","networkAccess":"bogus"}}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidNetworkAccessError = try XCTUnwrap(invalidNetworkAccess["error"] as? [String: Any])
+        XCTAssertEqual(invalidNetworkAccessError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidNetworkAccessError["message"] as? String, "invalid sandbox policy")
     }
 
     func testExecOneOffCommandResolvesExecutableThroughEnvironmentPath() throws {

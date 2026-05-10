@@ -257,6 +257,7 @@ private struct AppServerCommandExecParams {
     let outputBytesCap: Int?
     let size: AppServerTerminalSize?
     let environmentOverrides: [String: String?]
+    let sandboxPolicy: SandboxPolicy?
 }
 
 private struct AppServerSandboxLaunch {
@@ -9963,7 +9964,7 @@ public enum CodexAppServer {
         return try runOneOffCommand(
             parsed.command,
             cwd: cwd,
-            sandboxPolicy: runtimeConfig.legacySandboxPolicy(),
+            sandboxPolicy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
             sandboxCwd: configuration.cwd,
             timeoutMilliseconds: parsed.timeoutMs,
             outputBytesCap: parsed.outputBytesCap,
@@ -9997,7 +9998,11 @@ public enum CodexAppServer {
         let streamStdoutStderr = boolParam(params?["streamStdoutStderr"], defaultValue: false)
         let disableOutputCap = boolParam(params?["disableOutputCap"], defaultValue: false)
         let disableTimeout = boolParam(params?["disableTimeout"], defaultValue: false)
-        if params?["sandboxPolicy"] != nil && params?["permissionProfile"] != nil {
+        let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
+        if sandboxPolicy != nil,
+           let permissionProfile = params?["permissionProfile"],
+           !(permissionProfile is NSNull)
+        {
             throw AppServerError.invalidRequest("`permissionProfile` cannot be combined with `sandboxPolicy`")
         }
         if processID == nil && (tty || streamStdin || streamStdoutStderr) {
@@ -10026,7 +10031,8 @@ public enum CodexAppServer {
             timeoutMs: disableTimeout ? nil : commandExecTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: disableOutputCap ? nil : commandExecOutputBytesCap(params?["outputBytesCap"]),
             size: size,
-            environmentOverrides: processEnvironmentOverrides(params?["env"])
+            environmentOverrides: processEnvironmentOverrides(params?["env"]),
+            sandboxPolicy: sandboxPolicy
         )
     }
 
@@ -10183,6 +10189,62 @@ public enum CodexAppServer {
             throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
         }
         return AppServerTerminalSize(rows: rows, cols: cols)
+    }
+
+    private static func commandExecSandboxPolicy(_ value: Any?) throws -> SandboxPolicy? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let object = value as? [String: Any],
+              let type = stringParam(object["type"])
+        else {
+            throw AppServerError.invalidRequest("invalid sandbox policy")
+        }
+
+        switch type {
+        case "dangerFullAccess":
+            return .dangerFullAccess
+        case "readOnly":
+            if legacyReadOnlyAccessIsRestricted(object["access"]) {
+                throw AppServerError.invalidRequest("readOnly.access is no longer supported; use permissionProfile for restricted reads")
+            }
+            return .readOnly
+        case "externalSandbox":
+            let networkAccess = try networkAccessParam(object["networkAccess"]) ?? .restricted
+            return .externalSandbox(networkAccess: networkAccess)
+        case "workspaceWrite":
+            if legacyReadOnlyAccessIsRestricted(object["readOnlyAccess"]) {
+                throw AppServerError.invalidRequest("workspaceWrite.readOnlyAccess is no longer supported; use permissionProfile for restricted reads")
+            }
+            let writableRoots = try stringArrayParam(object["writableRoots"])?.map { path in
+                try AbsolutePath(absolutePath: URL(fileURLWithPath: path).standardizedFileURL.path)
+            } ?? []
+            return .workspaceWrite(
+                writableRoots: writableRoots,
+                networkAccess: boolParam(object["networkAccess"], defaultValue: false),
+                excludeTmpdirEnvVar: boolParam(object["excludeTmpdirEnvVar"], defaultValue: false),
+                excludeSlashTmp: boolParam(object["excludeSlashTmp"], defaultValue: false)
+            )
+        default:
+            throw AppServerError.invalidRequest("invalid sandbox policy")
+        }
+    }
+
+    private static func networkAccessParam(_ value: Any?) throws -> NetworkAccess? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let networkAccess = stringParam(value).flatMap(NetworkAccess.init(rawValue:)) else {
+            throw AppServerError.invalidRequest("invalid sandbox policy")
+        }
+        return networkAccess
+    }
+
+    private static func legacyReadOnlyAccessIsRestricted(_ value: Any?) -> Bool {
+        guard let object = value as? [String: Any] else {
+            return false
+        }
+        return stringParam(object["type"]) == "restricted"
     }
 
     fileprivate static func commandExecProcessID(params: [String: Any]?) throws -> String {
@@ -16464,7 +16526,7 @@ final class CodexAppServerMessageProcessor {
             params: parsed,
             requestID: id,
             cwd: CodexAppServer.commandExecCwd(parsed.cwd, configuration: configuration),
-            sandboxPolicy: runtimeConfig.legacySandboxPolicy(),
+            sandboxPolicy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
             sandboxCwd: configuration.cwd,
             environment: configuration.environment,
             notificationSink: notificationSink,
