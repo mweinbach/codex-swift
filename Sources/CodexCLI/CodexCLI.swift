@@ -344,6 +344,24 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum DebugCommandAction: Equatable, Sendable {
+        case models(bundled: Bool)
+        case appServerSendMessageV2(message: String)
+        case promptInput(prompt: String?, imagePaths: [String])
+        case traceReduce(traceBundle: String, output: String?)
+        case clearMemories
+    }
+
+    public struct DebugCommandRequest: Equatable, Sendable {
+        public let action: DebugCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: DebugCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public enum McpCommandAction: Equatable, Sendable {
         case list(json: Bool)
         case get(name: String, json: Bool)
@@ -447,6 +465,7 @@ public struct CodexCLI: Sendable {
     public typealias AppServerCommandRunner = (AppServerCommandRequest) async throws -> CommandExecutionResult
     public typealias ExecPolicyCommandRunner = (ExecPolicyCommandRequest) async throws -> CommandExecutionResult
     public typealias SandboxCommandRunner = (SandboxCommandRequest) async throws -> CommandExecutionResult
+    public typealias DebugCommandRunner = (DebugCommandRequest) async throws -> CommandExecutionResult
     public typealias McpCommandRunner = (McpCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
@@ -570,6 +589,7 @@ public struct CodexCLI: Sendable {
         appServerRunner: AppServerCommandRunner? = nil,
         execPolicyRunner: ExecPolicyCommandRunner? = nil,
         sandboxRunner: SandboxCommandRunner? = nil,
+        debugRunner: DebugCommandRunner? = nil,
         mcpRunner: McpCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil,
@@ -796,6 +816,29 @@ public struct CodexCLI: Sendable {
             case let .success(action):
                 do {
                     let result = try await sandboxRunner(SandboxCommandRequest(
+                        action: action,
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "debug":
+            guard let debugRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseDebugCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await debugRunner(DebugCommandRequest(
                         action: action,
                         configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                     ))
@@ -2120,6 +2163,159 @@ public struct CodexCLI: Sendable {
             logDenials: logDenials,
             command: command
         ))
+    }
+
+    private func parseDebugCommandAction(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure(
+                "codex-swift: missing required subcommand for command 'debug': models|app-server|prompt-input|trace-reduce|clear-memories",
+                64
+            )
+        }
+
+        let rest = Array(arguments.dropFirst())
+        switch subcommand {
+        case "models":
+            return parseDebugModels(rest)
+        case "app-server":
+            return parseDebugAppServer(rest)
+        case "prompt-input":
+            return parseDebugPromptInput(rest)
+        case "trace-reduce":
+            return parseDebugTraceReduce(rest)
+        case "clear-memories":
+            return parseNoArgumentDebugAction(rest, subcommand: subcommand, action: .clearMemories)
+        default:
+            return .failure("codex-swift: unsupported debug subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private func parseDebugModels(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
+        var bundled = false
+        for argument in arguments {
+            if argument == "--bundled" {
+                bundled = true
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'debug models': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'debug models': \(argument)", 64)
+        }
+        return .success(.models(bundled: bundled))
+    }
+
+    private func parseDebugAppServer(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'debug app-server': send-message-v2", 64)
+        }
+        guard subcommand == "send-message-v2" else {
+            return .failure("codex-swift: unsupported debug app-server subcommand: \(subcommand)", 64)
+        }
+        let rest = Array(arguments.dropFirst())
+        guard let message = rest.first else {
+            return .failure("codex-swift: missing required argument for command 'debug app-server send-message-v2': <USER_MESSAGE>", 64)
+        }
+        if message.hasPrefix("-") {
+            return .failure("codex-swift: unsupported option for command 'debug app-server send-message-v2': \(message)", 64)
+        }
+        guard rest.count == 1 else {
+            return .failure("codex-swift: unexpected argument for command 'debug app-server send-message-v2': \(rest[1])", 64)
+        }
+        return .success(.appServerSendMessageV2(message: message))
+    }
+
+    private func parseDebugPromptInput(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
+        var prompt: String?
+        var imagePaths: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--image" || argument == "-i" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                imagePaths.append(contentsOf: splitCommaDelimited(arguments[index + 1]))
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--image=") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst("--image=".count))))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'debug prompt-input': \(argument)", 64)
+            }
+            if prompt != nil {
+                return .failure("codex-swift: unexpected argument for command 'debug prompt-input': \(argument)", 64)
+            }
+            prompt = argument
+            index += 1
+        }
+
+        return .success(.promptInput(prompt: prompt, imagePaths: imagePaths))
+    }
+
+    private func parseDebugTraceReduce(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
+        var traceBundle: String?
+        var output: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--output" || argument == "-o" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                output = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--output=") {
+                output = String(argument.dropFirst("--output=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                output = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'debug trace-reduce': \(argument)", 64)
+            }
+            if traceBundle != nil {
+                return .failure("codex-swift: unexpected argument for command 'debug trace-reduce': \(argument)", 64)
+            }
+            traceBundle = argument
+            index += 1
+        }
+
+        guard let traceBundle else {
+            return .failure("codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>", 64)
+        }
+        return .success(.traceReduce(traceBundle: traceBundle, output: output))
+    }
+
+    private func parseNoArgumentDebugAction(
+        _ arguments: [String],
+        subcommand: String,
+        action: DebugCommandAction
+    ) -> ParseResult<DebugCommandAction> {
+        guard let argument = arguments.first else {
+            return .success(action)
+        }
+        if argument.hasPrefix("-") {
+            return .failure("codex-swift: unsupported option for command 'debug \(subcommand)': \(argument)", 64)
+        }
+        return .failure("codex-swift: unexpected argument for command 'debug \(subcommand)': \(argument)", 64)
     }
 
     private func parseMcpCommandAction(_ arguments: [String]) -> ParseResult<McpCommandAction> {

@@ -594,6 +594,137 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncDebugModelsParsesBundledFlagAndOverrides() async {
+        var stdout: [String] = []
+        var receivedRequest: CodexCLI.DebugCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["-c", "model=\"gpt-5\"", "debug", "models", "--bundled"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            debugRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "models")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["models"])
+        XCTAssertEqual(receivedRequest, CodexCLI.DebugCommandRequest(
+            action: .models(bundled: true),
+            configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5\""])
+        ))
+    }
+
+    func testRunAsyncDebugPromptInputParsesPromptAndImagesLikeRust() async {
+        var receivedAction: CodexCLI.DebugCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "prompt-input", "hello", "--image", "a.png,b.png", "-i", "c.png"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            debugRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .promptInput(prompt: "hello", imagePaths: ["a.png", "b.png", "c.png"]))
+    }
+
+    func testRunAsyncDebugAppServerSendMessageV2ParsesMessage() async {
+        var receivedAction: CodexCLI.DebugCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "app-server", "send-message-v2", "hi"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            debugRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .appServerSendMessageV2(message: "hi"))
+    }
+
+    func testRunAsyncDebugTraceReduceParsesOutput() async {
+        var receivedAction: CodexCLI.DebugCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "trace-reduce", "/tmp/trace", "-o", "/tmp/state.json"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            debugRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .traceReduce(traceBundle: "/tmp/trace", output: "/tmp/state.json"))
+    }
+
+    func testRunAsyncDebugClearMemoriesParsesEmptySubcommand() async {
+        var receivedAction: CodexCLI.DebugCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "clear-memories"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            debugRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .clearMemories)
+    }
+
+    func testRunAsyncDebugRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["debug"],
+                "codex-swift: missing required subcommand for command 'debug': models|app-server|prompt-input|trace-reduce|clear-memories"
+            ),
+            (
+                ["debug", "models", "extra"],
+                "codex-swift: unexpected argument for command 'debug models': extra"
+            ),
+            (
+                ["debug", "app-server"],
+                "codex-swift: missing required subcommand for command 'debug app-server': send-message-v2"
+            ),
+            (
+                ["debug", "app-server", "send-message-v2"],
+                "codex-swift: missing required argument for command 'debug app-server send-message-v2': <USER_MESSAGE>"
+            ),
+            (
+                ["debug", "prompt-input", "a", "b"],
+                "codex-swift: unexpected argument for command 'debug prompt-input': b"
+            ),
+            (
+                ["debug", "trace-reduce"],
+                "codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                debugRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncNewCommandHooksWithoutRunnersStillReportUnimplemented() async {
         for command in [
             "exec",
