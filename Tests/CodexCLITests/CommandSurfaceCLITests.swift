@@ -561,6 +561,91 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(action, .generateTS(outDir: "/tmp/ts", prettier: nil, experimental: true))
     }
 
+    func testRunAsyncRemoteControlAppendsFeatureOverrideAfterRootOverrides() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c",
+                "features.remote_control=false",
+                "--enable",
+                "web_search_request",
+                "remote-control"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.action, .remoteControl)
+        XCTAssertEqual(request?.configOverrides.rawOverrides, [
+            "features.remote_control=false",
+            "features.web_search_request=true",
+            "features.remote_control=true"
+        ])
+    }
+
+    func testRunAsyncRemoteControlRejectsRootRemoteFlagsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["--remote", "ws://127.0.0.1:8080", "remote-control"],
+                "`--remote ws://127.0.0.1:8080` is only supported for interactive TUI commands, not `codex remote-control`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "remote-control"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex remote-control`"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                appServerRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 1, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
+    func testRunAsyncRemoteControlRejectsArgumentsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["remote-control", "extra"],
+                "codex-swift: unexpected argument for command 'remote-control': extra"
+            ),
+            (
+                ["remote-control", "--listen"],
+                "codex-swift: unsupported option for command 'remote-control': --listen"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                appServerRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncAppServerRejectsInvalidGeneratorFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
@@ -840,7 +925,6 @@ final class CommandSurfaceCLITests: XCTestCase {
             "plugin",
             "mcp-server",
             "app-server",
-            "remote-control",
             "debug",
             "resume",
             "fork",

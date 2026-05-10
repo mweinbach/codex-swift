@@ -311,6 +311,7 @@ public struct CodexCLI: Sendable {
 
     public enum AppServerCommandAction: Equatable, Sendable {
         case run
+        case remoteControl
         case generateTS(outDir: String, prettier: String?, experimental: Bool)
         case generateJSONSchema(outDir: String, experimental: Bool)
     }
@@ -822,6 +823,26 @@ public struct CodexCLI: Sendable {
                 stderr(message)
                 return exitCode
             }
+        case let .command(spec, _) where spec.name == "remote-control":
+            guard let appServerRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseRemoteControlCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await appServerRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
         case let .command(spec, _) where spec.name == "app":
             guard let appRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
@@ -1130,6 +1151,8 @@ public struct CodexCLI: Sendable {
             "--out",
             "-o",
             "--prettier",
+            "--remote",
+            "--remote-auth-token-env",
             "--output-schema",
             "--output-last-message",
             "--color",
@@ -2058,6 +2081,64 @@ public struct CodexCLI: Sendable {
         }
 
         return appServerRequest(action: action, rootArguments: rootArguments)
+    }
+
+    private func parseRemoteControlCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<AppServerCommandRequest> {
+        if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "remote-control", in: rootArguments) {
+            return .failure(
+                "`--remote \(remote)` is only supported for interactive TUI commands, not `codex remote-control`",
+                1
+            )
+        }
+        if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: "remote-control", in: rootArguments) != nil {
+            return .failure(
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex remote-control`",
+                1
+            )
+        }
+        guard arguments.isEmpty else {
+            let argument = arguments[0]
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'remote-control': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'remote-control': \(argument)", 64)
+        }
+        switch parseConfigOverrides(from: rootArguments) {
+        case let .success(configOverrides):
+            var rawOverrides = configOverrides.rawOverrides
+            rawOverrides.append("features.remote_control=true")
+            return .success(AppServerCommandRequest(
+                action: .remoteControl,
+                configOverrides: CliConfigOverrides(rawOverrides: rawOverrides)
+            ))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func rootRemoteFlagValue(named option: String, beforeCommand command: String, in arguments: [String]) -> String? {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == command {
+                return nil
+            }
+            if argument == option {
+                return index + 1 < arguments.count ? arguments[index + 1] : ""
+            }
+            if argument.hasPrefix("\(option)=") {
+                return String(argument.dropFirst(option.count + 1))
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        return nil
     }
 
     private func appServerRequest(

@@ -32,6 +32,7 @@ Source baseline inspected for this scaffold:
   - slash command names, presentation order, descriptions, and task availability
 - `codex-rs/cli/src/main.rs`
   - top-level command registry, visible aliases, hidden command marking, version, and shell completion generation for bash, elvish, fish, PowerShell, and zsh
+  - `remote-control` dispatch now rejects Rust's root `--remote` / `--remote-auth-token-env` flags for this non-interactive subcommand, rejects unexpected command arguments before runtime startup, and starts the Swift app-server path with `features.remote_control=true` appended after any root config or feature-toggle overrides
 - `codex-rs/common/src/approval_mode_cli_arg.rs`
   - approval CLI argument names and protocol mapping
 - `codex-rs/common/src/sandbox_mode_cli_arg.rs`
@@ -972,6 +973,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - tool handler registry dispatch and dynamic MCP tool conversion
 - Rust-complete MCP server conversation reply, cancellation, elicitation, event streaming, and client management
 - app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
+- app-server remote-control websocket transport and state-db-backed remote session accept loop
 - Rust-complete apply-patch approval caching, subprocess self-invocation, sandbox retry/escalation, and diff event plumbing
 - cloud tasks TUI list/browse runtime
 - remaining Rust command parser parity for complex Bash/Powershell AST cases
