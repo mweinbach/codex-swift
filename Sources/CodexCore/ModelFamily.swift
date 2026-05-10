@@ -18,6 +18,7 @@ public struct ModelFamilyConfigOverrides: Equatable, Sendable {
 
 public struct ModelFamily: Equatable, Sendable {
     public static let contextWindow272K: Int64 = 272_000
+    static var defaultBaseInstructions: String { ModelFamilyPrompts.base }
 
     public var slug: String
     public var family: String

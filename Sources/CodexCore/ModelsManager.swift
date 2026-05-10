@@ -119,6 +119,7 @@ public enum ModelsManager {
     public static let openAIDefaultAPIModel = "gpt-5.5"
     public static let openAIDefaultChatGPTModel = "gpt-5.5"
     public static let codexAutoBalancedModel = "codex-auto-balanced"
+    public static let amazonBedrockDefaultModel = "openai.gpt-5.4"
 
     public static func cachePath(codexHome: URL) -> URL {
         codexHome.appendingPathComponent(modelCacheFile, isDirectory: false)
@@ -227,6 +228,22 @@ public enum ModelsManager {
         return try decoder.decode(ModelsResponse.self, from: Data(contentsOf: url))
     }
 
+    public static func amazonBedrockStaticModelCatalog() -> ModelsResponse {
+        ModelsResponse(models: [
+            amazonBedrockGPT54Model(priority: 0),
+            amazonBedrockOSSModel(
+                slug: "openai.gpt-oss-120b",
+                displayName: "GPT OSS 120B on Bedrock",
+                priority: 1
+            ),
+            amazonBedrockOSSModel(
+                slug: "openai.gpt-oss-20b",
+                displayName: "GPT OSS 20B on Bedrock",
+                priority: 2
+            )
+        ])
+    }
+
     public static func rawModelCatalogOnlineIfUncached<Transport: APITransport>(
         codexHome: URL,
         config: CodexRuntimeConfig,
@@ -237,7 +254,11 @@ public enum ModelsManager {
         now: Date = Date(),
         cacheTTL: TimeInterval = defaultModelCacheTTL
     ) async throws -> ModelsResponse {
-        let providerInfo = config.selectedModelProvider ?? ModelProviderInfo.createOpenAIProvider()
+        let providerInfo = selectedProviderInfo(for: config)
+        if providerInfo.isAmazonBedrock() {
+            return amazonBedrockStaticModelCatalog()
+        }
+
         let apiProvider = providerInfo.toAPIProvider(authMode: auth?.authMode)
         let authProvider = try await APIAuthResolver.authProvider(
             auth: auth,
@@ -299,6 +320,16 @@ public enum ModelsManager {
         provider.baseURL.contains("/backend-api/codex") || auth.bearerToken != nil
     }
 
+    private static func selectedProviderInfo(for config: CodexRuntimeConfig) -> ModelProviderInfo {
+        if let providerInfo = config.selectedModelProvider {
+            return providerInfo
+        }
+        if let providerInfo = ModelProviderInfo.builtInModelProviders()[config.selectedModelProviderID] {
+            return providerInfo
+        }
+        return ModelProviderInfo.createOpenAIProvider()
+    }
+
     private static func mergedRawModels(
         remoteModels: [ModelInfo],
         existingModels: [ModelInfo]
@@ -312,6 +343,101 @@ public enum ModelsManager {
             }
         }
         return models
+    }
+
+    private static func amazonBedrockGPT54Model(priority: Int32) -> ModelInfo {
+        ModelInfo(
+            slug: amazonBedrockDefaultModel,
+            displayName: "gpt-5.4",
+            description: "Strong model for everyday coding.",
+            defaultReasoningLevel: .medium,
+            supportedReasoningLevels: [
+                reasoningEffortPreset(.minimal),
+                reasoningEffortPreset(.low),
+                reasoningEffortPreset(.medium),
+                reasoningEffortPreset(.high)
+            ],
+            shellType: .shellCommand,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: priority,
+            serviceTiers: [
+                ModelServiceTier(
+                    id: ServiceTier.fast.requestValue,
+                    name: "Fast",
+                    description: "Fastest inference with increased plan usage"
+                )
+            ],
+            baseInstructions: ModelFamily.defaultBaseInstructions,
+            supportsReasoningSummaries: true,
+            defaultReasoningSummary: .none,
+            supportVerbosity: true,
+            defaultVerbosity: .medium,
+            applyPatchToolType: .freeform,
+            webSearchToolType: .textAndImage,
+            truncationPolicy: .tokens(10_000),
+            supportsParallelToolCalls: true,
+            supportsImageDetailOriginal: true,
+            contextWindow: 272_000,
+            maxContextWindow: 1_000_000,
+            experimentalSupportedTools: [],
+            inputModalities: [.text, .image],
+            supportsSearchTool: true
+        )
+    }
+
+    private static func amazonBedrockOSSModel(slug: String, displayName: String, priority: Int32) -> ModelInfo {
+        ModelInfo(
+            slug: slug,
+            displayName: displayName,
+            description: displayName,
+            defaultReasoningLevel: .medium,
+            supportedReasoningLevels: [
+                reasoningEffortPreset(.low),
+                reasoningEffortPreset(.medium),
+                reasoningEffortPreset(.high)
+            ],
+            shellType: .shellCommand,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: priority,
+            baseInstructions: ModelFamily.defaultBaseInstructions,
+            supportsReasoningSummaries: true,
+            defaultReasoningSummary: .none,
+            supportVerbosity: false,
+            defaultVerbosity: nil,
+            applyPatchToolType: nil,
+            webSearchToolType: .text,
+            truncationPolicy: .tokens(10_000),
+            supportsParallelToolCalls: true,
+            supportsImageDetailOriginal: false,
+            contextWindow: 128_000,
+            maxContextWindow: 128_000,
+            experimentalSupportedTools: [],
+            inputModalities: [.text],
+            supportsSearchTool: false
+        )
+    }
+
+    private static func reasoningEffortPreset(_ effort: ReasoningEffort) -> ReasoningEffortPreset {
+        ReasoningEffortPreset(effort: effort, description: reasoningEffortDescription(effort))
+    }
+
+    private static func reasoningEffortDescription(_ effort: ReasoningEffort) -> String {
+        switch effort {
+        case .none:
+            return "No reasoning"
+        case .minimal:
+            return "Minimal reasoning"
+        case .low:
+            return "Fast responses with lighter reasoning"
+        case .medium:
+            return "Balances speed and reasoning depth for everyday tasks"
+        case .high:
+            return "Greater reasoning depth for complex problems"
+        case .xhigh:
+            return "Extra high reasoning depth for complex problems"
+        }
     }
 }
 

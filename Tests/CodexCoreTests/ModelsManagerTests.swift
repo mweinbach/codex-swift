@@ -205,6 +205,59 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: ModelsManager.cachePath(codexHome: root).path))
     }
 
+    func testAmazonBedrockStaticModelCatalogMatchesRust() {
+        let catalog = ModelsManager.amazonBedrockStaticModelCatalog()
+
+        XCTAssertEqual(catalog.models.map(\.slug), [
+            "openai.gpt-5.4",
+            "openai.gpt-oss-120b",
+            "openai.gpt-oss-20b"
+        ])
+
+        let defaultModel = catalog.models[0]
+        XCTAssertEqual(defaultModel.displayName, "gpt-5.4")
+        XCTAssertEqual(defaultModel.supportedReasoningLevels.map(\.effort), [.minimal, .low, .medium, .high])
+        XCTAssertEqual(defaultModel.serviceTiers.map(\.id), ["priority"])
+        XCTAssertEqual(defaultModel.defaultVerbosity, .medium)
+        XCTAssertEqual(defaultModel.applyPatchToolType, .freeform)
+        XCTAssertEqual(defaultModel.webSearchToolType, .textAndImage)
+        XCTAssertEqual(defaultModel.truncationPolicy, .tokens(10_000))
+        XCTAssertEqual(defaultModel.contextWindow, 272_000)
+        XCTAssertEqual(defaultModel.maxContextWindow, 1_000_000)
+        XCTAssertEqual(defaultModel.inputModalities, [.text, .image])
+        XCTAssertTrue(defaultModel.supportsSearchTool)
+
+        let ossModel = catalog.models[1]
+        XCTAssertEqual(ossModel.supportedReasoningLevels.map(\.effort), [.low, .medium, .high])
+        XCTAssertFalse(ossModel.supportVerbosity)
+        XCTAssertNil(ossModel.applyPatchToolType)
+        XCTAssertEqual(ossModel.webSearchToolType, .text)
+        XCTAssertEqual(ossModel.contextWindow, 128_000)
+        XCTAssertEqual(ossModel.maxContextWindow, 128_000)
+        XCTAssertEqual(ossModel.inputModalities, [.text])
+        XCTAssertFalse(ossModel.supportsSearchTool)
+    }
+
+    func testRawModelCatalogOnlineIfUncachedUsesStaticBedrockCatalogLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let transport = RecordingAPITransport { _ in
+            XCTFail("Bedrock static model manager should not fetch remote models")
+            return URLSessionTransportResponse(statusCode: 200, body: Data())
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "amazon-bedrock"),
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "unused-openai-key", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3"
+        )
+
+        XCTAssertEqual(response.models, ModelsManager.amazonBedrockStaticModelCatalog().models)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ModelsManager.cachePath(codexHome: root).path))
+    }
+
     func testMergePresetsKeepsExistingOnlyWhenRemoteDoesNotShadowIt() {
         let remote = preset(model: "remote", isDefault: false)
         let duplicate = preset(model: "remote", isDefault: true)
