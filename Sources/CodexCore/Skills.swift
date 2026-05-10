@@ -107,47 +107,167 @@ public struct SkillInjections: Equatable, Sendable {
     }
 }
 
+public enum SkillMetadataBudget: Equatable, Sendable {
+    case tokens(Int)
+    case characters(Int)
+
+    public var limit: Int {
+        switch self {
+        case let .tokens(limit), let .characters(limit):
+            return limit
+        }
+    }
+
+    fileprivate func cost(_ text: String) -> Int {
+        switch self {
+        case .tokens:
+            return Skills.approximateTokenCount(bytes: text.utf8.count)
+        case .characters:
+            return text.count
+        }
+    }
+
+    fileprivate func cost(characters: Int, bytes: Int) -> Int {
+        switch self {
+        case .tokens:
+            return Skills.approximateTokenCount(bytes: bytes)
+        case .characters:
+            return characters
+        }
+    }
+}
+
+public struct SkillRenderReport: Equatable, Sendable {
+    public let totalCount: Int
+    public let includedCount: Int
+    public let omittedCount: Int
+    public let truncatedDescriptionChars: Int
+    public let truncatedDescriptionCount: Int
+
+    fileprivate var averageTruncatedDescriptionChars: Int {
+        guard totalCount > 0, truncatedDescriptionChars > 0 else {
+            return 0
+        }
+        return (truncatedDescriptionChars + totalCount - 1) / totalCount
+    }
+}
+
+public struct AvailableSkills: Equatable, Sendable {
+    public let skillRootLines: [String]
+    public let skillLines: [String]
+    public let report: SkillRenderReport
+    public let warningMessage: String?
+}
+
 public enum Skills {
-    public static let sectionIntro =
-        "These skills are discovered at startup from multiple local sources. Each entry includes a name, description, and file path so you can open the source for full instructions."
+    public static let defaultSkillMetadataCharacterBudget = 8_000
+    public static let skillMetadataContextWindowPercent = 2
+    public static let skillDescriptionTruncationWarningThresholdChars = 100
+    private static let approximateBytesPerToken = 4
+
+    public static let skillDescriptionTruncatedWarning =
+        "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+
+    public static let skillDescriptionTruncatedWarningWithPercent =
+        "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+
+    public static let skillDescriptionsRemovedWarningPrefix =
+        "Exceeded skills context budget. All skill descriptions were removed and"
+
+    public static let sectionIntro = skillsIntroWithAbsolutePaths
 
     public static let sectionGuidance = #"""
-- Discovery: Available skills are listed in project docs and may also appear in a runtime "## Skills" section (name + description + file path). These are the sources of truth; skill bodies live on disk at the listed paths.
-- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
+- Discovery: The list above is the skills available in this session (name + description + file path). Skill bodies live on disk at the listed paths.
+- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
 - Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.
 - How to use a skill (progressive disclosure):
   1) After deciding to use a skill, open its `SKILL.md`. Read only enough to follow the workflow.
-  2) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
-  3) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
-  4) If `assets/` or templates exist, reuse them instead of recreating from scratch.
-- Description as trigger: The YAML `description` in `SKILL.md` is the primary trigger signal; rely on it to decide applicability. If unsure, ask a brief clarification before proceeding.
+  2) When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the skill directory listed above first, and only consider other paths if needed.
+  3) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
+  4) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
+  5) If `assets/` or templates exist, reuse them instead of recreating from scratch.
 - Coordination and sequencing:
   - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
   - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.
 - Context hygiene:
   - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.
-  - Avoid deeply nested references; prefer one-hop files explicitly linked from `SKILL.md`.
+  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
+  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
+- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.
+"""#
+
+    public static let skillsIntroWithAbsolutePaths =
+        "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill."
+
+    public static let skillsIntroWithAliases =
+        "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and a short path that can be expanded into an absolute path using the skill roots table."
+
+    public static let sectionGuidanceWithAliases = #"""
+- Discovery: The list above is the skills available in this session (name + description + short path). Skill bodies live on disk at the listed paths after expanding the matching alias from `### Skill roots`.
+- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
+- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.
+- How to use a skill (progressive disclosure):
+  1) After deciding to use a skill, expand the listed short `path` with the matching alias from `### Skill roots`, then open its `SKILL.md`. Read only enough to follow the workflow.
+  2) When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that expanded `SKILL.md` first, and only consider other paths if needed.
+  3) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
+  4) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
+  5) If `assets/` or templates exist, reuse them instead of recreating from scratch.
+- Coordination and sequencing:
+  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
+  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.
+- Context hygiene:
+  - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.
+  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
   - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
 - Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.
 """#
 
     public static func renderSkillsSection(_ skills: [SkillMetadata]) -> String? {
-        guard !skills.isEmpty else {
+        guard let available = buildAvailableSkills(
+            skills: skills,
+            budget: .characters(Int.max)
+        ) else {
             return nil
         }
+        return renderAvailableSkillsBody(
+            skillRootLines: available.skillRootLines,
+            skillLines: available.skillLines
+        )
+    }
 
-        var lines: [String] = [
-            "## Skills",
-            sectionIntro
-        ]
-
-        for skill in skills {
-            let path = skill.path.replacingOccurrences(of: "\\", with: "/")
-            lines.append("- \(skill.name): \(skill.description) (file: \(path))")
+    public static func renderAvailableSkillsBody(skillRootLines: [String], skillLines: [String]) -> String {
+        let hasAliases = !skillRootLines.isEmpty
+        let intro = hasAliases ? skillsIntroWithAliases : skillsIntroWithAbsolutePaths
+        let guidance = hasAliases ? sectionGuidanceWithAliases : sectionGuidance
+        var lines: [String] = ["## Skills", intro]
+        if !skillRootLines.isEmpty {
+            lines.append("### Skill roots")
+            lines.append(contentsOf: skillRootLines)
         }
+        lines.append("### Available skills")
+        lines.append(contentsOf: skillLines)
+        lines.append("### How to use skills")
+        lines.append(guidance)
+        return "\n\(lines.joined(separator: "\n"))\n"
+    }
 
-        lines.append(sectionGuidance)
-        return lines.joined(separator: "\n")
+    public static func defaultSkillMetadataBudget(contextWindow: Int?) -> SkillMetadataBudget {
+        if let contextWindow, contextWindow > 0 {
+            return .tokens(max(1, contextWindow * skillMetadataContextWindowPercent / 100))
+        }
+        return .characters(defaultSkillMetadataCharacterBudget)
+    }
+
+    public static func buildAvailableSkills(
+        skills: [SkillMetadata],
+        budget: SkillMetadataBudget
+    ) -> AvailableSkills? {
+        buildAvailableSkills(
+            lines: orderedAbsoluteSkillLines(skills),
+            totalCount: skills.count,
+            budget: budget,
+            skillRootLines: []
+        )
     }
 
     public static func buildSkillInjections(
@@ -191,6 +311,213 @@ public enum Skills {
         buildSkillInjections(inputs: inputs, skills: outcome) { path in
             try String(contentsOfFile: path, encoding: .utf8)
         }
+    }
+
+    private static func buildAvailableSkills(
+        lines: [SkillLine],
+        totalCount: Int,
+        budget: SkillMetadataBudget,
+        skillRootLines: [String]
+    ) -> AvailableSkills? {
+        guard totalCount > 0 else {
+            return nil
+        }
+
+        let (skillLines, report) = renderSkillLines(lines, totalCount: totalCount, budget: budget)
+        let warningMessage: String?
+        if report.omittedCount > 0 {
+            let skillWord = report.omittedCount == 1 ? "skill" : "skills"
+            let verb = report.omittedCount == 1 ? "was" : "were"
+            warningMessage = "\(budgetWarningPrefix(budget, prefix: skillDescriptionsRemovedWarningPrefix)) \(report.omittedCount) additional \(skillWord) \(verb) not included in the model-visible skills list."
+        } else if report.averageTruncatedDescriptionChars > skillDescriptionTruncationWarningThresholdChars {
+            switch budget {
+            case .tokens:
+                warningMessage = skillDescriptionTruncatedWarningWithPercent
+            case .characters:
+                warningMessage = skillDescriptionTruncatedWarning
+            }
+        } else {
+            warningMessage = nil
+        }
+
+        return AvailableSkills(
+            skillRootLines: skillRootLines,
+            skillLines: skillLines,
+            report: report,
+            warningMessage: warningMessage
+        )
+    }
+
+    private static func renderSkillLines(
+        _ lines: [SkillLine],
+        totalCount: Int,
+        budget: SkillMetadataBudget
+    ) -> ([String], SkillRenderReport) {
+        let fullCost = lines.reduce(0) { $0 + $1.fullCost(budget) }
+        if fullCost <= budget.limit {
+            return (
+                lines.map(\.renderFull),
+                SkillRenderReport(
+                    totalCount: totalCount,
+                    includedCount: lines.count,
+                    omittedCount: 0,
+                    truncatedDescriptionChars: 0,
+                    truncatedDescriptionCount: 0
+                )
+            )
+        }
+
+        let minimumCost = lines.reduce(0) { $0 + $1.minimumCost(budget) }
+        if minimumCost <= budget.limit {
+            let rendered = renderLinesWithDescriptionBudget(
+                budget,
+                lines: lines,
+                limit: budget.limit - minimumCost
+            )
+            let truncatedDescriptionChars = rendered.reduce(0) { $0 + $1.truncatedChars }
+            let truncatedDescriptionCount = rendered.filter { $0.truncatedChars > 0 }.count
+            return (
+                rendered.map(\.line),
+                SkillRenderReport(
+                    totalCount: totalCount,
+                    includedCount: lines.count,
+                    omittedCount: 0,
+                    truncatedDescriptionChars: truncatedDescriptionChars,
+                    truncatedDescriptionCount: truncatedDescriptionCount
+                )
+            )
+        }
+
+        return renderMinimumSkillLinesUntilBudget(budget, lines: lines, totalCount: totalCount)
+    }
+
+    private static func renderMinimumSkillLinesUntilBudget(
+        _ budget: SkillMetadataBudget,
+        lines: [SkillLine],
+        totalCount: Int
+    ) -> ([String], SkillRenderReport) {
+        var included: [String] = []
+        var used = 0
+        var omittedCount = 0
+        var truncatedDescriptionChars = 0
+        var truncatedDescriptionCount = 0
+
+        for line in lines {
+            let lineCost = line.minimumCost(budget)
+            let descriptionCharCount = line.description.count
+            if used + lineCost <= budget.limit {
+                used += lineCost
+                included.append(line.renderMinimum())
+            } else {
+                omittedCount += 1
+            }
+
+            truncatedDescriptionChars += descriptionCharCount
+            if descriptionCharCount > 0 {
+                truncatedDescriptionCount += 1
+            }
+        }
+
+        return (
+            included,
+            SkillRenderReport(
+                totalCount: totalCount,
+                includedCount: included.count,
+                omittedCount: omittedCount,
+                truncatedDescriptionChars: truncatedDescriptionChars,
+                truncatedDescriptionCount: truncatedDescriptionCount
+            )
+        )
+    }
+
+    private static func renderLinesWithDescriptionBudget(
+        _ budget: SkillMetadataBudget,
+        lines: [SkillLine],
+        limit: Int
+    ) -> [RenderedSkillLine] {
+        let budgetLines = lines.map { DescriptionBudgetLine(line: $0, budget: budget) }
+        var charAllocations = Array(repeating: 0, count: budgetLines.count)
+        var currentExtraCosts = Array(repeating: 0, count: budgetLines.count)
+        var remaining = limit
+
+        while true {
+            var changed = false
+            for index in budgetLines.indices {
+                let line = budgetLines[index]
+                guard charAllocations[index] < line.descriptionCharCount else {
+                    continue
+                }
+
+                let currentCost = currentExtraCosts[index]
+                let nextChars = charAllocations[index] + 1
+                let nextCost = line.extraCosts[nextChars]
+                let delta = nextCost - currentCost
+                if delta <= remaining {
+                    charAllocations[index] = nextChars
+                    currentExtraCosts[index] = nextCost
+                    remaining -= delta
+                    changed = true
+                }
+            }
+
+            if !changed {
+                break
+            }
+        }
+
+        return zip(budgetLines, charAllocations).map { line, descriptionChars in
+            RenderedSkillLine(
+                line: line.line.render(descriptionCharacters: descriptionChars),
+                truncatedChars: line.descriptionCharCount - descriptionChars
+            )
+        }
+    }
+
+    private static func orderedAbsoluteSkillLines(_ skills: [SkillMetadata]) -> [SkillLine] {
+        skills.sorted { lhs, rhs in
+            let lhsKey = (promptScopeRank(lhs.scope), lhs.name, lhs.path)
+            let rhsKey = (promptScopeRank(rhs.scope), rhs.name, rhs.path)
+            return lhsKey < rhsKey
+        }.map { skill in
+            SkillLine(
+                name: skill.name,
+                description: skill.description,
+                path: skill.path.replacingOccurrences(of: "\\", with: "/")
+            )
+        }
+    }
+
+    private static func promptScopeRank(_ scope: SkillScope) -> Int {
+        switch scope {
+        case .system:
+            return 0
+        case .admin:
+            return 1
+        case .repo:
+            return 2
+        case .user:
+            return 3
+        }
+    }
+
+    private static func lineCost(_ budget: SkillMetadataBudget, line: String) -> Int {
+        budget.cost("\(line)\n")
+    }
+
+    private static func budgetWarningPrefix(_ budget: SkillMetadataBudget, prefix: String) -> String {
+        switch budget {
+        case .tokens:
+            return prefix.replacingOccurrences(
+                of: "Exceeded skills context budget.",
+                with: "Exceeded skills context budget of 2%."
+            )
+        case .characters:
+            return prefix
+        }
+    }
+
+    fileprivate static func approximateTokenCount(bytes: Int) -> Int {
+        (bytes + approximateBytesPerToken - 1) / approximateBytesPerToken
     }
 
     public static func collectExplicitSkillMentions(
@@ -469,6 +796,82 @@ public enum Skills {
             return true
         default:
             return false
+        }
+    }
+
+    private struct SkillLine {
+        let name: String
+        let description: String
+        let path: String
+
+        var renderFull: String {
+            render(description: description)
+        }
+
+        func renderMinimum() -> String {
+            render(description: "")
+        }
+
+        func fullCost(_ budget: SkillMetadataBudget) -> Int {
+            lineCost(budget, line: renderFull)
+        }
+
+        func minimumCost(_ budget: SkillMetadataBudget) -> Int {
+            lineCost(budget, line: renderMinimum())
+        }
+
+        func render(descriptionCharacters: Int) -> String {
+            guard descriptionCharacters > 0 else {
+                return render(description: "")
+            }
+            let endIndex = description.index(
+                description.startIndex,
+                offsetBy: min(descriptionCharacters, description.count)
+            )
+            return render(description: String(description[..<endIndex]))
+        }
+
+        private func render(description: String) -> String {
+            if description.isEmpty {
+                return "- \(name): (file: \(path))"
+            }
+            return "- \(name): \(description) (file: \(path))"
+        }
+    }
+
+    private struct RenderedSkillLine {
+        let line: String
+        let truncatedChars: Int
+    }
+
+    private struct DescriptionBudgetLine {
+        let line: SkillLine
+        let descriptionCharCount: Int
+        let extraCosts: [Int]
+
+        init(line: SkillLine, budget: SkillMetadataBudget) {
+            self.line = line
+            self.descriptionCharCount = line.description.count
+
+            let minimumLine = line.renderMinimum()
+            let minimumCharacters = minimumLine.count + 1
+            let minimumBytes = minimumLine.utf8.count + 1
+            let minimumCost = budget.cost(characters: minimumCharacters, bytes: minimumBytes)
+
+            var extraCosts = [0]
+            extraCosts.reserveCapacity(descriptionCharCount + 1)
+            var prefixCharacters = 0
+            var prefixBytes = 0
+            for character in line.description {
+                prefixCharacters += 1
+                prefixBytes += character.utf8.count
+                let renderedCharacters = minimumCharacters + prefixCharacters + 1
+                let renderedBytes = minimumBytes + prefixBytes + 1
+                extraCosts.append(
+                    budget.cost(characters: renderedCharacters, bytes: renderedBytes) - minimumCost
+                )
+            }
+            self.extraCosts = extraCosts
         }
     }
 }

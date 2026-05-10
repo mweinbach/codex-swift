@@ -134,10 +134,14 @@ final class ProjectDocTests: XCTestCase {
             """
             base doc
 
+
             ## Skills
             \(Skills.sectionIntro)
+            ### Available skills
             - pdf-processing: extract from pdfs (file: /skills/pdf-processing/SKILL.md)
+            ### How to use skills
             \(Skills.sectionGuidance)
+
             """
         )
     }
@@ -160,10 +164,14 @@ final class ProjectDocTests: XCTestCase {
         XCTAssertEqual(
             result,
             """
+
             ## Skills
             \(Skills.sectionIntro)
+            ### Available skills
             - linting: run swiftlint (file: /skills/linting/SKILL.md)
+            ### How to use skills
             \(Skills.sectionGuidance)
+
             """
         )
     }
