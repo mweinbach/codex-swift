@@ -2,6 +2,103 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testHandlerInitializeAttachesSessionAndRejectsDuplicateLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        let handler = ExecServerHandler(sessionRegistry: registry)
+
+        let response = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+
+        XCTAssertEqual(response.sessionId, "session-1")
+        let isAttached = await handler.isSessionAttached()
+        XCTAssertTrue(isAttached)
+        await XCTAssertThrowsExecServerError(
+            try await handler.initialize(ExecServerInitializeParams(clientName: "client")),
+            code: -32600,
+            message: "initialize may only be sent once per connection"
+        )
+    }
+
+    func testHandlerInitializeFailureAllowsRetryLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "connection-2", "session-1"]))
+        let handler = ExecServerHandler(sessionRegistry: registry)
+
+        await XCTAssertThrowsExecServerError(
+            try await handler.initialize(ExecServerInitializeParams(clientName: "client", resumeSessionId: "missing")),
+            code: -32600,
+            message: "unknown session id missing"
+        )
+
+        let response = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        XCTAssertEqual(response.sessionId, "session-1")
+    }
+
+    func testHandlerInitializedNotificationOrderingMatchesRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        let handler = ExecServerHandler(sessionRegistry: registry)
+
+        await XCTAssertThrowsHandlerNotificationError(
+            try await handler.markInitialized(),
+            message: "received `initialized` notification before `initialize`"
+        )
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+    }
+
+    func testHandlerRequireInitializedForMethodFamiliesMatchesRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        let handler = ExecServerHandler(sessionRegistry: registry)
+
+        await XCTAssertThrowsExecServerError(
+            try await handler.requireInitialized(for: "exec"),
+            code: -32600,
+            message: "client must call initialize before using exec methods"
+        )
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        await XCTAssertThrowsExecServerError(
+            try await handler.requireInitialized(for: "filesystem"),
+            code: -32600,
+            message: "client must send initialized before using filesystem methods"
+        )
+        try await handler.markInitialized()
+
+        let session = try await handler.requireInitialized(for: "http")
+        XCTAssertEqual(session.sessionID, "session-1")
+    }
+
+    func testHandlerReportsResumedSessionLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let first = ExecServerHandler(sessionRegistry: registry)
+        let second = ExecServerHandler(sessionRegistry: registry)
+        let response = try await first.initialize(ExecServerInitializeParams(clientName: "first"))
+        try await first.markInitialized()
+        await first.shutdown()
+
+        _ = try await second.initialize(ExecServerInitializeParams(clientName: "second", resumeSessionId: response.sessionId))
+
+        let firstIsAttached = await first.isSessionAttached()
+        XCTAssertFalse(firstIsAttached)
+        await XCTAssertThrowsExecServerError(
+            try await first.requireInitialized(for: "exec"),
+            code: -32600,
+            message: "session has been resumed by another connection"
+        )
+    }
+
+    func testHandlerShutdownDetachesSessionForResume() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let first = ExecServerHandler(sessionRegistry: registry)
+        let response = try await first.initialize(ExecServerInitializeParams(clientName: "first"))
+
+        await first.shutdown()
+        let second = try await registry.attach(resumeSessionID: response.sessionId)
+
+        XCTAssertEqual(second.sessionID, "session-1")
+        let firstIsAttached = await first.isSessionAttached()
+        let secondIsAttached = await second.isSessionAttached()
+        XCTAssertFalse(firstIsAttached)
+        XCTAssertTrue(secondIsAttached)
+    }
+
     func testSessionRegistryCreatesNewSessionsWithActiveConnection() async throws {
         let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
 
@@ -202,6 +299,22 @@ final class ExecServerTests: XCTestCase {
             XCTFail("Expected exec-server JSON-RPC error", file: file, line: line)
         } catch let error as ExecServerJSONRPCErrorDetail {
             XCTAssertEqual(error.code, code, file: file, line: line)
+            XCTAssertEqual(error.message, message, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
+    }
+
+    private func XCTAssertThrowsHandlerNotificationError(
+        _ expression: @autoclosure () async throws -> some Any,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server handler notification error", file: file, line: line)
+        } catch let error as ExecServerHandlerNotificationError {
             XCTAssertEqual(error.message, message, file: file, line: line)
         } catch {
             XCTFail("Unexpected error: \(error)", file: file, line: line)
