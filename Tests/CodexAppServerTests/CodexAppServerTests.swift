@@ -11273,6 +11273,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(approvalOriginName["file"] as? String, managedConfigFile.standardizedFileURL.path)
     }
 
+    func testConfigValueWriteSucceedsWhenManagedPreferencesExpandHomeDirectoryPathsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "model = \"user\"\n".write(to: configFile, atomically: true, encoding: .utf8)
+
+        let managedPreferences = Data("""
+        sandbox_mode = "workspace-write"
+        [sandbox_workspace_write]
+        writable_roots = ["~/code"]
+        """.utf8)
+            .base64EncodedString()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: temp.url.appendingPathComponent("missing-managed-config.toml", isDirectory: false),
+                managedPreferencesBase64: managedPreferences
+            )
+        )
+        let write = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"model","value":"updated","mergeStrategy":"replace"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(write["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "model = \"updated\"\n")
+    }
+
     func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

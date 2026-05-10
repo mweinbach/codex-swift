@@ -370,7 +370,8 @@ public enum CodexConfigLayerLoader {
                     "Failed to parse config requirements as TOML: invalid sandbox_mode"
                 )
             }
-            requirements.allowedSandboxModes = [SandboxModeRequirement(sandboxMode: sandboxMode)]
+            let requirement = SandboxModeRequirement(sandboxMode: sandboxMode)
+            requirements.allowedSandboxModes = requirement == .readOnly ? [.readOnly] : [.readOnly, requirement]
         }
 
         return requirements

@@ -12,6 +12,11 @@ final class AbsolutePathTests: XCTestCase {
         XCTAssertEqual(path.path, "/tmp/base/subdir/file.txt")
     }
 
+    func testAbsolutePathExpandsHomeDirectoryLikeRust() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        XCTAssertEqual(try AbsolutePath(absolutePath: "~/code").path, home + "/code")
+    }
+
     func testJoinAndParent() throws {
         let base = try AbsolutePath(absolutePath: "/tmp/base")
         XCTAssertEqual(try base.join("child/../file.txt").path, "/tmp/base/file.txt")

@@ -932,6 +932,8 @@ Source baseline inspected for this scaffold:
   - added a conservative source-preserving persistence path for simple config-manager replacement writes, matching Rust's `ConfigEditsBuilder` behavior for inserting scalar values into existing TOML tables without reordering unrelated keys or dropping comments; verified nested `apps.*.default_tools_approval_mode` and custom `mcp_servers.*.default_tools_approval_mode` writes through `config/read`.
 - `codex-rs/app-server/src/config_manager_service.rs` session flag config layers
   - threaded injected CLI config overrides through app-server config-layer loads so `config/read`, config writes, skills/hooks filtering, marketplace reads, requirements reads, and auth restriction checks see the same session flag layer ordering as Rust; added Rust-shaped coverage for managed config overriding both user config and session flags, plus writes that match the managed effective value returning `ok` without override metadata.
+- `codex-rs/utils/absolute-path/src/lib.rs` home-directory path expansion
+  - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
 
 ## Known Gaps
 

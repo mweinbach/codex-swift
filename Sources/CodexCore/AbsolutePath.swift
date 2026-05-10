@@ -22,6 +22,7 @@ public struct AbsolutePath: Equatable, Hashable, Codable, CustomStringConvertibl
     public var description: String { path }
 
     public init(absolutePath path: String) throws {
+        let path = Self.expandingHomeDirectory(in: path)
         guard path.hasPrefix("/") else {
             throw AbsolutePathError.basePathIsNotAbsolute(path)
         }
@@ -86,5 +87,17 @@ public struct AbsolutePath: Equatable, Hashable, Codable, CustomStringConvertibl
             stack.append(String(component))
         }
         return stack.isEmpty ? "/" : "/" + stack.joined(separator: "/")
+    }
+
+    private static func expandingHomeDirectory(in path: String) -> String {
+        guard path == "~" || path.hasPrefix("~/") else {
+            return path
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path == "~" {
+            return home
+        }
+        let rest = path.dropFirst(2)
+        return home + "/" + rest
     }
 }

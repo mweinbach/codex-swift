@@ -141,6 +141,31 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(writableRoots.filter { $0 == expectedRoot }.count, 1)
     }
 
+    func testManagedPreferencesExpandHomeDirectoryInWorkspaceWriteRootsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let managedPreferences = Data("""
+        sandbox_mode = "workspace-write"
+        [sandbox_workspace_write]
+        writable_roots = ["~/code"]
+        """.utf8)
+            .base64EncodedString()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed-config.toml", isDirectory: false),
+                managedPreferencesBase64: managedPreferences
+            )
+        )
+
+        guard case let .workspaceWrite(writableRoots, _, _, _) = config.sandboxPolicy else {
+            return XCTFail("expected workspace-write sandbox policy")
+        }
+        let expectedRoot = try AbsolutePath(absolutePath: "~/code")
+        XCTAssertEqual(writableRoots.filter { $0 == expectedRoot }.count, 1)
+    }
+
     func testWorkspaceWriteAppendsMemoriesRootToConfiguredWritableRootsLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let extraRoot = dir.url.appendingPathComponent("extra", isDirectory: true)
