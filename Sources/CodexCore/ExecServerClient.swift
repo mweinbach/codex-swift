@@ -16,6 +16,44 @@ public struct ExecServerClientConnectOptions: Equatable, Sendable {
     }
 }
 
+public struct StdioExecServerCommand: Equatable, Sendable {
+    public let program: String
+    public let args: [String]
+    public let env: [String: String]
+    public let cwd: String?
+
+    public init(
+        program: String,
+        args: [String] = [],
+        env: [String: String] = [:],
+        cwd: String? = nil
+    ) {
+        self.program = program
+        self.args = args
+        self.env = env
+        self.cwd = cwd
+    }
+}
+
+public struct StdioExecServerConnectArgs: Equatable, Sendable {
+    public let command: StdioExecServerCommand
+    public let clientName: String
+    public let initializeTimeoutSeconds: TimeInterval
+    public let resumeSessionID: String?
+
+    public init(
+        command: StdioExecServerCommand,
+        clientName: String = "codex-environment",
+        initializeTimeoutSeconds: TimeInterval = 5,
+        resumeSessionID: String? = nil
+    ) {
+        self.command = command
+        self.clientName = clientName
+        self.initializeTimeoutSeconds = initializeTimeoutSeconds
+        self.resumeSessionID = resumeSessionID
+    }
+}
+
 public enum ExecServerClientError: Error, Equatable, CustomStringConvertible, Sendable {
     case initializeTimedOut(timeoutSeconds: TimeInterval)
     case closed
@@ -154,6 +192,86 @@ public actor ExecServerLineClientTransport: ExecServerClientTransport {
     }
 }
 
+public final class ExecServerStdioCommandTransport: ExecServerClientTransport, @unchecked Sendable {
+    private let process: Process
+    private let stdin: FileHandleLineWriter
+    private let stdout: FileHandleLineReader
+    private let stderrDrain: FileHandleDrain
+    private let lineTransport: ExecServerLineClientTransport
+
+    public init(
+        command: StdioExecServerCommand,
+        notificationHandler: @escaping ExecServerLineClientTransport.NotificationHandler = { _ in }
+    ) throws {
+        let process = Process()
+        if command.program.hasPrefix("/") {
+            process.executableURL = URL(fileURLWithPath: command.program)
+            process.arguments = command.args
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command.program] + command.args
+        }
+        process.environment = command.env.isEmpty
+            ? ProcessInfo.processInfo.environment
+            : ProcessInfo.processInfo.environment.merging(command.env) { _, override in override }
+        if let cwd = command.cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        }
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        let stdin = FileHandleLineWriter(stdinPipe.fileHandleForWriting)
+        let stdout = FileHandleLineReader(stdoutPipe.fileHandleForReading)
+        let stderrDrain = FileHandleDrain(stderrPipe.fileHandleForReading)
+        self.process = process
+        self.stdin = stdin
+        self.stdout = stdout
+        self.stderrDrain = stderrDrain
+        self.lineTransport = ExecServerLineClientTransport(
+            readLine: { try await stdout.readLine() },
+            writeLine: { try await stdin.write($0) },
+            notificationHandler: notificationHandler
+        )
+
+        do {
+            try process.run()
+        } catch {
+            closePipes()
+            throw ExecServerClientError.disconnected(
+                "exec-server transport disconnected: failed to spawn exec-server stdio command: \(error)"
+            )
+        }
+        stderrDrain.start()
+    }
+
+    deinit {
+        terminate()
+    }
+
+    public func send(_ message: ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage? {
+        try await lineTransport.send(message)
+    }
+
+    public func terminate() {
+        stderrDrain.stop()
+        closePipes()
+        if process.isRunning {
+            process.terminate()
+        }
+    }
+
+    private func closePipes() {
+        stdin.close()
+        stdout.close()
+        stderrDrain.close()
+    }
+}
+
 public actor ExecServerClient {
     private let transport: any ExecServerClientTransport
     private var nextRequestID: Int64 = 1
@@ -162,6 +280,28 @@ public actor ExecServerClient {
 
     public init(transport: any ExecServerClientTransport) {
         self.transport = transport
+    }
+
+    public static func connectStdioCommand(
+        _ args: StdioExecServerConnectArgs,
+        notificationHandler: @escaping ExecServerLineClientTransport.NotificationHandler = { _ in }
+    ) async throws -> ExecServerClient {
+        let transport = try ExecServerStdioCommandTransport(
+            command: args.command,
+            notificationHandler: notificationHandler
+        )
+        let client = ExecServerClient(transport: transport)
+        do {
+            _ = try await client.initialize(options: ExecServerClientConnectOptions(
+                clientName: args.clientName,
+                initializeTimeoutSeconds: args.initializeTimeoutSeconds,
+                resumeSessionID: args.resumeSessionID
+            ))
+            return client
+        } catch {
+            transport.terminate()
+            throw error
+        }
     }
 
     public var sessionID: String? {
@@ -344,5 +484,137 @@ public actor ExecServerClient {
             return "exec-server transport disconnected: \(reason)"
         }
         return "exec-server transport disconnected"
+    }
+}
+
+private final class FileHandleLineReader: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var isClosed = false
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func readLine() async throws -> String? {
+        try await Task.detached {
+            try self.readLineBlocking()
+        }.value
+    }
+
+    func close() {
+        lock.withLock {
+            guard !isClosed else {
+                return
+            }
+            isClosed = true
+            try? handle.close()
+        }
+    }
+
+    private func readLineBlocking() throws -> String? {
+        lock.lock()
+        let closed = isClosed
+        lock.unlock()
+        guard !closed else {
+            return nil
+        }
+        var data = Data()
+        while true {
+            let byte = handle.readData(ofLength: 1)
+            if byte.isEmpty {
+                guard !data.isEmpty else {
+                    return nil
+                }
+                break
+            }
+            if byte[byte.startIndex] == 0x0A {
+                break
+            }
+            data.append(byte)
+        }
+        if data.last == 0x0D {
+            data.removeLast()
+        }
+        guard let line = String(data: data, encoding: .utf8) else {
+            throw ExecServerClientError.disconnected(
+                "exec-server transport disconnected: failed to read JSON-RPC message from exec-server stdio command: input is not valid UTF-8"
+            )
+        }
+        return line
+    }
+}
+
+private final class FileHandleLineWriter: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var isClosed = false
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func write(_ data: Data) async throws {
+        try await Task.detached {
+            try self.writeBlocking(data)
+        }.value
+    }
+
+    func close() {
+        lock.withLock {
+            guard !isClosed else {
+                return
+            }
+            isClosed = true
+            try? handle.close()
+        }
+    }
+
+    private func writeBlocking(_ data: Data) throws {
+        try lock.withLock {
+            guard !isClosed else {
+                throw ExecServerClientError.disconnected("exec-server transport disconnected")
+            }
+            try handle.write(contentsOf: data)
+        }
+    }
+}
+
+private final class FileHandleDrain: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var isClosed = false
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func start() {
+        lock.withLock {
+            guard task == nil else {
+                return
+            }
+            task = Task.detached { [handle] in
+                _ = handle.readDataToEndOfFile()
+            }
+        }
+    }
+
+    func stop() {
+        lock.withLock {
+            task?.cancel()
+            task = nil
+        }
+    }
+
+    func close() {
+        lock.withLock {
+            guard !isClosed else {
+                return
+            }
+            isClosed = true
+            try? handle.close()
+        }
     }
 }

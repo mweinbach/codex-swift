@@ -1,4 +1,6 @@
 import CodexCore
+import Darwin
+import Foundation
 import XCTest
 
 final class ExecServerClientTests: XCTestCase {
@@ -235,6 +237,81 @@ final class ExecServerClientTests: XCTestCase {
         )
     }
 
+    func testConnectStdioCommandSpawnsProcessAndInitializesLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let initPath = temp.url.appendingPathComponent("initialize.jsonl").path
+        let initializedPath = temp.url.appendingPathComponent("initialized.jsonl").path
+        let cwdPath = temp.url.path
+        let envPath = temp.url.appendingPathComponent("env.txt").path
+        let script = """
+        IFS= read -r initialize
+        printf '%s\\n' "$initialize" > '\(shellQuote(initPath))'
+        pwd > '\(shellQuote(cwdPath))/cwd.txt'
+        printf '%s\\n' "$CODEX_SWIFT_EXEC_SERVER_TEST" > '\(shellQuote(envPath))'
+        printf '%s\\n' '{"id":1,"result":{"sessionId":"stdio-session"}}'
+        IFS= read -r initialized
+        printf '%s\\n' "$initialized" > '\(shellQuote(initializedPath))'
+        sleep 2
+        """
+
+        let client = try await ExecServerClient.connectStdioCommand(StdioExecServerConnectArgs(
+            command: StdioExecServerCommand(
+                program: "sh",
+                args: ["-c", script],
+                env: ["CODEX_SWIFT_EXEC_SERVER_TEST": "env-value"],
+                cwd: temp.url.path
+            ),
+            clientName: "stdio-test-client",
+            initializeTimeoutSeconds: 1,
+            resumeSessionID: "resume-me"
+        ))
+
+        let sessionID = await client.sessionID
+        XCTAssertEqual(sessionID, "stdio-session")
+        let initializeLine = try waitForTextFile(initPath).trimmingCharacters(in: .newlines)
+        let initializedLine = try waitForTextFile(initializedPath).trimmingCharacters(in: .newlines)
+        let cwdLine = try waitForTextFile(temp.url.appendingPathComponent("cwd.txt").path)
+            .trimmingCharacters(in: .newlines)
+        let envLine = try waitForTextFile(envPath).trimmingCharacters(in: .newlines)
+
+        let initialize = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(initializeLine.utf8))
+        guard case let .request(request) = initialize else {
+            return XCTFail("Expected initialize request")
+        }
+        XCTAssertEqual(request.method, execServerInitializeMethod)
+        XCTAssertEqual(request.params?["clientName"], .string("stdio-test-client"))
+        XCTAssertEqual(request.params?["resumeSessionId"], .string("resume-me"))
+        let initialized = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(initializedLine.utf8))
+        XCTAssertEqual(initialized.method, execServerInitializedMethod)
+        XCTAssertEqual(
+            URL(fileURLWithPath: cwdLine).standardizedFileURL.path,
+            temp.url.standardizedFileURL.path
+        )
+        XCTAssertEqual(envLine, "env-value")
+    }
+
+    func testConnectStdioCommandTerminatesProcessOnMalformedInitializeLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let markerPath = temp.url.appendingPathComponent("marker").path
+        let script = """
+        IFS= read -r _initialize
+        printf '%s\\n' "$$" > '\(shellQuote(markerPath))'
+        printf '%s\\n' 'not-json'
+        sleep 10
+        """
+
+        await XCTAssertThrowsExecServerClientError(
+            try await ExecServerClient.connectStdioCommand(StdioExecServerConnectArgs(
+                command: StdioExecServerCommand(program: "sh", args: ["-c", script]),
+                clientName: "stdio-test-client",
+                initializeTimeoutSeconds: 1
+            )),
+            descriptionPrefix: "exec-server protocol error: failed to parse JSON-RPC message from exec-server stdio command:"
+        )
+        let pid = try waitForPIDFile(markerPath)
+        try await waitForProcessExit(pid)
+    }
+
     private func XCTAssertThrowsExecServerClientError<T>(
         _ expression: @autoclosure @escaping () async throws -> T,
         description: String,
@@ -335,6 +412,61 @@ private actor LineClientHarness {
 private func line(for message: ExecServerJSONRPCMessage) throws -> String {
     let data = try ExecServerJSONRPCCodec.encodeLine(message)
     return String(decoding: data.dropLast(), as: UTF8.self)
+}
+
+private func shellQuote(_ value: String) -> String {
+    value.replacingOccurrences(of: "'", with: "'\\''")
+}
+
+private func waitForPIDFile(_ path: String) throws -> Int32 {
+    for _ in 0..<20 {
+        if let contents = try? String(contentsOfFile: path, encoding: .utf8),
+           let pid = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return pid
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    throw NSError(domain: "ExecServerClientTests", code: 1, userInfo: [
+        NSLocalizedDescriptionKey: "PID file was not written"
+    ])
+}
+
+private func waitForTextFile(_ path: String) throws -> String {
+    for _ in 0..<20 {
+        if let contents = try? String(contentsOfFile: path, encoding: .utf8), !contents.isEmpty {
+            return contents
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    throw NSError(domain: "ExecServerClientTests", code: 1, userInfo: [
+        NSLocalizedDescriptionKey: "text file \(path) was not written"
+    ])
+}
+
+private func waitForProcessExit(_ pid: Int32) async throws {
+    for _ in 0..<30 {
+        if Darwin.kill(pid, 0) != 0 {
+            return
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    XCTFail("process \(pid) should exit")
+}
+
+private final class TemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "codex-swift-exec-server-client-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
 }
 
 private extension ExecServerJSONRPCMessage {
