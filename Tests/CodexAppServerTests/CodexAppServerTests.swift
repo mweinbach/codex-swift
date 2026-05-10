@@ -1,6 +1,7 @@
 @testable import CodexAppServer
 import CodexCore
 import Foundation
+import SQLite3
 import XCTest
 
 final class CodexAppServerTests: XCTestCase {
@@ -5480,6 +5481,60 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadListStateDbOnlyReturnsSQLiteWithoutRolloutScan() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T10-00-00",
+            timestamp: "2025-01-02T10:00:00Z",
+            preview: "rollout cwd should not match stale sqlite cwd",
+            provider: "openai",
+            cwd: temp.url.appendingPathComponent("rollout-cwd", isDirectory: true).path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let staleCwd = temp.url.appendingPathComponent("stale-cwd", isDirectory: true)
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: ThreadId(string: threadID),
+            rolloutPath: rolloutPath,
+            createdAt: try appServerDate("2025-01-02T10:00:00Z"),
+            updatedAt: try appServerDate("2025-01-03T10:00:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: staleCwd.path,
+            cliVersion: "0.0.0",
+            title: "stale sqlite title",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "state db only stale cwd"
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let stateOnlyResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":10,"cwd":"\#(staleCwd.path)","useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let stateOnlyResult = try XCTUnwrap(stateOnlyResponse["result"] as? [String: Any])
+        let stateOnlyData = try XCTUnwrap(stateOnlyResult["data"] as? [[String: Any]])
+        XCTAssertEqual(stateOnlyData.map { $0["id"] as? String }, [threadID])
+        XCTAssertEqual(stateOnlyData.map { $0["preview"] as? String }, ["state db only stale cwd"])
+        XCTAssertEqual(stateOnlyData.map { $0["cwd"] as? String }, [staleCwd.path])
+
+        let scannedResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"limit":10,"cwd":"\#(staleCwd.path)","useStateDbOnly":false}}"#,
+            configuration: configuration
+        )
+        let scannedResult = try XCTUnwrap(scannedResponse["result"] as? [String: Any])
+        let scannedData = try XCTUnwrap(scannedResult["data"] as? [[String: Any]])
+        XCTAssertTrue(scannedData.isEmpty)
+    }
+
     func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
@@ -10054,7 +10109,8 @@ final class CodexAppServerTests: XCTestCase {
         environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
-        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
+        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
+        stateStore: SQLiteAgentGraphStore? = nil
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
             CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
@@ -10076,7 +10132,8 @@ final class CodexAppServerTests: XCTestCase {
             authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
-            configLayerOverrides: configLayerOverrides
+            configLayerOverrides: configLayerOverrides,
+            stateStore: stateStore
         )
     }
 
@@ -10200,6 +10257,56 @@ final class CodexAppServerTests: XCTestCase {
             idString: threadID
         ))
         try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: path)
+    }
+
+    private func appServerDate(_ timestamp: String) throws -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = timestamp.contains(".")
+            ? [.withInternetDateTime, .withFractionalSeconds]
+            : [.withInternetDateTime]
+        return try XCTUnwrap(formatter.date(from: timestamp))
+    }
+
+    private func createAppServerThreadsTable(databaseURL: URL) throws {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        let query =
+            """
+            CREATE TABLE threads (
+                id TEXT NOT NULL PRIMARY KEY,
+                agent_path TEXT,
+                memory_mode TEXT,
+                rollout_path TEXT,
+                created_at INTEGER,
+                created_at_ms INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0,
+                archived_at INTEGER,
+                source TEXT NOT NULL DEFAULT 'cli',
+                thread_source TEXT,
+                agent_nickname TEXT,
+                agent_role TEXT,
+                model_provider TEXT NOT NULL DEFAULT 'openai',
+                model TEXT,
+                reasoning_effort TEXT,
+                cwd TEXT NOT NULL DEFAULT '',
+                cli_version TEXT NOT NULL DEFAULT '',
+                first_user_message TEXT NOT NULL DEFAULT '',
+                sandbox_policy TEXT NOT NULL DEFAULT '',
+                approval_mode TEXT NOT NULL DEFAULT '',
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                git_sha TEXT,
+                git_branch TEXT,
+                git_origin_url TEXT
+            )
+            """
+        XCTAssertEqual(sqlite3_exec(openedDatabase, query, nil, nil, nil), SQLITE_OK)
     }
 
     private func fakeJWT(email: String, plan: String, accountID: String = "acct-test") throws -> String {

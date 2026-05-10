@@ -1691,7 +1691,7 @@ public enum ThreadListSortDirection: Equatable, Sendable {
     }
 }
 
-private extension ThreadMetadata {
+public extension ThreadMetadata {
     func timestamp(for sortKey: ThreadListSortKey) -> Date {
         switch sortKey {
         case .createdAt:

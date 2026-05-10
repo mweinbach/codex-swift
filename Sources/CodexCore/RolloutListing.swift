@@ -68,6 +68,10 @@ public struct ConversationCursor: Equatable, Codable, Sendable {
     public var token: String {
         RolloutListing.formatRFC3339Timestamp(timestamp)
     }
+
+    public var anchorTimestamp: Date {
+        timestamp
+    }
 }
 
 public enum ConversationSortKey: Equatable, Sendable {

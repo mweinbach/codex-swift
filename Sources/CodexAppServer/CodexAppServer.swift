@@ -114,6 +114,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
     public let configLayerOverrides: ConfigLayerLoaderOverrides
+    public let stateStore: SQLiteAgentGraphStore?
 
     public init(
         codexHome: URL,
@@ -134,7 +135,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
-        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
+        configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
+        stateStore: SQLiteAgentGraphStore? = nil
     ) {
         self.codexHome = codexHome
         self.cwd = cwd
@@ -161,6 +163,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.mcpHTTPTransport = mcpHTTPTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
         self.configLayerOverrides = configLayerOverrides
+        self.stateStore = stateStore
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -721,14 +724,34 @@ public enum CodexAppServer {
         let sourceFilter = try threadListSourceFilter(params?["sourceKinds"])
         let sortKey = try threadListSortKey(params?["sortKey"])
         let sortDirection = try threadListSortDirection(params?["sortDirection"])
+        let cursor = try threadListCursor(params?["cursor"])
+        let pageSize = listLimit(params?["limit"])
+        let modelProviders = modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
+        let cwdFilters = try threadListCwdFilters(params?["cwd"])
+        if boolParam(params?["useStateDbOnly"], defaultValue: false) {
+            return try threadListStateDbOnlyResult(
+                configuration: configuration,
+                pageSize: pageSize,
+                cursor: cursor,
+                allowedSources: sourceFilter.allowedSources,
+                sourceMatcher: sourceFilter.matcher,
+                modelProviders: modelProviders,
+                archivedOnly: boolParam(params?["archived"], defaultValue: false),
+                cwdFilters: cwdFilters,
+                searchTerm: stringParam(params?["searchTerm"]),
+                sortKey: sortKey,
+                sortDirection: sortDirection
+            )
+        }
+
         let page = try RolloutListing.getConversations(
             codexHome: configuration.codexHome,
-            pageSize: listLimit(params?["limit"]),
-            cursor: try threadListCursor(params?["cursor"]),
+            pageSize: pageSize,
+            cursor: cursor,
             allowedSources: sourceFilter.allowedSources,
-            modelProviders: modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider),
+            modelProviders: modelProviders,
             archivedOnly: boolParam(params?["archived"], defaultValue: false),
-            cwdFilters: try threadListCwdFilters(params?["cwd"]),
+            cwdFilters: cwdFilters,
             searchTerm: stringParam(params?["searchTerm"]),
             sourceMatcher: sourceFilter.matcher,
             sortKey: sortKey,
@@ -9571,6 +9594,58 @@ public enum CodexAppServer {
         ].nullStripped(keepNulls: true)
     }
 
+    private static func threadObject(
+        for metadata: ThreadMetadata,
+        defaultProvider: String,
+        turns: [[String: Any]] = []
+    ) throws -> [String: Any] {
+        let source = threadListSessionSource(from: metadata.source)
+        return [
+            "id": metadata.id.description,
+            "sessionId": metadata.id.description,
+            "forkedFromId": NSNull(),
+            "preview": metadata.firstUserMessage ?? metadata.title,
+            "ephemeral": false,
+            "modelProvider": metadata.modelProvider.isEmpty ? defaultProvider : metadata.modelProvider,
+            "createdAt": Int(metadata.createdAt.timeIntervalSince1970),
+            "updatedAt": Int(metadata.updatedAt.timeIntervalSince1970),
+            "status": ["type": "notLoaded"],
+            "path": metadata.rolloutPath,
+            "cwd": metadata.cwd,
+            "cliVersion": metadata.cliVersion,
+            "source": appServerSource(source),
+            "threadSource": metadata.threadSource?.description ?? NSNull(),
+            "agentNickname": ((metadata.agentNickname ?? source.nickname) as Any?) ?? NSNull(),
+            "agentRole": ((metadata.agentRole ?? source.agentRole) as Any?) ?? NSNull(),
+            "gitInfo": threadListGitInfo(from: metadata) ?? NSNull(),
+            "name": NSNull(),
+            "turns": turns
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func threadListSessionSource(from persistedSource: String) -> SessionSource {
+        if let data = persistedSource.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(SessionSource.self, from: data) {
+            return parsed
+        }
+        if let quoted = try? JSONEncoder().encode(persistedSource),
+           let parsed = try? JSONDecoder().decode(SessionSource.self, from: quoted) {
+            return parsed
+        }
+        return .unknown
+    }
+
+    private static func threadListGitInfo(from metadata: ThreadMetadata) -> [String: Any]? {
+        guard metadata.gitSHA != nil || metadata.gitBranch != nil || metadata.gitOriginURL != nil else {
+            return nil
+        }
+        return [
+            "sha": metadata.gitSHA as Any,
+            "branch": metadata.gitBranch as Any,
+            "originUrl": metadata.gitOriginURL as Any
+        ].nullStripped()
+    }
+
     private static func unixSeconds(_ timestamp: String) -> Int {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -10815,6 +10890,93 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
         }
         return parsed
+    }
+
+    private static func threadListStateDbOnlyResult(
+        configuration: CodexAppServerConfiguration,
+        pageSize: Int,
+        cursor: ConversationCursor?,
+        allowedSources: [SessionSource],
+        sourceMatcher: SessionSourceMatcher?,
+        modelProviders: [String]?,
+        archivedOnly: Bool,
+        cwdFilters: [String]?,
+        searchTerm: String?,
+        sortKey: ConversationSortKey,
+        sortDirection: ConversationSortDirection
+    ) throws -> [String: Any] {
+        guard let stateStore = configuration.stateStore else {
+            return [
+                "data": [],
+                "nextCursor": NSNull(),
+                "backwardsCursor": NSNull()
+            ]
+        }
+
+        let filters = ThreadListFilterOptions(
+            archivedOnly: archivedOnly,
+            allowedSources: allowedSources.map(\.description),
+            modelProviders: modelProviders,
+            cwdFilters: cwdFilters?.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            anchor: cursor.map { ThreadListAnchor(timestamp: $0.anchorTimestamp) },
+            sortKey: threadListStoreSortKey(sortKey),
+            sortDirection: threadListStoreSortDirection(sortDirection),
+            searchTerm: searchTerm
+        )
+        let page = try runAsyncBlocking {
+            try await stateStore.listThreads(pageSize: pageSize, filters: filters)
+        }
+        let visibleItems = page.items.filter { item in
+            sourceMatcher?.matches(threadListSessionSource(from: item.source)) ?? true
+        }
+        return [
+            "data": try visibleItems.map { try threadObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
+            "nextCursor": (page.nextAnchor.map { threadListCursorToken(for: $0.timestamp) } as Any?) ?? NSNull(),
+            "backwardsCursor": visibleItems.first.map {
+                threadListBackwardsCursorToken(
+                    for: $0.timestamp(for: filters.sortKey),
+                    sortDirection: sortDirection
+                )
+            } as Any? ?? NSNull()
+        ]
+    }
+
+    private static func threadListStoreSortKey(_ sortKey: ConversationSortKey) -> ThreadListSortKey {
+        switch sortKey {
+        case .createdAt:
+            return .createdAt
+        case .updatedAt:
+            return .updatedAt
+        }
+    }
+
+    private static func threadListStoreSortDirection(_ sortDirection: ConversationSortDirection) -> ThreadListSortDirection {
+        switch sortDirection {
+        case .ascending:
+            return .ascending
+        case .descending:
+            return .descending
+        }
+    }
+
+    private static func threadListBackwardsCursorToken(
+        for timestamp: Date,
+        sortDirection: ConversationSortDirection
+    ) -> String {
+        let interval: TimeInterval = sortDirection == .ascending ? 0.001 : -0.001
+        return threadListCursorToken(for: timestamp.addingTimeInterval(interval))
+    }
+
+    private static func threadListCursorToken(for timestamp: Date) -> String {
+        let wholeSeconds = timestamp.timeIntervalSince1970.rounded(.towardZero)
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if abs(timestamp.timeIntervalSince1970 - wholeSeconds) < 0.000_001 {
+            formatter.formatOptions = [.withInternetDateTime]
+        } else {
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        }
+        return formatter.string(from: timestamp)
     }
 
     private static func threadListSortKey(_ value: Any?) throws -> ConversationSortKey {
