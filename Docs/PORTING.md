@@ -94,7 +94,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/common/src/approval_presets.rs`
   - built-in approval preset ordering and policy pairs
 - `codex-rs/protocol/src/approvals.rs`
-  - transparent execpolicy amendment array encoding, exec/apply-patch approval payloads, elicitation request/action models, JSON-RPC-style request IDs, default turn IDs, approval ids, timestamps, network approval contexts/amendments, additional permissions, available-decision fallback derivation, and optional omission rules
+  - transparent execpolicy amendment array encoding, exec/apply-patch approval payloads, elicitation request/action models, JSON-RPC-style request IDs, default turn IDs, approval ids, timestamps, network approval contexts/amendments, additional permissions, available-decision fallback derivation, optional omission rules, and UTF-8 byte-boundary truncation for rendered allow-prefix text
 - `codex-rs/protocol/src/protocol.rs` review decision model
   - approval response wire strings, timeout decision, externally tagged execpolicy/network-policy amendment approval payloads, and denied default
 - `codex-rs/protocol/src/user_input.rs`

@@ -54,6 +54,15 @@ final class ApprovalsTests: XCTestCase {
         )
     }
 
+    func testCommandPrefixFormatterTruncatesAtUTF8BoundaryLikeRust() throws {
+        let prefixes = [[String(repeating: "é", count: 3_000)]]
+
+        let output = try XCTUnwrap(CommandPrefixFormatter.formatAllowPrefixes(prefixes))
+        let prefix = String(output.dropLast(CommandPrefixFormatter.truncatedMarker.count))
+        XCTAssertLessThanOrEqual(prefix.utf8.count, CommandPrefixFormatter.maxAllowPrefixTextBytes)
+        XCTAssertEqual(output.hasSuffix(CommandPrefixFormatter.truncatedMarker), true)
+    }
+
     func testReviewDecisionUnitVariantsUseRustSnakeCaseStrings() throws {
         let cases: [(ReviewDecision, String)] = [
             (.approved, #""approved""#),

@@ -44,13 +44,25 @@ public enum CommandPrefixFormatter {
             .map { "- \(renderCommandPrefix($0))" }
             .joined(separator: "\n")
 
-        if output.count > maxAllowPrefixTextBytes {
+        if output.utf8.count > maxAllowPrefixTextBytes {
             truncated = true
-            let endIndex = output.index(output.startIndex, offsetBy: maxAllowPrefixTextBytes)
-            output = String(output[..<endIndex])
+            output = truncateToUTF8Boundary(output, maxBytes: maxAllowPrefixTextBytes)
         }
 
         return truncated ? output + truncatedMarker : output
+    }
+
+    private static func truncateToUTF8Boundary(_ value: String, maxBytes: Int) -> String {
+        var end = value.utf8.index(value.utf8.startIndex, offsetBy: maxBytes)
+        while end > value.utf8.startIndex,
+              String.Index(end, within: value) == nil
+        {
+            end = value.utf8.index(before: end)
+        }
+        guard let stringEnd = String.Index(end, within: value) else {
+            return ""
+        }
+        return String(value[..<stringEnd])
     }
 
     private static func renderCommandPrefix(_ prefix: [String]) -> String {
