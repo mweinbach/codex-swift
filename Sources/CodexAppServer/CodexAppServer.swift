@@ -3059,7 +3059,20 @@ public enum CodexAppServer {
     }
 
     private static func connectorInstallURL(name: String, connectorID: String) -> String {
-        "https://chatgpt.com/apps/\(slugifyExternalAgentName(name))/\(connectorID)"
+        "https://chatgpt.com/apps/\(connectorNameSlug(name))/\(connectorID)"
+    }
+
+    private static func connectorNameSlug(_ value: String) -> String {
+        var slug = ""
+        for scalar in value.unicodeScalars {
+            if scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(UnicodeScalar(String(scalar).lowercased())!)
+            } else {
+                slug.append("-")
+            }
+        }
+        let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "app" : trimmed
     }
 
     fileprivate static func pluginListResult(

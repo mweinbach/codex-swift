@@ -470,16 +470,13 @@ private func connectorInstallURL(name: String, connectorID: String) -> String {
 
 private func connectorNameSlug(_ value: String) -> String {
     var slug = ""
-    var lastWasDash = false
     for scalar in value.unicodeScalars {
         if scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) {
             slug.unicodeScalars.append(UnicodeScalar(String(scalar).lowercased())!)
-            lastWasDash = false
-        } else if !lastWasDash {
+        } else {
             slug.append("-")
-            lastWasDash = true
         }
     }
     let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-    return trimmed.isEmpty ? "migrated" : trimmed
+    return trimmed.isEmpty ? "app" : trimmed
 }

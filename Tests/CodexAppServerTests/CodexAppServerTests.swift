@@ -4285,6 +4285,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["nextCursor"] is NSNull)
     }
 
+    func testAppListUsesRustConnectorInstallURLSlugs() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        apps = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            accessibleConnectorProvider: { _, _ in
+                [
+                    DiscoverableConnectorInfo(
+                        id: "connector_symbol",
+                        name: "$$$",
+                        isAccessible: true,
+                        isEnabled: true
+                    ),
+                    DiscoverableConnectorInfo(
+                        id: "connector_punctuation",
+                        name: "A + B",
+                        isAccessible: true,
+                        isEnabled: true
+                    )
+                ]
+            }
+        )
+
+        let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["installUrl"] as? String }, [
+            "https://chatgpt.com/apps/app/connector_symbol",
+            "https://chatgpt.com/apps/a---b/connector_punctuation"
+        ])
+    }
+
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

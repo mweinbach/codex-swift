@@ -155,6 +155,33 @@ final class ToolDiscoveryTests: XCTestCase {
         )
     }
 
+    func testAccessibleConnectorsFromMCPToolsUsesRustInstallURLSlugs() {
+        let tools = [
+            "mcp__codex_apps__punctuation": McpTool(
+                name: "punctuation",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "connector_punctuation",
+                connectorName: "A + B"
+            ),
+            "mcp__codex_apps__symbol": McpTool(
+                name: "symbol",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "connector_symbol",
+                connectorName: "$$$"
+            )
+        ]
+
+        let connectors = accessibleConnectorsFromMCPTools(tools)
+
+        XCTAssertEqual(
+            connectors.map { $0.installURL },
+            [
+                "https://chatgpt.com/apps/app/connector_symbol",
+                "https://chatgpt.com/apps/a---b/connector_punctuation"
+            ]
+        )
+    }
+
     func testBuildRequestPluginInstallElicitationRequestUsesExpectedShape() throws {
         let args = RequestPluginInstallArgs(
             toolType: .connector,
