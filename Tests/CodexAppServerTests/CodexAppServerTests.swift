@@ -2813,6 +2813,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(firstItems[1]["text"] as? String, "Done")
     }
 
+    func testThreadReadCanReturnArchivedThreadsByIDLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Archived user message",
+            provider: "mock_provider",
+            archived: true
+        )
+        let archivedPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID,
+            includeArchived: true
+        ))
+        try appendRolloutEvents(
+            to: archivedPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [.agentMessage(AgentMessageEvent(message: "Archived answer"))]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertEqual(thread["id"] as? String, threadID)
+        XCTAssertEqual(thread["path"] as? String, archivedPath)
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turnUserText(turns[0]), "Archived user message")
+        XCTAssertEqual(turnAgentTexts(turns[0]), ["Archived answer"])
+    }
+
     func testThreadReadRejectsInvalidThreadIDAndMissingRollout() throws {
         let temp = try TemporaryDirectory()
 
@@ -8972,6 +9008,38 @@ final class CodexAppServerTests: XCTestCase {
         let newerResult = try XCTUnwrap(newerPage["result"] as? [String: Any])
         let newerData = try XCTUnwrap(newerResult["data"] as? [[String: Any]])
         XCTAssertEqual(newerData.map(turnUserText), ["third", "fourth"])
+    }
+
+    func testThreadTurnsListCanReturnArchivedThreadsByIDLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "archived first",
+            provider: "mock_provider",
+            archived: true
+        )
+        let archivedPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID,
+            includeArchived: true
+        ))
+        try appendRolloutEvents(to: archivedPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .agentMessage(AgentMessageEvent(message: "archived final"))
+        ])
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":10}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(turnUserText(data[0]), "archived first")
+        XCTAssertEqual(turnAgentTexts(data[0]), ["archived final"])
     }
 
     func testThreadTurnsRoutesRequireExperimentalAPI() throws {

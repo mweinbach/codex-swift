@@ -178,39 +178,47 @@ public enum RolloutListing {
 
     public static func findConversationPathByIDString(
         codexHome: URL,
-        idString: String
+        idString: String,
+        includeArchived: Bool = false
     ) throws -> String? {
         guard UUID(uuidString: idString) != nil else {
             return nil
         }
 
-        let root = codexHome.appendingPathComponent(sessionsSubdirectory, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            return nil
-        }
+        let roots = [
+            codexHome.appendingPathComponent(sessionsSubdirectory, isDirectory: true)
+        ] + (includeArchived ? [
+            codexHome.appendingPathComponent(RolloutErrors.archivedSessionsSubdirectory, isDirectory: true)
+        ] : [])
 
-        let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: []
-        )
-
-        while let url = enumerator?.nextObject() as? URL {
-            guard url.lastPathComponent.hasSuffix(".jsonl") else {
+        for root in roots {
+            guard FileManager.default.fileExists(atPath: root.path) else {
                 continue
             }
 
-            if url.lastPathComponent.contains(idString) {
+            let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: []
+            )
+
+            while let url = enumerator?.nextObject() as? URL {
+                guard url.lastPathComponent.hasSuffix(".jsonl") else {
+                    continue
+                }
+
+                if url.lastPathComponent.contains(idString) {
+                    return url.path
+                }
+
+                guard let text = try? String(contentsOf: url, encoding: .utf8),
+                      text.contains(idString)
+                else {
+                    continue
+                }
+
                 return url.path
             }
-
-            guard let text = try? String(contentsOf: url, encoding: .utf8),
-                  text.contains(idString)
-            else {
-                continue
-            }
-
-            return url.path
         }
 
         return nil

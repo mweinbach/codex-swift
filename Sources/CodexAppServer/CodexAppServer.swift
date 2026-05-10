@@ -1293,7 +1293,8 @@ public enum CodexAppServer {
 
         guard let rolloutPath = try RolloutListing.findConversationPathByIDString(
             codexHome: configuration.codexHome,
-            idString: conversationID.description
+            idString: conversationID.description,
+            includeArchived: true
         ) else {
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
@@ -1326,7 +1327,8 @@ public enum CodexAppServer {
 
         guard let rolloutPath = try RolloutListing.findConversationPathByIDString(
             codexHome: configuration.codexHome,
-            idString: conversationID.description
+            idString: conversationID.description,
+            includeArchived: true
         ) else {
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }

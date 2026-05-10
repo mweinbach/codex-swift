@@ -489,6 +489,8 @@ Source baseline inspected for this scaffold:
   - rollout summary projection now uses the newest persisted `turn_context.cwd` when present, so `thread/read`, `thread/resume`, and state DB repair metadata reflect Rust's resume-candidate behavior of re-reading the latest turn context instead of trusting stale session metadata.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` experimental thread history pagination
   - `thread/turns/list` now pages reconstructed rollout turns with Rust-shaped JSON cursors, descending default sort, `summary`/`full`/`notLoaded` item views, Rust enum validation for `itemsView` and `sortDirection`, `nextCursor`/`backwardsCursor`, and invalid-cursor/thread-id errors; `thread/turns/items/list` returns the current Rust unsupported JSON-RPC error.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` archived thread reads
+  - `thread/read` and `thread/turns/list` now resolve archived JSONL rollouts by thread id, matching Rust's `include_archived` local thread-store reads while keeping mutating rollout lookup paths active-session-only unless their route explicitly handles archive state.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` loaded-thread listing
   - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, limit handling, `nextCursor`, and unsubscribe-keeps-loaded behavior.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` out-of-band elicitation counters
