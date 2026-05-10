@@ -26,15 +26,15 @@ final class CollabEventsTests: XCTestCase {
 
     func testAgentStatusDerivesFromStatusChangingEventsLikeRust() {
         XCTAssertEqual(
-            AgentStatus.from(eventMessage: .taskStarted(TaskStartedEvent(modelContextWindow: nil))),
+            AgentStatus.from(eventMessage: .taskStarted(TaskStartedEvent(turnID: "turn-1", modelContextWindow: nil))),
             .running
         )
         XCTAssertEqual(
-            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(lastAgentMessage: "done"))),
+            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(turnID: "turn-1", lastAgentMessage: "done"))),
             .completed("done")
         )
         XCTAssertEqual(
-            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(lastAgentMessage: nil))),
+            AgentStatus.from(eventMessage: .taskComplete(TaskCompleteEvent(turnID: "turn-1", lastAgentMessage: nil))),
             .completed(nil)
         )
         XCTAssertEqual(

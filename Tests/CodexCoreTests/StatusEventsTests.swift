@@ -116,17 +116,20 @@ final class StatusEventsTests: XCTestCase {
     }
 
     func testTaskEventsIncludeNullOptionalsLikeRust() throws {
-        try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: nil), [
+        try XCTAssertJSONObjectEqual(TaskStartedEvent(turnID: "turn-1", modelContextWindow: nil), [
+            "turn_id": "turn-1",
             "model_context_window": NSNull(),
             "collaboration_mode_kind": "default"
         ])
-        try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: 128_000), [
+        try XCTAssertJSONObjectEqual(TaskStartedEvent(turnID: "turn-1", modelContextWindow: 128_000), [
+            "turn_id": "turn-1",
             "model_context_window": 128_000,
             "collaboration_mode_kind": "default"
         ])
         try XCTAssertJSONObjectEqual(
-            TaskStartedEvent(modelContextWindow: nil, collaborationModeKind: .plan),
+            TaskStartedEvent(turnID: "turn-1", modelContextWindow: nil, collaborationModeKind: .plan),
             [
+                "turn_id": "turn-1",
                 "model_context_window": NSNull(),
                 "collaboration_mode_kind": "plan"
             ]
@@ -134,14 +137,25 @@ final class StatusEventsTests: XCTestCase {
 
         let legacyStarted = try JSONDecoder().decode(
             TaskStartedEvent.self,
-            from: Data(#"{"model_context_window":null}"#.utf8)
+            from: Data(#"{"turn_id":"turn-1","model_context_window":null}"#.utf8)
         )
         XCTAssertEqual(legacyStarted.collaborationModeKind, .defaultMode)
 
-        try XCTAssertJSONObjectEqual(TaskCompleteEvent(lastAgentMessage: nil), [
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TaskStartedEvent.self,
+            from: Data(#"{"model_context_window":null}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TaskCompleteEvent.self,
+            from: Data(#"{"last_agent_message":null}"#.utf8)
+        ))
+
+        try XCTAssertJSONObjectEqual(TaskCompleteEvent(turnID: "turn-1", lastAgentMessage: nil), [
+            "turn_id": "turn-1",
             "last_agent_message": NSNull()
         ])
-        try XCTAssertJSONObjectEqual(TaskCompleteEvent(lastAgentMessage: "done"), [
+        try XCTAssertJSONObjectEqual(TaskCompleteEvent(turnID: "turn-1", lastAgentMessage: "done"), [
+            "turn_id": "turn-1",
             "last_agent_message": "done"
         ])
     }

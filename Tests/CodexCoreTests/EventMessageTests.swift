@@ -3,12 +3,16 @@ import XCTest
 
 final class EventMessageTests: XCTestCase {
     func testEventWrapperUsesRustIDAndMsgShape() throws {
-        let event = Event(id: "submission-1", msg: .taskStarted(TaskStartedEvent(modelContextWindow: nil)))
+        let event = Event(
+            id: "submission-1",
+            msg: .taskStarted(TaskStartedEvent(turnID: "turn-1", modelContextWindow: nil))
+        )
 
         try XCTAssertJSONObjectEqual(event, [
             "id": "submission-1",
             "msg": [
                 "type": "task_started",
+                "turn_id": "turn-1",
                 "model_context_window": NSNull(),
                 "collaboration_mode_kind": "default"
             ]
@@ -18,6 +22,7 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(
             try JSONDecoder().decode(Event.self, from: data),
             Event(id: "submission-1", msg: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
                 modelContextWindow: nil,
                 collaborationModeKind: .defaultMode
             )))

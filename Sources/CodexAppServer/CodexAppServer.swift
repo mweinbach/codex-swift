@@ -8284,7 +8284,7 @@ public enum CodexAppServer {
             "params": [
                 "threadId": threadID,
                 "turn": turnObject(
-                    id: event.turnID ?? fallbackTurnID,
+                    id: event.turnID,
                     status: "inProgress",
                     error: nil,
                     startedAt: event.startedAt,
@@ -8304,7 +8304,7 @@ public enum CodexAppServer {
     ) -> [String: Any] {
         turnCompletedNotification(
             threadID: threadID,
-            turnID: event.turnID ?? fallbackTurnID,
+            turnID: event.turnID,
             status: error == nil ? "completed" : "failed",
             error: error,
             startedAt: startedAt,
@@ -15586,7 +15586,7 @@ final class CodexAppServerMessageProcessor {
         let notifications: [[String: Any]]
         switch event {
         case let .taskStarted(event):
-            let runtimeTurnID = event.turnID ?? turnID
+            let runtimeTurnID = event.turnID
             activeTurnIDs[threadID] = runtimeTurnID
             if let startedAt = event.startedAt {
                 runtimeTurnStartedAt[threadID, default: [:]][runtimeTurnID] = startedAt
@@ -15604,7 +15604,7 @@ final class CodexAppServerMessageProcessor {
                 )
             ].compactMap(\.self)
         case let .taskComplete(event):
-            let runtimeTurnID = event.turnID ?? turnID
+            let runtimeTurnID = event.turnID
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil

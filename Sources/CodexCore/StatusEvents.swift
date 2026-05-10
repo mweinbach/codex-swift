@@ -305,7 +305,7 @@ public struct ModelVerificationEvent: Equatable, Codable, Sendable {
 }
 
 public struct TaskCompleteEvent: Equatable, Codable, Sendable {
-    public let turnID: String?
+    public let turnID: String
     public let lastAgentMessage: String?
     public let completedAt: Int64?
     public let durationMilliseconds: Int64?
@@ -320,7 +320,7 @@ public struct TaskCompleteEvent: Equatable, Codable, Sendable {
     }
 
     public init(
-        turnID: String? = nil,
+        turnID: String,
         lastAgentMessage: String?,
         completedAt: Int64? = nil,
         durationMilliseconds: Int64? = nil,
@@ -335,7 +335,7 @@ public struct TaskCompleteEvent: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        self.turnID = try container.decode(String.self, forKey: .turnID)
         self.lastAgentMessage = try container.decodeIfPresent(String.self, forKey: .lastAgentMessage)
         self.completedAt = try container.decodeIfPresent(Int64.self, forKey: .completedAt)
         self.durationMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .durationMilliseconds)
@@ -344,7 +344,7 @@ public struct TaskCompleteEvent: Equatable, Codable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(turnID, forKey: .turnID)
+        try container.encode(turnID, forKey: .turnID)
         try container.encodeIfPresentOrNull(lastAgentMessage, forKey: .lastAgentMessage)
         try container.encodeIfPresent(completedAt, forKey: .completedAt)
         try container.encodeIfPresent(durationMilliseconds, forKey: .durationMilliseconds)
@@ -353,7 +353,7 @@ public struct TaskCompleteEvent: Equatable, Codable, Sendable {
 }
 
 public struct TaskStartedEvent: Equatable, Codable, Sendable {
-    public let turnID: String?
+    public let turnID: String
     public let startedAt: Int64?
     public let modelContextWindow: Int64?
     public let collaborationModeKind: CollaborationModeKind?
@@ -366,7 +366,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
     }
 
     public init(
-        turnID: String? = nil,
+        turnID: String,
         startedAt: Int64? = nil,
         modelContextWindow: Int64?,
         collaborationModeKind: CollaborationModeKind? = nil
@@ -379,7 +379,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        self.turnID = try container.decode(String.self, forKey: .turnID)
         self.startedAt = try container.decodeIfPresent(Int64.self, forKey: .startedAt)
         self.modelContextWindow = try container.decodeIfPresent(Int64.self, forKey: .modelContextWindow)
         self.collaborationModeKind = try container.decodeIfPresent(
@@ -390,7 +390,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(turnID, forKey: .turnID)
+        try container.encode(turnID, forKey: .turnID)
         try container.encodeIfPresent(startedAt, forKey: .startedAt)
         try container.encodeIfPresentOrNull(modelContextWindow, forKey: .modelContextWindow)
         try container.encode(collaborationModeKind ?? .defaultMode, forKey: .collaborationModeKind)
