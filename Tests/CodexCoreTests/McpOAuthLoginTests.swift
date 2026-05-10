@@ -22,6 +22,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 envHttpHeaders: ["X-Env": "TOKEN"],
                 environment: ["TOKEN": "secret"],
                 scopes: ["repo", "user"],
+                oauthResource: "https://api.example.com",
                 timeoutSeconds: 9
             ),
             callbackServerFactory: { _, _ in callbackServer },
@@ -47,7 +48,7 @@ final class McpOAuthLoginTests: XCTestCase {
         XCTAssertEqual(messages, [.authorizationURL(serverName: "github", authURL: authURL)])
         XCTAssertEqual(
             authURL,
-            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback&scope=repo+user"
+            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback&scope=repo+user&resource=https%3A%2F%2Fapi.example.com"
         )
 
         let requests = await probe.requests()
@@ -70,6 +71,40 @@ final class McpOAuthLoginTests: XCTestCase {
         XCTAssertEqual(stored.tokenResponse.accessToken, "access")
         XCTAssertEqual(stored.tokenResponse.refreshToken, "refresh")
         XCTAssertEqual(stored.tokenResponse.scopes, ["repo", "user"])
+    }
+
+    func testPerformUsesDiscoveredScopesWhenRequestScopesAreMissing() async throws {
+        let temp = try OAuthLoginTemporaryDirectory()
+        let callbackServer = StubOAuthCallbackServer(
+            redirectURI: "http://127.0.0.1:4321/callback",
+            callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
+        )
+        let probe = OAuthLoginProbe()
+        let recorder = OAuthLoginRecorder()
+
+        try await McpOAuthLogin.perform(
+            request: McpOAuthLoginRequest(
+                serverName: "github",
+                serverURL: "https://mcp.example",
+                codexHome: temp.url,
+                storeMode: .file
+            ),
+            callbackServerFactory: { _, _ in callbackServer },
+            browserLauncher: { url in
+                await recorder.recordBrowserURL(url)
+            },
+            transport: { request in
+                try await probe.handle(request)
+            },
+            pkceGenerator: { PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge") },
+            csrfTokenGenerator: { "csrf" }
+        )
+
+        let browserURL = await recorder.browserURLs().first
+        XCTAssertEqual(
+            browserURL,
+            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback&scope=profile+email"
+        )
     }
 
     func testPerformContinuesWhenBrowserLaunchFails() async throws {
@@ -246,6 +281,7 @@ private actor OAuthLoginProbe {
                   "authorization_endpoint": "https://auth.example/authorize",
                   "token_endpoint": "https://auth.example/token",
                   "registration_endpoint": "https://auth.example/register",
+                  "scopes_supported": ["profile", " email ", "profile", "", "   "],
                   "response_types_supported": ["code"]
                 }
                 """.utf8)

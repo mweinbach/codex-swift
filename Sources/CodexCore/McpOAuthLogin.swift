@@ -15,7 +15,8 @@ public struct McpOAuthLoginRequest: Sendable {
     public let httpHeaders: [String: String]?
     public let envHttpHeaders: [String: String]?
     public let environment: [String: String]
-    public let scopes: [String]
+    public let scopes: [String]?
+    public let oauthResource: String?
     public let timeoutSeconds: Int?
     public let launchBrowser: Bool
     public let callbackPort: UInt16?
@@ -29,7 +30,8 @@ public struct McpOAuthLoginRequest: Sendable {
         httpHeaders: [String: String]? = nil,
         envHttpHeaders: [String: String]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        scopes: [String] = [],
+        scopes: [String]? = nil,
+        oauthResource: String? = nil,
         timeoutSeconds: Int? = nil,
         launchBrowser: Bool = true,
         callbackPort: UInt16? = nil,
@@ -43,6 +45,7 @@ public struct McpOAuthLoginRequest: Sendable {
         self.envHttpHeaders = envHttpHeaders
         self.environment = environment
         self.scopes = scopes
+        self.oauthResource = oauthResource
         self.timeoutSeconds = timeoutSeconds
         self.launchBrowser = launchBrowser
         self.callbackPort = callbackPort
@@ -96,9 +99,11 @@ public enum McpOAuthLogin {
             throw McpOAuthLoginError.metadataNotFound
         }
 
+        let scopes = request.scopes ?? normalizedScopes(metadata.scopesSupported)
         let session = try await McpOAuthAuthorizationSession.start(
             metadata: metadata,
-            scopes: request.scopes,
+            scopes: scopes,
+            oauthResource: request.oauthResource,
             redirectURI: callbackServer.redirectURI,
             clientName: "Codex",
             httpHeaders: request.httpHeaders,
@@ -139,6 +144,18 @@ public enum McpOAuthLogin {
             mode: request.storeMode,
             keyringStore: keyringStore
         )
+    }
+
+    private static func normalizedScopes(_ scopes: [String]?) -> [String] {
+        var normalized: [String] = []
+        for scope in scopes ?? [] {
+            let trimmed = scope.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !normalized.contains(trimmed) else {
+                continue
+            }
+            normalized.append(trimmed)
+        }
+        return normalized
     }
 }
 

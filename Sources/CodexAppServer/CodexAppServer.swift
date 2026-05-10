@@ -21,7 +21,8 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
     public let httpHeaders: [String: String]?
     public let envHttpHeaders: [String: String]?
     public let environment: [String: String]
-    public let scopes: [String]
+    public let scopes: [String]?
+    public let oauthResource: String?
     public let timeoutSeconds: Int?
     public let callbackPort: UInt16?
     public let callbackURL: String?
@@ -34,7 +35,8 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         httpHeaders: [String: String]? = nil,
         envHttpHeaders: [String: String]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        scopes: [String] = [],
+        scopes: [String]? = nil,
+        oauthResource: String? = nil,
         timeoutSeconds: Int? = nil,
         callbackPort: UInt16? = nil,
         callbackURL: String? = nil
@@ -47,6 +49,7 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         self.envHttpHeaders = envHttpHeaders
         self.environment = environment
         self.scopes = scopes
+        self.oauthResource = oauthResource
         self.timeoutSeconds = timeoutSeconds
         self.callbackPort = callbackPort
         self.callbackURL = callbackURL
@@ -641,6 +644,7 @@ public enum CodexAppServer {
                         envHttpHeaders: request.envHttpHeaders,
                         environment: request.environment,
                         scopes: request.scopes,
+                        oauthResource: request.oauthResource,
                         timeoutSeconds: request.timeoutSeconds,
                         launchBrowser: true,
                         callbackPort: request.callbackPort,
@@ -8184,7 +8188,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("OAuth login is only supported for streamable HTTP servers.")
         }
 
-        let scopes = stringArrayParam(params?["scopes"]) ?? []
+        let explicitScopes = params?["scopes"] == nil ? nil : (stringArrayParam(params?["scopes"]) ?? [])
         let timeoutSeconds: Int?
         if params?["timeoutSecs"] != nil {
             timeoutSeconds = intParam(params?["timeoutSecs"], defaultValue: 0)
@@ -8205,7 +8209,8 @@ public enum CodexAppServer {
                         httpHeaders: httpHeaders,
                         envHttpHeaders: envHttpHeaders,
                         environment: configuration.environment,
-                        scopes: scopes,
+                        scopes: explicitScopes ?? server.scopes,
+                        oauthResource: server.oauthResource,
                         timeoutSeconds: timeoutSeconds,
                         callbackPort: runtimeConfig.mcpOAuthCallbackPort,
                         callbackURL: runtimeConfig.mcpOAuthCallbackURL

@@ -1376,7 +1376,8 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
                         settings: settings,
                         httpHeaders: httpHeaders,
                         envHttpHeaders: envHttpHeaders,
-                        scopes: []
+                        scopes: nil,
+                        oauthResource: nil
                     )
                     return CodexCLI.CommandExecutionResult(
                         exitCode: 0,
@@ -1430,7 +1431,8 @@ private func runMcpCommand(_ request: CodexCLI.McpCommandRequest) async throws -
             settings: settings,
             httpHeaders: httpHeaders,
             envHttpHeaders: envHttpHeaders,
-            scopes: scopes
+            scopes: scopes.isEmpty ? server.scopes : scopes,
+            oauthResource: server.oauthResource
         )
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
@@ -1480,7 +1482,8 @@ private func runMcpOAuthLogin(
     settings: CodexRuntimeConfig,
     httpHeaders: [String: String]?,
     envHttpHeaders: [String: String]?,
-    scopes: [String]
+    scopes: [String]?,
+    oauthResource: String?
 ) async throws {
     try await McpOAuthLogin.perform(
         request: McpOAuthLoginRequest(
@@ -1492,6 +1495,7 @@ private func runMcpOAuthLogin(
             envHttpHeaders: envHttpHeaders,
             environment: ProcessInfo.processInfo.environment,
             scopes: scopes,
+            oauthResource: oauthResource,
             callbackPort: settings.mcpOAuthCallbackPort,
             callbackURL: settings.mcpOAuthCallbackURL
         ),

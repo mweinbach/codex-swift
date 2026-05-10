@@ -9946,6 +9946,8 @@ final class CodexAppServerTests: XCTestCase {
 
         [mcp_servers.github]
         url = "https://mcp.github.test/mcp"
+        scopes = ["configured"]
+        oauth_resource = "https://api.github.test"
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         let loginCapture = AppServerMcpOAuthLoginCapture()
         let notificationCapture = AppServerNotificationCapture()
@@ -9974,6 +9976,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requests[0].serverURL, "https://mcp.github.test/mcp")
         XCTAssertEqual(requests[0].storeMode, .file)
         XCTAssertEqual(requests[0].scopes, ["repo"])
+        XCTAssertEqual(requests[0].oauthResource, "https://api.github.test")
         XCTAssertEqual(requests[0].timeoutSeconds, 7)
         XCTAssertEqual(requests[0].callbackPort, 5678)
         XCTAssertEqual(requests[0].callbackURL, "https://oauth.github.test/callback")
@@ -9985,6 +9988,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["name"] as? String, "github")
         XCTAssertEqual(params["success"] as? Bool, true)
         XCTAssertNil(params["error"])
+    }
+
+    func testMcpServerOAuthLoginUsesConfiguredScopesWhenParamsOmitScopes() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.github]
+        url = "https://mcp.github.test/mcp"
+        scopes = ["repo", "workflow"]
+        oauth_resource = "https://api.github.test"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let loginCapture = AppServerMcpOAuthLoginCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            mcpOAuthLoginStarter: { request, completion in
+                await loginCapture.append(request)
+                await completion(true, nil)
+                return AppServerMcpOAuthLoginStarted(authorizationURL: "https://auth.github.test/authorize")
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        _ = try decode(processor.processLine(Data(#"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"github"}}"#.utf8)))
+
+        let requests = await loginCapture.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].scopes, ["repo", "workflow"])
+        XCTAssertEqual(requests[0].oauthResource, "https://api.github.test")
     }
 
     func testSkillsListReturnsRepoUserAndSystemSkillsWithPriorityDedupe() throws {

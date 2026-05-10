@@ -184,6 +184,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
     public static func start(
         metadata: McpOAuthAuthorizationMetadata,
         scopes: [String],
+        oauthResource: String? = nil,
         redirectURI: String,
         clientName: String? = nil,
         clientMetadataURL: String? = nil,
@@ -223,6 +224,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
             clientID: clientConfig.clientID,
             redirectURI: redirectURI,
             scopes: scopes,
+            oauthResource: oauthResource,
             csrfToken: csrfToken,
             codeChallenge: pkce.codeChallenge
         )
@@ -284,6 +286,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
         clientID: String,
         redirectURI: String,
         scopes: [String],
+        oauthResource: String?,
         csrfToken: String,
         codeChallenge: String
     ) throws -> String {
@@ -304,6 +307,9 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
 
         if !scopes.isEmpty {
             encodedPairs.append("\(formEncode("scope"))=\(formEncode(scopes.joined(separator: " ")))")
+        }
+        if let oauthResource = oauthResource?.trimmingCharacters(in: .whitespacesAndNewlines), !oauthResource.isEmpty {
+            encodedPairs.append("\(formEncode("resource"))=\(formEncode(oauthResource))")
         }
 
         let encodedQuery = encodedPairs.joined(separator: "&")
