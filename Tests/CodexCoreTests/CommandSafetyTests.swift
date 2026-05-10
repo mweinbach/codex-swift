@@ -340,6 +340,12 @@ final class CommandSafetyTests: XCTestCase {
             "-Command",
             "Get-Content Cargo.toml"
         ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Get-Content",
+            "Cargo.toml"
+        ]))
     }
 
     func testWindowsPowerShellSafePipelinesAndGitUsage() {
@@ -415,8 +421,7 @@ final class CommandSafetyTests: XCTestCase {
             ["powershell.exe", "-Command", "git cat-file --filters HEAD:a.txt"],
             ["powershell.exe", "-Command", "-git cat-file -p HEAD:foo.rs"],
             ["powershell.exe", "-EncodedCommand", "RwBlAHQALQBMAG8AYwBhAHQAaQBvAG4A"],
-            ["powershell.exe", "-UnknownFlag", "Get-Location"],
-            ["powershell.exe", "-Command", "Get-Content", "Cargo.toml"]
+            ["powershell.exe", "-UnknownFlag", "Get-Location"]
         ] {
             XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
         }

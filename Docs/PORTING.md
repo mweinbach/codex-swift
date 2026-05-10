@@ -871,6 +871,8 @@ Source baseline inspected for this scaffold:
   - matched Rust tree-sitter parser behavior for shell comments by rejecting unquoted `#` at word boundaries in Swift's word-only bash fallback, preventing comment-bearing `bash -lc` scripts from being auto-classified as safe while preserving literal `#` inside words and escaped `\#` arguments.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
+- `codex-rs/shell-command/src/powershell.rs` wrapper command extraction
+  - Swift PowerShell safe-command parsing now matches Rust's `-Command`/`-c` extraction by evaluating the script argument immediately after the command flag and ignoring later wrapper argv entries, while still rejecting unknown or unsafe flags before the script.
 - `codex-rs/core/src/exec_policy.rs` PowerShell command-origin lowering
   - routed Swift exec-policy checks through the Rust-style PowerShell `-Command`/`-c` body parser so prefix rules, heuristics, and proposed amendments evaluate inner PowerShell words such as `Get-Content Cargo.toml` instead of the wrapper argv.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` PowerShell force-delete heuristic

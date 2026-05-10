@@ -243,7 +243,7 @@ public enum CommandSafety {
 
             switch lower {
             case "-command", "/command", "-c":
-                guard arguments.indices.contains(index + 1), index + 2 == arguments.count else {
+                guard arguments.indices.contains(index + 1) else {
                     return nil
                 }
                 return parseSafePowerShellScript(arguments[index + 1], executable: executable)
