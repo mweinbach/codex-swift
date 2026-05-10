@@ -12040,6 +12040,13 @@ final class CodexAppServerTests: XCTestCase {
             #"{"id":3,"method":"command/exec/terminate","params":{"processId":"cmd-kill"}}"#.utf8
         )))
         XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first { $0["id"] as? Int == 1 })
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertNotEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
     }
 
     func testCommandExecProcessIDSessionTimeoutReportsRustExitCode() async throws {
