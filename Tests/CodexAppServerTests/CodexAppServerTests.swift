@@ -740,6 +740,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(cancelledParams["error"] is NSNull)
     }
 
+    func testRuntimeErrorEventsEmitRustErrorNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .error(ErrorEvent(
+                message: "too many attempts",
+                codexErrorInfo: .responseTooManyFailedAttempts(httpStatusCode: 429)
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .streamError(StreamErrorEvent(
+                message: "stream dropped",
+                codexErrorInfo: .responseStreamDisconnected(httpStatusCode: nil),
+                additionalDetails: "retrying"
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .error(ErrorEvent(
+                message: "cannot steer",
+                codexErrorInfo: .activeTurnNotSteerable(turnKind: .review)
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .warning(WarningEvent(message: "after suppressed error"))
+        )
+
+        let error = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(error[0]["method"] as? String, "error")
+        let errorParams = try XCTUnwrap(error[0]["params"] as? [String: Any])
+        XCTAssertEqual(errorParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(errorParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(errorParams["willRetry"] as? Bool, false)
+        let errorObject = try XCTUnwrap(errorParams["error"] as? [String: Any])
+        XCTAssertEqual(errorObject["message"] as? String, "too many attempts")
+        XCTAssertTrue(errorObject["additionalDetails"] is NSNull)
+        let errorInfo = try XCTUnwrap(errorObject["codexErrorInfo"] as? [String: Any])
+        let tooManyAttempts = try XCTUnwrap(errorInfo["responseTooManyFailedAttempts"] as? [String: Any])
+        XCTAssertEqual(tooManyAttempts["httpStatusCode"] as? Int, 429)
+
+        let streamError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(streamError[0]["method"] as? String, "error")
+        let streamErrorParams = try XCTUnwrap(streamError[0]["params"] as? [String: Any])
+        XCTAssertEqual(streamErrorParams["willRetry"] as? Bool, true)
+        let streamErrorObject = try XCTUnwrap(streamErrorParams["error"] as? [String: Any])
+        XCTAssertEqual(streamErrorObject["message"] as? String, "stream dropped")
+        XCTAssertEqual(streamErrorObject["additionalDetails"] as? String, "retrying")
+        let streamErrorInfo = try XCTUnwrap(streamErrorObject["codexErrorInfo"] as? [String: Any])
+        let disconnected = try XCTUnwrap(streamErrorInfo["responseStreamDisconnected"] as? [String: Any])
+        XCTAssertTrue(disconnected["httpStatusCode"] is NSNull)
+
+        let warning = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(warning[0]["method"] as? String, "warning")
+        let warningParams = try XCTUnwrap(warning[0]["params"] as? [String: Any])
+        XCTAssertEqual(warningParams["message"] as? String, "after suppressed error")
+    }
+
     func testRuntimeNoticeAndModelEventsEmitRustNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

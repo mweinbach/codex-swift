@@ -8295,6 +8295,101 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func errorNotification(
+        threadID: String,
+        turnID: String,
+        event: ErrorEvent
+    ) -> [String: Any]? {
+        guard event.affectsTurnStatus else {
+            return nil
+        }
+        return errorNotification(
+            threadID: threadID,
+            turnID: turnID,
+            message: event.message,
+            codexErrorInfo: event.codexErrorInfo,
+            additionalDetails: nil,
+            willRetry: false
+        )
+    }
+
+    fileprivate static func streamErrorNotification(
+        threadID: String,
+        turnID: String,
+        event: StreamErrorEvent
+    ) -> [String: Any] {
+        errorNotification(
+            threadID: threadID,
+            turnID: turnID,
+            message: event.message,
+            codexErrorInfo: event.codexErrorInfo,
+            additionalDetails: event.additionalDetails,
+            willRetry: true
+        )
+    }
+
+    private static func errorNotification(
+        threadID: String,
+        turnID: String,
+        message: String,
+        codexErrorInfo: CodexErrorInfo?,
+        additionalDetails: String?,
+        willRetry: Bool
+    ) -> [String: Any] {
+        [
+            "method": "error",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "willRetry": willRetry,
+                "error": [
+                    "message": message,
+                    "codexErrorInfo": codexErrorInfo.map(codexErrorInfoObject) ?? NSNull(),
+                    "additionalDetails": additionalDetails as Any? ?? NSNull()
+                ]
+            ]
+        ]
+    }
+
+    private static func codexErrorInfoObject(_ info: CodexErrorInfo) -> Any {
+        switch info {
+        case .contextWindowExceeded:
+            return "contextWindowExceeded"
+        case .usageLimitExceeded:
+            return "usageLimitExceeded"
+        case .serverOverloaded:
+            return "serverOverloaded"
+        case .cyberPolicy:
+            return "cyberPolicy"
+        case let .httpConnectionFailed(httpStatusCode):
+            return ["httpConnectionFailed": httpStatusObject(httpStatusCode)]
+        case let .responseStreamConnectionFailed(httpStatusCode):
+            return ["responseStreamConnectionFailed": httpStatusObject(httpStatusCode)]
+        case .internalServerError:
+            return "internalServerError"
+        case .unauthorized:
+            return "unauthorized"
+        case .badRequest:
+            return "badRequest"
+        case .sandboxError:
+            return "sandboxError"
+        case let .responseStreamDisconnected(httpStatusCode):
+            return ["responseStreamDisconnected": httpStatusObject(httpStatusCode)]
+        case let .responseTooManyFailedAttempts(httpStatusCode):
+            return ["responseTooManyFailedAttempts": httpStatusObject(httpStatusCode)]
+        case let .activeTurnNotSteerable(turnKind):
+            return ["activeTurnNotSteerable": ["turnKind": turnKind.rawValue]]
+        case .threadRollbackFailed:
+            return "threadRollbackFailed"
+        case .other:
+            return "other"
+        }
+    }
+
+    private static func httpStatusObject(_ httpStatusCode: UInt16?) -> [String: Any] {
+        ["httpStatusCode": httpStatusCode as Any? ?? NSNull()]
+    }
+
     fileprivate static func realtimeStartedNotification(
         threadID: String,
         event: RealtimeConversationStartedEvent
@@ -8480,6 +8575,10 @@ public enum CodexAppServer {
         event: EventMessage
     ) -> [String: Any]? {
         switch event {
+        case let .error(event):
+            return errorNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .streamError(event):
+            return streamErrorNotification(threadID: threadID, turnID: turnID, event: event)
         case let .turnDiff(turnDiff):
             return turnDiffUpdatedNotification(
                 threadID: threadID,
