@@ -4102,7 +4102,18 @@ final class CodexAppServerTests: XCTestCase {
 
         [features]
         apps = true
+
+        [apps._default]
+        enabled = false
+
+        [apps.connector_alpha]
+        enabled = true
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [apps.connector_beta]
+        enabled = false
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
         let idToken = try fakeJWT(email: "user@example.com", plan: "business", accountID: "account-123")
         try """
         {
@@ -4173,7 +4184,8 @@ final class CodexAppServerTests: XCTestCase {
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
-            }
+            },
+            configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
         )
 
         let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
@@ -4190,7 +4202,7 @@ final class CodexAppServerTests: XCTestCase {
             "https://chatgpt.com/apps/beta/connector_beta"
         ])
         XCTAssertEqual(data.map { $0["isAccessible"] as? Bool }, [false, false])
-        XCTAssertEqual(data.map { $0["isEnabled"] as? Bool }, [true, true])
+        XCTAssertEqual(data.map { $0["isEnabled"] as? Bool }, [true, false])
         XCTAssertTrue(result["nextCursor"] is NSNull)
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
             "Bearer chatgpt-token",

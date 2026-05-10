@@ -2810,7 +2810,14 @@ public enum CodexAppServer {
 
     private static func appList(configuration: CodexAppServerConfiguration) throws -> [[String: Any]] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let stack = try? CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment,
+            systemConfigFile: nil
+        )
+        let config = try stack?.effectiveConfig() ?? (CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:]))
         var appsByID: [String: [String: Any]] = [:]
 
         if let runtimeConfig = try? CodexConfigLoader.load(
@@ -2842,7 +2849,11 @@ public enum CodexAppServer {
             }
         }
 
-        return sortedAppInfos(Array(appsByID.values))
+        return sortedAppInfos(applyAppEnabledState(
+            to: Array(appsByID.values),
+            config: config,
+            requirements: stack?.requirementsToml
+        ))
     }
 
     private static func localPluginAppList(
@@ -2930,14 +2941,37 @@ public enum CodexAppServer {
         }
     }
 
-    private static func configuredAppEnabled(id: String, in config: ConfigValue) -> Bool {
-        guard let root = configTable(config),
-              let apps = root["apps"].flatMap(configTable),
-              let entry = apps[id].flatMap(configTable)
-        else {
-            return true
+    private static func applyAppEnabledState(
+        to apps: [[String: Any]],
+        config: ConfigValue,
+        requirements: ConfigRequirementsToml?
+    ) -> [[String: Any]] {
+        apps.map { app in
+            guard let id = app["id"] as? String else {
+                return app
+            }
+            var updated = app
+            updated["isEnabled"] = configuredAppEnabled(id: id, in: config, requirements: requirements)
+            return updated
         }
-        return boolConfig(entry, "enabled") ?? true
+    }
+
+    private static func configuredAppEnabled(
+        id: String,
+        in config: ConfigValue,
+        requirements: ConfigRequirementsToml? = nil
+    ) -> Bool {
+        let root = configTable(config)
+        let apps = root?["apps"].flatMap(configTable)
+        let appEntry = apps?[id].flatMap(configTable)
+        let defaultEntry = apps?["_default"].flatMap(configTable)
+        var enabled = appEntry.flatMap { boolConfig($0, "enabled") }
+            ?? defaultEntry.flatMap { boolConfig($0, "enabled") }
+            ?? true
+        if requirements?.apps?.apps[id]?.enabled == false {
+            enabled = false
+        }
+        return enabled
     }
 
     private static func connectorInstallURL(name: String, connectorID: String) -> String {
