@@ -838,6 +838,81 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""answer":{"type":"string"}"#))
     }
 
+    func testTurnStartCollaborationModePersistsNormalizedTurnContextLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"thread-model","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [
+                    ["type": "text", "text": "Plan this"]
+                ],
+                "model": "request-model",
+                "effort": "low",
+                "collaborationMode": [
+                    "mode": "plan",
+                    "settings": [
+                        "model": "plan-model",
+                        "reasoning_effort": "medium",
+                        "developer_instructions": NSNull()
+                    ]
+                ]
+            ]
+        ]
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+        let startedTurn = try XCTUnwrap((try XCTUnwrap(messages[0]["result"] as? [String: Any]))["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(startedTurn["id"] as? String)
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""type":"turn_context""#))
+        XCTAssertTrue(rollout.contains(#""turn_id":"\#(turnID)""#))
+        XCTAssertTrue(rollout.contains(#""model":"plan-model""#))
+        XCTAssertTrue(rollout.contains(#""effort":"medium""#))
+        XCTAssertTrue(rollout.contains(#""collaboration_mode""#))
+        XCTAssertTrue(rollout.contains(#""mode":"plan""#))
+        XCTAssertTrue(rollout.contains(#""developer_instructions":"#))
+        XCTAssertTrue(rollout.contains("Plan Mode is a collaboration mode"))
+    }
+
+    func testTurnStartRejectsInvalidCollaborationModeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"collaborationMode":{"mode":"mystery","settings":{"model":"plan-model","reasoning_effort":"medium","developer_instructions":null}}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid value for field `collaborationMode`")
+    }
+
     func testTurnStartRejectsUnknownContextOverrideEnumsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

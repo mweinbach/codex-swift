@@ -1609,6 +1609,7 @@ public enum CodexAppServer {
         let summary = try turnStartReasoningSummaryParam(params?["summary"])
         let personality = try turnStartPersonalityParam(params?["personality"])
         let outputSchema = try jsonValueParam(params?["outputSchema"], fieldName: "outputSchema")
+        let collaborationMode = try turnStartCollaborationModeParam(params?["collaborationMode"])
         guard cwd != nil
             || approvalPolicy != nil
             || sandboxPolicy != nil
@@ -1617,19 +1618,24 @@ public enum CodexAppServer {
             || summary != nil
             || personality != nil
             || outputSchema != nil
+            || collaborationMode != nil
         else {
             return nil
         }
 
         let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
+        let contextModel = collaborationMode?.settings.model ?? model ?? runtimeConfig.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let contextEffort = collaborationMode?.settings.reasoningEffort ?? effort ?? runtimeConfig.modelReasoningEffort
         return TurnContextItem(
             cwd: cwd ?? existing.cwd,
             approvalPolicy: approvalPolicy ?? runtimeConfig.approvalPolicy ?? .unlessTrusted,
             sandboxPolicy: sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
-            model: model ?? runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil),
+            model: contextModel,
             personality: personality,
-            effort: effort ?? runtimeConfig.modelReasoningEffort,
+            collaborationMode: collaborationMode,
+            effort: contextEffort,
             summary: summary ?? runtimeConfig.modelReasoningSummary ?? .auto,
             finalOutputJSONSchema: outputSchema
         )
@@ -1676,6 +1682,23 @@ public enum CodexAppServer {
             throw unknownVariant(rawValue, expected: Personality.allCases.map(\.rawValue))
         }
         return personality
+    }
+
+    private static func turnStartCollaborationModeParam(_ value: Any?) throws -> CollaborationMode? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value)
+        else {
+            throw AppServerError.invalidRequest("invalid value for field `collaborationMode`")
+        }
+        do {
+            let mode = try JSONDecoder().decode(CollaborationMode.self, from: data)
+            return mode.withBuiltinDeveloperInstructionsIfNeeded()
+        } catch {
+            throw AppServerError.invalidRequest("invalid value for field `collaborationMode`")
+        }
     }
 
     private static func strictStringParam(_ value: Any?, fieldName: String) throws -> String? {
