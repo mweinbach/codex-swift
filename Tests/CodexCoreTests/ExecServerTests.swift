@@ -2,6 +2,152 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testConnectionProcessorRoutesMessagesSequentiallyLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        )
+        let connection = await processor.makeConnection()
+        let initialize = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        )
+        let pendingExec = ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "p1"))
+        )
+
+        let initializeResponse = await connection.handle(.message(.request(initialize)))
+        let initializedResponse = await connection.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        let pendingExecResponse = await connection.handle(.message(.request(pendingExec)))
+
+        XCTAssertEqual(initializeResponse?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertNil(initializedResponse)
+        XCTAssertEqual(pendingExecResponse, .error(
+            requestID: .integer(2),
+            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `process/terminate` yet")
+        ))
+    }
+
+    func testConnectionProcessorReportsMalformedMessagesWithRustRequestID() async {
+        let connection = ExecServerConnection()
+
+        let response = await connection.handle(.malformedMessage(reason: "bad json"))
+
+        XCTAssertEqual(response, .error(
+            requestID: .integer(-1),
+            error: ExecServerRPC.invalidRequest("bad json")
+        ))
+        let closed = await connection.isClosed()
+        XCTAssertFalse(closed)
+    }
+
+    func testConnectionProcessorClosesOnUnexpectedClientMessagesLikeRust() async {
+        let connection = ExecServerConnection()
+        let responseMessage = ExecServerJSONRPCMessage.response(ExecServerJSONRPCResponse(
+            id: .integer(1),
+            result: .object([:])
+        ))
+
+        let response = await connection.handle(.message(responseMessage))
+        let afterClose = await connection.handle(.malformedMessage(reason: "ignored"))
+
+        XCTAssertNil(response)
+        XCTAssertNil(afterClose)
+        let closed = await connection.isClosed()
+        XCTAssertTrue(closed)
+    }
+
+    func testConnectionProcessorClosesOnUnexpectedNotificationsLikeRust() async throws {
+        let connection = ExecServerConnection()
+        let unexpected = ExecServerJSONRPCNotification(method: "surprise", params: .object([:]))
+        let initialize = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        )
+
+        let response = await connection.handle(.message(.notification(unexpected)))
+        let afterClose = await connection.handle(.message(.request(initialize)))
+
+        XCTAssertNil(response)
+        XCTAssertNil(afterClose)
+        let closed = await connection.isClosed()
+        XCTAssertTrue(closed)
+    }
+
+    func testConnectionProcessorShutdownDetachesSessionForResumeLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        )
+        let first = await processor.makeConnection()
+        let firstInitialize = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "first"))
+        )
+        let response = await first.handle(.message(.request(firstInitialize)))
+        XCTAssertEqual(response?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+
+        _ = await first.handle(.disconnected(reason: nil))
+        let second = await processor.makeConnection()
+        let secondInitialize = ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(
+                clientName: "second",
+                resumeSessionId: "session-1"
+            ))
+        )
+
+        let resumed = await second.handle(.message(.request(secondInitialize)))
+
+        XCTAssertEqual(resumed?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+    }
+
+    func testConnectionProcessorIgnoresClosedConnectionAfterResumeLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        )
+        let first = await processor.makeConnection()
+        let firstInitialize = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "first"))
+        )
+        _ = await first.handle(.message(.request(firstInitialize)))
+        await first.shutdown()
+        let second = await processor.makeConnection()
+        let secondInitialize = ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(
+                clientName: "second",
+                resumeSessionId: "session-1"
+            ))
+        )
+        _ = await second.handle(.message(.request(secondInitialize)))
+
+        let evictedResponse = await first.handle(.malformedMessage(reason: "ignored"))
+
+        XCTAssertNil(evictedResponse)
+        let closed = await first.isClosed()
+        XCTAssertTrue(closed)
+    }
+
     func testRouterDispatchesInitializeRequestLikeRust() async throws {
         let router = ExecServerRouter()
         let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))

@@ -1,0 +1,95 @@
+import Foundation
+
+public enum ExecServerConnectionEvent: Equatable, Sendable {
+    case message(ExecServerJSONRPCMessage)
+    case malformedMessage(reason: String)
+    case disconnected(reason: String?)
+}
+
+public actor ExecServerConnectionProcessor {
+    private let sessionRegistry: ExecServerSessionRegistry
+    private let router: ExecServerRouter
+
+    public init(
+        sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
+        router: ExecServerRouter = ExecServerRouter()
+    ) {
+        self.sessionRegistry = sessionRegistry
+        self.router = router
+    }
+
+    public func makeConnection() -> ExecServerConnection {
+        ExecServerConnection(
+            sessionRegistry: sessionRegistry,
+            router: router
+        )
+    }
+}
+
+public actor ExecServerConnection {
+    private let handler: ExecServerHandler
+    private let router: ExecServerRouter
+    private var closed = false
+
+    public init(
+        sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
+        router: ExecServerRouter = ExecServerRouter()
+    ) {
+        self.handler = ExecServerHandler(sessionRegistry: sessionRegistry)
+        self.router = router
+    }
+
+    public func handle(_ event: ExecServerConnectionEvent) async -> ExecServerOutboundMessage? {
+        guard !closed else {
+            return nil
+        }
+
+        guard await handler.isSessionAttached() else {
+            await close()
+            return nil
+        }
+
+        switch event {
+        case let .malformedMessage(reason):
+            return .error(requestID: .integer(-1), error: ExecServerRPC.invalidRequest(reason))
+        case let .message(message):
+            return await handle(message)
+        case .disconnected:
+            await close()
+            return nil
+        }
+    }
+
+    public func shutdown() async {
+        await close()
+    }
+
+    public func isClosed() -> Bool {
+        closed
+    }
+
+    private func handle(_ message: ExecServerJSONRPCMessage) async -> ExecServerOutboundMessage? {
+        switch message {
+        case let .request(request):
+            return await router.handleRequest(request, using: handler)
+        case let .notification(notification):
+            do {
+                try await router.handleNotification(notification, using: handler)
+            } catch {
+                await close()
+            }
+            return nil
+        case .response, .error:
+            await close()
+            return nil
+        }
+    }
+
+    private func close() async {
+        guard !closed else {
+            return
+        }
+        closed = true
+        await handler.shutdown()
+    }
+}
