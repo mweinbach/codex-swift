@@ -156,6 +156,7 @@ public enum NonInteractiveExec {
                 verbosity: verbosity ?? modelFamily.defaultVerbosity,
                 outputSchema: outputSchema
             ),
+            inputModalities: modelFamily.inputModalities,
             conversationID: conversationID.description,
             sessionSource: .exec
         )

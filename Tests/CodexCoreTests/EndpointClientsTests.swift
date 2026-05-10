@@ -499,6 +499,54 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-123")])
     }
 
+    func testResponsesClientNormalizesPromptInputForTextOnlyModels() async throws {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key")
+        )
+
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: Prompt(input: [
+                .message(role: "user", content: [
+                    .inputText(text: "look"),
+                    .inputImage(imageURL: "data:image/png;base64,abc", detail: .high)
+                ]),
+                .functionCall(name: "run", arguments: "{}", callID: "call-1"),
+                .imageGenerationCall(id: "ig-1", status: "completed", result: "BASE64")
+            ]),
+            options: ResponsesOptions(inputModalities: [.text])
+        )
+
+        let body = try XCTUnwrap(transport.streamRequests.first?.body)
+        let input = try XCTUnwrap(try JSONObject(body)["input"] as? [[String: Any]])
+        XCTAssertEqual(input.count, 4)
+
+        let content = try XCTUnwrap(input[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["text"] as? String, "look")
+        XCTAssertEqual(
+            content[1]["text"] as? String,
+            ContextNormalization.imageContentOmittedPlaceholder
+        )
+        XCTAssertNil(content[1]["image_url"])
+
+        XCTAssertEqual(input[1]["type"] as? String, "function_call")
+        XCTAssertEqual(input[2]["type"] as? String, "function_call_output")
+        XCTAssertEqual(input[2]["output"] as? String, "aborted")
+        XCTAssertEqual(input[3]["type"] as? String, "image_generation_call")
+        XCTAssertEqual(input[3]["result"] as? String, "")
+    }
+
     func testResponsesClientSkipsAttestationWithoutChatGPTAccount() async {
         let transport = CapturingTransport(
             streamResults: [

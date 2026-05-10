@@ -35,6 +35,7 @@ public struct ModelFamily: Equatable, Sendable {
     public var defaultReasoningSummary: ReasoningSummary
     public var shellType: ConfigShellToolType
     public var truncationPolicy: TruncationPolicy
+    public var inputModalities: [InputModality]
 
     private var configuredAutoCompactTokenLimit: Int64?
 
@@ -55,7 +56,8 @@ public struct ModelFamily: Equatable, Sendable {
         defaultVerbosity: Verbosity? = nil,
         defaultReasoningSummary: ReasoningSummary = .auto,
         shellType: ConfigShellToolType = .default,
-        truncationPolicy: TruncationPolicy = .bytes(10_000)
+        truncationPolicy: TruncationPolicy = .bytes(10_000),
+        inputModalities: [InputModality] = InputModality.defaultInputModalities
     ) {
         self.slug = slug
         self.family = family
@@ -74,6 +76,7 @@ public struct ModelFamily: Equatable, Sendable {
         self.defaultReasoningSummary = defaultReasoningSummary
         self.shellType = shellType
         self.truncationPolicy = truncationPolicy
+        self.inputModalities = inputModalities
     }
 
     public func withConfigOverrides(_ overrides: ModelFamilyConfigOverrides) -> ModelFamily {
@@ -118,6 +121,7 @@ public struct ModelFamily: Equatable, Sendable {
         defaultVerbosity = model.defaultVerbosity
         applyPatchToolType = model.applyPatchToolType
         truncationPolicy = model.truncationPolicy.runtimePolicy
+        inputModalities = model.inputModalities
         supportsParallelToolCalls = model.supportsParallelToolCalls
         contextWindow = model.resolvedContextWindow
         configuredAutoCompactTokenLimit = model.autoCompactTokenLimitValue()

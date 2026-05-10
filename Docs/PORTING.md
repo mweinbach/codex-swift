@@ -924,6 +924,8 @@ Source baseline inspected for this scaffold:
   - added SQLite `apply_rollout_items` equivalent with a Swift `ThreadMetadataBuilder`, existing-row fallback vs. builder-created metadata, rollout-path refresh, session-meta/turn-context/token-count/user-message mutation, existing-git preference, override-or-file-mtime updated-at refresh, new-thread memory-mode initialization, session-meta memory-mode restore, and dynamic-tool extraction after thread upsert.
 - `codex-rs/core/src/context_manager/normalize.rs` unsupported image normalization
   - ported Rust's `strip_images_when_unsupported` behavior for text-only model contexts: message `input_image` blocks and structured function/custom tool output images are replaced with the exact Rust placeholder text, image-generation result payloads are cleared, and image-capable model contexts are left unchanged.
+- `codex-rs/core/src/context_manager/history.rs` prompt input normalization
+  - wired Responses prompt streaming through Rust's `History::for_prompt` normalization path for Swift model requests: request input now gets missing tool outputs inserted, orphan outputs removed, and image payloads stripped according to the selected model family's input modalities before the Responses API body is built.
 
 ## Known Gaps
 

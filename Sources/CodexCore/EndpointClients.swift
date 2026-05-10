@@ -678,6 +678,7 @@ public struct ResponsesOptions: Equatable, Sendable {
     public var serviceTier: String?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
+    public var inputModalities: [InputModality]
     public var storeOverride: Bool?
     public var conversationID: String?
     public var sessionSource: SessionSource?
@@ -689,6 +690,7 @@ public struct ResponsesOptions: Equatable, Sendable {
         serviceTier: String? = nil,
         promptCacheKey: String? = nil,
         text: ResponsesAPITextControls? = nil,
+        inputModalities: [InputModality] = InputModality.defaultInputModalities,
         storeOverride: Bool? = nil,
         conversationID: String? = nil,
         sessionSource: SessionSource? = nil,
@@ -699,6 +701,7 @@ public struct ResponsesOptions: Equatable, Sendable {
         self.serviceTier = serviceTier
         self.promptCacheKey = promptCacheKey
         self.text = text
+        self.inputModalities = inputModalities
         self.storeOverride = storeOverride
         self.conversationID = conversationID
         self.sessionSource = sessionSource
@@ -789,7 +792,11 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         }
 
         do {
-            let request = try ResponsesRequestBuilder(model: model, instructions: instructions, input: prompt.input)
+            var input = prompt.input
+            ContextNormalization.normalizeHistory(&input)
+            ContextNormalization.stripImagesWhenUnsupported(inputModalities: options.inputModalities, items: &input)
+
+            let request = try ResponsesRequestBuilder(model: model, instructions: instructions, input: input)
                 .tools(tools)
                 .parallelToolCalls(prompt.parallelToolCalls)
                 .reasoning(options.reasoning)

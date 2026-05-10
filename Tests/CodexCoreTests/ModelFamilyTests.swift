@@ -80,6 +80,7 @@ final class ModelFamilyTests: XCTestCase {
         let unknown = ModelsManager.findFamilyForModel("unknown-model")
         XCTAssertEqual(unknown.slug, "unknown-model")
         XCTAssertEqual(unknown.family, "unknown-model")
+        XCTAssertEqual(unknown.inputModalities, [.text, .image])
         XCTAssertNil(unknown.contextWindow)
         XCTAssertNil(unknown.autoCompactTokenLimit())
         XCTAssertTrue(unknown.baseInstructions.hasPrefix("You are a coding agent running in the Codex CLI"))
@@ -147,7 +148,8 @@ final class ModelFamilyTests: XCTestCase {
                 truncationPolicy: .tokens(2_000),
                 supportsParallelToolCalls: true,
                 contextWindow: 400_000,
-                experimentalSupportedTools: ["alpha", "beta"]
+                experimentalSupportedTools: ["alpha", "beta"],
+                inputModalities: [.text]
             )
         ])
 
@@ -161,6 +163,7 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertTrue(updated.supportsParallelToolCalls)
         XCTAssertEqual(updated.contextWindow, 400_000)
         XCTAssertEqual(updated.experimentalSupportedTools, ["alpha", "beta"])
+        XCTAssertEqual(updated.inputModalities, [.text])
         XCTAssertEqual(updated.baseInstructions, "Remote instructions")
     }
 

@@ -115,6 +115,19 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(options.serviceTier, "flex")
     }
 
+    func testResponsesOptionsCarriesModelInputModalities() {
+        let options = NonInteractiveExec.responsesOptions(
+            conversationID: ConversationId(),
+            modelFamily: ModelFamily(slug: "text-only", family: "test", inputModalities: [.text]),
+            reasoningEffort: nil,
+            reasoningSummary: nil,
+            verbosity: nil,
+            outputSchema: nil
+        )
+
+        XCTAssertEqual(options.inputModalities, [.text])
+    }
+
     func testUserPromptSubmitHooksAppendAdditionalContextToPrompt() async throws {
         let cwd = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-hook-context-\(UUID().uuidString)", isDirectory: true)
