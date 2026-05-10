@@ -1024,6 +1024,352 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertNotNil(rawPayloads["payload-tool-result"])
     }
 
+    func testTraceReduceRecordsAgentInteractionEdges() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let spawnInvocation = rawPayloadRef("payload-spawn-invocation", kind: "tool_invocation")
+        let spawnRuntimeStart = rawPayloadRef("payload-spawn-runtime-start", kind: "tool_runtime_event")
+        let spawnRuntimeEnd = rawPayloadRef("payload-spawn-runtime-end", kind: "tool_runtime_event")
+        let spawnResult = rawPayloadRef("payload-spawn-result", kind: "tool_result")
+        let childFirstRequest = rawPayloadRef("payload-child-first-request", kind: "inference_request")
+        let childSecondRequest = rawPayloadRef("payload-child-second-request", kind: "inference_request")
+        let childAnswerRequest = rawPayloadRef("payload-child-answer-request", kind: "inference_request")
+        let childAnswerResponse = rawPayloadRef("payload-child-answer-response", kind: "inference_response")
+        let sendInvocation = rawPayloadRef("payload-send-invocation", kind: "tool_invocation")
+        let sendRuntimeStart = rawPayloadRef("payload-send-runtime-start", kind: "tool_runtime_event")
+        let sendRuntimeEnd = rawPayloadRef("payload-send-runtime-end", kind: "tool_runtime_event")
+        let sendResult = rawPayloadRef("payload-send-result", kind: "tool_result")
+        let closeInvocation = rawPayloadRef("payload-close-invocation", kind: "tool_invocation")
+        let closeRuntimeStart = rawPayloadRef("payload-close-runtime-start", kind: "tool_runtime_event")
+        let closeRuntimeEnd = rawPayloadRef("payload-close-runtime-end", kind: "tool_runtime_event")
+        let closeResult = rawPayloadRef("payload-close-result", kind: "tool_result")
+        let carriedResult = rawPayloadRef("payload-agent-result", kind: "agent_result")
+        let parentNotificationRequest = rawPayloadRef("payload-parent-notification-request", kind: "inference_request")
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-root",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "call-spawn",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "spawn_agent"],
+                "summary": ["type": "generic", "label": "spawn_agent"],
+                "invocation_payload": spawnInvocation
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_started",
+                "tool_call_id": "call-spawn",
+                "runtime_payload": spawnRuntimeStart
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_ended",
+                "tool_call_id": "call-spawn",
+                "status": "completed",
+                "runtime_payload": spawnRuntimeEnd
+            ]),
+            traceEvent(seq: 7, wallTime: 107, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "call-spawn",
+                "status": "completed",
+                "result_payload": spawnResult
+            ]),
+            traceEvent(seq: 8, wallTime: 108, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-child",
+                "agent_path": "/root/child"
+            ]),
+            traceEvent(seq: 9, wallTime: 109, threadID: "thread-child", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-child",
+                "thread_id": "thread-child"
+            ]),
+            traceEvent(seq: 10, wallTime: 110, threadID: "thread-child", codexTurnID: "turn-child", payload: [
+                "type": "inference_started",
+                "inference_call_id": "child-first",
+                "thread_id": "thread-child",
+                "codex_turn_id": "turn-child",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": childFirstRequest
+            ]),
+            traceEvent(seq: 11, wallTime: 111, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "call-send",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "send_message"],
+                "summary": ["type": "generic", "label": "send_message"],
+                "invocation_payload": sendInvocation
+            ]),
+            traceEvent(seq: 12, wallTime: 112, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_started",
+                "tool_call_id": "call-send",
+                "runtime_payload": sendRuntimeStart
+            ]),
+            traceEvent(seq: 13, wallTime: 113, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_ended",
+                "tool_call_id": "call-send",
+                "status": "completed",
+                "runtime_payload": sendRuntimeEnd
+            ]),
+            traceEvent(seq: 14, wallTime: 114, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "call-send",
+                "status": "completed",
+                "result_payload": sendResult
+            ]),
+            traceEvent(seq: 15, wallTime: 115, threadID: "thread-child", codexTurnID: "turn-child", payload: [
+                "type": "inference_started",
+                "inference_call_id": "child-second",
+                "thread_id": "thread-child",
+                "codex_turn_id": "turn-child",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": childSecondRequest
+            ]),
+            traceEvent(seq: 16, wallTime: 116, threadID: "thread-child", codexTurnID: "turn-child", payload: [
+                "type": "inference_started",
+                "inference_call_id": "child-answer",
+                "thread_id": "thread-child",
+                "codex_turn_id": "turn-child",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": childAnswerRequest
+            ]),
+            traceEvent(seq: 17, wallTime: 117, threadID: "thread-child", codexTurnID: "turn-child", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "child-answer",
+                "response_id": "resp-child-answer",
+                "response_payload": childAnswerResponse
+            ]),
+            traceEvent(seq: 18, wallTime: 118, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "call-close",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "close_agent"],
+                "summary": ["type": "generic", "label": "close_agent"],
+                "invocation_payload": closeInvocation
+            ]),
+            traceEvent(seq: 19, wallTime: 119, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_started",
+                "tool_call_id": "call-close",
+                "runtime_payload": closeRuntimeStart
+            ]),
+            traceEvent(seq: 20, wallTime: 120, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_ended",
+                "tool_call_id": "call-close",
+                "status": "completed",
+                "runtime_payload": closeRuntimeEnd
+            ]),
+            traceEvent(seq: 21, wallTime: 121, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "call-close",
+                "status": "completed",
+                "result_payload": closeResult
+            ]),
+            traceEvent(seq: 22, wallTime: 122, payload: [
+                "type": "agent_result_observed",
+                "edge_id": "edge:agent-result:thread-child:turn-child:thread-root",
+                "child_thread_id": "thread-child",
+                "child_codex_turn_id": "turn-child",
+                "parent_thread_id": "thread-root",
+                "message": "done",
+                "carried_payload": carriedResult
+            ]),
+            traceEvent(seq: 23, wallTime: 123, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "inference_started",
+                "inference_call_id": "parent-notification",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-root",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": parentNotificationRequest
+            ])
+        ])
+
+        let payloads = bundle.appendingPathComponent("payloads", isDirectory: true)
+        try writeJSONObject([
+            "sender_thread_id": "thread-root",
+            "new_thread_id": "thread-child",
+            "prompt": "count files"
+        ], to: payloads.appendingPathComponent("payload-spawn-runtime-end.json", isDirectory: false))
+        try writeJSONObject([
+            "input": [
+                interAgentMessage(author: "/root", recipient: "/root/child", content: "count files")
+            ]
+        ], to: payloads.appendingPathComponent("payload-child-first-request.json", isDirectory: false))
+        try writeJSONObject([
+            "input": [
+                interAgentMessage(author: "/root", recipient: "/root/child", content: "count files"),
+                interAgentMessage(author: "/root", recipient: "/root/child", content: "status?")
+            ]
+        ], to: payloads.appendingPathComponent("payload-child-second-request.json", isDirectory: false))
+        try writeJSONObject([
+            "input": [
+                interAgentMessage(author: "/root", recipient: "/root/child", content: "count files"),
+                interAgentMessage(author: "/root", recipient: "/root/child", content: "status?")
+            ]
+        ], to: payloads.appendingPathComponent("payload-child-answer-request.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-child-answer",
+            "output_items": [
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [["type": "output_text", "text": "done"]]
+                ]
+            ]
+        ], to: payloads.appendingPathComponent("payload-child-answer-response.json", isDirectory: false))
+        try writeJSONObject([
+            "receiver_thread_id": "thread-child",
+            "prompt": "status?"
+        ], to: payloads.appendingPathComponent("payload-send-runtime-start.json", isDirectory: false))
+        try writeJSONObject([
+            "receiver_thread_id": "thread-child",
+            "prompt": "status?"
+        ], to: payloads.appendingPathComponent("payload-send-runtime-end.json", isDirectory: false))
+        try writeJSONObject([
+            "receiver_thread_id": "thread-child"
+        ], to: payloads.appendingPathComponent("payload-close-runtime-start.json", isDirectory: false))
+        try writeJSONObject([
+            "receiver_thread_id": "thread-child"
+        ], to: payloads.appendingPathComponent("payload-close-runtime-end.json", isDirectory: false))
+        try writeJSONObject([
+            "input": [
+                interAgentMessage(author: "/root/child", recipient: "/root", content: "done")
+            ]
+        ], to: payloads.appendingPathComponent("payload-parent-notification-request.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let edges = try XCTUnwrap(state["interaction_edges"] as? [String: Any])
+
+        let spawnEdge = try XCTUnwrap(edges["edge:spawn:thread-root:thread-child"] as? [String: Any])
+        XCTAssertEqual(spawnEdge["kind"] as? String, "spawn_agent")
+        XCTAssertEqual((spawnEdge["source"] as? [String: Any])?["tool_call_id"] as? String, "call-spawn")
+        XCTAssertEqual((spawnEdge["target"] as? [String: Any])?["item_id"] as? String, "conversation_item:1")
+        XCTAssertEqual(spawnEdge["started_at_unix_ms"] as? Int, 104)
+        XCTAssertEqual(spawnEdge["ended_at_unix_ms"] as? Int, 106)
+        XCTAssertEqual(spawnEdge["carried_item_ids"] as? [String], ["conversation_item:1"])
+        XCTAssertEqual(spawnEdge["carried_raw_payload_ids"] as? [String], [
+            "payload-spawn-invocation",
+            "payload-spawn-runtime-start",
+            "payload-spawn-runtime-end",
+            "payload-spawn-result"
+        ])
+
+        let sendEdge = try XCTUnwrap(edges["edge:tool:call-send"] as? [String: Any])
+        XCTAssertEqual(sendEdge["kind"] as? String, "send_message")
+        XCTAssertEqual((sendEdge["target"] as? [String: Any])?["item_id"] as? String, "conversation_item:2")
+        XCTAssertEqual(sendEdge["ended_at_unix_ms"] as? Int, 113)
+        XCTAssertEqual(sendEdge["carried_raw_payload_ids"] as? [String], [
+            "payload-send-invocation",
+            "payload-send-runtime-start",
+            "payload-send-runtime-end",
+            "payload-send-result"
+        ])
+
+        let closeEdge = try XCTUnwrap(edges["edge:tool:call-close"] as? [String: Any])
+        XCTAssertEqual(closeEdge["kind"] as? String, "close_agent")
+        XCTAssertEqual((closeEdge["target"] as? [String: Any])?["type"] as? String, "thread")
+        XCTAssertEqual((closeEdge["target"] as? [String: Any])?["thread_id"] as? String, "thread-child")
+        XCTAssertEqual(closeEdge["carried_item_ids"] as? [String], [])
+        XCTAssertEqual(closeEdge["ended_at_unix_ms"] as? Int, 120)
+
+        let resultEdge = try XCTUnwrap(edges["edge:agent-result:thread-child:turn-child:thread-root"] as? [String: Any])
+        XCTAssertEqual(resultEdge["kind"] as? String, "agent_result")
+        XCTAssertEqual((resultEdge["source"] as? [String: Any])?["item_id"] as? String, "conversation_item:3")
+        XCTAssertEqual((resultEdge["target"] as? [String: Any])?["item_id"] as? String, "conversation_item:4")
+        XCTAssertEqual(resultEdge["carried_item_ids"] as? [String], ["conversation_item:4"])
+        XCTAssertEqual(resultEdge["carried_raw_payload_ids"] as? [String], ["payload-agent-result"])
+
+        let rawPayloads = try XCTUnwrap(state["raw_payloads"] as? [String: Any])
+        XCTAssertNotNil(rawPayloads["payload-agent-result"])
+    }
+
+    func testTraceReduceFallsBackSpawnInteractionEdgeToChildThread() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let invocationPayload = rawPayloadRef("payload-spawn-invocation", kind: "tool_invocation")
+        let runtimePayload = rawPayloadRef("payload-spawn-runtime-end", kind: "tool_runtime_event")
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-root",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "call-spawn",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "spawn_agent"],
+                "summary": ["type": "generic", "label": "spawn_agent"],
+                "invocation_payload": invocationPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-root", payload: [
+                "type": "tool_call_runtime_ended",
+                "tool_call_id": "call-spawn",
+                "status": "completed",
+                "runtime_payload": runtimePayload
+            ]),
+            traceEvent(seq: 5, wallTime: 105, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-child",
+                "agent_path": "/root/child"
+            ])
+        ])
+
+        try writeJSONObject([
+            "sender_thread_id": "thread-root",
+            "new_thread_id": "thread-child",
+            "prompt": "count files"
+        ], to: bundle.appendingPathComponent("payloads/payload-spawn-runtime-end.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let edges = try XCTUnwrap(state["interaction_edges"] as? [String: Any])
+        let edge = try XCTUnwrap(edges["edge:spawn:thread-root:thread-child"] as? [String: Any])
+        XCTAssertEqual(edge["kind"] as? String, "spawn_agent")
+        XCTAssertEqual((edge["target"] as? [String: Any])?["type"] as? String, "thread")
+        XCTAssertEqual((edge["target"] as? [String: Any])?["thread_id"] as? String, "thread-child")
+        XCTAssertEqual(edge["carried_item_ids"] as? [String], [])
+    }
+
     func testTraceReduceRecordsExecTerminalOperationAndSession() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
@@ -2294,6 +2640,30 @@ final class DebugCommandRuntimeTests: XCTestCase {
             "thread_id": threadID ?? NSNull(),
             "codex_turn_id": codexTurnID ?? NSNull(),
             "payload": payload
+        ]
+    }
+
+    private func rawPayloadRef(_ rawPayloadID: String, kind: String) -> [String: Any] {
+        [
+            "raw_payload_id": rawPayloadID,
+            "kind": ["type": kind],
+            "path": "payloads/\(rawPayloadID).json"
+        ]
+    }
+
+    private func interAgentMessage(author: String, recipient: String, content: String) throws -> [String: Any] {
+        let message = [
+            "author": author,
+            "recipient": recipient,
+            "content": content,
+            "trigger_turn": true
+        ] as [String: Any]
+        let data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys])
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        return [
+            "type": "message",
+            "role": "assistant",
+            "content": [["type": "output_text", "text": text]]
         ]
     }
 

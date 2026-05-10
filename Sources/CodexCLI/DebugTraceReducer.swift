@@ -11,6 +11,7 @@ struct DebugTraceReducer {
     private var codeCellIDsByRuntime: [String: String] = [:]
     private var pendingCodeCellStarts: [String: PendingCodeCellStart] = [:]
     private var pendingCodeCellLifecycleEvents: [String: [PendingCodeCellLifecycleEvent]] = [:]
+    private var pendingAgentInteractionEdges: [PendingAgentInteractionEdge] = []
 
     init(bundleURL: URL) throws {
         self.bundleURL = bundleURL
@@ -53,6 +54,7 @@ struct DebugTraceReducer {
             }
             try apply(event: event, line: lineIndex + 1)
         }
+        try resolvePendingSpawnEdgeFallbacks()
         rollout["raw_payloads"] = rawPayloads
         return rollout
     }
@@ -107,6 +109,8 @@ struct DebugTraceReducer {
             try completeCompactionRequest(event: event, payload: payload, status: "failed")
         case "compaction_installed":
             try installCompaction(event: event, payload: payload)
+        case "agent_result_observed":
+            try observeAgentResult(event: event, payload: payload)
         case "protocol_event_observed", "other":
             break
         default:
@@ -467,6 +471,7 @@ struct DebugTraceReducer {
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
         try syncTerminalModelObservation(toolCallID: toolCallID)
+        try startAgentInteractionFromRuntime(toolCallID: toolCallID, runtimePayload: runtimePayload)
     }
 
     private mutating func endToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
@@ -489,6 +494,11 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try endAgentInteractionFromRuntime(
+            event: event,
+            toolCallID: toolCallID,
+            runtimePayload: runtimePayload
+        )
     }
 
     private mutating func endToolCall(event: [String: Any], payload: [String: Any]) throws {
@@ -517,6 +527,10 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try attachAgentInteractionToolResult(
+            toolCallID: toolCallID,
+            resultPayload: payload["result_payload"] as? [String: Any]
+        )
     }
 
     private mutating func startCodeCell(event: [String: Any], payload: [String: Any]) throws {
@@ -1069,6 +1083,7 @@ struct DebugTraceReducer {
             try updateConversationItem(itemID, normalized: item, producedBy: producedBy)
             try attachModelVisibleToolItem(itemID: itemID, normalized: item)
             try attachModelVisibleCodeCellItem(itemID: itemID, normalized: item)
+            try resolvePendingAgentEdges(forItemID: itemID)
             itemIDs.append(itemID)
         }
         try flushPendingCodeCellStarts()
@@ -1099,6 +1114,7 @@ struct DebugTraceReducer {
             try updateConversationItem(itemID, normalized: item, producedBy: producedBy)
             try attachModelVisibleToolItem(itemID: itemID, normalized: item)
             try attachModelVisibleCodeCellItem(itemID: itemID, normalized: item)
+            try resolvePendingAgentEdges(forItemID: itemID)
             itemIDs.append(itemID)
         }
         try flushPendingCodeCellStarts()
@@ -1249,6 +1265,411 @@ struct DebugTraceReducer {
         codeCells[codeCellID] = cell
         rollout["code_cells"] = codeCells
         try appendProducer(["type": "code_cell", "code_cell_id": codeCellID], toConversationItem: itemID)
+    }
+
+    private mutating func startAgentInteractionFromRuntime(
+        toolCallID: String,
+        runtimePayload: [String: Any]
+    ) throws {
+        let toolCall = try toolCallForAgentEdge(toolCallID)
+        let kind = try Self.requiredDictionary(toolCall, key: "kind")
+        switch kind["type"] as? String {
+        case "assign_agent_task":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try queueMessageAgentInteraction(
+                toolCallID: toolCallID,
+                kind: "assign_agent_task",
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                messageContent: try Self.requiredString(runtime, key: "prompt"),
+                endedAtUnixMS: nil
+            )
+        case "send_message":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try queueMessageAgentInteraction(
+                toolCallID: toolCallID,
+                kind: "send_message",
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                messageContent: try Self.requiredString(runtime, key: "prompt"),
+                endedAtUnixMS: nil
+            )
+        case "close_agent":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try upsertCloseAgentInteraction(
+                toolCallID: toolCallID,
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                endedAtUnixMS: nil
+            )
+        default:
+            break
+        }
+    }
+
+    private mutating func endAgentInteractionFromRuntime(
+        event: [String: Any],
+        toolCallID: String,
+        runtimePayload: [String: Any]
+    ) throws {
+        let toolCall = try toolCallForAgentEdge(toolCallID)
+        let kind = try Self.requiredDictionary(toolCall, key: "kind")
+        let wallTimeUnixMS = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        switch kind["type"] as? String {
+        case "spawn_agent":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            guard let childThreadID = runtime["new_thread_id"] as? String else {
+                return
+            }
+            let senderThreadID = try Self.requiredString(runtime, key: "sender_thread_id")
+            try queueOrResolveAgentInteractionEdge(PendingAgentInteractionEdge(
+                edgeID: "edge:spawn:\(senderThreadID):\(childThreadID)",
+                kind: "spawn_agent",
+                source: ["type": "tool_call", "tool_call_id": toolCallID],
+                targetThreadID: childThreadID,
+                messageContent: try Self.requiredString(runtime, key: "prompt"),
+                unresolvedSpawnThreadID: childThreadID,
+                startedAtUnixMS: try toolCallStartedAt(toolCall),
+                endedAtUnixMS: wallTimeUnixMS,
+                carriedRawPayloadIDs: try agentToolPayloadIDs(toolCallID: toolCallID)
+            ))
+        case "assign_agent_task":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try queueMessageAgentInteraction(
+                toolCallID: toolCallID,
+                kind: "assign_agent_task",
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                messageContent: try Self.requiredString(runtime, key: "prompt"),
+                endedAtUnixMS: wallTimeUnixMS
+            )
+        case "send_message":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try queueMessageAgentInteraction(
+                toolCallID: toolCallID,
+                kind: "send_message",
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                messageContent: try Self.requiredString(runtime, key: "prompt"),
+                endedAtUnixMS: wallTimeUnixMS
+            )
+        case "close_agent":
+            let runtime = try loadRawPayloadJSON(runtimePayload)
+            try upsertCloseAgentInteraction(
+                toolCallID: toolCallID,
+                targetThreadID: try Self.requiredString(runtime, key: "receiver_thread_id"),
+                endedAtUnixMS: wallTimeUnixMS
+            )
+        default:
+            break
+        }
+    }
+
+    private mutating func attachAgentInteractionToolResult(
+        toolCallID: String,
+        resultPayload: [String: Any]?
+    ) throws {
+        guard let resultPayload,
+              let resultPayloadID = resultPayload["raw_payload_id"] as? String
+        else {
+            return
+        }
+        var edges = try Self.dictionaryMap(rollout["interaction_edges"], key: "interaction_edges")
+        if let edgeID = edges.first(where: { _, value in
+            guard let edge = value as? [String: Any],
+                  let source = edge["source"] as? [String: Any]
+            else {
+                return false
+            }
+            return Self.toolCallSource(source, matches: toolCallID)
+        })?.key,
+           var edge = edges[edgeID] as? [String: Any] {
+            var ids = edge["carried_raw_payload_ids"] as? [String] ?? []
+            Self.appendUnique(resultPayloadID, to: &ids)
+            edge["carried_raw_payload_ids"] = ids
+            edges[edgeID] = edge
+            rollout["interaction_edges"] = edges
+            return
+        }
+
+        if let index = pendingAgentInteractionEdges.firstIndex(where: {
+            Self.toolCallSource($0.source, matches: toolCallID)
+        }) {
+            Self.appendUnique(resultPayloadID, to: &pendingAgentInteractionEdges[index].carriedRawPayloadIDs)
+        }
+    }
+
+    private mutating func observeAgentResult(event: [String: Any], payload: [String: Any]) throws {
+        let childThreadID = try Self.requiredString(payload, key: "child_thread_id")
+        let childTurnID = try Self.requiredString(payload, key: "child_codex_turn_id")
+        let source: [String: Any]
+        if let sourceItemID = try latestAssistantMessageItemID(threadID: childThreadID, codexTurnID: childTurnID) {
+            source = ["type": "conversation_item", "item_id": sourceItemID]
+        } else {
+            source = ["type": "thread", "thread_id": childThreadID]
+        }
+        let carriedPayload = payload["carried_payload"] as? [String: Any]
+        let carriedPayloadID = carriedPayload?["raw_payload_id"] as? String
+        try queueOrResolveAgentInteractionEdge(PendingAgentInteractionEdge(
+            edgeID: try Self.requiredString(payload, key: "edge_id"),
+            kind: "agent_result",
+            source: source,
+            targetThreadID: try Self.requiredString(payload, key: "parent_thread_id"),
+            messageContent: try Self.requiredString(payload, key: "message"),
+            unresolvedSpawnThreadID: nil,
+            startedAtUnixMS: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            endedAtUnixMS: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            carriedRawPayloadIDs: carriedPayloadID.map { [$0] } ?? []
+        ))
+    }
+
+    private mutating func queueMessageAgentInteraction(
+        toolCallID: String,
+        kind: String,
+        targetThreadID: String,
+        messageContent: String,
+        endedAtUnixMS: Int?
+    ) throws {
+        let toolCall = try toolCallForAgentEdge(toolCallID)
+        try queueOrResolveAgentInteractionEdge(PendingAgentInteractionEdge(
+            edgeID: "edge:tool:\(toolCallID)",
+            kind: kind,
+            source: ["type": "tool_call", "tool_call_id": toolCallID],
+            targetThreadID: targetThreadID,
+            messageContent: messageContent,
+            unresolvedSpawnThreadID: nil,
+            startedAtUnixMS: try toolCallStartedAt(toolCall),
+            endedAtUnixMS: endedAtUnixMS,
+            carriedRawPayloadIDs: try agentToolPayloadIDs(toolCallID: toolCallID)
+        ))
+    }
+
+    private mutating func upsertCloseAgentInteraction(
+        toolCallID: String,
+        targetThreadID: String,
+        endedAtUnixMS: Int?
+    ) throws {
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard threads[targetThreadID] != nil else {
+            return
+        }
+        let toolCall = try toolCallForAgentEdge(toolCallID)
+        try upsertInteractionEdge([
+            "edge_id": "edge:tool:\(toolCallID)",
+            "kind": "close_agent",
+            "source": ["type": "tool_call", "tool_call_id": toolCallID],
+            "target": ["type": "thread", "thread_id": targetThreadID],
+            "started_at_unix_ms": try toolCallStartedAt(toolCall),
+            "ended_at_unix_ms": endedAtUnixMS.map { $0 as Any } ?? NSNull(),
+            "carried_item_ids": [],
+            "carried_raw_payload_ids": try agentToolPayloadIDs(toolCallID: toolCallID)
+        ])
+    }
+
+    private mutating func queueOrResolveAgentInteractionEdge(_ pending: PendingAgentInteractionEdge) throws {
+        if let itemID = try findUnlinkedInterAgentMessageItem(
+            threadID: pending.targetThreadID,
+            messageContent: pending.messageContent
+        ) {
+            try upsertAgentInteractionEdge(pending, targetItemID: itemID)
+            return
+        }
+
+        if let index = pendingAgentInteractionEdges.firstIndex(where: { $0.edgeID == pending.edgeID }) {
+            guard pendingAgentInteractionEdges[index].conflicts(with: pending) == false else {
+                throw DebugTraceReducerError.conflictingPendingInteractionEdge(pending.edgeID)
+            }
+            pendingAgentInteractionEdges[index].startedAtUnixMS = min(
+                pendingAgentInteractionEdges[index].startedAtUnixMS,
+                pending.startedAtUnixMS
+            )
+            switch (pendingAgentInteractionEdges[index].endedAtUnixMS, pending.endedAtUnixMS) {
+            case let (.some(existing), .some(incoming)):
+                pendingAgentInteractionEdges[index].endedAtUnixMS = max(existing, incoming)
+            case (nil, let incoming), (let incoming, nil):
+                pendingAgentInteractionEdges[index].endedAtUnixMS = incoming
+            }
+            Self.extendUnique(pending.carriedRawPayloadIDs, to: &pendingAgentInteractionEdges[index].carriedRawPayloadIDs)
+            return
+        }
+        pendingAgentInteractionEdges.append(pending)
+    }
+
+    private mutating func resolvePendingAgentEdges(forItemID itemID: String) throws {
+        guard let (threadID, messageContent) = try interAgentMessageItem(itemID) else {
+            return
+        }
+        guard let index = pendingAgentInteractionEdges.firstIndex(where: {
+            $0.targetThreadID == threadID && $0.messageContent == messageContent
+        }) else {
+            return
+        }
+        let pending = pendingAgentInteractionEdges.remove(at: index)
+        try upsertAgentInteractionEdge(pending, targetItemID: itemID)
+    }
+
+    private mutating func resolvePendingSpawnEdgeFallbacks() throws {
+        let pending = pendingAgentInteractionEdges
+        pendingAgentInteractionEdges.removeAll()
+        for edge in pending {
+            guard let childThreadID = edge.unresolvedSpawnThreadID else {
+                continue
+            }
+            guard edge.kind == "spawn_agent" else {
+                throw DebugTraceReducerError.nonSpawnInteractionFallback(edge.edgeID)
+            }
+            let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+            guard threads[childThreadID] != nil else {
+                continue
+            }
+            try upsertInteractionEdge([
+                "edge_id": edge.edgeID,
+                "kind": edge.kind,
+                "source": edge.source,
+                "target": ["type": "thread", "thread_id": childThreadID],
+                "started_at_unix_ms": edge.startedAtUnixMS,
+                "ended_at_unix_ms": edge.endedAtUnixMS.map { $0 as Any } ?? NSNull(),
+                "carried_item_ids": [],
+                "carried_raw_payload_ids": edge.carriedRawPayloadIDs
+            ])
+        }
+    }
+
+    private mutating func upsertAgentInteractionEdge(
+        _ pending: PendingAgentInteractionEdge,
+        targetItemID: String
+    ) throws {
+        try upsertInteractionEdge([
+            "edge_id": pending.edgeID,
+            "kind": pending.kind,
+            "source": pending.source,
+            "target": ["type": "conversation_item", "item_id": targetItemID],
+            "started_at_unix_ms": pending.startedAtUnixMS,
+            "ended_at_unix_ms": pending.endedAtUnixMS.map { $0 as Any } ?? NSNull(),
+            "carried_item_ids": [targetItemID],
+            "carried_raw_payload_ids": pending.carriedRawPayloadIDs
+        ])
+    }
+
+    private mutating func upsertInteractionEdge(_ edge: [String: Any]) throws {
+        let edgeID = try Self.requiredString(edge, key: "edge_id")
+        var edges = try Self.dictionaryMap(rollout["interaction_edges"], key: "interaction_edges")
+        if var existing = edges[edgeID] as? [String: Any] {
+            guard Self.sameInteractionEndpoint(existing, edge) else {
+                throw DebugTraceReducerError.conflictingInteractionEdge(edgeID)
+            }
+            existing["started_at_unix_ms"] = min(
+                try Self.requiredInt(existing, key: "started_at_unix_ms"),
+                try Self.requiredInt(edge, key: "started_at_unix_ms")
+            )
+            existing["ended_at_unix_ms"] = Self.mergedOptionalMaxInt(existing["ended_at_unix_ms"], edge["ended_at_unix_ms"])
+            var itemIDs = existing["carried_item_ids"] as? [String] ?? []
+            Self.extendUnique(edge["carried_item_ids"] as? [String] ?? [], to: &itemIDs)
+            existing["carried_item_ids"] = itemIDs
+            var rawIDs = existing["carried_raw_payload_ids"] as? [String] ?? []
+            Self.extendUnique(edge["carried_raw_payload_ids"] as? [String] ?? [], to: &rawIDs)
+            existing["carried_raw_payload_ids"] = rawIDs
+            edges[edgeID] = existing
+        } else {
+            edges[edgeID] = edge
+        }
+        rollout["interaction_edges"] = edges
+    }
+
+    private func findUnlinkedInterAgentMessageItem(threadID: String, messageContent: String) throws -> String? {
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard let thread = threads[threadID] as? [String: Any] else {
+            return nil
+        }
+        for itemID in thread["conversation_item_ids"] as? [String] ?? [] {
+            guard try !isInteractionEdgeTargetItem(itemID),
+                  let (_, content) = try interAgentMessageItem(itemID),
+                  content == messageContent
+            else {
+                continue
+            }
+            return itemID
+        }
+        return nil
+    }
+
+    private func interAgentMessageItem(_ itemID: String) throws -> (String, String)? {
+        let conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        guard let item = conversationItems[itemID] as? [String: Any],
+              item["role"] as? String == "assistant",
+              item["kind"] as? String == "message",
+              let body = item["body"] as? [String: Any],
+              let parts = body["parts"] as? [[String: Any]],
+              parts.count == 1,
+              parts[0]["type"] as? String == "text",
+              let text = parts[0]["text"] as? String,
+              let data = text.data(using: .utf8),
+              let communication = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let recipient = communication["recipient"] as? String,
+              let content = communication["content"] as? String,
+              let threadID = item["thread_id"] as? String
+        else {
+            return nil
+        }
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard let thread = threads[threadID] as? [String: Any],
+              recipient == thread["agent_path"] as? String
+        else {
+            return nil
+        }
+        return (threadID, content)
+    }
+
+    private func isInteractionEdgeTargetItem(_ itemID: String) throws -> Bool {
+        let edges = try Self.dictionaryMap(rollout["interaction_edges"], key: "interaction_edges")
+        return edges.values.contains { value in
+            guard let edge = value as? [String: Any],
+                  let target = edge["target"] as? [String: Any]
+            else {
+                return false
+            }
+            return target["type"] as? String == "conversation_item"
+                && target["item_id"] as? String == itemID
+        }
+    }
+
+    private func latestAssistantMessageItemID(threadID: String, codexTurnID: String) throws -> String? {
+        let conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        return conversationItems.compactMap { itemID, value -> (String, Int)? in
+            guard let item = value as? [String: Any],
+                  item["thread_id"] as? String == threadID,
+                  item["codex_turn_id"] as? String == codexTurnID,
+                  item["role"] as? String == "assistant",
+                  item["kind"] as? String == "message",
+                  let firstSeen = item["first_seen_at_unix_ms"] as? Int
+            else {
+                return nil
+            }
+            return (itemID, firstSeen)
+        }
+        .max { $0.1 < $1.1 }?
+        .0
+    }
+
+    private func toolCallForAgentEdge(_ toolCallID: String) throws -> [String: Any] {
+        let toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard let toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("agent edge referenced unknown tool call \(toolCallID)")
+        }
+        return toolCall
+    }
+
+    private func toolCallStartedAt(_ toolCall: [String: Any]) throws -> Int {
+        let execution = try Self.requiredDictionary(toolCall, key: "execution")
+        return try Self.requiredInt(execution, key: "started_at_unix_ms")
+    }
+
+    private func agentToolPayloadIDs(toolCallID: String) throws -> [String] {
+        let toolCall = try toolCallForAgentEdge(toolCallID)
+        var ids: [String] = []
+        if let invocationID = toolCall["raw_invocation_payload_id"] as? String {
+            Self.appendUnique(invocationID, to: &ids)
+        }
+        Self.extendUnique(toolCall["raw_runtime_payload_ids"] as? [String] ?? [], to: &ids)
+        if let resultID = toolCall["raw_result_payload_id"] as? String {
+            Self.appendUnique(resultID, to: &ids)
+        }
+        return ids
     }
 
     private func sourceItemIDForCodeCell(_ codeCellID: String, threadID: String, callID: String) throws -> String? {
@@ -2225,6 +2646,61 @@ struct DebugTraceReducer {
         return value
     }
 
+    private static func appendUnique(_ value: String, to values: inout [String]) {
+        if !values.contains(value) {
+            values.append(value)
+        }
+    }
+
+    private static func extendUnique(_ incoming: [String], to values: inout [String]) {
+        for value in incoming {
+            appendUnique(value, to: &values)
+        }
+    }
+
+    private static func toolCallSource(_ source: [String: Any], matches toolCallID: String) -> Bool {
+        source["type"] as? String == "tool_call" && source["tool_call_id"] as? String == toolCallID
+    }
+
+    private static func sameInteractionEndpoint(_ left: [String: Any], _ right: [String: Any]) -> Bool {
+        guard left["kind"] as? String == right["kind"] as? String,
+              let leftSource = left["source"] as? [String: Any],
+              let rightSource = right["source"] as? [String: Any],
+              let leftTarget = left["target"] as? [String: Any],
+              let rightTarget = right["target"] as? [String: Any]
+        else {
+            return false
+        }
+        return NSDictionary(dictionary: leftSource).isEqual(to: rightSource)
+            && NSDictionary(dictionary: leftTarget).isEqual(to: rightTarget)
+    }
+
+    private static func mergedOptionalMaxInt(_ left: Any?, _ right: Any?) -> Any {
+        let leftInt = optionalInt(left)
+        let rightInt = optionalInt(right)
+        switch (leftInt, rightInt) {
+        case let (.some(left), .some(right)):
+            return max(left, right)
+        case let (.some(left), nil):
+            return left
+        case let (nil, .some(right)):
+            return right
+        case (nil, nil):
+            return NSNull()
+        }
+    }
+
+    private static func optionalInt(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int:
+            return int
+        case let number as NSNumber:
+            return number.intValue
+        default:
+            return nil
+        }
+    }
+
     private static func terminalID(from value: Any?) -> String? {
         switch value {
         case let string as String where !string.isEmpty:
@@ -2557,6 +3033,27 @@ private struct PendingCodeCellLifecycleEvent {
     }
 }
 
+private struct PendingAgentInteractionEdge {
+    let edgeID: String
+    let kind: String
+    let source: [String: Any]
+    let targetThreadID: String
+    let messageContent: String
+    let unresolvedSpawnThreadID: String?
+    var startedAtUnixMS: Int
+    var endedAtUnixMS: Int?
+    var carriedRawPayloadIDs: [String]
+
+    func conflicts(with other: PendingAgentInteractionEdge) -> Bool {
+        edgeID != other.edgeID
+            || kind != other.kind
+            || !NSDictionary(dictionary: source).isEqual(to: other.source)
+            || targetThreadID != other.targetThreadID
+            || messageContent != other.messageContent
+            || unresolvedSpawnThreadID != other.unresolvedSpawnThreadID
+    }
+}
+
 private enum DebugTraceReducerError: Error, CustomStringConvertible {
     case invalidJSONObject(String)
     case invalidTraceEvent(line: Int)
@@ -2644,6 +3141,9 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         codeCellID: String
     )
     case unknownRuntimeCodeCellID(eventName: String, threadID: String, runtimeCellID: String)
+    case conflictingPendingInteractionEdge(String)
+    case nonSpawnInteractionFallback(String)
+    case conflictingInteractionEdge(String)
 
     var description: String {
         switch self {
@@ -2745,6 +3245,12 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "runtime code cell \(runtimeCellID) for thread \(threadID) mapped to both \(existingCodeCellID) and \(codeCellID)"
         case let .unknownRuntimeCodeCellID(eventName, threadID, runtimeCellID):
             return "\(eventName) referenced unknown runtime code cell \(runtimeCellID) for thread \(threadID)"
+        case let .conflictingPendingInteractionEdge(edgeID):
+            return "pending interaction edge \(edgeID) was observed with conflicting delivery data"
+        case let .nonSpawnInteractionFallback(edgeID):
+            return "non-spawn interaction edge \(edgeID) carried a spawn fallback target"
+        case let .conflictingInteractionEdge(edgeID):
+            return "interaction edge \(edgeID) was observed with conflicting endpoints"
         }
     }
 }
