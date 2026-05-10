@@ -63,6 +63,22 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 """,
                 database: openedDatabase
             )
+            try Self.execute(
+                """
+                CREATE TABLE IF NOT EXISTS thread_goals (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    goal_id TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'budget_limited', 'complete')),
+                    token_budget INTEGER,
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
+                    time_used_seconds INTEGER NOT NULL DEFAULT 0,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                )
+                """,
+                database: openedDatabase
+            )
         } catch {
             sqlite3_close(openedDatabase)
             throw error
@@ -356,6 +372,181 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 .text(memoryMode),
                 .text(threadID.description),
             ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
+    public func getThreadGoal(threadID: ThreadId) async throws -> ThreadGoal? {
+        let database = handle.database
+        return try Self.withStatement(
+            query:
+            """
+            SELECT
+                thread_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            FROM thread_goals
+            WHERE thread_id = ?
+            """,
+            bindings: [.text(threadID.description)],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return try Self.threadGoal(from: statement)
+        }
+    }
+
+    public func replaceThreadGoal(
+        threadID: ThreadId,
+        objective: String,
+        status: ThreadGoalStatus,
+        tokenBudget: Int64?
+    ) async throws -> ThreadGoal {
+        let goalID = UUID().uuidString.lowercased()
+        let nowMilliseconds = Self.currentTimeMilliseconds()
+        let status = Self.statusAfterBudgetLimit(
+            status,
+            tokensUsed: 0,
+            tokenBudget: tokenBudget
+        )
+        let database = handle.database
+        return try Self.withStatement(
+            query:
+            """
+            INSERT INTO thread_goals (
+                thread_id,
+                goal_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            ) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                goal_id = excluded.goal_id,
+                objective = excluded.objective,
+                status = excluded.status,
+                token_budget = excluded.token_budget,
+                tokens_used = 0,
+                time_used_seconds = 0,
+                created_at_ms = excluded.created_at_ms,
+                updated_at_ms = excluded.updated_at_ms
+            RETURNING
+                thread_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            """,
+            bindings: [
+                .text(threadID.description),
+                .text(goalID),
+                .text(objective),
+                .text(Self.databaseStatus(status)),
+                .optionalInt(tokenBudget),
+                .int(nowMilliseconds),
+                .int(nowMilliseconds),
+            ],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return try Self.threadGoal(from: statement)
+        }
+    }
+
+    public func updateThreadGoal(
+        threadID: ThreadId,
+        status: ThreadGoalStatus?,
+        tokenBudget: ThreadGoalTokenBudgetUpdate
+    ) async throws -> ThreadGoal? {
+        let existing = try await getThreadGoal(threadID: threadID)
+        guard let existing else {
+            return nil
+        }
+        if status == nil, tokenBudget == .preserve {
+            return existing
+        }
+        let replacementBudget: Int64?
+        switch tokenBudget {
+        case .preserve:
+            replacementBudget = existing.tokenBudget
+        case let .set(value):
+            replacementBudget = value
+        }
+        var replacementStatus = status ?? existing.status
+        if existing.status == .budgetLimited, replacementStatus == .paused {
+            replacementStatus = .budgetLimited
+        } else if replacementStatus == .active,
+                  let replacementBudget,
+                  existing.tokensUsed >= replacementBudget {
+            replacementStatus = .budgetLimited
+        }
+
+        let nowMilliseconds = Self.currentTimeMilliseconds()
+        let database = handle.database
+        return try Self.withStatement(
+            query:
+            """
+            UPDATE thread_goals
+            SET
+                status = ?,
+                token_budget = ?,
+                updated_at_ms = ?
+            WHERE thread_id = ?
+            RETURNING
+                thread_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            """,
+            bindings: [
+                .text(Self.databaseStatus(replacementStatus)),
+                .optionalInt(replacementBudget),
+                .int(nowMilliseconds),
+                .text(threadID.description),
+            ],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return try Self.threadGoal(from: statement)
+        }
+    }
+
+    public func deleteThreadGoal(threadID: ThreadId) async throws -> Bool {
+        let database = handle.database
+        try Self.execute(
+            "DELETE FROM thread_goals WHERE thread_id = ?",
+            bindings: [.text(threadID.description)],
             database: database
         )
         return sqlite3_changes(database) > 0
@@ -1044,6 +1235,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         Int64((date.timeIntervalSince1970 * 1_000).rounded(.down))
     }
 
+    private static func currentTimeMilliseconds() -> Int64 {
+        epochMilliseconds(Date())
+    }
+
     private static func epochSeconds(_ date: Date) -> Int64 {
         Int64(date.timeIntervalSince1970.rounded(.down))
     }
@@ -1336,6 +1531,62 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             gitBranch: optionalTextColumn(statement, index: 21),
             gitOriginURL: optionalTextColumn(statement, index: 22)
         )
+    }
+
+    private static func threadGoal(from statement: OpaquePointer) throws -> ThreadGoal {
+        let databaseStatus = try requiredTextColumn(statement, index: 2, columnName: "status")
+        guard let status = apiStatus(databaseStatus) else {
+            throw AgentGraphStoreError.internal(message: "unknown thread goal status: \(databaseStatus)")
+        }
+        return ThreadGoal(
+            threadID: try ThreadId(string: try requiredTextColumn(statement, index: 0, columnName: "thread_id")),
+            objective: try requiredTextColumn(statement, index: 1, columnName: "objective"),
+            status: status,
+            tokenBudget: optionalIntColumn(statement, index: 3),
+            tokensUsed: sqlite3_column_int64(statement, 4),
+            timeUsedSeconds: sqlite3_column_int64(statement, 5),
+            createdAt: epochSeconds(fromMilliseconds: sqlite3_column_int64(statement, 6)),
+            updatedAt: epochSeconds(fromMilliseconds: sqlite3_column_int64(statement, 7))
+        )
+    }
+
+    private static func databaseStatus(_ status: ThreadGoalStatus) -> String {
+        switch status {
+        case .active:
+            return "active"
+        case .paused:
+            return "paused"
+        case .budgetLimited:
+            return "budget_limited"
+        case .complete:
+            return "complete"
+        }
+    }
+
+    private static func apiStatus(_ status: String) -> ThreadGoalStatus? {
+        switch status {
+        case "active":
+            return .active
+        case "paused":
+            return .paused
+        case "budget_limited":
+            return .budgetLimited
+        case "complete":
+            return .complete
+        default:
+            return nil
+        }
+    }
+
+    private static func statusAfterBudgetLimit(
+        _ status: ThreadGoalStatus,
+        tokensUsed: Int64,
+        tokenBudget: Int64?
+    ) -> ThreadGoalStatus {
+        if status == .active, let tokenBudget, tokensUsed >= tokenBudget {
+            return .budgetLimited
+        }
+        return status
     }
 
     private static func epochMillisecondsDate(_ value: Int64) -> Date {
@@ -1633,6 +1884,11 @@ public struct ThreadsPage: Equatable, Sendable {
         self.nextAnchor = nextAnchor
         self.numScannedRows = numScannedRows
     }
+}
+
+public enum ThreadGoalTokenBudgetUpdate: Equatable, Sendable {
+    case preserve
+    case set(Int64?)
 }
 
 public struct ThreadListFilterOptions: Equatable, Sendable {

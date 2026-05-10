@@ -1548,7 +1548,32 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
-    func testThreadGoalMethodsPersistAndNotifyWhenFeatureEnabled() throws {
+    func testThreadGoalMethodsRequireStateDbWhenFeatureEnabled() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-20-00",
+            timestamp: "2025-01-06T07:20:00Z",
+            preview: "goal missing state",
+            provider: "mock_provider"
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/goal/get","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "sqlite state db unavailable for thread goals")
+    }
+
+    func testThreadGoalMethodsPersistAndNotifyWhenFeatureEnabled() async throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
@@ -1561,8 +1586,13 @@ final class CodexAppServerTests: XCTestCase {
             preview: "goal thread",
             provider: "mock_provider"
         )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "goal thread"
+        )
         let processor = try initializedProcessor(
-            configuration: testConfiguration(codexHome: temp.url),
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
 
@@ -1618,9 +1648,11 @@ final class CodexAppServerTests: XCTestCase {
         )))
         XCTAssertEqual(clearAgain.count, 1)
         XCTAssertEqual((clearAgain[0]["result"] as? [String: Any])?["cleared"] as? Bool, false)
+        let persistedGoal = try await stateStore.getThreadGoal(threadID: try ThreadId(string: threadID))
+        XCTAssertNil(persistedGoal)
     }
 
-    func testThreadGoalMethodsValidateEnabledInputs() throws {
+    func testThreadGoalMethodsValidateEnabledInputs() async throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
@@ -1633,10 +1665,16 @@ final class CodexAppServerTests: XCTestCase {
             preview: "goal validation",
             provider: "mock_provider"
         )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "goal validation"
+        )
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
 
         let emptyObjective = try appServerResponse(
             #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"   "}}"#,
-            codexHome: temp.url,
+            configuration: configuration,
             experimentalAPIEnabled: true
         )
         let emptyObjectiveError = try XCTUnwrap(emptyObjective["error"] as? [String: Any])
@@ -1645,7 +1683,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let zeroBudget = try appServerResponse(
             #"{"id":2,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":0}}"#,
-            codexHome: temp.url,
+            configuration: configuration,
             experimentalAPIEnabled: true
         )
         let zeroBudgetError = try XCTUnwrap(zeroBudget["error"] as? [String: Any])
@@ -1654,7 +1692,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let missingGoal = try appServerResponse(
             #"{"id":3,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","status":"paused"}}"#,
-            codexHome: temp.url,
+            configuration: configuration,
             experimentalAPIEnabled: true
         )
         let missingGoalError = try XCTUnwrap(missingGoal["error"] as? [String: Any])
@@ -10637,6 +10675,35 @@ final class CodexAppServerTests: XCTestCase {
             ? [.withInternetDateTime, .withFractionalSeconds]
             : [.withInternetDateTime]
         return try XCTUnwrap(formatter.date(from: timestamp))
+    }
+
+    private func createAppServerGoalStateStore(
+        codexHome: URL,
+        threadID: String,
+        title: String
+    ) async throws -> SQLiteAgentGraphStore {
+        let stateDatabaseURL = codexHome.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let parsedThreadID = try ThreadId(string: threadID)
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: parsedThreadID,
+            rolloutPath: codexHome
+                .appendingPathComponent("sessions/test-\(threadID).jsonl", isDirectory: false)
+                .path,
+            createdAt: try appServerDate("2025-01-06T07:30:00Z"),
+            updatedAt: try appServerDate("2025-01-06T07:30:00Z"),
+            source: "cli",
+            modelProvider: "mock_provider",
+            cwd: codexHome.path,
+            cliVersion: "0.0.0",
+            title: title,
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: title
+        ))
+        return stateStore
     }
 
     private func createAppServerThreadsTable(databaseURL: URL) throws {

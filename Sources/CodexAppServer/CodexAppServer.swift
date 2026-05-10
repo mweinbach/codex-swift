@@ -1960,55 +1960,70 @@ public enum CodexAppServer {
         try requireExperimentalAPI(method: "thread/goal/set", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
-        var goals = try readThreadGoals(codexHome: configuration.codexHome)
+        let thread = try ThreadId(string: threadID)
+        let stateStore = try stateStoreForThreadGoals(configuration: configuration)
         let status = try goalStatus(params?["status"])
         let objective = stringParam(params?["objective"])?.trimmingCharacters(in: .whitespacesAndNewlines)
         let tokenBudget = try goalTokenBudget(params: params)
+        let tokenBudgetUpdate: ThreadGoalTokenBudgetUpdate = tokenBudget.wasProvided
+            ? .set(tokenBudget.value.map(Int64.init))
+            : .preserve
 
+        let goal: ThreadGoal
         if let objective {
             try validateGoalObjective(objective)
             if tokenBudget.wasProvided {
                 try validateGoalBudget(tokenBudget.value)
             }
-            if var existing = goals[threadID],
+            let existing = try runAsyncBlocking {
+                try await stateStore.getThreadGoal(threadID: thread)
+            }
+            if let existing,
                existing.objective == objective,
-               existing.status != "complete" {
-                existing.status = status ?? existing.status
-                if tokenBudget.wasProvided {
-                    existing.tokenBudget = tokenBudget.value
+               existing.status != .complete {
+                guard let updated = try runAsyncBlocking({
+                    try await stateStore.updateThreadGoal(
+                        threadID: thread,
+                        status: status,
+                        tokenBudget: tokenBudgetUpdate
+                    )
+                }) else {
+                    throw AppServerError.invalidRequest("cannot update goal for thread \(threadID): no goal exists")
                 }
-                existing.updatedAt = currentUnixTimestamp()
-                goals[threadID] = existing
+                goal = updated
             } else {
-                goals[threadID] = StoredThreadGoal(
-                    threadID: threadID,
-                    objective: objective,
-                    status: status ?? "active",
-                    tokenBudget: tokenBudget.wasProvided ? tokenBudget.value : nil,
-                    tokensUsed: 0,
-                    timeUsedSeconds: 0,
-                    createdAt: currentUnixTimestamp(),
-                    updatedAt: currentUnixTimestamp()
-                )
+                goal = try runAsyncBlocking {
+                    try await stateStore.replaceThreadGoal(
+                        threadID: thread,
+                        objective: objective,
+                        status: status ?? .active,
+                        tokenBudget: tokenBudget.value.map(Int64.init)
+                    )
+                }
             }
         } else {
-            guard var existing = goals[threadID] else {
+            guard try runAsyncBlocking({
+                try await stateStore.getThreadGoal(threadID: thread)
+            }) != nil else {
                 throw AppServerError.invalidRequest("cannot update goal for thread \(threadID): no goal exists")
             }
             if tokenBudget.wasProvided {
                 try validateGoalBudget(tokenBudget.value)
             }
-            existing.status = status ?? existing.status
-            if tokenBudget.wasProvided {
-                existing.tokenBudget = tokenBudget.value
+            guard let updated = try runAsyncBlocking({
+                try await stateStore.updateThreadGoal(
+                    threadID: thread,
+                    status: status,
+                    tokenBudget: tokenBudgetUpdate
+                )
+            }) else {
+                throw AppServerError.invalidRequest("cannot update goal for thread \(threadID): no goal exists")
             }
-            existing.updatedAt = currentUnixTimestamp()
-            goals[threadID] = existing
+            goal = updated
         }
 
-        try writeThreadGoals(goals, codexHome: configuration.codexHome)
-        let goal = goals[threadID]!.object
-        return (["goal": goal], threadID, goal)
+        let goalObject = threadGoalObject(goal)
+        return (["goal": goalObject], threadID, goalObject)
     }
 
     fileprivate static func threadGoalGetResult(
@@ -2019,7 +2034,11 @@ public enum CodexAppServer {
         try requireExperimentalAPI(method: "thread/goal/get", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
-        let goal = try readThreadGoals(codexHome: configuration.codexHome)[threadID]?.object
+        let stateStore = try stateStoreForThreadGoals(configuration: configuration)
+        let thread = try ThreadId(string: threadID)
+        let goal = try runAsyncBlocking {
+            try await stateStore.getThreadGoal(threadID: thread)
+        }.map(threadGoalObject)
         return ["goal": goal ?? NSNull()]
     }
 
@@ -2031,12 +2050,32 @@ public enum CodexAppServer {
         try requireExperimentalAPI(method: "thread/goal/clear", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
-        var goals = try readThreadGoals(codexHome: configuration.codexHome)
-        let cleared = goals.removeValue(forKey: threadID) != nil
-        if cleared {
-            try writeThreadGoals(goals, codexHome: configuration.codexHome)
+        let stateStore = try stateStoreForThreadGoals(configuration: configuration)
+        let thread = try ThreadId(string: threadID)
+        let cleared = try runAsyncBlocking {
+            try await stateStore.deleteThreadGoal(threadID: thread)
         }
         return (["cleared": cleared], threadID, cleared)
+    }
+
+    private static func stateStoreForThreadGoals(configuration: CodexAppServerConfiguration) throws -> SQLiteAgentGraphStore {
+        guard let stateStore = configuration.stateStore else {
+            throw AppServerError.internalError("sqlite state db unavailable for thread goals")
+        }
+        return stateStore
+    }
+
+    private static func threadGoalObject(_ goal: ThreadGoal) -> [String: Any] {
+        [
+            "threadId": goal.threadID.description,
+            "objective": goal.objective,
+            "status": goal.status.rawValue,
+            "tokenBudget": goal.tokenBudget.map { Int($0) } ?? NSNull(),
+            "tokensUsed": Int(goal.tokensUsed),
+            "timeUsedSeconds": Int(goal.timeUsedSeconds),
+            "createdAt": Int(goal.createdAt),
+            "updatedAt": Int(goal.updatedAt)
+        ]
     }
 
     private static func requireGoalsFeature(configuration: CodexAppServerConfiguration) throws {
@@ -2100,7 +2139,7 @@ public enum CodexAppServer {
         return GoalTokenBudget(wasProvided: true, value: value)
     }
 
-    private static func goalStatus(_ raw: Any?) throws -> String? {
+    private static func goalStatus(_ raw: Any?) throws -> ThreadGoalStatus? {
         guard let raw else {
             return nil
         }
@@ -2108,8 +2147,14 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid goal status")
         }
         switch status {
-        case "active", "paused", "budgetLimited", "complete":
-            return status
+        case "active":
+            return .active
+        case "paused":
+            return .paused
+        case "budgetLimited":
+            return .budgetLimited
+        case "complete":
+            return .complete
         default:
             throw AppServerError.invalidRequest("invalid goal status: \(status)")
         }
@@ -2128,69 +2173,6 @@ public enum CodexAppServer {
         if let value, value <= 0 {
             throw AppServerError.invalidRequest("goal budgets must be positive when provided")
         }
-    }
-
-    private struct StoredThreadGoal: Codable {
-        let threadID: String
-        let objective: String
-        var status: String
-        var tokenBudget: Int?
-        var tokensUsed: Int
-        var timeUsedSeconds: Int
-        let createdAt: Int
-        var updatedAt: Int
-
-        private enum CodingKeys: String, CodingKey {
-            case threadID = "threadId"
-            case objective
-            case status
-            case tokenBudget
-            case tokensUsed
-            case timeUsedSeconds
-            case createdAt
-            case updatedAt
-        }
-
-        var object: [String: Any] {
-            [
-                "threadId": threadID,
-                "objective": objective,
-                "status": status,
-                "tokenBudget": tokenBudget ?? NSNull(),
-                "tokensUsed": tokensUsed,
-                "timeUsedSeconds": timeUsedSeconds,
-                "createdAt": createdAt,
-                "updatedAt": updatedAt
-            ]
-        }
-    }
-
-    private static func readThreadGoals(codexHome: URL) throws -> [String: StoredThreadGoal] {
-        let path = threadGoalsPath(codexHome: codexHome)
-        guard FileManager.default.fileExists(atPath: path.path) else {
-            return [:]
-        }
-        let data = try Data(contentsOf: path)
-        guard !data.isEmpty else {
-            return [:]
-        }
-        return try JSONDecoder().decode([String: StoredThreadGoal].self, from: data)
-    }
-
-    private static func writeThreadGoals(_ goals: [String: StoredThreadGoal], codexHome: URL) throws {
-        let path = threadGoalsPath(codexHome: codexHome)
-        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(goals).write(to: path, options: .atomic)
-    }
-
-    private static func threadGoalsPath(codexHome: URL) -> URL {
-        codexHome.appendingPathComponent("thread_goals.json", isDirectory: false)
-    }
-
-    private static func currentUnixTimestamp() -> Int {
-        Int(Date().timeIntervalSince1970)
     }
 
     fileprivate static func threadMemoryModeSetResult(
