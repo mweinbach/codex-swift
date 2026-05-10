@@ -309,6 +309,8 @@ Source baseline inspected for this scaffold:
   - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, Azure Responses endpoint detection, and OpenAI/Azure remote-compaction support detection
 - `codex-rs/model-provider/src/provider.rs`
   - runtime model-provider abstraction for configured providers and Amazon Bedrock, provider-owned capability dispatch, runtime base-URL lookup, provider auth precedence reuse, ChatGPT-only attestation support detection, Rust-shaped provider account states for unauthenticated/OpenAI API-key/ChatGPT/custom non-OpenAI/Bedrock providers, missing ChatGPT account-detail error text, and Bedrock bypass of OpenAI auth
+- `codex-rs/model-provider-info/src/lib.rs` and `codex-rs/core/src/config/config_tests.rs` Amazon Bedrock provider config
+  - AWS auth config wire fields, default empty `aws` config on the built-in Amazon Bedrock provider, `model_providers.amazon-bedrock.aws.profile` / `region` override merging, rejection of non-`aws` Amazon Bedrock built-in overrides with Rust's error text, and rejection of `aws` config on custom model providers
 - `codex-rs/core/src/exec_env.rs` and shell-environment policy types from `codex-rs/core/src/config/types.rs`
   - shell environment inheritance modes, case-insensitive wildcard include/exclude patterns, default sensitive-name filtering, set overrides, include-only post-filtering, and profile-use flag conversion
 - `codex-rs/common/src/config_summary.rs`

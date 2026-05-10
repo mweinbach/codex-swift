@@ -11,6 +11,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelProvider)
         XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "amazon-bedrock", "ollama", "lmstudio"])
         XCTAssertTrue(config.modelProviders["openai"]?.requiresOpenAIAuth == true)
+        XCTAssertEqual(config.modelProviders["amazon-bedrock"]?.aws, ModelProviderAWSAuthInfo())
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.selectedModelProvider?.name, "OpenAI")
         XCTAssertNil(config.approvalPolicy)
@@ -517,6 +518,70 @@ final class ConfigLoaderTests: XCTestCase {
             XCTAssertEqual(
                 String(describing: error),
                 "model_providers contains reserved built-in provider IDs: `openai`. Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`)."
+            )
+        }
+    }
+
+    func testAmazonBedrockModelProviderAppliesAWSProfileOverrideLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model_provider = "amazon-bedrock"
+
+        [model_providers.amazon-bedrock.aws]
+        profile = "codex-bedrock"
+        region = "us-west-2"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.selectedModelProviderID, "amazon-bedrock")
+        XCTAssertEqual(
+            config.selectedModelProvider?.aws,
+            ModelProviderAWSAuthInfo(profile: "codex-bedrock", region: "us-west-2")
+        )
+        XCTAssertEqual(
+            config.selectedModelProvider?.baseURL,
+            ModelProviderInfo.amazonBedrockDefaultBaseURL
+        )
+    }
+
+    func testAmazonBedrockModelProviderRejectsUnsupportedOverridesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model_provider = "amazon-bedrock"
+
+        [model_providers.amazon-bedrock]
+        name = "Custom Bedrock"
+        base_url = "https://bedrock.example.com/v1"
+        requires_openai_auth = true
+
+        [model_providers.amazon-bedrock.aws]
+        profile = "codex-bedrock"
+        region = "us-west-2"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers.amazon-bedrock only supports changing `aws.profile` and `aws.region`; other non-default provider fields are not supported"
+            )
+        }
+    }
+
+    func testCustomModelProviderRejectsAWSConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [model_providers.custom]
+        name = "Custom Provider"
+
+        [model_providers.custom.aws]
+        profile = "codex-bedrock"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_providers.custom: provider aws is only supported for `amazon-bedrock`"
             )
         }
     }

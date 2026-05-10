@@ -10,6 +10,7 @@ final class ModelProviderInfoTests: XCTestCase {
                 envKey: "API_KEY",
                 envKeyInstructions: "Set API_KEY.",
                 experimentalBearerToken: "token",
+                aws: ModelProviderAWSAuthInfo(profile: "codex-bedrock", region: "us-west-2"),
                 wireAPI: .responses,
                 queryParams: ["api-version": "2025-04-01-preview"],
                 httpHeaders: ["X-Example": "value"],
@@ -25,6 +26,10 @@ final class ModelProviderInfoTests: XCTestCase {
                 "env_key": "API_KEY",
                 "env_key_instructions": "Set API_KEY.",
                 "experimental_bearer_token": "token",
+                "aws": [
+                    "profile": "codex-bedrock",
+                    "region": "us-west-2"
+                ],
                 "wire_api": "responses",
                 "query_params": ["api-version": "2025-04-01-preview"],
                 "http_headers": ["X-Example": "value"],
@@ -46,6 +51,7 @@ final class ModelProviderInfoTests: XCTestCase {
                 "env_key": NSNull(),
                 "env_key_instructions": NSNull(),
                 "experimental_bearer_token": NSNull(),
+                "aws": NSNull(),
                 "wire_api": "chat",
                 "query_params": NSNull(),
                 "http_headers": NSNull(),
@@ -71,6 +77,7 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(provider.name, "Azure")
         XCTAssertEqual(provider.baseURL, "https://xxxxx.openai.azure.com/openai")
         XCTAssertEqual(provider.envKey, "AZURE_OPENAI_API_KEY")
+        XCTAssertNil(provider.aws)
         XCTAssertEqual(provider.wireAPI, .chat)
         XCTAssertEqual(provider.queryParams, ["api-version": "2025-04-01-preview"])
         XCTAssertFalse(provider.requiresOpenAIAuth)
@@ -300,6 +307,7 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(providers["openai"]?.wireAPI, .responses)
         XCTAssertEqual(providers["openai"]?.requiresOpenAIAuth, true)
         XCTAssertEqual(providers["amazon-bedrock"], ModelProviderInfo.createAmazonBedrockProvider())
+        XCTAssertEqual(providers["amazon-bedrock"]?.aws, ModelProviderAWSAuthInfo())
         XCTAssertEqual(providers["ollama"], ModelProviderInfo.createOSSProvider(
             baseURL: "http://localhost:11434/v1",
             wireAPI: .chat
@@ -343,6 +351,15 @@ final class ModelProviderInfoTests: XCTestCase {
             ModelProviderInfo.createAmazonBedrockProvider().capabilities(),
             ModelProviderCapabilities(namespaceTools: false, imageGeneration: false, webSearch: false)
         )
+    }
+
+    func testAmazonBedrockProviderIncludesDefaultAWSConfigLikeRust() {
+        let provider = ModelProviderInfo.createAmazonBedrockProvider()
+
+        XCTAssertEqual(provider.aws, ModelProviderAWSAuthInfo(profile: nil, region: nil))
+        XCTAssertEqual(provider.baseURL, "https://bedrock-mantle.us-east-1.api.aws/openai/v1")
+        XCTAssertEqual(provider.wireAPI, .responses)
+        XCTAssertFalse(provider.requiresOpenAIAuth)
     }
 
     func testSupportsRemoteCompactionMatchesRustProviderRules() {

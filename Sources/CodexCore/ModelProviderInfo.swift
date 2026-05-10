@@ -232,6 +232,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     public let envKey: String?
     public let envKeyInstructions: String?
     public let experimentalBearerToken: String?
+    public var aws: ModelProviderAWSAuthInfo?
     public let wireAPI: WireAPI
     public let queryParams: [String: String]?
     public let httpHeaders: [String: String]?
@@ -247,6 +248,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         case envKey = "env_key"
         case envKeyInstructions = "env_key_instructions"
         case experimentalBearerToken = "experimental_bearer_token"
+        case aws
         case wireAPI = "wire_api"
         case queryParams = "query_params"
         case httpHeaders = "http_headers"
@@ -258,11 +260,12 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     }
 
     public init(
-        name: String,
+        name: String = "",
         baseURL: String? = nil,
         envKey: String? = nil,
         envKeyInstructions: String? = nil,
         experimentalBearerToken: String? = nil,
+        aws: ModelProviderAWSAuthInfo? = nil,
         wireAPI: WireAPI = .chat,
         queryParams: [String: String]? = nil,
         httpHeaders: [String: String]? = nil,
@@ -277,6 +280,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.envKey = envKey
         self.envKeyInstructions = envKeyInstructions
         self.experimentalBearerToken = experimentalBearerToken
+        self.aws = aws
         self.wireAPI = wireAPI
         self.queryParams = queryParams
         self.httpHeaders = httpHeaders
@@ -289,11 +293,12 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.name = try container.decode(String.self, forKey: .name)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
         self.envKey = try container.decodeIfPresent(String.self, forKey: .envKey)
         self.envKeyInstructions = try container.decodeIfPresent(String.self, forKey: .envKeyInstructions)
         self.experimentalBearerToken = try container.decodeIfPresent(String.self, forKey: .experimentalBearerToken)
+        self.aws = try container.decodeIfPresent(ModelProviderAWSAuthInfo.self, forKey: .aws)
         self.wireAPI = try container.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .chat
         self.queryParams = try container.decodeIfPresent([String: String].self, forKey: .queryParams)
         self.httpHeaders = try container.decodeIfPresent([String: String].self, forKey: .httpHeaders)
@@ -311,6 +316,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         try encodeOptional(envKey, into: &container, forKey: .envKey)
         try encodeOptional(envKeyInstructions, into: &container, forKey: .envKeyInstructions)
         try encodeOptional(experimentalBearerToken, into: &container, forKey: .experimentalBearerToken)
+        try encodeOptional(aws, into: &container, forKey: .aws)
         try container.encode(wireAPI, forKey: .wireAPI)
         try encodeOptional(queryParams, into: &container, forKey: .queryParams)
         try encodeOptional(httpHeaders, into: &container, forKey: .httpHeaders)
@@ -436,6 +442,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         ModelProviderInfo(
             name: amazonBedrockProviderName,
             baseURL: amazonBedrockDefaultBaseURL,
+            aws: ModelProviderAWSAuthInfo(),
             wireAPI: .responses,
             requiresOpenAIAuth: false
         )
@@ -490,10 +497,36 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         return ModelProviderCapabilities()
     }
 
+    func isAmazonBedrockAWSOnlyOverride() -> Bool {
+        name.isEmpty
+            && baseURL == nil
+            && envKey == nil
+            && envKeyInstructions == nil
+            && experimentalBearerToken == nil
+            && queryParams == nil
+            && httpHeaders == nil
+            && envHTTPHeaders == nil
+            && requestMaxRetries == nil
+            && streamMaxRetries == nil
+            && streamIdleTimeoutMilliseconds == nil
+            && requiresOpenAIAuth == false
+            && (wireAPI == .chat || wireAPI == .responses)
+    }
+
     private static func isValidHeader(name: String, value: String) -> Bool {
         !name.isEmpty
             && !name.contains { $0.isWhitespace || $0.isNewline || $0 == ":" }
             && !value.contains { $0.isNewline }
+    }
+}
+
+public struct ModelProviderAWSAuthInfo: Codable, Equatable, Sendable {
+    public var profile: String?
+    public var region: String?
+
+    public init(profile: String? = nil, region: String? = nil) {
+        self.profile = profile
+        self.region = region
     }
 }
 

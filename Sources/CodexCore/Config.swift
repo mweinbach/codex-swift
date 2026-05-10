@@ -517,6 +517,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidProjectRootMarkers
     case modelProviderNotFound(String)
     case reservedModelProviderOverride([String])
+    case unsupportedProviderAWS(String)
+    case unsupportedAmazonBedrockOverride
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
@@ -541,6 +543,10 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
         case let .reservedModelProviderOverride(providerIDs):
             let conflicts = providerIDs.map { "`\($0)`" }.joined(separator: ", ")
             return "model_providers contains reserved built-in provider IDs: \(conflicts). Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`)."
+        case let .unsupportedProviderAWS(providerID):
+            return "model_providers.\(providerID): provider aws is only supported for `amazon-bedrock`"
+        case .unsupportedAmazonBedrockOverride:
+            return "model_providers.amazon-bedrock only supports changing `aws.profile` and `aws.region`; other non-default provider fields are not supported"
         case let .invalidConfigLine(line):
             return "Invalid config line: \(line)"
         case let .invalidTableHeader(header):
@@ -1347,9 +1353,36 @@ private struct ParsedCodexConfigToml {
         }
         for (name, value) in configuredProviders {
             let provider = try modelProviderInfoValue(value, key: "model_providers.\(name)")
+            if name == ModelProviderInfo.amazonBedrockProviderID {
+                try mergeAmazonBedrockAWSOverride(provider, into: &providers)
+                continue
+            }
+            if provider.aws != nil {
+                throw CodexConfigLoadError.unsupportedProviderAWS(name)
+            }
             providers[name] = provider
         }
         return providers
+    }
+
+    private static func mergeAmazonBedrockAWSOverride(
+        _ provider: ModelProviderInfo,
+        into providers: inout [String: ModelProviderInfo]
+    ) throws {
+        guard provider.isAmazonBedrockAWSOnlyOverride() else {
+            throw CodexConfigLoadError.unsupportedAmazonBedrockOverride
+        }
+        guard var builtIn = providers[ModelProviderInfo.amazonBedrockProviderID] else {
+            return
+        }
+
+        if let profile = provider.aws?.profile {
+            builtIn.aws?.profile = profile
+        }
+        if let region = provider.aws?.region {
+            builtIn.aws?.region = region
+        }
+        providers[ModelProviderInfo.amazonBedrockProviderID] = builtIn
     }
 
     private static func modelProviderInfoValue(_ value: ConfigValue, key: String) throws -> ModelProviderInfo {
@@ -1608,6 +1641,7 @@ private struct ParsedCodexConfigToml {
         key == "query_params"
             || key == "http_headers"
             || key == "env_http_headers"
+            || key == "aws"
     }
 
     private static func trimmedNonEmptyStringValue(_ value: ConfigValue, key: String) throws -> String? {
