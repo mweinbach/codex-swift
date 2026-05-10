@@ -14,6 +14,7 @@ public struct ExecServerStdioTransport: Sendable {
         writeLine: @escaping WriteLine
     ) async throws where Lines.Element == String {
         let writer = ExecServerStdioWriter(writeLine: writeLine)
+        var inputTasks: [Task<Void, Error>] = []
         let outboundTask = Task {
             while !Task.isCancelled {
                 guard let line = try await server.nextQueuedLine() else {
@@ -25,18 +26,44 @@ public struct ExecServerStdioTransport: Sendable {
 
         do {
             for try await line in lines {
-                let responseLines = try await server.receiveLine(line, drainMode: .directOnly)
-                for responseLine in responseLines {
-                    try await writer.write(responseLine)
+                guard let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: line, connectionLabel: "exec-server stdio") else {
+                    continue
+                }
+                let server = server
+                let writer = writer
+                switch event {
+                case let .message(.request(request)) where request.method != execServerInitializeMethod:
+                    inputTasks.append(Task {
+                        let responseLines = try await server.receiveEvent(event, drainMode: .directOnly)
+                        for responseLine in responseLines {
+                            try await writer.write(responseLine)
+                        }
+                    })
+                    inputTasks.removeAll { $0.isCancelled }
+                default:
+                    let responseLines = try await server.receiveEvent(event, drainMode: .directOnly)
+                    for responseLine in responseLines {
+                        try await writer.write(responseLine)
+                    }
                 }
             }
             let disconnectLines = try await server.disconnect()
             for line in disconnectLines {
                 try await writer.write(line)
             }
+            for task in inputTasks {
+                do {
+                    try await task.value
+                } catch is CancellationError {
+                    continue
+                }
+            }
             try await outboundTask.value
         } catch {
             outboundTask.cancel()
+            for task in inputTasks {
+                task.cancel()
+            }
             _ = try? await server.disconnect()
             throw error
         }

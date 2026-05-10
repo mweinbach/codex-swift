@@ -104,7 +104,11 @@ public actor ExecServerConnection {
     private func handle(_ message: ExecServerJSONRPCMessage) async -> ExecServerOutboundMessage? {
         switch message {
         case let .request(request):
-            return await router.handleRequest(request, using: handler)
+            let outbound = await router.handleRequest(request, using: handler)
+            guard !closed else {
+                return nil
+            }
+            return outbound
         case let .notification(notification):
             do {
                 try await router.handleNotification(notification, using: handler)

@@ -412,6 +412,73 @@ final class ExecServerTests: XCTestCase {
         try await runTask.value
     }
 
+    func testStdioTransportDisconnectDetachesSessionDuringInFlightReadLikeRust() async throws {
+        var inputContinuation: AsyncStream<String>.Continuation?
+        let input = AsyncStream<String> { continuation in
+            inputContinuation = continuation
+        }
+        let output = StdioTransportOutput()
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let firstTransport = ExecServerStdioTransport(server: ExecServerLineServer(sessionRegistry: registry))
+
+        let firstRunTask = Task {
+            try await firstTransport.run(lines: input) { line in
+                await output.append(line)
+            }
+        }
+        let continuation = try XCTUnwrap(inputContinuation)
+        continuation.yield(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#)
+        let initializeMessages = try await output.waitForMessages(count: 1)
+        XCTAssertEqual(initializeMessages[0], ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+
+        continuation.yield(#"{"method":"initialized","params":{}}"#)
+        try await Task.sleep(nanoseconds: 10_000_000)
+        continuation.yield(#"{"id":2,"method":"process/start","params":{"processId":"transport-long-read","argv":["/bin/sh","-c","sleep 5"],"cwd":"/tmp","env":{},"tty":false}}"#)
+
+        let firstMessages = try await output.waitForMessages(count: 2)
+        XCTAssertEqual(firstMessages[1], ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("transport-long-read")])
+        ))
+
+        continuation.yield(#"{"id":3,"method":"process/read","params":{"processId":"transport-long-read","waitMs":5000}}"#)
+        continuation.finish()
+        try await withTimeout(seconds: 1) {
+            try await firstRunTask.value
+        }
+
+        let second = await ExecServerConnectionProcessor(sessionRegistry: registry).makeConnection()
+        let resumed = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(
+                clientName: "second",
+                resumeSessionId: "session-1"
+            ))
+        ))))
+        _ = await second.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        let terminated = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(5),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "transport-long-read"))
+        ))))
+
+        XCTAssertEqual(resumed?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(4),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertEqual(terminated?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(5),
+            result: .object(["running": .bool(true)])
+        ))
+    }
+
     func testConnectionProcessorHandlesWebSocketCodecEventsLikeRust() async {
         let connection = ExecServerConnection()
         let malformed = await connection.handleWebSocketText("{", connectionLabel: "exec-server websocket peer")
@@ -2486,6 +2553,24 @@ final class ExecServerTests: XCTestCase {
         }
         XCTFail("Timed out waiting for outbound exec-server message", file: file, line: line)
         return nil
+    }
+
+    private func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw XCTestError(.timeoutWhileWaiting)
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
     }
 
     private func collectHTTPBodyDeltaLines(

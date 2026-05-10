@@ -27,7 +27,17 @@ public actor ExecServerLineServer {
         _ line: String,
         drainMode: ExecServerLineDrainMode = .includeQueued
     ) async throws -> [Data] {
-        let direct = await connection.handleStdioLine(line, connectionLabel: connectionLabel)
+        guard let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: line, connectionLabel: connectionLabel) else {
+            return []
+        }
+        return try await receiveEvent(event, drainMode: drainMode)
+    }
+
+    public func receiveEvent(
+        _ event: ExecServerConnectionEvent,
+        drainMode: ExecServerLineDrainMode = .includeQueued
+    ) async throws -> [Data] {
+        let direct = await connection.handle(event)
         var lines = try encode(direct)
         if drainMode == .includeQueued {
             lines += try await drainQueuedLines()
