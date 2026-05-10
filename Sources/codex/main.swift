@@ -1269,7 +1269,16 @@ private func runForkCommand(_ request: CodexCLI.ForkCommandRequest) async throws
 private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case let .listen(url):
-        _ = try ExecServerListenURLParser.parse(url)
+        switch try ExecServerListenURLParser.parse(url) {
+        case .stdio:
+            let transport = ExecServerStdioTransport()
+            try await transport.run(lines: FileHandle.standardInput.bytes.lines) { line in
+                FileHandle.standardOutput.write(line)
+            }
+            return CodexCLI.CommandExecutionResult(exitCode: 0)
+        case .webSocket:
+            break
+        }
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
             stderrMessage: "codex-swift: exec-server \(url) transport runtime is not complete yet."

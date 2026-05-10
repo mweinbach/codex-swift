@@ -229,6 +229,80 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(deltas.last?.done, true)
     }
 
+    func testStdioTransportWritesQueuedNotificationsWithoutAdditionalInputLikeRust() async throws {
+        var inputContinuation: AsyncStream<String>.Continuation?
+        let input = AsyncStream<String> { continuation in
+            inputContinuation = continuation
+        }
+        let output = StdioTransportOutput()
+        let transport = ExecServerStdioTransport(server: ExecServerLineServer(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])),
+            httpClient: ExecServerHTTPClient(
+                send: { _ in URLSessionTransportResponse(statusCode: 500) },
+                stream: { _ in
+                    APIStreamResponse(
+                        statusCode: 200,
+                        byteStream: APIByteStream { continuation in
+                            continuation.yield(.success(Data("hello".utf8)))
+                            continuation.finish()
+                        }
+                    )
+                }
+            )
+        ))
+
+        let runTask = Task {
+            try await transport.run(lines: input) { line in
+                await output.append(line)
+            }
+        }
+        let continuation = try XCTUnwrap(inputContinuation)
+        continuation.yield(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#)
+        continuation.yield(#"{"method":"initialized","params":{}}"#)
+        continuation.yield(#"{"id":2,"method":"http/request","params":{"method":"GET","url":"https://example.test/mcp","requestId":"transport-stream","streamResponse":true}}"#)
+
+        let messages = try await output.waitForMessages(count: 3)
+        XCTAssertEqual(messages[0], ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertEqual(messages[1], ExecServerRPC.response(
+            id: .integer(2),
+            result: .object([
+                "bodyBase64": .string(""),
+                "headers": .array([]),
+                "status": .integer(200)
+            ])
+        ))
+        guard case let .notification(notification) = messages[2] else {
+            return XCTFail("Expected queued http/request body delta notification")
+        }
+        XCTAssertEqual(notification.method, execServerHttpRequestBodyDeltaMethod)
+        let delta = try decodeJSONValue(
+            try XCTUnwrap(notification.params),
+            as: ExecServerHttpRequestBodyDeltaNotification.self
+        )
+        XCTAssertEqual(delta.requestId, "transport-stream")
+        XCTAssertEqual(delta.seq, 1)
+        XCTAssertEqual(delta.delta.bytes, Array("hello".utf8))
+        XCTAssertFalse(delta.done)
+
+        let terminalMessages = try await output.waitForMessages(count: 4)
+        guard case let .notification(terminalNotification) = terminalMessages[3] else {
+            return XCTFail("Expected terminal http/request body delta notification")
+        }
+        let terminalDelta = try decodeJSONValue(
+            try XCTUnwrap(terminalNotification.params),
+            as: ExecServerHttpRequestBodyDeltaNotification.self
+        )
+        XCTAssertEqual(terminalDelta.requestId, "transport-stream")
+        XCTAssertEqual(terminalDelta.seq, 2)
+        XCTAssertTrue(terminalDelta.done)
+
+        continuation.finish()
+        try await runTask.value
+    }
+
     func testConnectionProcessorHandlesWebSocketCodecEventsLikeRust() async {
         let connection = ExecServerConnection()
         let malformed = await connection.handleWebSocketText("{", connectionLabel: "exec-server websocket peer")
@@ -1850,6 +1924,32 @@ final class ExecServerTests: XCTestCase {
     private func decodeLine(_ data: Data) throws -> ExecServerJSONRPCMessage {
         XCTAssertEqual(data.last, 0x0A)
         return try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(data.dropLast()))
+    }
+
+    private actor StdioTransportOutput {
+        private var lines: [Data] = []
+
+        func append(_ line: Data) {
+            lines.append(line)
+        }
+
+        func waitForMessages(
+            count: Int,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async throws -> [ExecServerJSONRPCMessage] {
+            for _ in 0..<50 {
+                if lines.count >= count {
+                    return try lines.map { try JSONDecoder().decode(
+                        ExecServerJSONRPCMessage.self,
+                        from: Data($0.dropLast())
+                    ) }
+                }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            XCTFail("Timed out waiting for stdio transport output", file: file, line: line)
+            return []
+        }
     }
 
     private actor HTTPRequestRecorder {

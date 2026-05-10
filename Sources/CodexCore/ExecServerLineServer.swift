@@ -1,5 +1,10 @@
 import Foundation
 
+public enum ExecServerLineDrainMode: Sendable {
+    case includeQueued
+    case directOnly
+}
+
 public actor ExecServerLineServer {
     private let connection: ExecServerConnection
     private let connectionLabel: String
@@ -18,10 +23,15 @@ public actor ExecServerLineServer {
         self.connectionLabel = connectionLabel
     }
 
-    public func receiveLine(_ line: String) async throws -> [Data] {
+    public func receiveLine(
+        _ line: String,
+        drainMode: ExecServerLineDrainMode = .includeQueued
+    ) async throws -> [Data] {
         let direct = await connection.handleStdioLine(line, connectionLabel: connectionLabel)
         var lines = try encode(direct)
-        lines += try await drainQueuedLines()
+        if drainMode == .includeQueued {
+            lines += try await drainQueuedLines()
+        }
         return lines
     }
 
@@ -38,6 +48,13 @@ public actor ExecServerLineServer {
             lines.append(try ExecServerJSONRPCCodec.encodeLine(outbound.jsonRPCMessage))
         }
         return lines
+    }
+
+    public func nextQueuedLine() async throws -> Data? {
+        guard let outbound = await connection.waitForOutbound() else {
+            return nil
+        }
+        return try ExecServerJSONRPCCodec.encodeLine(outbound.jsonRPCMessage)
     }
 
     public func isClosed() async -> Bool {

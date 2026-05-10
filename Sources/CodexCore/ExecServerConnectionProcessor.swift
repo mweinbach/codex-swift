@@ -97,6 +97,10 @@ public actor ExecServerConnection {
         await outboundQueue.dequeue()
     }
 
+    public func waitForOutbound() async -> ExecServerOutboundMessage? {
+        await outboundQueue.next()
+    }
+
     private func handle(_ message: ExecServerJSONRPCMessage) async -> ExecServerOutboundMessage? {
         switch message {
         case let .request(request):
@@ -120,13 +124,23 @@ public actor ExecServerConnection {
         }
         closed = true
         await handler.shutdown()
+        await outboundQueue.finish()
     }
 }
 
 private actor ExecServerOutboundQueue {
     private var messages: [ExecServerOutboundMessage] = []
+    private var waiters: [CheckedContinuation<ExecServerOutboundMessage?, Never>] = []
+    private var finished = false
 
     func enqueue(_ message: ExecServerOutboundMessage) {
+        guard !finished else {
+            return
+        }
+        if !waiters.isEmpty {
+            waiters.removeFirst().resume(returning: message)
+            return
+        }
         messages.append(message)
     }
 
@@ -135,5 +149,26 @@ private actor ExecServerOutboundQueue {
             return nil
         }
         return messages.removeFirst()
+    }
+
+    func next() async -> ExecServerOutboundMessage? {
+        if !messages.isEmpty {
+            return messages.removeFirst()
+        }
+        if finished {
+            return nil
+        }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func finish() {
+        finished = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending {
+            continuation.resume(returning: nil)
+        }
     }
 }
