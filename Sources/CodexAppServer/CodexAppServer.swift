@@ -4762,8 +4762,130 @@ public enum CodexAppServer {
                 configuration: configuration
             )
         case (.none, .some(let remoteMarketplaceName)):
+            return try remotePluginInstallResult(
+                remoteMarketplaceName: remoteMarketplaceName,
+                remotePluginID: pluginName,
+                configuration: configuration
+            )
+        }
+    }
+
+    private static func remotePluginInstallResult(
+        remoteMarketplaceName: String,
+        remotePluginID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
+        guard runtimeConfig.features.isEnabled(.plugins) else {
             throw AppServerError.invalidRequest("remote plugin install is not enabled for marketplace \(remoteMarketplaceName)")
         }
+        guard isValidRemotePluginID(remotePluginID) else {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            throw AppServerError.invalidRequest("install remote plugin: chatgpt authentication required for remote plugin catalog")
+        }
+        let detail = try remotePluginObject(
+            path: "/ps/plugins/\(remotePluginID)",
+            queryItems: [URLQueryItem(name: "includeDownloadUrls", value: "true")],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "read remote plugin details before install"
+        )
+        if remotePluginAvailability(detail["status"] as? String) == "DISABLED_BY_ADMIN" {
+            let pluginID = detail["id"] as? String ?? remotePluginID
+            throw AppServerError.invalidRequest("remote plugin \(pluginID) is disabled by admin")
+        }
+        if detail["installation_policy"] as? String == "NOT_AVAILABLE" {
+            let pluginID = detail["id"] as? String ?? remotePluginID
+            throw AppServerError.invalidRequest("remote plugin \(pluginID) is not available for install")
+        }
+        try validateRemotePluginBundleMetadata(
+            remotePluginID: remotePluginID,
+            detail: detail,
+            environment: configuration.environment
+        )
+        let response = try remotePluginObject(
+            path: "/ps/plugins/\(remotePluginID)/install",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "install remote plugin",
+            method: "POST"
+        )
+        if let responsePluginID = response["id"] as? String, responsePluginID != remotePluginID {
+            throw AppServerError.internalError(
+                "install remote plugin: remote plugin mutation returned unexpected plugin id: expected `\(remotePluginID)`, got `\(responsePluginID)`"
+            )
+        }
+        if let enabled = response["enabled"] as? Bool, !enabled {
+            throw AppServerError.internalError(
+                "install remote plugin: remote plugin mutation returned unexpected enabled state for `\(remotePluginID)`: expected true, got false"
+            )
+        }
+        return [
+            "authPolicy": detail["authentication_policy"] as? String ?? "ON_USE",
+            "appsNeedingAuth": []
+        ]
+    }
+
+    private static func validateRemotePluginBundleMetadata(
+        remotePluginID: String,
+        detail: [String: Any],
+        environment: [String: String]
+    ) throws {
+        let release = detail["release"] as? [String: Any]
+        let version = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !version.isEmpty else {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend did not return a release version for remote plugin `\(remotePluginID)`"
+            )
+        }
+        if version == "." || version == ".." {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend returned an invalid release version for remote plugin `\(remotePluginID)`: invalid plugin version: path traversal is not allowed"
+            )
+        }
+        if !version.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "+" || $0 == "_" || $0 == "-") }) {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend returned an invalid release version for remote plugin `\(remotePluginID)`: invalid plugin version: only ASCII letters, digits, `.`, `+`, `_`, and `-` are allowed"
+            )
+        }
+        let bundleDownloadURL = (release?["bundle_download_url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !bundleDownloadURL.isEmpty else {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend did not return a download URL for remote plugin `\(remotePluginID)`"
+            )
+        }
+        guard let parsedURL = URL(string: bundleDownloadURL),
+              let scheme = parsedURL.scheme
+        else {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend returned an invalid download URL for remote plugin `\(remotePluginID)`: \(bundleDownloadURL)"
+            )
+        }
+        guard scheme == "https" || isAllowedTestLoopbackHTTPRemotePluginBundleURL(parsedURL, environment: environment) else {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend returned an unsupported download URL scheme for remote plugin `\(remotePluginID)`: \(scheme)"
+            )
+        }
+    }
+
+    private static func isAllowedTestLoopbackHTTPRemotePluginBundleURL(
+        _ url: URL,
+        environment: [String: String]
+    ) -> Bool {
+        guard url.scheme == "http",
+              environment["CODEX_TEST_ALLOW_HTTP_REMOTE_PLUGIN_BUNDLE_DOWNLOADS"] == "1",
+              let host = url.host?.lowercased()
+        else {
+            return false
+        }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     private static func localPluginInstallResult(
