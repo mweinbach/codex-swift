@@ -725,6 +725,30 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testDebugRuntimeModelsBundledOutputsBundledCatalog() async throws {
+        let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
+            action: .models(bundled: true)
+        ))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertNil(result.stderrMessage)
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode(ModelsResponse.self, from: Data(output.utf8))
+        XCTAssertEqual(decoded, try ModelsManager.bundledModelsResponse())
+    }
+
+    func testDebugRuntimeModelsOnlineRemainsExplicitlyPending() async throws {
+        let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
+            action: .models(bundled: false)
+        ))
+
+        XCTAssertEqual(result, CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: command 'debug models' runtime port is not complete yet."
+        ))
+    }
+
     func testRunAsyncNewCommandHooksWithoutRunnersStillReportUnimplemented() async {
         for command in [
             "exec",
