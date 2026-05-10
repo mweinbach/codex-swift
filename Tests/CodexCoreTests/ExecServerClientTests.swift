@@ -170,6 +170,218 @@ final class ExecServerClientTests: XCTestCase {
         )
     }
 
+    func testRemoteFileSystemDelegatesOperationsThroughExecServerClientLikeRust() async throws {
+        let sandbox = FileSystemSandboxContext(
+            permissions: .readOnly(),
+            cwd: try AbsolutePath(absolutePath: "/repo")
+        )
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            switch request.method {
+            case execServerFsReadFileMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo/note.txt"))
+                XCTAssertNil(request.params?["sandbox"]?["cwd"])
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsReadFileResponse(dataBase64: "aGVsbG8="))
+                )
+            case execServerFsWriteFileMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo/out.txt"))
+                XCTAssertEqual(request.params?["dataBase64"], .string("d3JpdHRlbg=="))
+                XCTAssertNil(request.params?["sandbox"]?["cwd"])
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsWriteFileResponse())
+                )
+            case execServerFsCreateDirectoryMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo/new"))
+                XCTAssertEqual(request.params?["recursive"], .bool(false))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsCreateDirectoryResponse())
+                )
+            case execServerFsGetMetadataMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo/out.txt"))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsGetMetadataResponse(
+                        isDirectory: false,
+                        isFile: true,
+                        isSymlink: false,
+                        createdAtMs: 11,
+                        modifiedAtMs: 22
+                    ))
+                )
+            case execServerFsReadDirectoryMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo"))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsReadDirectoryResponse(entries: [
+                        ExecServerFsReadDirectoryEntry(fileName: "out.txt", isDirectory: false, isFile: true)
+                    ]))
+                )
+            case execServerFsRemoveMethod:
+                XCTAssertEqual(request.params?["path"], .string("/repo/out.txt"))
+                XCTAssertEqual(request.params?["recursive"], .bool(true))
+                XCTAssertEqual(request.params?["force"], .bool(false))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsRemoveResponse())
+                )
+            case execServerFsCopyMethod:
+                XCTAssertEqual(request.params?["sourcePath"], .string("/repo/source.txt"))
+                XCTAssertEqual(request.params?["destinationPath"], .string("/repo/dest.txt"))
+                XCTAssertEqual(request.params?["recursive"], .bool(true))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsCopyResponse())
+                )
+            default:
+                XCTFail("Unexpected method \(request.method)")
+                return nil
+            }
+        }
+        let fileSystem = ExecServerRemoteFileSystem(client: ExecServerClient(transport: transport))
+
+        let contents = try await fileSystem.readFile(
+            try AbsolutePath(absolutePath: "/repo/note.txt"),
+            sandbox: sandbox
+        )
+        try await fileSystem.writeFile(
+            try AbsolutePath(absolutePath: "/repo/out.txt"),
+            contents: Data("written".utf8),
+            sandbox: sandbox
+        )
+        try await fileSystem.createDirectory(
+            try AbsolutePath(absolutePath: "/repo/new"),
+            options: CreateDirectoryOptions(recursive: false),
+            sandbox: sandbox
+        )
+        let metadata = try await fileSystem.getMetadata(try AbsolutePath(absolutePath: "/repo/out.txt"))
+        let entries = try await fileSystem.readDirectory(try AbsolutePath(absolutePath: "/repo"))
+        try await fileSystem.remove(
+            try AbsolutePath(absolutePath: "/repo/out.txt"),
+            options: RemoveOptions(recursive: true, force: false)
+        )
+        try await fileSystem.copy(
+            from: try AbsolutePath(absolutePath: "/repo/source.txt"),
+            to: try AbsolutePath(absolutePath: "/repo/dest.txt"),
+            options: CopyOptions(recursive: true)
+        )
+
+        XCTAssertEqual(contents, Data("hello".utf8))
+        XCTAssertEqual(metadata, FileMetadata(
+            isDirectory: false,
+            isFile: true,
+            isSymlink: false,
+            createdAtMs: 11,
+            modifiedAtMs: 22
+        ))
+        XCTAssertEqual(entries, [
+            ReadDirectoryEntry(fileName: "out.txt", isDirectory: false, isFile: true)
+        ])
+        let methods = await transport.snapshot().compactMap { message -> String? in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return request.method
+        }
+        XCTAssertEqual(methods, [
+            execServerFsReadFileMethod,
+            execServerFsWriteFileMethod,
+            execServerFsCreateDirectoryMethod,
+            execServerFsGetMetadataMethod,
+            execServerFsReadDirectoryMethod,
+            execServerFsRemoveMethod,
+            execServerFsCopyMethod
+        ])
+    }
+
+    func testRemoteFileSystemPreservesCwdWhenPermissionsDependOnItLikeRust() async throws {
+        let sandbox = FileSystemSandboxContext(
+            permissions: .workspaceWrite(),
+            cwd: try AbsolutePath(absolutePath: "/repo")
+        )
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            XCTAssertEqual(request.method, execServerFsReadFileMethod)
+            XCTAssertEqual(request.params?["sandbox"]?["cwd"], .string("/repo"))
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerFsReadFileResponse(dataBase64: "b2s="))
+            )
+        }
+        let fileSystem = ExecServerRemoteFileSystem(client: ExecServerClient(transport: transport))
+
+        let contents = try await fileSystem.readFile(
+            try AbsolutePath(absolutePath: "/repo/note.txt"),
+            sandbox: sandbox
+        )
+
+        XCTAssertEqual(contents, Data("ok".utf8))
+    }
+
+    func testRemoteFileSystemMapsInvalidBase64AndServerErrorsLikeRust() async throws {
+        let invalidBase64Transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerFsReadFileResponse(dataBase64: "%%%"))
+            )
+        }
+        let invalidBase64FileSystem = ExecServerRemoteFileSystem(
+            client: ExecServerClient(transport: invalidBase64Transport)
+        )
+        await XCTAssertThrowsExecServerFileSystemError(
+            try await invalidBase64FileSystem.readFile(try AbsolutePath(absolutePath: "/repo/bad.txt")),
+            kind: .invalidInput,
+            description: "remote fs/readFile returned invalid base64 dataBase64: Invalid byte 37, offset 0."
+        )
+
+        let notFoundTransport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return ExecServerRPC.error(
+                id: request.id,
+                error: ExecServerRPC.notFound("No such file or directory")
+            )
+        }
+        let notFoundFileSystem = ExecServerRemoteFileSystem(client: ExecServerClient(transport: notFoundTransport))
+        await XCTAssertThrowsExecServerFileSystemError(
+            try await notFoundFileSystem.getMetadata(try AbsolutePath(absolutePath: "/repo/missing.txt")),
+            kind: .notFound,
+            description: "No such file or directory"
+        )
+
+        let invalidInputTransport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return ExecServerRPC.error(
+                id: request.id,
+                error: ExecServerRPC.invalidRequest("bad fs request")
+            )
+        }
+        let invalidInputFileSystem = ExecServerRemoteFileSystem(
+            client: ExecServerClient(transport: invalidInputTransport)
+        )
+        await XCTAssertThrowsExecServerFileSystemError(
+            try await invalidInputFileSystem.remove(
+                try AbsolutePath(absolutePath: "/repo/bad.txt"),
+                options: RemoveOptions(recursive: false, force: false)
+            ),
+            kind: .invalidInput,
+            description: "bad fs request"
+        )
+    }
+
     func testLineClientTransportWritesStdioLinesAndFansOutNotificationsLikeRust() async throws {
         let harness = LineClientHarness()
         let notification = ExecServerJSONRPCNotification(
@@ -398,6 +610,24 @@ final class ExecServerClientTests: XCTestCase {
                 file: file,
                 line: line
             )
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
+    }
+
+    private func XCTAssertThrowsExecServerFileSystemError<T>(
+        _ expression: @autoclosure @escaping () async throws -> T,
+        kind: ExecServerFileSystemError.Kind,
+        description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server filesystem error", file: file, line: line)
+        } catch let error as ExecServerFileSystemError {
+            XCTAssertEqual(error.kind, kind, file: file, line: line)
+            XCTAssertEqual(error.description, description, file: file, line: line)
         } catch {
             XCTFail("Unexpected error: \(error)", file: file, line: line)
         }
