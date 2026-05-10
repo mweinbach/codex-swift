@@ -5,6 +5,39 @@ import SQLite3
 import XCTest
 
 final class DebugCommandRuntimeTests: XCTestCase {
+    func testAppServerSendMessageV2UsesCurrentExecutableAndConfigOverrides() async throws {
+        let executable = URL(fileURLWithPath: "/tmp/codex-swift-test", isDirectory: false)
+        let overrides = CliConfigOverrides(rawOverrides: ["model=\"gpt-test\"", "features.remote_control=true"])
+        var capturedExecutable: URL?
+        var capturedOverrides: CliConfigOverrides?
+        var capturedMessage: String?
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(
+                action: .appServerSendMessageV2(message: "hello app server"),
+                configOverrides: overrides
+            ),
+            dependencies: DebugCommandRuntime.Dependencies(
+                currentExecutable: { executable },
+                sendAppServerMessageV2: { executableURL, configOverrides, message in
+                    capturedExecutable = executableURL
+                    capturedOverrides = configOverrides
+                    capturedMessage = message
+                    return CodexCLI.CommandExecutionResult(
+                        exitCode: 0,
+                        stdoutMessage: "< initialize response: {}\n< thread/start response: {}\n< turn/start response: {}\n"
+                    )
+                }
+            )
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(capturedExecutable, executable)
+        XCTAssertEqual(capturedOverrides, overrides)
+        XCTAssertEqual(capturedMessage, "hello app server")
+        XCTAssertTrue(result.stdoutMessage?.contains("< turn/start response:") == true)
+    }
+
     func testPromptInputOutputsEnvironmentImagesAndNormalizedPrompt() async throws {
         let temp = try TemporaryDirectory()
         let imagePath = temp.url.appendingPathComponent("image.png", isDirectory: false)

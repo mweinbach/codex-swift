@@ -7,6 +7,8 @@ public enum DebugCommandRuntime {
         public var loadConfig: (URL, CliConfigOverrides) throws -> CodexRuntimeConfig
         public var makeStateStore: (URL, String) throws -> SQLiteAgentGraphStore
         public var loadRawModelCatalog: (URL, CodexRuntimeConfig) async throws -> ModelsResponse
+        public var currentExecutable: () throws -> URL
+        public var sendAppServerMessageV2: (URL, CliConfigOverrides, String) async throws -> CodexCLI.CommandExecutionResult
 
         public init(
             findCodexHome: @escaping () throws -> URL = { try CodexHome.find() },
@@ -32,12 +34,33 @@ public enum DebugCommandRuntime {
                     transport: URLSessionAPITransport(),
                     clientVersion: ModelsManager.formatClientVersion(major: "0", minor: "0", patch: "0")
                 )
-            }
+            },
+            currentExecutable: @escaping () throws -> URL = {
+                if let executableURL = Bundle.main.executableURL {
+                    return executableURL.standardizedFileURL
+                }
+                let rawPath = CommandLine.arguments.first ?? "codex"
+                if rawPath.hasPrefix("/") {
+                    return URL(fileURLWithPath: rawPath, isDirectory: false).standardizedFileURL
+                }
+                return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                    .appendingPathComponent(rawPath, isDirectory: false)
+                    .standardizedFileURL
+            },
+            sendAppServerMessageV2: ((URL, CliConfigOverrides, String) async throws -> CodexCLI.CommandExecutionResult)? = nil
         ) {
             self.findCodexHome = findCodexHome
             self.loadConfig = loadConfig
             self.makeStateStore = makeStateStore
             self.loadRawModelCatalog = loadRawModelCatalog
+            self.currentExecutable = currentExecutable
+            self.sendAppServerMessageV2 = sendAppServerMessageV2 ?? { executableURL, overrides, message in
+                try await DebugCommandRuntime.sendAppServerMessageV2(
+                    executableURL: executableURL,
+                    configOverrides: overrides,
+                    userMessage: message
+                )
+            }
         }
     }
 
@@ -48,8 +71,12 @@ public enum DebugCommandRuntime {
         switch request.action {
         case let .models(bundled):
             return try await runModels(bundled: bundled, request: request, dependencies: dependencies)
-        case .appServerSendMessageV2:
-            return pendingRuntime("debug app-server send-message-v2")
+        case let .appServerSendMessageV2(message):
+            return try await dependencies.sendAppServerMessageV2(
+                dependencies.currentExecutable(),
+                request.configOverrides,
+                message
+            )
         case let .promptInput(prompt, imagePaths):
             return try runPromptInput(prompt: prompt, imagePaths: imagePaths, request: request, dependencies: dependencies)
         case let .traceReduce(traceBundle, output):
@@ -85,6 +112,175 @@ public enum DebugCommandRuntime {
             )
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+
+    public static func sendAppServerMessageV2(
+        executableURL: URL,
+        configOverrides: CliConfigOverrides,
+        userMessage: String
+    ) async throws -> CodexCLI.CommandExecutionResult {
+        try await Task.detached {
+            try runAppServerSendMessageV2(
+                executableURL: executableURL,
+                configOverrides: configOverrides,
+                userMessage: userMessage
+            )
+        }.value
+    }
+
+    private static func runAppServerSendMessageV2(
+        executableURL: URL,
+        configOverrides: CliConfigOverrides,
+        userMessage: String
+    ) throws -> CodexCLI.CommandExecutionResult {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = configOverrides.rawOverrides.flatMap { ["--config", $0] } + ["app-server"]
+        var environment = ProcessInfo.processInfo.environment
+        if let executableDirectory = executableURL.deletingLastPathComponent().path.nilIfEmpty {
+            let existingPath = environment["PATH"].map { ":\($0)" } ?? ""
+            environment["PATH"] = executableDirectory + existingPath
+        }
+        process.environment = environment
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw DebugAppServerRuntimeError.launchFailed(executableURL.path, error)
+        }
+
+        let stdinHandle = stdin.fileHandleForWriting
+        let stdoutHandle = stdout.fileHandleForReading
+        var renderedOutput = ""
+
+        let initialize = try sendAppServerDebugRequest(
+            id: 1,
+            method: "initialize",
+            params: ["capabilities": ["experimentalApi": true]],
+            stdin: stdinHandle,
+            stdout: stdoutHandle,
+            output: &renderedOutput
+        )
+        renderedOutput += "< initialize response: \(compactJSONObject(initialize))\n"
+
+        let threadStart = try sendAppServerDebugRequest(
+            id: 2,
+            method: "thread/start",
+            params: [:],
+            stdin: stdinHandle,
+            stdout: stdoutHandle,
+            output: &renderedOutput
+        )
+        renderedOutput += "< thread/start response: \(compactJSONObject(threadStart))\n"
+
+        guard let threadID = ((threadStart["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String else {
+            throw DebugAppServerRuntimeError.missingField("thread/start result.thread.id")
+        }
+
+        let turnStart = try sendAppServerDebugRequest(
+            id: 3,
+            method: "turn/start",
+            params: [
+                "threadId": threadID,
+                "input": [
+                    [
+                        "type": "text",
+                        "text": userMessage,
+                        "textElements": []
+                    ]
+                ]
+            ],
+            stdin: stdinHandle,
+            stdout: stdoutHandle,
+            output: &renderedOutput
+        )
+        renderedOutput += "< turn/start response: \(compactJSONObject(turnStart))\n"
+        stdinHandle.closeFile()
+
+        while let line = readAppServerDebugLine(from: stdoutHandle) {
+            renderedOutput += "< notification: \(line)\n"
+        }
+        process.waitUntilExit()
+
+        let stderrText = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        guard process.terminationStatus == 0 else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: process.terminationStatus,
+                stdoutMessage: renderedOutput.nilIfEmpty,
+                stderrMessage: stderrText.nilIfEmpty
+            )
+        }
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: renderedOutput.nilIfEmpty,
+            stderrMessage: stderrText.nilIfEmpty
+        )
+    }
+
+    private static func sendAppServerDebugRequest(
+        id: Int,
+        method: String,
+        params: [String: Any],
+        stdin: FileHandle,
+        stdout: FileHandle,
+        output: inout String
+    ) throws -> [String: Any] {
+        let request: [String: Any] = [
+            "id": id,
+            "method": method,
+            "params": params
+        ]
+        var data = try JSONSerialization.data(withJSONObject: request)
+        data.append(0x0A)
+        try stdin.write(contentsOf: data)
+
+        while let line = readAppServerDebugLine(from: stdout) {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
+                output += "< notification: \(line)\n"
+                continue
+            }
+            if (object["id"] as? Int) == id {
+                if let error = object["error"] as? [String: Any] {
+                    throw DebugAppServerRuntimeError.serverError(
+                        method,
+                        error["message"] as? String ?? compactJSONObject(error)
+                    )
+                }
+                return object
+            }
+            output += "< notification: \(line)\n"
+        }
+        throw DebugAppServerRuntimeError.missingResponse(method)
+    }
+
+    private static func readAppServerDebugLine(from handle: FileHandle) -> String? {
+        var data = Data()
+        while true {
+            let byte = handle.readData(ofLength: 1)
+            if byte.isEmpty {
+                return data.isEmpty ? nil : String(decoding: data, as: UTF8.self)
+            }
+            if byte[byte.startIndex] == 0x0A {
+                return String(decoding: data, as: UTF8.self)
+            }
+            data.append(byte)
+        }
+    }
+
+    private static func compactJSONObject(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        else {
+            return String(describing: object)
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func runPromptInput(
@@ -231,6 +427,32 @@ public enum DebugCommandRuntime {
         for entry in entries {
             try FileManager.default.removeItem(at: entry)
         }
+    }
+}
+
+private enum DebugAppServerRuntimeError: Error, CustomStringConvertible {
+    case launchFailed(String, Error)
+    case missingResponse(String)
+    case serverError(String, String)
+    case missingField(String)
+
+    var description: String {
+        switch self {
+        case let .launchFailed(path, error):
+            return "failed to start `\(path)` app-server: \(error)"
+        case let .missingResponse(method):
+            return "app-server exited before responding to \(method)"
+        case let .serverError(method, message):
+            return "\(method) failed: \(message)"
+        case let .missingField(field):
+            return "app-server response missing \(field)"
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
