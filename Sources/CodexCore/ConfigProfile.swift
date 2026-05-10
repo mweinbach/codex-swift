@@ -22,6 +22,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
     public var approvalPolicy: AskForApproval?
+    public var approvalsReviewer: ApprovalsReviewer?
     public var sandboxMode: SandboxMode?
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
@@ -46,6 +47,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case model
         case modelProvider = "model_provider"
         case approvalPolicy = "approval_policy"
+        case approvalsReviewer = "approvals_reviewer"
         case sandboxMode = "sandbox_mode"
         case modelReasoningEffort = "model_reasoning_effort"
         case modelReasoningSummary = "model_reasoning_summary"
@@ -71,6 +73,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         model: String? = nil,
         modelProvider: String? = nil,
         approvalPolicy: AskForApproval? = nil,
+        approvalsReviewer: ApprovalsReviewer? = nil,
         sandboxMode: SandboxMode? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
@@ -94,6 +97,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.model = model
         self.modelProvider = modelProvider
         self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
         self.sandboxMode = sandboxMode
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
@@ -120,6 +124,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.model = try container.decodeIfPresent(String.self, forKey: .model)
         self.modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         self.approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
+        self.approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         self.sandboxMode = try container.decodeIfPresent(SandboxMode.self, forKey: .sandboxMode)
         self.modelReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .modelReasoningEffort)
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
@@ -146,6 +151,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(model, into: &container, forKey: .model)
         try encodeOptional(modelProvider, into: &container, forKey: .modelProvider)
         try encodeOptional(approvalPolicy, into: &container, forKey: .approvalPolicy)
+        try encodeOptional(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try encodeOptional(sandboxMode, into: &container, forKey: .sandboxMode)
         try encodeOptional(modelReasoningEffort, into: &container, forKey: .modelReasoningEffort)
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
@@ -172,6 +178,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
             model: model,
             modelProvider: modelProvider,
             approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
             modelReasoningEffort: modelReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
             modelVerbosity: modelVerbosity,
@@ -184,6 +191,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
     public var approvalPolicy: AskForApproval?
+    public var approvalsReviewer: ApprovalsReviewer?
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
@@ -193,6 +201,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         case model
         case modelProvider
         case approvalPolicy
+        case approvalsReviewer
         case modelReasoningEffort
         case modelReasoningSummary
         case modelVerbosity
@@ -203,6 +212,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         model: String? = nil,
         modelProvider: String? = nil,
         approvalPolicy: AskForApproval? = nil,
+        approvalsReviewer: ApprovalsReviewer? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
@@ -211,6 +221,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         self.model = model
         self.modelProvider = modelProvider
         self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
@@ -222,6 +233,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         self.model = try container.decodeIfPresent(String.self, forKey: .model)
         self.modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         self.approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
+        self.approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         self.modelReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .modelReasoningEffort)
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
         self.modelVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .modelVerbosity)
@@ -233,6 +245,7 @@ public struct AppServerProfile: Codable, Equatable, Sendable {
         try encodeOptional(model, into: &container, forKey: .model)
         try encodeOptional(modelProvider, into: &container, forKey: .modelProvider)
         try encodeOptional(approvalPolicy, into: &container, forKey: .approvalPolicy)
+        try encodeOptional(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try encodeOptional(modelReasoningEffort, into: &container, forKey: .modelReasoningEffort)
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
         try encodeOptional(modelVerbosity, into: &container, forKey: .modelVerbosity)

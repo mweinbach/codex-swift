@@ -62,6 +62,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelProvider: String?
     public var modelProviders: [String: ModelProviderInfo]
     public var approvalPolicy: AskForApproval?
+    public var approvalsReviewer: ApprovalsReviewer
     public var sandboxMode: SandboxMode?
     public var sandboxPolicy: SandboxPolicy?
     public var modelReasoningEffort: ReasoningEffort?
@@ -169,6 +170,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelProvider = modelProvider
         self.modelProviders = modelProviders
         self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = .user
         self.sandboxMode = sandboxMode
         self.sandboxPolicy = sandboxPolicy
         self.modelReasoningEffort = modelReasoningEffort
@@ -677,6 +679,10 @@ public enum CodexConfigLoader {
     ) throws {
         let approvalPolicy = config.approvalPolicy ?? AskForApproval.defaultValue
         try requirements.approvalPolicy.canSet(approvalPolicy).get()
+
+        if case .failure = requirements.approvalsReviewer.canSet(config.approvalsReviewer) {
+            config.approvalsReviewer = requirements.approvalsReviewer.value
+        }
 
         let sandboxPolicy = config.legacySandboxPolicy()
         try requirements.sandboxPolicy.canSet(sandboxPolicy).get()
@@ -1678,6 +1684,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)approval_policy"
             )
         }
+        if let approvalsReviewer = values["approvals_reviewer"] {
+            config.approvalsReviewer = try approvalsReviewerValue(
+                approvalsReviewer,
+                key: "\(keyPrefix)approvals_reviewer"
+            )
+        }
         if let sandboxMode = values["sandbox_mode"] {
             config.sandboxMode = try stringEnumValue(
                 SandboxMode.self,
@@ -1842,6 +1854,7 @@ private struct ParsedCodexConfigToml {
             || key == "model_auto_compact_token_limit"
             || key == "model_provider"
             || key == "approval_policy"
+            || key == "approvals_reviewer"
             || key == "sandbox_mode"
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
@@ -1888,6 +1901,7 @@ private struct ParsedCodexConfigToml {
         key == "model"
             || key == "model_provider"
             || key == "approval_policy"
+            || key == "approvals_reviewer"
             || key == "sandbox_mode"
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
@@ -1975,6 +1989,18 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidStringValue(key)
         }
         return enumValue
+    }
+
+    private static func approvalsReviewerValue(_ value: ConfigValue, key: String) throws -> ApprovalsReviewer {
+        let rawValue = try stringValue(value, key: key)
+        switch rawValue {
+        case "user":
+            return .user
+        case "guardian_subagent", "auto_review":
+            return .autoReview
+        default:
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
     }
 
     private static func realtimeAudioConfigValue(_ table: [String: ConfigValue], key: String) throws -> RealtimeAudioConfig {

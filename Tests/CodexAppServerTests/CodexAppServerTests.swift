@@ -97,7 +97,7 @@ final class CodexAppServerTests: XCTestCase {
         retainedTemporaryDirectories.append(cwd)
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
 
-        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"model":"gpt-test","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","approvalPolicy":"never","sandbox":"workspace-write","developerInstructions":"dev notes"}}"#.utf8)))
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"model":"gpt-test","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","approvalPolicy":"never","approvalsReviewer":"guardian_subagent","sandbox":"workspace-write","developerInstructions":"dev notes"}}"#.utf8)))
 
         XCTAssertEqual(messages.count, 2)
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
@@ -107,7 +107,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["cwd"] as? String, cwd.url.path)
         XCTAssertEqual(result["instructionSources"] as? [String], [])
         XCTAssertEqual(result["approvalPolicy"] as? String, "never")
-        XCTAssertEqual(result["approvalsReviewer"] as? String, "user")
+        XCTAssertEqual(result["approvalsReviewer"] as? String, "guardian_subagent")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspace-write")
         XCTAssertEqual(result["permissionProfile"] as? NSNull, NSNull())
         XCTAssertEqual(result["activePermissionProfile"] as? NSNull, NSNull())

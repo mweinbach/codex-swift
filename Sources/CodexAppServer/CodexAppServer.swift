@@ -911,7 +911,7 @@ public enum CodexAppServer {
             "cwd": started.cwd.path,
             "instructionSources": [],
             "approvalPolicy": started.approvalPolicy.rawValue,
-            "approvalsReviewer": "user",
+            "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(started.sandbox),
             "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
@@ -945,6 +945,8 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
+        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+            ?? runtimeConfig.approvalsReviewer
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
@@ -965,6 +967,7 @@ public enum CodexAppServer {
                 modelProvider: modelProvider,
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
+                approvalsReviewer: approvalsReviewer,
                 sandbox: sandbox,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
                 ephemeral: true
@@ -991,6 +994,7 @@ public enum CodexAppServer {
             modelProvider: modelProvider,
             cwd: cwd,
             approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
             sandbox: sandbox,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             ephemeral: false
@@ -1151,6 +1155,8 @@ public enum CodexAppServer {
         let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
         let modelProvider = runtimeConfig.selectedModelProviderID
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
+        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+            ?? runtimeConfig.approvalsReviewer
         let sandbox = runtimeConfig.legacySandboxPolicy()
 
         return [
@@ -1161,7 +1167,7 @@ public enum CodexAppServer {
             "cwd": thread["cwd"] ?? "/",
             "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
-            "approvalsReviewer": "user",
+            "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
@@ -1226,6 +1232,8 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
+        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+            ?? runtimeConfig.approvalsReviewer
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
@@ -1273,7 +1281,7 @@ public enum CodexAppServer {
             "cwd": cwd.path,
             "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
-            "approvalsReviewer": "user",
+            "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
@@ -15495,6 +15503,17 @@ public enum CodexAppServer {
         stringParam(value).flatMap(AskForApproval.init(rawValue:))
     }
 
+    private static func approvalsReviewerParam(_ value: Any?) -> ApprovalsReviewer? {
+        switch stringParam(value) {
+        case "user":
+            return .user
+        case "guardian_subagent", "auto_review":
+            return .autoReview
+        default:
+            return nil
+        }
+    }
+
     private static func threadSourceParam(_ value: Any?) -> ThreadSource? {
         stringParam(value).flatMap(ThreadSource.init(rawValue:))
     }
@@ -17981,6 +18000,7 @@ private struct AppServerStartedConversation {
     let modelProvider: String
     let cwd: URL
     let approvalPolicy: AskForApproval
+    let approvalsReviewer: ApprovalsReviewer
     let sandbox: SandboxPolicy
     let reasoningEffort: String?
     let ephemeral: Bool

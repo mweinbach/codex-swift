@@ -15,6 +15,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.selectedModelProvider?.name, "OpenAI")
         XCTAssertNil(config.approvalPolicy)
+        XCTAssertEqual(config.approvalsReviewer, .user)
         XCTAssertNil(config.sandboxMode)
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
@@ -75,6 +76,7 @@ final class ConfigLoaderTests: XCTestCase {
         model = "gpt-5.4"
         model_provider = "openai"
         approval_policy = "on-failure"
+        approvals_reviewer = "guardian_subagent"
         sandbox_mode = "workspace-write"
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
@@ -132,6 +134,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelProvider, "openai")
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.approvalPolicy, .onFailure)
+        XCTAssertEqual(config.approvalsReviewer, .autoReview)
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
@@ -761,6 +764,7 @@ final class ConfigLoaderTests: XCTestCase {
         model = "top-model"
         model_provider = "ollama"
         approval_policy = "on-request"
+        approvals_reviewer = "user"
         sandbox_mode = "read-only"
         model_reasoning_effort = "low"
         model_reasoning_summary = "concise"
@@ -779,6 +783,7 @@ final class ConfigLoaderTests: XCTestCase {
         model = "profile-model"
         model_provider = "lmstudio"
         approval_policy = "never"
+        approvals_reviewer = "auto_review"
         sandbox_mode = "danger-full-access"
         model_reasoning_effort = "xhigh"
         model_reasoning_summary = "auto"
@@ -801,6 +806,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelProvider, "lmstudio")
         XCTAssertEqual(config.selectedModelProviderID, "lmstudio")
         XCTAssertEqual(config.approvalPolicy, .never)
+        XCTAssertEqual(config.approvalsReviewer, .autoReview)
         XCTAssertEqual(config.sandboxMode, .dangerFullAccess)
         XCTAssertEqual(config.modelReasoningEffort, .xhigh)
         XCTAssertEqual(config.modelReasoningSummary, .auto)
@@ -1321,6 +1327,28 @@ final class ConfigLoaderTests: XCTestCase {
                 .invalidValue(candidate: "OnRequest", allowed: "[Never]")
             )
         }
+    }
+
+    func testRequirementsTomlFallsBackToAllowedApprovalsReviewerLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_approvals_reviewers = ["guardian_subagent"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        approvals_reviewer = "user"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        XCTAssertEqual(config.approvalsReviewer, .autoReview)
     }
 
     func testRequirementsTomlRejectsDisallowedRuntimeSandboxModeLikeRust() throws {
