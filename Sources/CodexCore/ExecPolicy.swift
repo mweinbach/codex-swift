@@ -7469,6 +7469,21 @@ private enum ExecPolicyCommandOrigin {
     case powerShell
 }
 
+public enum ExecPolicyInheritance {
+    public static func childUsesParentExecPolicy(
+        parentStack: ConfigLayerStack,
+        childStack: ConfigLayerStack
+    ) -> Bool {
+        execPolicyConfigFolders(parentStack) == execPolicyConfigFolders(childStack) &&
+            parentStack.ignoreUserAndProjectExecPolicyRules == childStack.ignoreUserAndProjectExecPolicyRules &&
+            parentStack.requirements.execPolicy == childStack.requirements.execPolicy
+    }
+
+    private static func execPolicyConfigFolders(_ stack: ConfigLayerStack) -> [AbsolutePath] {
+        stack.getLayers(ordering: .lowestPrecedenceFirst).compactMap { $0.configFolder() }
+    }
+}
+
 public final class ExecPolicyManager: @unchecked Sendable {
     public static let rulesDirectoryName = "rules"
     public static let defaultPolicyFileName = "default.rules"

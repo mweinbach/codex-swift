@@ -235,7 +235,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/safety.rs`
   - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
-  - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading including Rust's user/project rule skip flag, exec approval requirement derivation, heredoc single-command prefix matching without auto-amendments, amendment proposals, and default allow-prefix file appending
+  - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading including Rust's user/project rule skip flag, `ignore_user_config` retaining user policy files, parent/child exec-policy inheritance reuse checks, exec approval requirement derivation, heredoc single-command prefix matching without auto-amendments, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`

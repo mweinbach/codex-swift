@@ -3863,6 +3863,70 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testIgnoreUserConfigKeepsUserPolicyFilesLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let codexHome = tempDir.url.appendingPathComponent("codex-home", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexHome.appendingPathComponent("rules", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "invalid = [".write(
+            to: codexHome.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"prefix_rule(pattern=["curl"], decision="forbidden")"#.write(
+            to: codexHome.appendingPathComponent("rules/deny-curl.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: codexHome,
+            overrides: ConfigLayerLoaderOverrides(ignoreUserConfig: true),
+            systemConfigFile: nil
+        )
+        let policy = try ExecPolicyManager.load(features: .withDefaults(), configStack: stack).current()
+
+        XCTAssertEqual(
+            policy.check(tokens("curl", "https://example.com"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .forbidden,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("curl"), decision: .forbidden)]
+            )
+        )
+    }
+
+    func testChildUsesParentExecPolicyWhenNonPolicyLayersDifferLikeRust() throws {
+        let base = try execPolicyLayerStack(sessionConfig: .table(["model": .string("gpt-5")]))
+        let child = try execPolicyLayerStack(sessionConfig: .table(["model": .string("gpt-5.5")]))
+
+        XCTAssertTrue(ExecPolicyInheritance.childUsesParentExecPolicy(parentStack: base, childStack: child))
+    }
+
+    func testChildDoesNotUseParentExecPolicyWhenIgnoreRulesDiffersLikeRust() throws {
+        let parent = try execPolicyLayerStack(ignoreUserAndProjectExecPolicyRules: false)
+        let child = try execPolicyLayerStack(ignoreUserAndProjectExecPolicyRules: true)
+
+        XCTAssertFalse(ExecPolicyInheritance.childUsesParentExecPolicy(parentStack: parent, childStack: child))
+    }
+
+    func testChildDoesNotUseParentExecPolicyWhenRequirementsPolicyDiffersLikeRust() throws {
+        let parent = try execPolicyLayerStack()
+        var requiredPolicy = ExecPolicy.empty()
+        try requiredPolicy.addPrefixRule(tokens("rm"), decision: .prompt)
+        let child = try execPolicyLayerStack(requirements: ConfigRequirements(execPolicy: requiredPolicy))
+
+        XCTAssertFalse(ExecPolicyInheritance.childUsesParentExecPolicy(parentStack: parent, childStack: child))
+    }
+
+    func testChildDoesNotUseParentExecPolicyWhenConfigFoldersDifferLikeRust() throws {
+        let parent = try execPolicyLayerStack(userConfigFolderName: "parent-codex")
+        let child = try execPolicyLayerStack(userConfigFolderName: "child-codex")
+
+        XCTAssertFalse(ExecPolicyInheritance.childUsesParentExecPolicy(parentStack: parent, childStack: child))
+    }
+
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")
@@ -4067,6 +4131,37 @@ private func allowAll(_: ArraySlice<String>) -> ExecPolicyDecision {
 
 private func promptAll(_: ArraySlice<String>) -> ExecPolicyDecision {
     .prompt
+}
+
+private func execPolicyLayerStack(
+    userConfigFolderName: String = "user-codex",
+    sessionConfig: ConfigValue = .table([:]),
+    requirements: ConfigRequirements = .default,
+    ignoreUserAndProjectExecPolicyRules: Bool = false
+) throws -> ConfigLayerStack {
+    let base = URL(fileURLWithPath: "/tmp/codex-swift-exec-policy-inheritance", isDirectory: true)
+    let systemConfig = base
+        .appendingPathComponent("system-codex", isDirectory: true)
+        .appendingPathComponent("config.toml")
+    let userConfig = base
+        .appendingPathComponent(userConfigFolderName, isDirectory: true)
+        .appendingPathComponent("config.toml")
+
+    return try ConfigLayerStack(
+        layers: [
+            ConfigLayerEntry(
+                name: .system(file: try AbsolutePath(absolutePath: systemConfig.path)),
+                config: .table(["approval_policy": .string("on-request")])
+            ),
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: userConfig.path)),
+                config: .table(["model": .string("gpt-5")])
+            ),
+            ConfigLayerEntry(name: .sessionFlags, config: sessionConfig)
+        ],
+        requirements: requirements,
+        ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
+    )
 }
 
 private final class CoreTemporaryDirectory {
