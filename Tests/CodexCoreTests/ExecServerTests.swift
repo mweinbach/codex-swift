@@ -444,6 +444,49 @@ final class ExecServerTests: XCTestCase {
         XCTAssertTrue(retained.closed)
     }
 
+    func testHandlerRetainsThenEvictsClosedProcessesLikeRust() async throws {
+        let processStore = ExecServerProcessStore(retentionDelayNanoseconds: 25_000_000)
+        let handler = ExecServerHandler(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])),
+            processStore: processStore
+        )
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+
+        let processId = "proc-retention"
+        _ = try await handler.startProcess(ExecServerExecParams(
+            processId: processId,
+            argv: ["/bin/sh", "-c", "printf 'retained\\n'"],
+            cwd: FileManager.default.currentDirectoryPath,
+            env: [:],
+            tty: false
+        ))
+        let retained = try await readHandlerProcessUntilClosed(handler, processId: processId)
+
+        XCTAssertEqual(retained.output, "retained\n")
+        XCTAssertEqual(retained.exitCode, 0)
+        XCTAssertTrue(retained.closed)
+        let finalRead = try await handler.readProcess(ExecServerReadParams(processId: processId))
+        XCTAssertTrue(finalRead.closed)
+
+        try await Task.sleep(nanoseconds: 75_000_000)
+        await XCTAssertThrowsExecServerError(
+            try await handler.readProcess(ExecServerReadParams(processId: processId)),
+            code: -32600,
+            message: "unknown process id \(processId)"
+        )
+
+        let restarted = try await handler.startProcess(ExecServerExecParams(
+            processId: processId,
+            argv: ["/bin/sh", "-c", "true"],
+            cwd: FileManager.default.currentDirectoryPath,
+            env: [:],
+            tty: false
+        ))
+        XCTAssertEqual(restarted.processId, processId)
+        await handler.shutdown()
+    }
+
     func testConnectionProcessorWritesToPipeStdinLikeRust() async throws {
         let connection = try await initializedConnection()
         let cwd = FileManager.default.currentDirectoryPath
@@ -2159,6 +2202,34 @@ final class ExecServerTests: XCTestCase {
                 )
             }
             let read = try decodeJSONValue(result, as: ExecServerReadResponse.self)
+            for chunk in read.chunks {
+                output += String(decoding: chunk.chunk.bytes, as: UTF8.self)
+                afterSeq = chunk.seq
+            }
+            if read.exited {
+                exitCode = read.exitCode
+            }
+            if read.closed {
+                return (output, exitCode, true)
+            }
+            afterSeq = read.nextSeq > 0 ? read.nextSeq - 1 : afterSeq
+        }
+        return (output, exitCode, false)
+    }
+
+    private func readHandlerProcessUntilClosed(
+        _ handler: ExecServerHandler,
+        processId: String
+    ) async throws -> (output: String, exitCode: Int32?, closed: Bool) {
+        var output = ""
+        var afterSeq: UInt64?
+        var exitCode: Int32?
+        for _ in 0..<20 {
+            let read = try await handler.readProcess(ExecServerReadParams(
+                processId: processId,
+                afterSeq: afterSeq,
+                waitMs: 250
+            ))
             for chunk in read.chunks {
                 output += String(decoding: chunk.chunk.bytes, as: UTF8.self)
                 afterSeq = chunk.seq

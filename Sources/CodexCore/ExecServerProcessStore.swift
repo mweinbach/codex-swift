@@ -4,11 +4,15 @@ public actor ExecServerProcessStore {
     public typealias OutboundNotification = @Sendable (ExecServerJSONRPCNotification) async -> Void
 
     private static let retainedOutputBytesPerProcess = 1024 * 1024
-
     private let outboundNotification: OutboundNotification
+    private let retentionDelayNanoseconds: UInt64
     private var processes: [String: ExecServerProcessState] = [:]
 
-    public init(outboundNotification: @escaping OutboundNotification = { _ in }) {
+    public init(
+        retentionDelayNanoseconds: UInt64 = 30_000_000_000,
+        outboundNotification: @escaping OutboundNotification = { _ in }
+    ) {
+        self.retentionDelayNanoseconds = retentionDelayNanoseconds
         self.outboundNotification = outboundNotification
     }
 
@@ -199,6 +203,9 @@ public actor ExecServerProcessStore {
             method: execServerProcessClosedMethod,
             params: ExecServerClosedNotification(processId: processId, seq: seq)
         )
+        Task {
+            await evictClosedProcessAfterRetention(processId: processId)
+        }
     }
 
     private func readResponse(
@@ -261,6 +268,14 @@ public actor ExecServerProcessStore {
 
     private func closeStdin(_ state: ExecServerProcessState) {
         try? state.stdin?.close()
+    }
+
+    private func evictClosedProcessAfterRetention(processId: String) async {
+        try? await Task.sleep(nanoseconds: retentionDelayNanoseconds)
+        guard let state = processes[processId], state.closed else {
+            return
+        }
+        processes.removeValue(forKey: processId)
     }
 
     private func sendNotification<T: Encodable & Sendable>(method: String, params: T) async {
