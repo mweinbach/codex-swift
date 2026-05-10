@@ -162,6 +162,8 @@ Source baseline inspected for this scaffold:
   - `codex debug models`, `debug app-server send-message-v2`, `debug prompt-input`, hidden `debug trace-reduce`, and `debug clear-memories` argument parsing now dispatch through typed Swift requests with Rust-shaped flags, positionals, comma-delimited image values, and pre-runner validation. The command runtimes remain pending unless covered by a separate porting note.
 - `codex-rs/cli/src/main.rs` debug models bundled runtime
   - executable `codex debug models --bundled` now emits the Swift bundled model catalog as JSON through the debug command runtime. Online raw catalog refresh for `codex debug models` without `--bundled` remains pending.
+- `codex-rs/cli/src/main.rs` debug clear-memories runtime
+  - executable `codex debug clear-memories` now resolves the effective config, clears Rust-compatible `state_5.sqlite` memory rows when present, preserves the no-state-db message path, and removes contents under both memory roots while preserving the root directories.
 - `codex-rs/stdio-to-uds`
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
 - `codex-rs/ansi-escape`

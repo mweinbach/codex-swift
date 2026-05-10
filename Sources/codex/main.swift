@@ -58,7 +58,7 @@ let exitCode = await cli.runAsync(
     appServerRunner: runAppServerCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
-    debugRunner: DebugCommandRuntime.run,
+    debugRunner: { request in try await DebugCommandRuntime.run(request) },
     mcpRunner: runMcpCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
     cloudRunner: runCloudCommand,
