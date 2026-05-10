@@ -4653,14 +4653,18 @@ public enum CodexAppServer {
         return ["contents": nullable(object["skill_md_contents"] as? String)].nullStripped(keepNulls: true)
     }
 
-    fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginShareSaveResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         guard params?["pluginPath"] != nil else {
             throw AppServerError.invalidParams("missing field `pluginPath`")
         }
-        _ = try absolutePathParam(params?["pluginPath"], name: "pluginPath")
+        let pluginPath = URL(fileURLWithPath: try absolutePathParam(params?["pluginPath"], name: "pluginPath"))
         let remotePluginID = stringParam(params?["remotePluginId"])
         let discoverability = try pluginShareSaveDiscoverability(params?["discoverability"])
         let shareTargets = params?["shareTargets"]
+        let shareTargetsProvided = shareTargets != nil && !(shareTargets is NSNull)
         if let remotePluginID, (remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID)) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
@@ -4674,8 +4678,272 @@ public enum CodexAppServer {
                 "discoverability LISTED is not supported for plugin/share/save; use UNLISTED or PRIVATE"
             )
         }
-        _ = try validatePluginShareTargets(shareTargets)
-        throw AppServerError.invalidRequest("plugin sharing is not enabled")
+        let validatedShareTargets = try validatePluginShareTargets(shareTargets)
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(configuration: configuration)
+        let result = try saveRemotePluginShare(
+            pluginPath: pluginPath,
+            remotePluginID: remotePluginID,
+            discoverability: discoverability,
+            shareTargets: validatedShareTargets,
+            shareTargetsProvided: shareTargetsProvided,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth
+        )
+        recordPluginShareLocalPath(
+            codexHome: configuration.codexHome,
+            remotePluginID: result.remotePluginID,
+            pluginPath: pluginPath
+        )
+        return [
+            "remotePluginId": result.remotePluginID,
+            "shareUrl": result.shareURL
+        ]
+    }
+
+    private struct RemotePluginShareSaveResult {
+        let remotePluginID: String
+        let shareURL: String
+    }
+
+    private struct RemotePluginShareArchive {
+        let filename: String
+        let bytes: Data
+    }
+
+    private static let remotePluginShareMaxArchiveBytes = 50 * 1024 * 1024
+
+    private static func saveRemotePluginShare(
+        pluginPath: URL,
+        remotePluginID: String?,
+        discoverability: String?,
+        shareTargets: [[String: Any]],
+        shareTargetsProvided: Bool,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) throws -> RemotePluginShareSaveResult {
+        let archive = try archiveRemotePluginForShare(
+            pluginPath: pluginPath,
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        let upload = try remotePluginObject(
+            path: "/public/plugins/workspace/upload-url",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "save remote plugin share",
+            method: "POST",
+            bodyObject: [
+                "filename": archive.filename,
+                "mime_type": "application/gzip",
+                "size_bytes": archive.bytes.count,
+                "plugin_id": remotePluginID ?? NSNull()
+            ].nullStripped(keepNulls: false)
+        )
+        guard let fileID = upload["file_id"] as? String, !fileID.isEmpty else {
+            throw AppServerError.internalError(
+                "save remote plugin share: workspace plugin upload response did not include a file id"
+            )
+        }
+        guard let uploadURL = upload["upload_url"] as? String,
+              let parsedUploadURL = URL(string: uploadURL)
+        else {
+            throw AppServerError.internalError(
+                "save remote plugin share: workspace plugin upload response did not include a valid upload URL"
+            )
+        }
+        guard let etag = upload["etag"] as? String, !etag.isEmpty else {
+            throw AppServerError.internalError(
+                "save remote plugin share: workspace plugin upload response did not include an etag"
+            )
+        }
+        try putRemotePluginShareArchive(
+            archive.bytes,
+            uploadURL: parsedUploadURL,
+            configuration: configuration,
+            failurePrefix: "save remote plugin share"
+        )
+        let finalShareTargets = remotePluginShareTargetsForSave(
+            shareTargets,
+            shareTargetsProvided: shareTargetsProvided,
+            discoverability: discoverability,
+            auth: auth
+        )
+        var finalizeBody: [String: Any] = [
+            "file_id": fileID,
+            "etag": etag
+        ]
+        if let discoverability {
+            finalizeBody["discoverability"] = discoverability
+        }
+        if let finalShareTargets {
+            finalizeBody["share_targets"] = finalShareTargets
+        }
+        let finalizePath = if let remotePluginID {
+            "/public/plugins/workspace/\(remotePluginID)"
+        } else {
+            "/public/plugins/workspace"
+        }
+        let response = try remotePluginObject(
+            path: finalizePath,
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "save remote plugin share",
+            method: "POST",
+            bodyObject: finalizeBody
+        )
+        guard let responsePluginID = response["plugin_id"] as? String,
+              !responsePluginID.isEmpty
+        else {
+            throw AppServerError.internalError(
+                "save remote plugin share: workspace plugin create response did not include a plugin id"
+            )
+        }
+        return RemotePluginShareSaveResult(
+            remotePluginID: responsePluginID,
+            shareURL: response["share_url"] as? String ?? ""
+        )
+    }
+
+    private static func archiveRemotePluginForShare(
+        pluginPath: URL,
+        codexHome: URL,
+        environment: [String: String]
+    ) throws -> RemotePluginShareArchive {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: pluginPath.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            throw AppServerError.invalidRequest(
+                "save remote plugin share: invalid plugin path `\(pluginPath.path)`: expected a plugin directory"
+            )
+        }
+        guard FileManager.default.fileExists(
+            atPath: pluginPath.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false).path
+        ) else {
+            throw AppServerError.invalidRequest(
+                "save remote plugin share: invalid plugin path `\(pluginPath.path)`: missing .codex-plugin/plugin.json"
+            )
+        }
+        try validateRemotePluginShareArchiveEntries(pluginPath: pluginPath)
+        let pluginName = pluginPath.lastPathComponent
+        guard !pluginName.isEmpty, pluginName != "/" else {
+            throw AppServerError.invalidRequest(
+                "save remote plugin share: invalid plugin path `\(pluginPath.path)`: plugin path must end in a valid UTF-8 directory name"
+            )
+        }
+        let archiveRoot = codexHome
+            .appendingPathComponent(".tmp", isDirectory: true)
+            .appendingPathComponent("plugin-share-archives", isDirectory: true)
+        let archivePath = archiveRoot.appendingPathComponent("\(UUID().uuidString).tar.gz", isDirectory: false)
+        do {
+            try FileManager.default.createDirectory(at: archiveRoot, withIntermediateDirectories: true)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+            process.arguments = ["-czf", archivePath.path, "-C", pluginPath.path, "."]
+            process.environment = environment
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let message = [stderr, stdout]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+                throw AppServerError.internalError(
+                    "save remote plugin share: failed to archive plugin at `\(pluginPath.path)`: \(message)"
+                )
+            }
+            let bytes = try Data(contentsOf: archivePath)
+            if bytes.count > remotePluginShareMaxArchiveBytes {
+                throw AppServerError.invalidRequest(
+                    "save remote plugin share: plugin archive would be \(bytes.count) bytes, exceeding the maximum upload size of \(remotePluginShareMaxArchiveBytes) bytes"
+                )
+            }
+            try? FileManager.default.removeItem(at: archivePath)
+            return RemotePluginShareArchive(filename: "\(pluginName).tar.gz", bytes: bytes)
+        } catch let error as AppServerError {
+            try? FileManager.default.removeItem(at: archivePath)
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: archivePath)
+            throw AppServerError.internalError(
+                "save remote plugin share: failed to archive plugin at `\(pluginPath.path)`: \(error)"
+            )
+        }
+    }
+
+    private static func validateRemotePluginShareArchiveEntries(pluginPath: URL) throws {
+        guard let enumerator = FileManager.default.enumerator(
+            at: pluginPath,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey],
+            options: []
+        ) else {
+            return
+        }
+        for case let entry as URL in enumerator {
+            let resourceValues = try entry.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey])
+            if resourceValues.isSymbolicLink == true {
+                throw AppServerError.internalError(
+                    "save remote plugin share: failed to archive plugin at `\(pluginPath.path)`: unsupported plugin archive entry type: \(entry.path)"
+                )
+            }
+            if resourceValues.isDirectory == true || resourceValues.isRegularFile == true {
+                continue
+            }
+            throw AppServerError.internalError(
+                "save remote plugin share: failed to archive plugin at `\(pluginPath.path)`: unsupported plugin archive entry type: \(entry.path)"
+            )
+        }
+    }
+
+    private static func putRemotePluginShareArchive(
+        _ bytes: Data,
+        uploadURL: URL,
+        configuration: CodexAppServerConfiguration,
+        failurePrefix: String
+    ) throws {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue("BlockBlob", forHTTPHeaderField: "x-ms-blob-type")
+        request.setValue("application/gzip", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bytes
+        let response: URLSessionTransportResponse
+        do {
+            response = try configuration.pluginHTTPTransport(request)
+        } catch {
+            throw AppServerError.internalError(
+                "\(failurePrefix): failed to send remote plugin catalog request to workspace plugin upload URL: \(error)"
+            )
+        }
+        guard response.statusCode == 200 || response.statusCode == 201 else {
+            let body = String(data: response.body, encoding: .utf8) ?? ""
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin catalog request to workspace plugin upload URL failed with status \(response.statusCode): \(body)"
+            )
+        }
+    }
+
+    private static func remotePluginShareTargetsForSave(
+        _ targets: [[String: Any]],
+        shareTargetsProvided: Bool,
+        discoverability: String?,
+        auth: AppServerAuth
+    ) -> [[String: Any]]? {
+        guard discoverability == "UNLISTED" else {
+            return shareTargetsProvided ? targets : nil
+        }
+        return remotePluginShareTargets(targets, discoverability: "UNLISTED", auth: auth)
     }
 
     fileprivate static func pluginShareUpdateTargetsResult(
@@ -4752,13 +5020,14 @@ public enum CodexAppServer {
             auth: auth,
             failurePrefix: "list remote plugin shares"
         )
+        let localPluginPaths = pluginShareLocalPaths(codexHome: configuration.codexHome)
         let items = createdPlugins.map { plugin -> [String: Any] in
             let pluginID = plugin["id"] as? String ?? ""
             let installed = installedPlugins.first { $0["id"] as? String == pluginID }
             return [
                 "plugin": remotePluginSummary(plugin, installed: installed),
                 "shareUrl": plugin["share_url"] as? String ?? "",
-                "localPluginPath": NSNull()
+                "localPluginPath": localPluginPaths[pluginID]?.path ?? NSNull()
             ].nullStripped(keepNulls: true)
         }
         return ["data": items]
@@ -4784,7 +5053,60 @@ public enum CodexAppServer {
             failurePrefix: "delete remote plugin share",
             method: "DELETE"
         )
+        removePluginShareLocalPath(codexHome: configuration.codexHome, remotePluginID: remotePluginID)
         return [:]
+    }
+
+    private struct PluginShareLocalPathMapping: Codable {
+        var localPluginPathsByRemotePluginId: [String: String]
+    }
+
+    private static func pluginShareLocalPaths(codexHome: URL) -> [String: URL] {
+        guard let data = try? Data(contentsOf: pluginShareLocalPathsURL(codexHome: codexHome)),
+              let mapping = try? JSONDecoder().decode(PluginShareLocalPathMapping.self, from: data)
+        else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: mapping.localPluginPathsByRemotePluginId.map { key, path in
+            (key, URL(fileURLWithPath: path))
+        })
+    }
+
+    private static func recordPluginShareLocalPath(
+        codexHome: URL,
+        remotePluginID: String,
+        pluginPath: URL
+    ) {
+        var mapping = pluginShareLocalPaths(codexHome: codexHome).mapValues(\.path)
+        mapping[remotePluginID] = pluginPath.path
+        writePluginShareLocalPathMapping(codexHome: codexHome, mapping: mapping)
+    }
+
+    private static func removePluginShareLocalPath(codexHome: URL, remotePluginID: String) {
+        var mapping = pluginShareLocalPaths(codexHome: codexHome).mapValues(\.path)
+        mapping.removeValue(forKey: remotePluginID)
+        writePluginShareLocalPathMapping(codexHome: codexHome, mapping: mapping)
+    }
+
+    private static func writePluginShareLocalPathMapping(codexHome: URL, mapping: [String: String]) {
+        let path = pluginShareLocalPathsURL(codexHome: codexHome)
+        do {
+            if mapping.isEmpty {
+                try? FileManager.default.removeItem(at: path)
+                return
+            }
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(PluginShareLocalPathMapping(localPluginPathsByRemotePluginId: mapping))
+            try data.write(to: path, options: [.atomic])
+        } catch {
+            return
+        }
+    }
+
+    private static func pluginShareLocalPathsURL(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent(".tmp/plugin-share-local-paths-v1.json", isDirectory: false)
     }
 
     private static func pluginShareUpdateDiscoverability(_ value: Any?) throws -> String {
@@ -19033,7 +19355,7 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/share/save":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginShareSaveResult(params: params)
+                        result: try CodexAppServer.pluginShareSaveResult(params: params, configuration: configuration)
                     )
                 case "plugin/share/updateTargets":
                     response = CodexAppServer.responseObject(

@@ -5394,6 +5394,217 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingDeleteIDError["message"] as? String, "missing field `remotePluginId`")
     }
 
+    func testPluginShareSaveUploadsLocalPluginAndRecordsLocalPath() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginSource = temp.url.appendingPathComponent("share-source", isDirectory: true)
+        try writePluginFixture(
+            root: pluginSource,
+            relativePath: "demo-plugin",
+            pluginName: "demo-plugin",
+            version: "0.1.0",
+            marker: "from-share-upload"
+        )
+        let pluginPath = pluginSource.appendingPathComponent("demo-plugin", isDirectory: true)
+        let pluginID = "plugins_123"
+        let uploadURLBody = """
+        {
+          "file_id": "file_123",
+          "upload_url": "https://uploads.example/upload/file_123",
+          "etag": "\\"upload_etag_123\\""
+        }
+        """
+        let createBody = """
+        {
+          "plugin_id": "\(pluginID)",
+          "share_url": "https://chatgpt.example/plugins/share/share-key-1"
+        }
+        """
+        let createdBody = """
+        {
+          "plugins": [
+            \(remotePluginDetailBody(id: pluginID, name: "demo-plugin", displayName: "Demo Plugin", scope: "WORKSPACE"))
+          ],
+          "pagination": {
+            "limit": 200,
+            "next_page_token": null
+          }
+        }
+        """
+        let installedBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.host, request.url?.query) {
+                case ("POST", "/backend-api/public/plugins/workspace/upload-url", "chatgpt.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, body: Data(uploadURLBody.utf8))
+                case ("PUT", "/upload/file_123", "uploads.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, headers: ["etag": "\"blob_etag_123\""])
+                case ("POST", "/backend-api/public/plugins/workspace", "chatgpt.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, body: Data(createBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/workspace/created", "chatgpt.example", "limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(createdBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "chatgpt.example", "scope=WORKSPACE"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath.path)","discoverability":"UNLISTED","shareTargets":[{"principalType":"user","principalId":"user-1"}]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["remotePluginId"] as? String, pluginID)
+        XCTAssertEqual(result["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "PUT", "POST"])
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer chatgpt-token")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "chatgpt-account-id"), "account-123")
+        let uploadURLRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[0].httpBody)) as? [String: Any])
+        XCTAssertEqual(uploadURLRequest["filename"] as? String, "demo-plugin.tar.gz")
+        XCTAssertEqual(uploadURLRequest["mime_type"] as? String, "application/gzip")
+        XCTAssertNil(uploadURLRequest["plugin_id"])
+        XCTAssertGreaterThan(uploadURLRequest["size_bytes"] as? Int ?? 0, 0)
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "x-ms-blob-type"), "BlockBlob")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Content-Type"), "application/gzip")
+        let uploadedArchive = try XCTUnwrap(requests[1].httpBody)
+        XCTAssertTrue(try archiveContains(uploadedArchive, "marker.txt", in: temp.url))
+        let finalizeRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[2].httpBody)) as? [String: Any])
+        XCTAssertEqual(finalizeRequest["file_id"] as? String, "file_123")
+        XCTAssertEqual(finalizeRequest["etag"] as? String, "\"upload_etag_123\"")
+        XCTAssertEqual(finalizeRequest["discoverability"] as? String, "UNLISTED")
+        let targets = try XCTUnwrap(finalizeRequest["share_targets"] as? [[String: Any]])
+        XCTAssertEqual(targets.count, 2)
+        XCTAssertEqual(targets[0]["principal_type"] as? String, "user")
+        XCTAssertEqual(targets[0]["principal_id"] as? String, "user-1")
+        XCTAssertEqual(targets[1]["principal_type"] as? String, "workspace")
+        XCTAssertEqual(targets[1]["principal_id"] as? String, "account-123")
+
+        let listResponse = try appServerResponse(
+            #"{"id":2,"method":"plugin/share/list","params":{}}"#,
+            configuration: configuration
+        )
+        let listResult = try XCTUnwrap(listResponse["result"] as? [String: Any])
+        let data = try XCTUnwrap(listResult["data"] as? [[String: Any]])
+        XCTAssertEqual(data.first?["localPluginPath"] as? String, pluginPath.path)
+    }
+
+    func testPluginShareSaveUpdatesExistingWorkspacePlugin() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginSource = temp.url.appendingPathComponent("share-source", isDirectory: true)
+        try writePluginFixture(
+            root: pluginSource,
+            relativePath: "demo-plugin",
+            pluginName: "demo-plugin",
+            version: "0.1.0",
+            marker: "from-share-update"
+        )
+        let pluginPath = pluginSource.appendingPathComponent("demo-plugin", isDirectory: true)
+        let pluginID = "plugins_456"
+        let uploadURLBody = """
+        {
+          "file_id": "file_456",
+          "upload_url": "https://uploads.example/upload/file_456",
+          "etag": "\\"upload_etag_456\\""
+        }
+        """
+        let updateBody = """
+        {
+          "plugin_id": "\(pluginID)",
+          "share_url": null
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.host) {
+                case ("POST", "/backend-api/public/plugins/workspace/upload-url", "chatgpt.example"):
+                    return URLSessionTransportResponse(statusCode: 201, body: Data(uploadURLBody.utf8))
+                case ("PUT", "/upload/file_456", "uploads.example"):
+                    return URLSessionTransportResponse(statusCode: 200)
+                case ("POST", "/backend-api/public/plugins/workspace/\(pluginID)", "chatgpt.example"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(updateBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath.path)","remotePluginId":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["remotePluginId"] as? String, pluginID)
+        XCTAssertEqual(result["shareUrl"] as? String, "")
+        let requests = capture.requests
+        XCTAssertEqual(requests.map { $0.url?.path ?? "" }, [
+            "/backend-api/public/plugins/workspace/upload-url",
+            "/upload/file_456",
+            "/backend-api/public/plugins/workspace/\(pluginID)"
+        ])
+        let uploadURLRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[0].httpBody)) as? [String: Any])
+        XCTAssertEqual(uploadURLRequest["plugin_id"] as? String, pluginID)
+        let finalizeRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[2].httpBody)) as? [String: Any])
+        XCTAssertEqual(finalizeRequest["file_id"] as? String, "file_456")
+        XCTAssertEqual(finalizeRequest["etag"] as? String, "\"upload_etag_456\"")
+        XCTAssertNil(finalizeRequest["discoverability"])
+        XCTAssertNil(finalizeRequest["share_targets"])
+    }
+
     func testPluginShareListReturnsCreatedWorkspacePlugins() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -15290,6 +15501,28 @@ final class CodexAppServerTests: XCTestCase {
         let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, "tar remote plugin bundle failed: \(stderr)\(stdout)")
         return try Data(contentsOf: archive)
+    }
+
+    private func archiveContains(_ archiveBytes: Data, _ expectedPath: String, in tempRoot: URL) throws -> Bool {
+        let archive = tempRoot.appendingPathComponent("share-upload-\(UUID().uuidString).tar.gz", isDirectory: false)
+        try archiveBytes.write(to: archive)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-tzf", archive.path]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "tar share upload listing failed: \(stderr)\(stdout)")
+        try? FileManager.default.removeItem(at: archive)
+        return stdout
+            .split(separator: "\n")
+            .map(String.init)
+            .contains { $0 == expectedPath || $0 == "./\(expectedPath)" }
     }
 
     private func base64URL(_ object: Any) throws -> String {
