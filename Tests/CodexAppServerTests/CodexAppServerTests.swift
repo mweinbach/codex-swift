@@ -520,6 +520,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandboxPolicy`")
     }
 
+    func testTurnStartRejectsOversizedV2TextInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let oversized = String(repeating: "x", count: (1 << 20) + 1)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [
+                    ["type": "text", "text": oversized]
+                ]
+            ]
+        ]
+
+        let response = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "Input exceeds the maximum length of 1048576 characters.")
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["input_error_code"] as? String, "input_too_large")
+        XCTAssertEqual(data["max_chars"] as? Int, 1 << 20)
+        XCTAssertEqual(data["actual_chars"] as? Int, (1 << 20) + 1)
+    }
+
     func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -576,6 +608,48 @@ final class CodexAppServerTests: XCTestCase {
         let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
         XCTAssertEqual(emptyError["code"] as? Int, -32600)
         XCTAssertEqual(emptyError["message"] as? String, "input must not be empty")
+    }
+
+    func testTurnSteerRejectsOversizedV2TextInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8
+        )))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        let first = String(repeating: "x", count: 1 << 19)
+        let second = String(repeating: "y", count: (1 << 19) + 1)
+        let request: [String: Any] = [
+            "id": 3,
+            "method": "turn/steer",
+            "params": [
+                "threadId": threadID,
+                "expectedTurnId": turnID,
+                "input": [
+                    ["type": "text", "text": first],
+                    ["type": "image", "url": "https://example.test/ignored-for-limit.png"],
+                    ["type": "text", "text": second]
+                ]
+            ]
+        ]
+
+        let response = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "Input exceeds the maximum length of 1048576 characters.")
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["input_error_code"] as? String, "input_too_large")
+        XCTAssertEqual(data["max_chars"] as? Int, 1 << 20)
+        XCTAssertEqual(data["actual_chars"] as? Int, (1 << 20) + 1)
     }
 
     func testTurnSteerExperimentalMetadataRequiresExperimentalAPI() throws {

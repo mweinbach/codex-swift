@@ -594,6 +594,7 @@ private struct AccountUsageWindow: Decodable {
 public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
+    private static let maxUserInputTextScalars = 1 << 20
     fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
     fileprivate static let platformFamily = "unix"
@@ -1335,6 +1336,7 @@ public enum CodexAppServer {
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
         let input = v2UserInputs(params?["input"])
+        try validateV2UserInputLimit(input)
         if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             try recorder.recordItems([
@@ -1515,6 +1517,7 @@ public enum CodexAppServer {
             )
         }
         let input = v2UserInputs(params?["input"])
+        try validateV2UserInputLimit(input)
         guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) else {
             throw AppServerError.invalidRequest("input must not be empty")
         }
@@ -12225,6 +12228,17 @@ public enum CodexAppServer {
         )
     }
 
+    private static func validateV2UserInputLimit(_ input: (text: String, images: [String]?)) throws {
+        let actualScalars = input.text.unicodeScalars.count
+        guard actualScalars <= maxUserInputTextScalars else {
+            throw AppServerError.invalidParamsWithInputTooLargeData(
+                "Input exceeds the maximum length of \(maxUserInputTextScalars) characters.",
+                maxChars: maxUserInputTextScalars,
+                actualChars: actualScalars
+            )
+        }
+    }
+
     private static func v1InputItems(_ value: Any?) -> (text: String, images: [String]?) {
         guard let items = value as? [[String: Any]] else {
             return ("", nil)
@@ -14253,12 +14267,16 @@ private enum AppServerError: Error, CustomStringConvertible {
     case invalidRequest(String)
     case invalidParams(String)
     case invalidRequestWithData(String, data: [String: String])
+    case invalidParamsWithInputTooLargeData(String, maxChars: Int, actualChars: Int)
     case methodNotFound(String)
     case internalError(String)
 
     var description: String {
         switch self {
-        case let .invalidRequest(message), let .invalidParams(message), let .invalidRequestWithData(message, _):
+        case let .invalidRequest(message),
+             let .invalidParams(message),
+             let .invalidRequestWithData(message, _),
+             let .invalidParamsWithInputTooLargeData(message, _, _):
             return message
         case let .methodNotFound(message):
             return message
@@ -14267,10 +14285,16 @@ private enum AppServerError: Error, CustomStringConvertible {
         }
     }
 
-    var data: [String: String]? {
+    var data: Any? {
         switch self {
         case let .invalidRequestWithData(_, data):
             return data
+        case let .invalidParamsWithInputTooLargeData(_, maxChars, actualChars):
+            return [
+                "input_error_code": "input_too_large",
+                "max_chars": maxChars,
+                "actual_chars": actualChars
+            ]
         case .invalidRequest, .invalidParams, .methodNotFound, .internalError:
             return nil
         }
@@ -16974,8 +16998,13 @@ final class CodexAppServerMessageProcessor {
                         message: error.description,
                         data: error.data
                     )
-                case .invalidParams:
-                    response = CodexAppServer.errorObject(id: id, code: -32602, message: error.description)
+                case .invalidParams, .invalidParamsWithInputTooLargeData:
+                    response = CodexAppServer.errorObject(
+                        id: id,
+                        code: -32602,
+                        message: error.description,
+                        data: error.data
+                    )
                 case .methodNotFound:
                     response = CodexAppServer.errorObject(id: id, code: -32601, message: error.description)
                 case .internalError:
