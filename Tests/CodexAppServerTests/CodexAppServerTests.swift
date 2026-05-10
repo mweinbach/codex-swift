@@ -793,6 +793,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""cwd":"\#(turnCwd.path.replacingOccurrences(of: "/", with: "\\/"))""#))
     }
 
+    func testTurnStartRejectsUnknownContextOverrideEnumsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases: [(String, String)] = [
+            (
+                #""approvalPolicy":"sideways""#,
+                "unknown variant `sideways`, expected one of `untrusted`, `on-failure`, `on-request`, `never`"
+            ),
+            (
+                #""effort":"gigantic""#,
+                "unknown variant `gigantic`, expected one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`"
+            ),
+            (
+                #""summary":"verbose""#,
+                "unknown variant `verbose`, expected one of `auto`, `concise`, `detailed`, `none`"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let messages = try decodeMessages(processor.processLine(Data(
+                #"{"id":\#(index + 2),"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],\#(testCase.0)}}"#.utf8
+            )))
+
+            XCTAssertEqual(messages.count, 1)
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testTurnStartRejectsUnknownEnvironmentBeforeStartingTurnLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

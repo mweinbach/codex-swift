@@ -1602,11 +1602,11 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> TurnContextItem? {
         let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
-        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+        let approvalPolicy = try turnStartApprovalPolicyParam(params?["approvalPolicy"])
         let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
         let model = stringParam(params?["model"])
-        let effort = stringParam(params?["effort"]).flatMap(ReasoningEffort.init(rawValue:))
-        let summary = stringParam(params?["summary"]).flatMap(ReasoningSummary.init(rawValue:))
+        let effort = try turnStartReasoningEffortParam(params?["effort"])
+        let summary = try turnStartReasoningSummaryParam(params?["summary"])
         guard cwd != nil
             || approvalPolicy != nil
             || sandboxPolicy != nil
@@ -1627,6 +1627,54 @@ public enum CodexAppServer {
             effort: effort ?? runtimeConfig.modelReasoningEffort,
             summary: summary ?? runtimeConfig.modelReasoningSummary ?? .auto
         )
+    }
+
+    private static func turnStartApprovalPolicyParam(_ value: Any?) throws -> AskForApproval? {
+        guard let rawValue = try strictStringParam(value, fieldName: "approvalPolicy") else {
+            return nil
+        }
+        guard let approvalPolicy = AskForApproval(rawValue: rawValue) else {
+            throw unknownVariant(
+                rawValue,
+                expected: ["untrusted", "on-failure", "on-request", "never"]
+            )
+        }
+        return approvalPolicy
+    }
+
+    private static func turnStartReasoningEffortParam(_ value: Any?) throws -> ReasoningEffort? {
+        guard let rawValue = try strictStringParam(value, fieldName: "effort") else {
+            return nil
+        }
+        guard let effort = ReasoningEffort(rawValue: rawValue) else {
+            throw unknownVariant(rawValue, expected: ReasoningEffort.allCases.map(\.rawValue))
+        }
+        return effort
+    }
+
+    private static func turnStartReasoningSummaryParam(_ value: Any?) throws -> ReasoningSummary? {
+        guard let rawValue = try strictStringParam(value, fieldName: "summary") else {
+            return nil
+        }
+        guard let summary = ReasoningSummary(rawValue: rawValue) else {
+            throw unknownVariant(rawValue, expected: ReasoningSummary.allCases.map(\.rawValue))
+        }
+        return summary
+    }
+
+    private static func strictStringParam(_ value: Any?, fieldName: String) throws -> String? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let rawValue = value as? String else {
+            throw AppServerError.invalidRequest("invalid value for field `\(fieldName)`")
+        }
+        return rawValue
+    }
+
+    private static func unknownVariant(_ rawValue: String, expected: [String]) -> AppServerError {
+        let expectedValues = expected.map { "`\($0)`" }.joined(separator: ", ")
+        return .invalidRequest("unknown variant `\(rawValue)`, expected one of \(expectedValues)")
     }
 
     fileprivate static func validateTurnEnvironmentSelections(
@@ -1796,6 +1844,7 @@ public enum CodexAppServer {
         guard !experimentalAPIEnabled,
               let approvalPolicy = params?["approvalPolicy"],
               !(approvalPolicy is NSNull),
+              !(approvalPolicy is String),
               approvalPolicyParam(approvalPolicy) == nil
         else {
             return
