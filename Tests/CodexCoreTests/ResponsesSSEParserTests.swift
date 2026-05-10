@@ -56,6 +56,48 @@ final class ResponsesSSEParserTests: XCTestCase {
         ])
     }
 
+    func testCustomToolInputDeltaUsesItemIDAndCallIDLikeRust() {
+        let text = sse([
+            #"{"type":"response.custom_tool_call_input.delta","item_id":"item-1","call_id":"call-1","delta":"{\"cmd\""}"#,
+            #"{"type":"response.completed","response":{"id":"resp_tool_delta"}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .success(.toolCallInputDelta(itemID: "item-1", callID: "call-1", delta: #"{"cmd""#)),
+            .success(.completed(responseID: "resp_tool_delta", tokenUsage: nil))
+        ])
+    }
+
+    func testCustomToolInputDeltaFallsBackToCallIDLikeRust() {
+        let text = sse([
+            #"{"type":"response.custom_tool_call_input.delta","call_id":"call-only","delta":":\"echo\"}"}"#,
+            #"{"type":"response.completed","response":{"id":"resp_tool_delta_fallback"}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .success(.toolCallInputDelta(itemID: "call-only", callID: "call-only", delta: #":"echo"}"#)),
+            .success(.completed(responseID: "resp_tool_delta_fallback", tokenUsage: nil))
+        ])
+    }
+
+    func testCustomToolInputDeltaWithoutIDOrDeltaIsIgnoredLikeRust() {
+        let text = sse([
+            #"{"type":"response.custom_tool_call_input.delta","delta":"ignored"}"#,
+            #"{"type":"response.custom_tool_call_input.delta","item_id":"item-ignored"}"#,
+            #"{"type":"response.completed","response":{"id":"resp_tool_delta_ignored"}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .success(.completed(responseID: "resp_tool_delta_ignored", tokenUsage: nil))
+        ])
+    }
+
     func testMissingCompletedReturnsStreamErrorAfterPriorEvents() {
         let text = sse([
             #"{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}"#
@@ -66,6 +108,30 @@ final class ResponsesSSEParserTests: XCTestCase {
         XCTAssertEqual(events, [
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "Hello")]))),
             .failure(.stream("stream closed before response.completed"))
+        ])
+    }
+
+    func testIncompleteResponseReturnsRustStreamErrorOnClose() {
+        let text = sse([
+            #"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .failure(.stream("Incomplete response returned, reason: max_output_tokens"))
+        ])
+    }
+
+    func testIncompleteResponseDefaultsUnknownReasonLikeRust() {
+        let text = sse([
+            #"{"type":"response.incomplete","response":{}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .failure(.stream("Incomplete response returned, reason: unknown"))
         ])
     }
 
@@ -110,6 +176,12 @@ final class ResponsesSSEParserTests: XCTestCase {
                 2
             ),
             ("output_text.delta", #"{"type":"response.output_text.delta","delta":"abc"}"#, .outputTextDelta("abc"), 2),
+            (
+                "custom_tool_call_input.delta",
+                #"{"type":"response.custom_tool_call_input.delta","item_id":"item-table","call_id":"call-table","delta":"abc"}"#,
+                .toolCallInputDelta(itemID: "item-table", callID: "call-table", delta: "abc"),
+                2
+            ),
             (
                 "reasoning_summary_text.delta",
                 #"{"type":"response.reasoning_summary_text.delta","delta":"sum","summary_index":2}"#,

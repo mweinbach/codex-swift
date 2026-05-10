@@ -9,6 +9,7 @@ public enum ResponseEvent: Equatable, Sendable {
     case serverReasoningIncluded(Bool)
     case modelsETag(String)
     case completed(responseID: String, tokenUsage: TokenUsage?)
+    case toolCallInputDelta(itemID: String, callID: String?, delta: String)
     case outputTextDelta(String)
     case reasoningSummaryDelta(delta: String, summaryIndex: Int64)
     case reasoningContentDelta(delta: String, contentIndex: Int64)
@@ -43,6 +44,14 @@ public struct ResponsesSSEParser: Sendable {
             }
             return [.outputTextDelta(delta)]
 
+        case "response.custom_tool_call_input.delta":
+            guard let delta = event.delta,
+                  let itemID = event.itemID ?? event.callID
+            else {
+                return []
+            }
+            return [.toolCallInputDelta(itemID: itemID, callID: event.callID, delta: delta)]
+
         case "response.reasoning_summary_text.delta":
             guard let delta = event.delta, let summaryIndex = event.summaryIndex else {
                 return []
@@ -60,6 +69,10 @@ public struct ResponsesSSEParser: Sendable {
 
         case "response.failed":
             receiveFailedResponse(event.response)
+            return []
+
+        case "response.incomplete":
+            receiveIncompleteResponse(event.response)
             return []
 
         case "response.completed":
@@ -149,6 +162,11 @@ public struct ResponsesSSEParser: Sendable {
         }
     }
 
+    private mutating func receiveIncompleteResponse(_ response: JSONValue?) {
+        let reason = response?.objectValue?["incomplete_details"]?.objectValue?["reason"]?.stringValue ?? "unknown"
+        responseError = .stream("Incomplete response returned, reason: \(reason)")
+    }
+
     private static func retryDelay(for error: ResponseFailedError) -> Duration? {
         guard error.code == "rate_limit_exceeded", let message = error.message else {
             return nil
@@ -185,6 +203,8 @@ private struct SSEEvent: Decodable {
     let item: JSONValue?
     let metadata: JSONValue?
     let delta: String?
+    let itemID: String?
+    let callID: String?
     let summaryIndex: Int64?
     let contentIndex: Int64?
 
@@ -215,6 +235,8 @@ private struct SSEEvent: Decodable {
         case item
         case metadata
         case delta
+        case itemID = "item_id"
+        case callID = "call_id"
         case summaryIndex = "summary_index"
         case contentIndex = "content_index"
     }

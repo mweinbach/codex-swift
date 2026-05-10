@@ -60,6 +60,9 @@ public struct ResponseEventAggregator: Sendable {
         case let .modelsETag(etag):
             return [.success(.modelsETag(etag))]
 
+        case let .toolCallInputDelta(itemID, callID, delta):
+            return [.success(.toolCallInputDelta(itemID: itemID, callID: callID, delta: delta))]
+
         case let .completed(responseID, tokenUsage):
             var events: [Result<ResponseEvent, APIError>] = []
             if !cumulativeReasoning.isEmpty {

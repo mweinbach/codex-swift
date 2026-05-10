@@ -660,6 +660,7 @@ public enum NonInteractiveExec {
                      .reasoningSummaryDelta,
                      .reasoningContentDelta,
                      .reasoningSummaryPartAdded,
+                     .toolCallInputDelta,
                      .rateLimits,
                      .serverModel,
                      .modelVerifications,

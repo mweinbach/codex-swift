@@ -112,7 +112,8 @@ final class ResponseEventAggregatorTests: XCTestCase {
             .success(.serverModel("gpt-rerouted")),
             .success(.modelVerifications([.trustedAccessForCyber])),
             .success(.serverReasoningIncluded(true)),
-            .success(.modelsETag("etag-1"))
+            .success(.modelsETag("etag-1")),
+            .success(.toolCallInputDelta(itemID: "item-1", callID: "call-1", delta: "abc"))
         ]
 
         XCTAssertEqual(ResponseEventAggregator.aggregate(events), events)
