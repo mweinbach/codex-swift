@@ -389,6 +389,105 @@ final class RolloutRecorderTests: XCTestCase {
         XCTAssertNil(decodedCustomOutput.success)
     }
 
+    func testPersistsReasoningResponseItemsLikeRust() throws {
+        let reasoning = ResponseItem.reasoning(
+            id: "rs_runtime_only",
+            summary: [.summaryText(text: "checked the Rust serde attributes")],
+            content: [
+                .reasoningText(text: "raw chain fragment"),
+                .text("visible explanation")
+            ],
+            encryptedContent: "encrypted-payload"
+        )
+        let line = RolloutLine(
+            timestamp: "2026-05-08T00:00:00.000Z",
+            item: .responseItem(reasoning)
+        )
+
+        let object = try JSONObject(line)
+        XCTAssertEqual(object["type"] as? String, "response_item")
+        XCTAssertEqual(object["timestamp"] as? String, "2026-05-08T00:00:00.000Z")
+        let payload = try XCTUnwrap(object["payload"] as? [String: Any])
+        XCTAssertEqual(payload["type"] as? String, "reasoning")
+        XCTAssertNil(payload["id"])
+        XCTAssertEqual(payload["encrypted_content"] as? String, "encrypted-payload")
+
+        let summary = try XCTUnwrap(payload["summary"] as? [[String: Any]])
+        XCTAssertEqual(summary.count, 1)
+        XCTAssertEqual(summary[0]["type"] as? String, "summary_text")
+        XCTAssertEqual(summary[0]["text"] as? String, "checked the Rust serde attributes")
+
+        let content = try XCTUnwrap(payload["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[0]["type"] as? String, "reasoning_text")
+        XCTAssertEqual(content[0]["text"] as? String, "raw chain fragment")
+        XCTAssertEqual(content[1]["type"] as? String, "text")
+        XCTAssertEqual(content[1]["text"] as? String, "visible explanation")
+
+        let decoded = try JSONDecoder().decode(RolloutLine.self, from: JSONEncoder().encode(line))
+        let expectedDecoded = ResponseItem.reasoning(
+            id: "",
+            summary: [.summaryText(text: "checked the Rust serde attributes")],
+            content: [
+                .reasoningText(text: "raw chain fragment"),
+                .text("visible explanation")
+            ],
+            encryptedContent: "encrypted-payload"
+        )
+        XCTAssertEqual(decoded.item, .responseItem(expectedDecoded))
+
+        let textOnly = ResponseItem.reasoning(
+            id: "rs_text_only",
+            summary: [.summaryText(text: "text-only reasoning content is not persisted")],
+            content: [.text("display-only reasoning text")],
+            encryptedContent: nil
+        )
+        let textOnlyLine = RolloutLine(
+            timestamp: "2026-05-08T00:00:01.000Z",
+            item: .responseItem(textOnly)
+        )
+        let textOnlyPayload = try XCTUnwrap(JSONObject(textOnlyLine)["payload"] as? [String: Any])
+        XCTAssertNil(textOnlyPayload["id"])
+        XCTAssertNil(textOnlyPayload["content"])
+        XCTAssertTrue(textOnlyPayload["encrypted_content"] is NSNull)
+
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let path = temp.url.appendingPathComponent("reasoning-rollout.jsonl")
+        let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let sessionMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: conversationID,
+            timestamp: "2026-05-08T00:00:00.000Z",
+            cwd: "/repo",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            source: .cli
+        )))
+        try writeLines([
+            RolloutLine(timestamp: "2026-05-08T00:00:00.000Z", item: sessionMeta),
+            line,
+            textOnlyLine
+        ], to: path)
+
+        guard case let .resumed(resumed) = try RolloutRecorder.getRolloutHistory(path: path) else {
+            return XCTFail("expected resumed history")
+        }
+        let expectedTextOnlyDecoded = ResponseItem.reasoning(
+            id: "",
+            summary: [.summaryText(text: "text-only reasoning content is not persisted")],
+            content: nil,
+            encryptedContent: nil
+        )
+        XCTAssertEqual(resumed.history, [
+            sessionMeta,
+            .responseItem(expectedDecoded),
+            .responseItem(expectedTextOnlyDecoded)
+        ])
+        XCTAssertEqual(
+            RolloutRecorder.reconstructResponseHistory(from: resumed.history),
+            [expectedDecoded, expectedTextOnlyDecoded]
+        )
+    }
+
     func testReconstructResponseHistoryUsesResponseItemsAndNormalizesToolPairs() {
         let history = RolloutRecorder.reconstructResponseHistory(from: [
             .sessionMeta(SessionMetaLine(meta: SessionMeta(
