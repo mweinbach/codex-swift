@@ -5577,6 +5577,58 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(stateOnlyAfterRepairData.map { $0["modelProvider"] as? String }, ["openai"])
     }
 
+    func testThreadListOverlaysStateDbGitMetadataForFilteredListing() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T16-00-00",
+            timestamp: "2025-01-03T16:00:00Z",
+            preview: "Hello from user",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: ThreadId(string: threadID),
+            rolloutPath: rolloutPath,
+            createdAt: try appServerDate("2025-01-03T16:00:00Z"),
+            updatedAt: try appServerDate("2025-01-03T16:00:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "Hello from user",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "Hello from user",
+            gitSHA: "sqlite-sha",
+            gitBranch: "sqlite-branch",
+            gitOriginURL: "https://example.com/repo.git"
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":10,"sourceKinds":["cli"]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let thread = try XCTUnwrap(data.first)
+        let gitInfo = try XCTUnwrap(thread["gitInfo"] as? [String: Any])
+
+        XCTAssertEqual(thread["id"] as? String, threadID)
+        XCTAssertEqual(gitInfo["sha"] as? String, "sqlite-sha")
+        XCTAssertEqual(gitInfo["branch"] as? String, "sqlite-branch")
+        XCTAssertEqual(gitInfo["originUrl"] as? String, "https://example.com/repo.git")
+    }
+
     func testThreadListStateDbOnlyDropsMissingRolloutPaths() async throws {
         let temp = try TemporaryDirectory()
         let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)

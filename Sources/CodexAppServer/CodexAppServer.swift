@@ -764,7 +764,7 @@ public enum CodexAppServer {
             archivedOnly: boolParam(params?["archived"], defaultValue: false)
         )
         return [
-            "data": try page.items.map { try threadObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
+            "data": try threadObjects(for: page.items, configuration: configuration),
             "nextCursor": (page.nextCursor?.token as Any?) ?? NSNull(),
             "backwardsCursor": (page.backwardsCursor?.token as Any?) ?? NSNull()
         ]
@@ -9572,28 +9572,38 @@ public enum CodexAppServer {
     private static func threadObject(
         for item: ConversationItem,
         defaultProvider: String,
-        turns: [[String: Any]] = []
+        turns: [[String: Any]] = [],
+        metadataOverlay: ThreadMetadata? = nil
     ) throws -> [String: Any] {
         let summary = try RolloutSummary(path: item.path, defaultProvider: defaultProvider)
         let updatedAt = item.updatedAt.map(unixSeconds) ?? summary.createdAtUnixSeconds
+        let source = metadataOverlay.map { threadListSessionSource(from: $0.source) } ?? summary.source
+        let gitInfo = threadListGitInfo(from: metadataOverlay) ?? summary.gitInfo
+        let preview = summary.preview.isEmpty ? metadataOverlay?.firstUserMessage ?? "" : summary.preview
+        let modelProvider = summary.modelProvider.isEmpty ? metadataOverlay?.modelProvider ?? defaultProvider : summary.modelProvider
+        let cwd = summary.cwd.isEmpty ? metadataOverlay?.cwd ?? "" : summary.cwd
+        let cliVersion = summary.cliVersion.isEmpty ? metadataOverlay?.cliVersion ?? "" : summary.cliVersion
+        let threadSource = summary.threadSource ?? metadataOverlay?.threadSource?.description
+        let agentNickname = summary.agentNickname ?? metadataOverlay?.agentNickname
+        let agentRole = summary.agentRole ?? metadataOverlay?.agentRole
         return [
             "id": summary.id,
             "sessionId": summary.id,
             "forkedFromId": summary.forkedFromID ?? NSNull(),
-            "preview": summary.preview,
+            "preview": preview,
             "ephemeral": false,
-            "modelProvider": summary.modelProvider,
+            "modelProvider": modelProvider,
             "createdAt": summary.createdAtUnixSeconds,
             "updatedAt": updatedAt,
             "status": ["type": "notLoaded"],
             "path": item.path,
-            "cwd": summary.cwd,
-            "cliVersion": summary.cliVersion,
-            "source": appServerSource(summary.source),
-            "threadSource": summary.threadSource ?? NSNull(),
-            "agentNickname": summary.agentNickname ?? NSNull(),
-            "agentRole": summary.agentRole ?? NSNull(),
-            "gitInfo": summary.gitInfo ?? NSNull(),
+            "cwd": cwd,
+            "cliVersion": cliVersion,
+            "source": appServerSource(source),
+            "threadSource": threadSource ?? NSNull(),
+            "agentNickname": agentNickname ?? NSNull(),
+            "agentRole": agentRole ?? NSNull(),
+            "gitInfo": gitInfo ?? NSNull(),
             "name": summary.name ?? NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
@@ -9684,6 +9694,43 @@ public enum CodexAppServer {
         )
     }
 
+    private static func threadObjects(
+        for items: [ConversationItem],
+        configuration: CodexAppServerConfiguration
+    ) throws -> [[String: Any]] {
+        let overlays = try stateMetadataOverlays(for: items, configuration: configuration)
+        return try items.map { item in
+            let summary = try RolloutSummary(path: item.path, defaultProvider: configuration.defaultModelProvider)
+            return try threadObject(
+                for: item,
+                defaultProvider: configuration.defaultModelProvider,
+                metadataOverlay: overlays[summary.id]
+            )
+        }
+    }
+
+    private static func stateMetadataOverlays(
+        for items: [ConversationItem],
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: ThreadMetadata] {
+        guard let stateStore = configuration.stateStore, !items.isEmpty else {
+            return [:]
+        }
+        return try runAsyncBlocking {
+            var overlays: [String: ThreadMetadata] = [:]
+            for item in items {
+                guard let summary = try? RolloutSummary(path: item.path, defaultProvider: configuration.defaultModelProvider),
+                      let threadID = try? ThreadId(string: summary.id),
+                      let metadata = try? await stateStore.getThread(threadID: threadID)
+                else {
+                    continue
+                }
+                overlays[summary.id] = metadata
+            }
+            return overlays
+        }
+    }
+
     private static func threadListSessionSource(from persistedSource: String) -> SessionSource {
         if let data = persistedSource.data(using: .utf8),
            let parsed = try? JSONDecoder().decode(SessionSource.self, from: data) {
@@ -9697,6 +9744,13 @@ public enum CodexAppServer {
     }
 
     private static func threadListGitInfo(from metadata: ThreadMetadata) -> [String: Any]? {
+        threadListGitInfo(from: Optional(metadata))
+    }
+
+    private static func threadListGitInfo(from metadata: ThreadMetadata?) -> [String: Any]? {
+        guard let metadata else {
+            return nil
+        }
         guard metadata.gitSHA != nil || metadata.gitBranch != nil || metadata.gitOriginURL != nil else {
             return nil
         }
