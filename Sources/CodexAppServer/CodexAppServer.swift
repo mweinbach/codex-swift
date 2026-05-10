@@ -2788,7 +2788,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let apps = try localPluginAppList(configuration: configuration)
+        let apps = try appList(configuration: configuration)
         let total = apps.count
         var start = 0
         if let cursor = stringParam(params?["cursor"]) {
@@ -2808,9 +2808,49 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func localPluginAppList(configuration: CodexAppServerConfiguration) throws -> [[String: Any]] {
+    private static func appList(configuration: CodexAppServerConfiguration) throws -> [[String: Any]] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        var appsByID: [String: [String: Any]] = [:]
+
+        if let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        ),
+           runtimeConfig.features.isEnabled(.apps),
+           let auth = try? currentAuth(configuration: configuration),
+           case .chatGPT = auth.kind {
+            for app in connectorDirectoryApps(
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            ) {
+                guard let id = app["id"] as? String else {
+                    continue
+                }
+                appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
+            }
+        }
+
+        for app in try localPluginAppList(configuration: configuration, config: config) {
+            guard let id = app["id"] as? String else {
+                continue
+            }
+            if appsByID[id] == nil {
+                appsByID[id] = app
+            }
+        }
+
+        return sortedAppInfos(Array(appsByID.values))
+    }
+
+    private static func localPluginAppList(
+        configuration: CodexAppServerConfiguration,
+        config: ConfigValue? = nil
+    ) throws -> [[String: Any]] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try config ?? (CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:]))
         let roots = localMarketplaceDiscoveryRoots(cwds: [], codexHome: configuration.codexHome, config: config)
         let manifestPaths = localMarketplaceManifestPaths(from: roots)
         var appsByID: [String: [String: Any]] = [:]
@@ -2851,19 +2891,7 @@ public enum CodexAppServer {
             }
         }
 
-        return appsByID.values.sorted {
-            let leftAccessible = $0["isAccessible"] as? Bool ?? false
-            let rightAccessible = $1["isAccessible"] as? Bool ?? false
-            if leftAccessible != rightAccessible {
-                return leftAccessible && !rightAccessible
-            }
-            let leftName = $0["name"] as? String ?? ""
-            let rightName = $1["name"] as? String ?? ""
-            if leftName != rightName {
-                return leftName < rightName
-            }
-            return ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
-        }
+        return sortedAppInfos(Array(appsByID.values))
     }
 
     private static func appInfoForPluginApp(_ app: [String: Any], config: ConfigValue) -> [String: Any] {
@@ -2884,6 +2912,22 @@ public enum CodexAppServer {
             "isEnabled": configuredAppEnabled(id: id, in: config),
             "pluginDisplayNames": []
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func sortedAppInfos(_ apps: [[String: Any]]) -> [[String: Any]] {
+        apps.sorted {
+            let leftAccessible = $0["isAccessible"] as? Bool ?? false
+            let rightAccessible = $1["isAccessible"] as? Bool ?? false
+            if leftAccessible != rightAccessible {
+                return leftAccessible && !rightAccessible
+            }
+            let leftName = $0["name"] as? String ?? $0["id"] as? String ?? ""
+            let rightName = $1["name"] as? String ?? $1["id"] as? String ?? ""
+            if leftName != rightName {
+                return leftName < rightName
+            }
+            return ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+        }
     }
 
     private static func configuredAppEnabled(id: String, in config: ConfigValue) -> Bool {
@@ -4299,13 +4343,14 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         auth: AppServerAuth
     ) -> [[String: Any]] {
-        var connectors: [[String: Any]] = []
+        var appsByID: [String: [String: Any]] = [:]
         var token: String?
         repeat {
-            var queryItems = [URLQueryItem(name: "external_logos", value: "true")]
+            var queryItems: [URLQueryItem] = []
             if let token {
                 queryItems.append(URLQueryItem(name: "token", value: token))
             }
+            queryItems.append(URLQueryItem(name: "external_logos", value: "true"))
             guard let page = connectorDirectoryObject(
                 path: "/connectors/directory/list",
                 queryItems: queryItems,
@@ -4315,9 +4360,7 @@ public enum CodexAppServer {
             ) else {
                 return []
             }
-            connectors.append(contentsOf: (page["apps"] as? [[String: Any]] ?? []).filter {
-                ($0["visibility"] as? String) != "HIDDEN"
-            })
+            mergeConnectorDirectoryApps(page["apps"] as? [[String: Any]] ?? [], into: &appsByID)
             token = (
                 (page["next_token"] as? String) ??
                 (page["nextToken"] as? String) ??
@@ -4328,14 +4371,124 @@ public enum CodexAppServer {
                 token = nil
             }
         } while token != nil
-        return connectors.sorted {
-            let leftName = $0["name"] as? String ?? $0["id"] as? String ?? ""
-            let rightName = $1["name"] as? String ?? $1["id"] as? String ?? ""
-            if leftName != rightName {
-                return leftName < rightName
-            }
-            return ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+
+        if isWorkspaceChatGPTAuth(auth),
+           let workspacePage = connectorDirectoryObject(
+               path: "/connectors/directory/list_workspace",
+               queryItems: [URLQueryItem(name: "external_logos", value: "true")],
+               runtimeConfig: runtimeConfig,
+               configuration: configuration,
+               auth: auth
+           ) {
+            mergeConnectorDirectoryApps(workspacePage["apps"] as? [[String: Any]] ?? [], into: &appsByID)
         }
+
+        return sortedAppInfos(Array(appsByID.values))
+    }
+
+    private static func mergeConnectorDirectoryApps(
+        _ apps: [[String: Any]],
+        into appsByID: inout [String: [String: Any]]
+    ) {
+        for app in apps where (app["visibility"] as? String) != "HIDDEN" {
+            guard let id = stringParam(app["id"]) else {
+                continue
+            }
+            let incoming = appInfoForDirectoryApp(app, id: id)
+            appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: incoming)
+        }
+    }
+
+    private static func appInfoForDirectoryApp(_ app: [String: Any], id: String) -> [String: Any] {
+        let normalizedName = normalizeConnectorName(stringParam(app["name"]), connectorID: id)
+        let installURL = stringParam(app["installUrl"]) ?? connectorInstallURL(name: normalizedName, connectorID: id)
+        return [
+            "id": id,
+            "name": normalizedName,
+            "description": normalizeConnectorString(app["description"]) as Any? ?? NSNull(),
+            "logoUrl": normalizeConnectorString(app["logoUrl"]) as Any? ?? NSNull(),
+            "logoUrlDark": normalizeConnectorString(app["logoUrlDark"]) as Any? ?? NSNull(),
+            "distributionChannel": normalizeConnectorString(app["distributionChannel"]) as Any? ?? NSNull(),
+            "branding": app["branding"] as Any? ?? NSNull(),
+            "appMetadata": (app["appMetadata"] ?? app["app_metadata"]) as Any? ?? NSNull(),
+            "labels": app["labels"] as Any? ?? NSNull(),
+            "installUrl": installURL,
+            "isAccessible": false,
+            "isEnabled": true,
+            "pluginDisplayNames": []
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func appInfoByMergingConnectorAppInfo(
+        existing: [String: Any]?,
+        incoming: [String: Any]
+    ) -> [String: Any] {
+        guard var merged = existing else {
+            return incoming
+        }
+        let id = stringParam(merged["id"]) ?? stringParam(incoming["id"]) ?? ""
+        var updatedName = false
+        if normalizeConnectorString(merged["name"]) == nil,
+           let incomingName = normalizeConnectorString(incoming["name"]) {
+            merged["name"] = incomingName
+            updatedName = true
+        } else if stringParam(merged["name"]) == id,
+                  let incomingName = normalizeConnectorString(incoming["name"]),
+                  incomingName != id {
+            merged["name"] = incomingName
+            updatedName = true
+        }
+        for key in ["description", "logoUrl", "logoUrlDark", "distributionChannel"] {
+            if normalizeConnectorString(merged[key]) == nil,
+               let incomingValue = normalizeConnectorString(incoming[key]) {
+                merged[key] = incomingValue
+            }
+        }
+        for key in ["branding", "appMetadata", "labels"] where isNullish(merged[key]) && !isNullish(incoming[key]) {
+            merged[key] = incoming[key]
+        }
+        if merged["installUrl"] == nil || merged["installUrl"] is NSNull,
+           let installURL = stringParam(incoming["installUrl"]) {
+            merged["installUrl"] = installURL
+        } else if updatedName,
+                  let mergedName = stringParam(merged["name"]) {
+            merged["installUrl"] = connectorInstallURL(name: mergedName, connectorID: id)
+        }
+        if (incoming["isAccessible"] as? Bool) == true {
+            merged["isAccessible"] = true
+        }
+        if let incomingEnabled = incoming["isEnabled"] as? Bool {
+            merged["isEnabled"] = (merged["isEnabled"] as? Bool ?? true) && incomingEnabled
+        }
+        let pluginDisplayNames = Set((merged["pluginDisplayNames"] as? [String] ?? []) + (incoming["pluginDisplayNames"] as? [String] ?? []))
+        merged["pluginDisplayNames"] = pluginDisplayNames.sorted()
+        return merged
+    }
+
+    private static func normalizeConnectorName(_ value: String?, connectorID: String) -> String {
+        guard let normalized = normalizeConnectorString(value) else {
+            return connectorID
+        }
+        return normalized
+    }
+
+    private static func normalizeConnectorString(_ value: Any?) -> String? {
+        stringParam(value)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmptyString
+    }
+
+    private static func isNullish(_ value: Any?) -> Bool {
+        value == nil || value is NSNull
+    }
+
+    private static func isWorkspaceChatGPTAuth(_ auth: AppServerAuth) -> Bool {
+        guard case let .chatGPT(idToken) = auth.kind,
+              case let .known(plan)? = idToken.chatGPTPlanType
+        else {
+            return false
+        }
+        return plan.isWorkspaceAccount
     }
 
     private static func connectorDirectoryObject(
@@ -20498,4 +20651,10 @@ private func updateRolloutSessionGitInfo(rolloutPath: String, patch: GitInfoPatc
     }
     try outputLines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     return rolloutPath
+}
+
+private extension String {
+    var nonEmptyString: String? {
+        isEmpty ? nil : self
+    }
 }

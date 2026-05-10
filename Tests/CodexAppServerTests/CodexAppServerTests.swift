@@ -4095,6 +4095,115 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(beyondError["message"] as? String, "cursor 2 exceeds total apps 1")
     }
 
+    func testAppListLoadsRemoteDirectoryAndWorkspaceConnectorsForWorkspaceAuth() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "business", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let firstPage = """
+        {
+          "apps": [
+            {
+              "id": "connector_beta",
+              "name": "  ",
+              "description": "   "
+            },
+            {
+              "id": "connector_hidden",
+              "name": "Hidden",
+              "visibility": "HIDDEN"
+            }
+          ],
+          "next_token": "page two"
+        }
+        """
+        let secondPage = """
+        {
+          "apps": [
+            {
+              "id": "connector_beta",
+              "name": "Beta",
+              "description": "Beta connector",
+              "logoUrl": "https://cdn.example/beta.png",
+              "distributionChannel": "official"
+            }
+          ],
+          "next_token": ""
+        }
+        """
+        let workspacePage = """
+        {
+          "apps": [
+            {
+              "id": "connector_alpha",
+              "name": "Alpha",
+              "description": "Workspace connector"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(firstPage.utf8))
+                case ("GET", "/backend-api/connectors/directory/list", "token=page%20two&external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(secondPage.utf8))
+                case ("GET", "/backend-api/connectors/directory/list_workspace", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(workspacePage.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, ["connector_alpha", "connector_beta"])
+        XCTAssertEqual(data.map { $0["name"] as? String }, ["Alpha", "Beta"])
+        XCTAssertEqual(data[0]["description"] as? String, "Workspace connector")
+        XCTAssertEqual(data[1]["description"] as? String, "Beta connector")
+        XCTAssertEqual(data[1]["logoUrl"] as? String, "https://cdn.example/beta.png")
+        XCTAssertEqual(data[1]["distributionChannel"] as? String, "official")
+        XCTAssertEqual(data.map { $0["installUrl"] as? String }, [
+            "https://chatgpt.com/apps/alpha/connector_alpha",
+            "https://chatgpt.com/apps/beta/connector_beta"
+        ])
+        XCTAssertEqual(data.map { $0["isAccessible"] as? Bool }, [false, false])
+        XCTAssertEqual(data.map { $0["isEnabled"] as? Bool }, [true, true])
+        XCTAssertTrue(result["nextCursor"] is NSNull)
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
+            "account-123",
+            "account-123",
+            "account-123"
+        ])
+    }
+
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
