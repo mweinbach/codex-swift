@@ -15271,6 +15271,8 @@ final class CodexAppServerMessageProcessor {
     private var activeTurnIDs: [String: String] = [:]
     private var runtimeTurnStartedAt: [String: [String: Int64]] = [:]
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
+    private var runtimePendingApprovalCounts: [String: Int] = [:]
+    private var runtimePendingUserInputCounts: [String: Int] = [:]
     private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
@@ -15423,6 +15425,7 @@ final class CodexAppServerMessageProcessor {
             let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            clearRuntimePendingActiveFlags(threadID: threadID)
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
             }
@@ -15445,6 +15448,7 @@ final class CodexAppServerMessageProcessor {
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            clearRuntimePendingActiveFlags(threadID: threadID)
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
             }
@@ -15473,6 +15477,7 @@ final class CodexAppServerMessageProcessor {
             ) {
                 projected.insert(notification, at: 0)
             }
+            clearRuntimePendingActiveFlags(threadID: threadID)
             if event.affectsTurnStatus {
                 runtimeTurnErrors[threadID, default: [:]][turnID] = CodexAppServer.turnErrorObject(
                     message: event.message,
@@ -15481,6 +15486,14 @@ final class CodexAppServerMessageProcessor {
                 )
             }
             notifications = projected
+        case .applyPatchApprovalRequest, .execApprovalRequest, .elicitationRequest, .requestPermissions:
+            notifications = [
+                markRuntimeApprovalRequested(threadID: threadID)
+            ].compactMap(\.self)
+        case .requestUserInput:
+            notifications = [
+                markRuntimeUserInputRequested(threadID: threadID)
+            ].compactMap(\.self)
         default:
             notifications = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
@@ -15501,6 +15514,48 @@ final class CodexAppServerMessageProcessor {
         for notification in notifications {
             await sendNotification(notification)
         }
+    }
+
+    private func markRuntimeApprovalRequested(threadID: String) -> [String: Any]? {
+        let previousFlags = runtimeActiveFlags(threadID: threadID)
+        runtimePendingApprovalCounts[threadID, default: 0] += 1
+        return runtimeActiveStatusNotificationIfChanged(threadID: threadID, previousFlags: previousFlags)
+    }
+
+    private func markRuntimeUserInputRequested(threadID: String) -> [String: Any]? {
+        let previousFlags = runtimeActiveFlags(threadID: threadID)
+        runtimePendingUserInputCounts[threadID, default: 0] += 1
+        return runtimeActiveStatusNotificationIfChanged(threadID: threadID, previousFlags: previousFlags)
+    }
+
+    private func runtimeActiveStatusNotificationIfChanged(
+        threadID: String,
+        previousFlags: [String]
+    ) -> [String: Any]? {
+        let flags = runtimeActiveFlags(threadID: threadID)
+        guard flags != previousFlags else {
+            return nil
+        }
+        return threadStatusChangedNotification(
+            threadID: threadID,
+            status: CodexAppServer.activeThreadStatus(activeFlags: flags)
+        )
+    }
+
+    private func runtimeActiveFlags(threadID: String) -> [String] {
+        var flags: [String] = []
+        if (runtimePendingApprovalCounts[threadID] ?? 0) > 0 {
+            flags.append("waitingOnApproval")
+        }
+        if (runtimePendingUserInputCounts[threadID] ?? 0) > 0 {
+            flags.append("waitingOnUserInput")
+        }
+        return flags
+    }
+
+    private func clearRuntimePendingActiveFlags(threadID: String) {
+        runtimePendingApprovalCounts.removeValue(forKey: threadID)
+        runtimePendingUserInputCounts.removeValue(forKey: threadID)
     }
 
     private func sendNotification(_ notification: [String: Any]) async {

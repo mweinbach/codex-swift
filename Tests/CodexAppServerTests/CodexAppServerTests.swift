@@ -1511,6 +1511,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(completedError["additionalDetails"] is NSNull)
     }
 
+    func testRuntimeApprovalAndUserInputEventsUpdateActiveFlags() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                modelContextWindow: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .applyPatchApprovalRequest(ApplyPatchApprovalRequestEvent(
+                callID: "patch-1",
+                turnID: "turn-1",
+                changes: [:]
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .execApprovalRequest(ExecApprovalRequestEvent(
+                callID: "exec-1",
+                turnID: "turn-1",
+                command: ["git", "status"],
+                cwd: "/repo",
+                parsedCmd: []
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .requestUserInput(RequestUserInputEvent(
+                callID: "input-1",
+                turnID: "turn-1",
+                questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick")]
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-1",
+                lastAgentMessage: nil
+            ))
+        )
+
+        let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
+        let activeParams = try XCTUnwrap(active[0]["params"] as? [String: Any])
+        let activeStatus = try XCTUnwrap(activeParams["status"] as? [String: Any])
+        XCTAssertEqual(activeStatus["activeFlags"] as? [String], [])
+
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        let waitingOnApproval = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(waitingOnApproval[0]["method"] as? String, "thread/status/changed")
+        let waitingOnApprovalParams = try XCTUnwrap(waitingOnApproval[0]["params"] as? [String: Any])
+        let waitingOnApprovalStatus = try XCTUnwrap(waitingOnApprovalParams["status"] as? [String: Any])
+        XCTAssertEqual(waitingOnApprovalStatus["activeFlags"] as? [String], ["waitingOnApproval"])
+
+        let waitingOnBoth = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(waitingOnBoth[0]["method"] as? String, "thread/status/changed")
+        let waitingOnBothParams = try XCTUnwrap(waitingOnBoth[0]["params"] as? [String: Any])
+        let waitingOnBothStatus = try XCTUnwrap(waitingOnBothParams["status"] as? [String: Any])
+        XCTAssertEqual(waitingOnBothStatus["activeFlags"] as? [String], ["waitingOnApproval", "waitingOnUserInput"])
+
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
+        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+    }
+
     func testRuntimeTurnAbortedEmitsInterruptedCompletionWithTiming() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
