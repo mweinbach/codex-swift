@@ -780,6 +780,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(goal["updatedAt"] as? Int, 1_700_000_123)
     }
 
+    func testRuntimeTokenCountEventEmitsUsageAndRateLimitNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .tokenCount(TokenCountEvent(
+                info: TokenUsageInfo(
+                    totalTokenUsage: TokenUsage(
+                        inputTokens: 100,
+                        cachedInputTokens: 25,
+                        outputTokens: 40,
+                        reasoningOutputTokens: 7,
+                        totalTokens: 140
+                    ),
+                    lastTokenUsage: TokenUsage(
+                        inputTokens: 10,
+                        cachedInputTokens: 5,
+                        outputTokens: 4,
+                        reasoningOutputTokens: 1,
+                        totalTokens: 14
+                    ),
+                    modelContextWindow: 200_000
+                ),
+                rateLimits: RateLimitSnapshot(
+                    limitID: "codex",
+                    limitName: "codex",
+                    primary: RateLimitWindow(usedPercent: 42.4, windowMinutes: 300, resetsAt: 1_700_000_000),
+                    secondary: nil,
+                    credits: CreditsSnapshot(hasCredits: true, unlimited: false, balance: "12.50"),
+                    planType: .pro,
+                    rateLimitReachedType: .workspaceOwnerUsageLimitReached
+                )
+            ))
+        )
+
+        let usageMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(usageMessages.count, 1)
+        XCTAssertEqual(usageMessages[0]["method"] as? String, "thread/tokenUsage/updated")
+        let usageParams = try XCTUnwrap(usageMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(usageParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(usageParams["turnId"] as? String, "turn-1")
+        let tokenUsage = try XCTUnwrap(usageParams["tokenUsage"] as? [String: Any])
+        XCTAssertEqual(tokenUsage["modelContextWindow"] as? Int, 200_000)
+        let total = try XCTUnwrap(tokenUsage["total"] as? [String: Any])
+        XCTAssertEqual(total["totalTokens"] as? Int, 140)
+        XCTAssertEqual(total["inputTokens"] as? Int, 100)
+        XCTAssertEqual(total["cachedInputTokens"] as? Int, 25)
+        XCTAssertEqual(total["outputTokens"] as? Int, 40)
+        XCTAssertEqual(total["reasoningOutputTokens"] as? Int, 7)
+        let last = try XCTUnwrap(tokenUsage["last"] as? [String: Any])
+        XCTAssertEqual(last["totalTokens"] as? Int, 14)
+        XCTAssertEqual(last["inputTokens"] as? Int, 10)
+        XCTAssertEqual(last["cachedInputTokens"] as? Int, 5)
+        XCTAssertEqual(last["outputTokens"] as? Int, 4)
+        XCTAssertEqual(last["reasoningOutputTokens"] as? Int, 1)
+
+        let rateLimitMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(rateLimitMessages.count, 1)
+        XCTAssertEqual(rateLimitMessages[0]["method"] as? String, "account/rateLimits/updated")
+        let rateLimitParams = try XCTUnwrap(rateLimitMessages[0]["params"] as? [String: Any])
+        let rateLimits = try XCTUnwrap(rateLimitParams["rateLimits"] as? [String: Any])
+        XCTAssertEqual(rateLimits["limitId"] as? String, "codex")
+        XCTAssertEqual(rateLimits["limitName"] as? String, "codex")
+        XCTAssertEqual(rateLimits["planType"] as? String, "pro")
+        XCTAssertEqual(rateLimits["rateLimitReachedType"] as? String, "workspace_owner_usage_limit_reached")
+        let primary = try XCTUnwrap(rateLimits["primary"] as? [String: Any])
+        XCTAssertEqual(primary["usedPercent"] as? Int, 42)
+        XCTAssertEqual(primary["windowDurationMins"] as? Int, 300)
+        XCTAssertEqual(primary["resetsAt"] as? Int, 1_700_000_000)
+        XCTAssertTrue(rateLimits["secondary"] is NSNull)
+        let credits = try XCTUnwrap(rateLimits["credits"] as? [String: Any])
+        XCTAssertEqual(credits["hasCredits"] as? Bool, true)
+        XCTAssertEqual(credits["unlimited"] as? Bool, false)
+        XCTAssertEqual(credits["balance"] as? String, "12.50")
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

@@ -8221,6 +8221,51 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func tokenCountNotifications(
+        threadID: String,
+        turnID: String,
+        event: TokenCountEvent
+    ) -> [[String: Any]] {
+        var notifications: [[String: Any]] = []
+        if let info = event.info {
+            notifications.append([
+                "method": "thread/tokenUsage/updated",
+                "params": [
+                    "threadId": threadID,
+                    "turnId": turnID,
+                    "tokenUsage": tokenUsageInfoObject(info)
+                ]
+            ])
+        }
+        if let rateLimits = event.rateLimits {
+            notifications.append([
+                "method": "account/rateLimits/updated",
+                "params": [
+                    "rateLimits": rateLimitSnapshotObject(rateLimits)
+                ]
+            ])
+        }
+        return notifications
+    }
+
+    private static func tokenUsageInfoObject(_ info: TokenUsageInfo) -> [String: Any] {
+        [
+            "total": tokenUsageBreakdownObject(info.totalTokenUsage),
+            "last": tokenUsageBreakdownObject(info.lastTokenUsage),
+            "modelContextWindow": info.modelContextWindow as Any? ?? NSNull()
+        ]
+    }
+
+    private static func tokenUsageBreakdownObject(_ usage: TokenUsage) -> [String: Any] {
+        [
+            "totalTokens": usage.totalTokens,
+            "inputTokens": usage.inputTokens,
+            "cachedInputTokens": usage.cachedInputTokens,
+            "outputTokens": usage.outputTokens,
+            "reasoningOutputTokens": usage.reasoningOutputTokens
+        ]
+    }
+
     fileprivate static func mcpServerStatusUpdatedNotification(_ update: McpStartupUpdateEvent) -> [String: Any] {
         let status: String
         let error: Any
@@ -8602,6 +8647,22 @@ public enum CodexAppServer {
             return value.map(jsonObject(from:))
         case let .object(value):
             return value.mapValues(jsonObject(from:))
+        }
+    }
+
+    fileprivate static func runtimeEventNotifications(
+        threadID: String,
+        turnID: String,
+        event: EventMessage
+    ) -> [[String: Any]] {
+        switch event {
+        case let .tokenCount(event):
+            return tokenCountNotifications(threadID: threadID, turnID: turnID, event: event)
+        default:
+            guard let notification = runtimeEventNotification(threadID: threadID, turnID: turnID, event: event) else {
+                return []
+            }
+            return [notification]
         }
     }
 
@@ -10149,7 +10210,7 @@ public enum CodexAppServer {
             return NSNull()
         }
         return [
-            "usedPercent": window.usedPercent,
+            "usedPercent": Int(window.usedPercent.rounded()),
             "windowDurationMins": window.windowMinutes ?? NSNull(),
             "resetsAt": window.resetsAt ?? NSNull()
         ].nullStripped(keepNulls: true)
@@ -14775,11 +14836,12 @@ final class CodexAppServerMessageProcessor {
     }
 
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
-        guard let notification = CodexAppServer.runtimeEventNotification(
+        let notifications = CodexAppServer.runtimeEventNotifications(
             threadID: threadID,
             turnID: turnID,
             event: event
-        ) else {
+        )
+        guard !notifications.isEmpty else {
             return
         }
         if case let .turnDiff(turnDiff) = event {
@@ -14789,7 +14851,9 @@ final class CodexAppServerMessageProcessor {
                 unifiedDiff: turnDiff.unifiedDiff
             )
         }
-        await sendNotification(notification)
+        for notification in notifications {
+            await sendNotification(notification)
+        }
     }
 
     private func sendNotification(_ notification: [String: Any]) async {
