@@ -5856,6 +5856,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(apps[2]["needsAuth"] as? Bool, true)
         XCTAssertEqual((plugin["hooks"] as? [[String: Any]])?.count, 0)
         XCTAssertEqual(plugin["mcpServers"] as? [String], [])
+        let capturedRequests = capture.requests.map { request in
+            (path: request.url?.path, query: request.url?.query)
+        }
+        XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/\(pluginID)" && $0.query == nil })
+        XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/installed" && $0.query == "scope=GLOBAL" })
+        XCTAssertFalse(capture.requests.contains { $0.url?.query?.contains("includeDownloadUrls") == true })
         XCTAssertTrue(capture.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
     }
 
@@ -5890,9 +5896,11 @@ final class CodexAppServerTests: XCTestCase {
           }
         }
         """
+        let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
             pluginHTTPTransport: { request in
+                capture.append(request)
                 switch (request.url?.path, request.url?.query) {
                 case ("/backend-api/ps/plugins/\(pluginID)", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
@@ -5912,6 +5920,12 @@ final class CodexAppServerTests: XCTestCase {
         let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
         XCTAssertEqual(plugin["marketplaceName"] as? String, "workspace-directory")
         let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        let capturedRequests = capture.requests.map { request in
+            (path: request.url?.path, query: request.url?.query)
+        }
+        XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/\(pluginID)" && $0.query == nil })
+        XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/installed" && $0.query == "scope=WORKSPACE" })
+        XCTAssertFalse(capture.requests.contains { $0.url?.query?.contains("includeDownloadUrls") == true })
         let shareContext = try XCTUnwrap(summary["shareContext"] as? [String: Any])
         XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
         XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
