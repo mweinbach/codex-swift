@@ -176,6 +176,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("config.toml").path))
     }
 
+    func testThreadStartWithExplicitUntrustedProjectDoesNotPromoteTrustLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let repoRoot = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(repoRoot)
+        try runGit(["init"], cwd: repoRoot.url)
+        let nested = repoRoot.url.appendingPathComponent("nested/project", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let trustedRoot = repoRoot.url.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        [projects."\(trustedRoot)"]
+        trust_level = "untrusted"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"cwd":"\#(nested.path)","sandbox":"workspace-write"}}"#.utf8)))
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains("[projects.\"\(trustedRoot)\"]"))
+        XCTAssertTrue(config.contains(#"trust_level = "untrusted""#))
+        XCTAssertFalse(config.contains(#"trust_level = "trusted""#))
+    }
+
     func testThreadStartFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
         try writeRequiredBrokenMCPConfig(codexHome: temp.url)

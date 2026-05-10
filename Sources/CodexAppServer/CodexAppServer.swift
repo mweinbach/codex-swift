@@ -943,13 +943,21 @@ public enum CodexAppServer {
         let trustTarget = GitInfoCollector.resolveRootGitProjectForTrust(cwd: cwd) ??
             GitInfoCollector.gitRepoRoot(baseDir: cwd) ??
             cwd
-        let projectKey = projectTrustKey(for: trustTarget)
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
+        guard activeProjectTrustLevel(
+            in: stack.effectiveConfig(),
+            cwd: cwd,
+            trustTarget: trustTarget
+        ) == nil else {
+            return
+        }
+
+        let projectKey = projectTrustKey(for: trustTarget)
         var nextConfig = stack.getUserLayer()?.config ?? .table([:])
         let originalConfig = nextConfig
         setConfigValue(
@@ -971,6 +979,28 @@ public enum CodexAppServer {
         try renderConfigToml(nextConfig).write(to: configFile, atomically: true, encoding: .utf8)
     }
 
+    private static func activeProjectTrustLevel(
+        in config: ConfigValue,
+        cwd: URL,
+        trustTarget: URL
+    ) -> TrustLevel? {
+        guard let projects = configTable(config)?["projects"].flatMap(configTable) else {
+            return nil
+        }
+        for lookupURL in [cwd, trustTarget] {
+            for key in projectTrustLookupKeys(for: lookupURL) {
+                guard let project = projects[key].flatMap(configTable),
+                      case let .string(rawTrustLevel)? = project["trust_level"],
+                      let trustLevel = TrustLevel(rawValue: rawTrustLevel)
+                else {
+                    continue
+                }
+                return trustLevel
+            }
+        }
+        return nil
+    }
+
     private static func threadStartPermissionsTrustProject(sandbox: SandboxPolicy) -> Bool {
         switch sandbox {
         case .dangerFullAccess, .externalSandbox, .workspaceWrite:
@@ -981,11 +1011,19 @@ public enum CodexAppServer {
     }
 
     private static func projectTrustKey(for url: URL) -> String {
+        projectTrustLookupKeys(for: url).first ?? url.standardizedFileURL.path
+    }
+
+    private static func projectTrustLookupKeys(for url: URL) -> [String] {
         let standardized = url.standardizedFileURL
         if FileManager.default.fileExists(atPath: standardized.path) {
-            return standardized.resolvingSymlinksInPath().standardizedFileURL.path
+            let canonical = standardized.resolvingSymlinksInPath().standardizedFileURL.path
+            if canonical != standardized.path {
+                return [canonical, standardized.path]
+            }
+            return [canonical]
         }
-        return standardized.path
+        return [standardized.path]
     }
 
     fileprivate static func threadResumeResult(
