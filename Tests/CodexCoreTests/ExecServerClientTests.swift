@@ -382,6 +382,148 @@ final class ExecServerClientTests: XCTestCase {
         )
     }
 
+    func testRemoteHTTPClientBuffersRequestAndClearsStreamingLikeRust() async throws {
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            XCTAssertEqual(request.method, execServerHttpRequestMethod)
+            XCTAssertEqual(request.params?["method"], .string("POST"))
+            XCTAssertEqual(request.params?["url"], .string("https://example.test/rpc"))
+            XCTAssertEqual(request.params?["bodyBase64"], .string("cGluZw=="))
+            XCTAssertEqual(request.params?["requestId"], .string("caller-buffer"))
+            XCTAssertEqual(request.params?["streamResponse"], .bool(false))
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestResponse(
+                    status: 201,
+                    headers: [ExecServerHttpHeader(name: "content-type", value: "text/plain")],
+                    body: ExecServerByteChunk(Array("pong".utf8))
+                ))
+            )
+        }
+        let httpClient = ExecServerRemoteHTTPClient(client: ExecServerClient(transport: transport))
+
+        let response = try await httpClient.run(ExecServerHttpRequestParams(
+            method: "POST",
+            url: "https://example.test/rpc",
+            body: ExecServerByteChunk(Array("ping".utf8)),
+            requestId: "caller-buffer",
+            streamResponse: true
+        ))
+
+        XCTAssertEqual(response.status, 201)
+        XCTAssertEqual(Data(response.body.bytes), Data("pong".utf8))
+    }
+
+    func testRemoteHTTPClientStreamsBodyDeltasWithGeneratedRequestIDLikeRust() async throws {
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            XCTAssertEqual(request.method, execServerHttpRequestMethod)
+            XCTAssertEqual(request.params?["requestId"], .string("http-1"))
+            XCTAssertEqual(request.params?["streamResponse"], .bool(true))
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestResponse(
+                    status: 200,
+                    headers: [ExecServerHttpHeader(name: "content-type", value: "text/event-stream")],
+                    body: ExecServerByteChunk([])
+                ))
+            )
+        }
+        let client = ExecServerClient(transport: transport)
+        let httpClient = ExecServerRemoteHTTPClient(client: client)
+
+        let response = try await httpClient.startStreaming(ExecServerHttpRequestParams(
+            method: "GET",
+            url: "https://example.test/events",
+            requestId: "caller-stream",
+            streamResponse: false
+        ))
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerHttpRequestBodyDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestBodyDeltaNotification(
+                requestId: "http-1",
+                seq: 1,
+                delta: ExecServerByteChunk(Array("hello ".utf8))
+            ))
+        ))
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerHttpRequestBodyDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestBodyDeltaNotification(
+                requestId: "http-1",
+                seq: 2,
+                delta: ExecServerByteChunk(Array("world".utf8)),
+                done: true
+            ))
+        ))
+
+        let body = try await collectRemoteHTTPBody(response.bodyStream)
+
+        XCTAssertEqual(response.response, ExecServerHttpRequestResponse(
+            status: 200,
+            headers: [ExecServerHttpHeader(name: "content-type", value: "text/event-stream")],
+            body: ExecServerByteChunk([])
+        ))
+        XCTAssertEqual(body, Data("hello world".utf8))
+    }
+
+    func testRemoteHTTPClientReportsStreamSequenceAndTerminalErrorsLikeRust() async throws {
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestResponse(
+                    status: 200,
+                    headers: [],
+                    body: ExecServerByteChunk([])
+                ))
+            )
+        }
+        let client = ExecServerClient(transport: transport)
+        let httpClient = ExecServerRemoteHTTPClient(client: client)
+
+        let response = try await httpClient.startStreaming(ExecServerHttpRequestParams(
+            method: "GET",
+            url: "https://example.test/events",
+            requestId: "ignored"
+        ))
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerHttpRequestBodyDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestBodyDeltaNotification(
+                requestId: "http-1",
+                seq: 2,
+                delta: ExecServerByteChunk(Array("late".utf8))
+            ))
+        ))
+
+        let error = try await collectRemoteHTTPBodyError(response.bodyStream)
+        XCTAssertEqual(error, .network("http response stream `http-1` received seq 2, expected 1"))
+
+        let second = try await httpClient.startStreaming(ExecServerHttpRequestParams(
+            method: "GET",
+            url: "https://example.test/events",
+            requestId: "ignored-again"
+        ))
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerHttpRequestBodyDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestBodyDeltaNotification(
+                requestId: "http-2",
+                seq: 1,
+                delta: ExecServerByteChunk([]),
+                done: true,
+                error: "stream failed"
+            ))
+        ))
+
+        let terminalError = try await collectRemoteHTTPBodyError(second.bodyStream)
+        XCTAssertEqual(terminalError, .network("http response stream `http-2` failed: stream failed"))
+    }
+
     func testRemoteProcessStartsAndDelegatesSessionOperationsLikeRust() async throws {
         let transport = ScriptedExecServerClientTransport { message in
             guard case let .request(request) = message else {
@@ -983,6 +1125,28 @@ private func waitForProcessExit(_ pid: Int32) async throws {
         try await Task.sleep(nanoseconds: 100_000_000)
     }
     XCTFail("process \(pid) should exit")
+}
+
+private func collectRemoteHTTPBody(_ stream: APIByteStream) async throws -> Data {
+    var body = Data()
+    for await result in stream {
+        switch result {
+        case let .success(data):
+            body.append(data)
+        case let .failure(error):
+            throw error
+        }
+    }
+    return body
+}
+
+private func collectRemoteHTTPBodyError(_ stream: APIByteStream) async throws -> TransportError? {
+    for await result in stream {
+        if case let .failure(error) = result {
+            return error
+        }
+    }
+    return nil
 }
 
 private func processExists(_ pid: Int32) -> Bool {

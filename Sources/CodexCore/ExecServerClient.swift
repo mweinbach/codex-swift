@@ -571,6 +571,8 @@ public actor ExecServerClient {
     private var storedSessionID: String?
     private var disconnectedMessage: String?
     private var processSessions: [String: ExecServerRemoteProcessEventLog] = [:]
+    private var nextHTTPBodyStreamRequestID: UInt64 = 1
+    private var httpBodyStreams: [String: ExecServerRemoteHTTPBodyStreamLog] = [:]
 
     public init(transport: any ExecServerClientTransport) {
         self.transport = transport
@@ -710,6 +712,14 @@ public actor ExecServerClient {
 
     public func handleServerNotification(_ notification: ExecServerJSONRPCNotification) async throws {
         switch notification.method {
+        case execServerHttpRequestBodyDeltaMethod:
+            let params = try decodeNotification(notification, as: ExecServerHttpRequestBodyDeltaNotification.self)
+            if let stream = httpBodyStreams[params.requestId] {
+                await stream.publish(params)
+                if params.done || params.error != nil {
+                    httpBodyStreams.removeValue(forKey: params.requestId)
+                }
+            }
         case execServerProcessOutputDeltaMethod:
             let params = try decodeNotification(notification, as: ExecServerOutputDeltaNotification.self)
             if let session = processSessions[params.processId] {
@@ -781,7 +791,30 @@ public actor ExecServerClient {
     }
 
     public func httpRequest(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {
-        try await call(execServerHttpRequestMethod, params: params)
+        try await rawHTTPRequest(httpRequestParams(params, streamResponse: false, requestId: params.requestId))
+    }
+
+    public func httpRequestStream(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHTTPStreamResponse {
+        if let disconnectedMessage {
+            throw ExecServerClientError.disconnected(disconnectedMessage)
+        }
+        let requestId = nextHTTPBodyStreamRequestIDString()
+        let stream = try registerHTTPBodyStream(requestId: requestId)
+        do {
+            let response = try await rawHTTPRequest(httpRequestParams(params, streamResponse: true, requestId: requestId))
+            return ExecServerHTTPStreamResponse(
+                response: response,
+                bodyStream: await stream.byteStream(client: self)
+            )
+        } catch {
+            removeHTTPBodyStream(requestId: requestId)
+            await stream.finishWithoutDelivery()
+            throw error
+        }
+    }
+
+    public func removeHTTPBodyStream(requestId: String) {
+        httpBodyStreams.removeValue(forKey: requestId)
     }
 
     private func notifyInitialized() async throws {
@@ -808,14 +841,36 @@ public actor ExecServerClient {
         } catch let error as ExecServerClientError where error.isTransportClosedLikeRust {
             let message = recordDisconnected(reason: nil)
             await failAllProcessSessions(message)
+            await failAllHTTPBodyStreams(message)
             throw ExecServerClientError.disconnected(message)
         }
         guard let response else {
             let message = recordDisconnected(reason: nil)
             await failAllProcessSessions(message)
+            await failAllHTTPBodyStreams(message)
             throw ExecServerClientError.disconnected(message)
         }
         return try decodeResponse(response, requestID: requestID, as: R.self)
+    }
+
+    private func rawHTTPRequest(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {
+        try await call(execServerHttpRequestMethod, params: params)
+    }
+
+    private func httpRequestParams(
+        _ params: ExecServerHttpRequestParams,
+        streamResponse: Bool,
+        requestId: String
+    ) -> ExecServerHttpRequestParams {
+        ExecServerHttpRequestParams(
+            method: params.method,
+            url: params.url,
+            headers: params.headers,
+            body: params.body,
+            timeoutMs: params.timeoutMs,
+            requestId: requestId,
+            streamResponse: streamResponse
+        )
     }
 
     private func send(_ message: ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage? {
@@ -893,6 +948,39 @@ public actor ExecServerClient {
         for session in sessions.values {
             await session.setFailure(message)
         }
+    }
+
+    private func failAllHTTPBodyStreams(_ message: String) async {
+        let streams = httpBodyStreams
+        httpBodyStreams.removeAll()
+        for (requestId, stream) in streams {
+            await stream.publish(ExecServerHttpRequestBodyDeltaNotification(
+                requestId: requestId,
+                seq: 1,
+                delta: ExecServerByteChunk([]),
+                done: true,
+                error: message
+            ))
+        }
+    }
+
+    private func nextHTTPBodyStreamRequestIDString() -> String {
+        let id = nextHTTPBodyStreamRequestID
+        nextHTTPBodyStreamRequestID += 1
+        return "http-\(id)"
+    }
+
+    private func registerHTTPBodyStream(
+        requestId: String
+    ) throws -> ExecServerRemoteHTTPBodyStreamLog {
+        if httpBodyStreams[requestId] != nil {
+            throw ExecServerClientError.protocolError(
+                "http response stream already registered for request \(requestId)"
+            )
+        }
+        let stream = ExecServerRemoteHTTPBodyStreamLog(requestId: requestId)
+        httpBodyStreams[requestId] = stream
+        return stream
     }
 
     private func withInitializeTimeout<R: Sendable>(
