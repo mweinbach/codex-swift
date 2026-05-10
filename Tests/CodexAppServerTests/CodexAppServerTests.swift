@@ -793,6 +793,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""cwd":"\#(turnCwd.path.replacingOccurrences(of: "/", with: "\\/"))""#))
     }
 
+    func testTurnStartPersonalityAndOutputSchemaPersistTurnContextLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [
+                    ["type": "text", "text": "Use this final schema"]
+                ],
+                "personality": "friendly",
+                "outputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "answer": ["type": "string"]
+                    ],
+                    "required": ["answer"],
+                    "additionalProperties": false
+                ]
+            ]
+        ]
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+        let startedTurn = try XCTUnwrap((try XCTUnwrap(messages[0]["result"] as? [String: Any]))["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(startedTurn["id"] as? String)
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""type":"turn_context""#))
+        XCTAssertTrue(rollout.contains(#""turn_id":"\#(turnID)""#))
+        XCTAssertTrue(rollout.contains(#""personality":"friendly""#))
+        XCTAssertTrue(rollout.contains(#""final_output_json_schema""#))
+        XCTAssertTrue(rollout.contains(#""answer":{"type":"string"}"#))
+    }
+
     func testTurnStartRejectsUnknownContextOverrideEnumsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -815,6 +860,10 @@ final class CodexAppServerTests: XCTestCase {
             (
                 #""summary":"verbose""#,
                 "unknown variant `verbose`, expected one of `auto`, `concise`, `detailed`, `none`"
+            ),
+            (
+                #""personality":"loud""#,
+                "unknown variant `loud`, expected one of `none`, `friendly`, `pragmatic`"
             )
         ]
 

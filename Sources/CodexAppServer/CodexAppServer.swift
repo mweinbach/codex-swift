@@ -1607,12 +1607,16 @@ public enum CodexAppServer {
         let model = stringParam(params?["model"])
         let effort = try turnStartReasoningEffortParam(params?["effort"])
         let summary = try turnStartReasoningSummaryParam(params?["summary"])
+        let personality = try turnStartPersonalityParam(params?["personality"])
+        let outputSchema = try jsonValueParam(params?["outputSchema"], fieldName: "outputSchema")
         guard cwd != nil
             || approvalPolicy != nil
             || sandboxPolicy != nil
             || model != nil
             || effort != nil
             || summary != nil
+            || personality != nil
+            || outputSchema != nil
         else {
             return nil
         }
@@ -1624,8 +1628,10 @@ public enum CodexAppServer {
             approvalPolicy: approvalPolicy ?? runtimeConfig.approvalPolicy ?? .unlessTrusted,
             sandboxPolicy: sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
             model: model ?? runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil),
+            personality: personality,
             effort: effort ?? runtimeConfig.modelReasoningEffort,
-            summary: summary ?? runtimeConfig.modelReasoningSummary ?? .auto
+            summary: summary ?? runtimeConfig.modelReasoningSummary ?? .auto,
+            finalOutputJSONSchema: outputSchema
         )
     }
 
@@ -1662,6 +1668,16 @@ public enum CodexAppServer {
         return summary
     }
 
+    private static func turnStartPersonalityParam(_ value: Any?) throws -> Personality? {
+        guard let rawValue = try strictStringParam(value, fieldName: "personality") else {
+            return nil
+        }
+        guard let personality = Personality(rawValue: rawValue) else {
+            throw unknownVariant(rawValue, expected: Personality.allCases.map(\.rawValue))
+        }
+        return personality
+    }
+
     private static func strictStringParam(_ value: Any?, fieldName: String) throws -> String? {
         guard let value, !(value is NSNull) else {
             return nil
@@ -1675,6 +1691,45 @@ public enum CodexAppServer {
     private static func unknownVariant(_ rawValue: String, expected: [String]) -> AppServerError {
         let expectedValues = expected.map { "`\($0)`" }.joined(separator: ", ")
         return .invalidRequest("unknown variant `\(rawValue)`, expected one of \(expectedValues)")
+    }
+
+    private static func jsonValueParam(_ value: Any?, fieldName: String) throws -> JSONValue? {
+        guard let value else {
+            return nil
+        }
+        do {
+            return try jsonValue(fromJSONObject: value)
+        } catch {
+            throw AppServerError.invalidRequest("invalid value for field `\(fieldName)`")
+        }
+    }
+
+    private static func jsonValue(fromJSONObject value: Any) throws -> JSONValue {
+        if value is NSNull {
+            return .null
+        }
+        if let bool = value as? Bool {
+            return .bool(bool)
+        }
+        if let integer = value as? Int {
+            return .integer(Int64(integer))
+        }
+        if let int64 = value as? Int64 {
+            return .integer(int64)
+        }
+        if let double = value as? Double {
+            return .double(double)
+        }
+        if let string = value as? String {
+            return .string(string)
+        }
+        if let array = value as? [Any] {
+            return .array(try array.map(jsonValue(fromJSONObject:)))
+        }
+        if let object = value as? [String: Any] {
+            return .object(try object.mapValues(jsonValue(fromJSONObject:)))
+        }
+        throw AppServerError.invalidRequest("invalid JSON value")
     }
 
     fileprivate static func validateTurnEnvironmentSelections(
