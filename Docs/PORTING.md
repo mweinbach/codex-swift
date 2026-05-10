@@ -992,6 +992,8 @@ Source baseline inspected for this scaffold:
   - ported `drop_last_n_user_turns` semantics for preserving pre-user prefixes, ignoring contextual user fragments as rollback boundaries, trimming contextual developer/user pre-turn updates above a rolled-back turn, preserving reference context for pure contextual updates, and clearing it when a mixed developer bundle is trimmed.
 - `codex-rs/core/src/context_manager/history.rs` history mutation and base-token estimates
   - added Swift parity for base-instruction token estimates, first/last item removal preserving function/local-shell/custom-tool call-output invariants, local-shell output prompt normalization, user-image replacement no-ops, and custom-tool output truncation.
+- `codex-rs/core/src/context_manager/history.rs` Codex-generated item classifier
+  - added Swift parity for Rust's `is_codex_generated_item` helper, classifying function/tool-search/custom-tool outputs and developer messages as Codex-generated while leaving model-generated assistant/tool-call items under the separate model-generated classifier.
 
 ## Known Gaps
 

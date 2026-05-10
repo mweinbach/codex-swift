@@ -299,6 +299,30 @@ public struct ContextManager: Equatable, Sendable {
         }
     }
 
+    public static func isCodexGeneratedItem(_ item: ResponseItem) -> Bool {
+        switch item {
+        case let .message(_, role, _, _):
+            return role == "developer"
+        case .functionCallOutput,
+             .customToolCallOutput,
+             .toolSearchOutput:
+            return true
+        case .reasoning,
+             .localShellCall,
+             .functionCall,
+             .toolSearchCall,
+             .customToolCall,
+             .webSearchCall,
+             .imageGenerationCall,
+             .compaction,
+             .contextCompaction,
+             .ghostSnapshot,
+             .knownPersisted,
+             .other:
+            return false
+        }
+    }
+
     private static func processItem(_ item: ResponseItem, policy: TruncationPolicy) -> ResponseItem {
         let policyWithSerializationBudget = policy.multiplied(by: 1.2)
         switch item {

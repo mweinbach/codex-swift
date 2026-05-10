@@ -62,6 +62,24 @@ final class ContextManagerTests: XCTestCase {
         XCTAssertEqual(history.forPrompt(), [item])
     }
 
+    func testCodexGeneratedItemClassifierMatchesRust() {
+        XCTAssertTrue(ContextManager.isCodexGeneratedItem(developerMessage("developer note")))
+        XCTAssertTrue(ContextManager.isCodexGeneratedItem(
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))
+        ))
+        XCTAssertTrue(ContextManager.isCodexGeneratedItem(
+            .customToolCallOutput(callID: "tool-1", output: "ok")
+        ))
+        XCTAssertTrue(ContextManager.isCodexGeneratedItem(
+            .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: [])
+        ))
+
+        XCTAssertFalse(ContextManager.isCodexGeneratedItem(assistantMessage("assistant response")))
+        XCTAssertFalse(ContextManager.isCodexGeneratedItem(userMessage("user input")))
+        XCTAssertFalse(ContextManager.isCodexGeneratedItem(functionCall(callID: "call-2")))
+        XCTAssertFalse(ContextManager.isCodexGeneratedItem(customToolCall(callID: "tool-2")))
+    }
+
     func testDropLastUserTurnsPreservesPrefixLikeRust() {
         var history = ContextManager(items: [
             assistantMessage("session prefix item"),
