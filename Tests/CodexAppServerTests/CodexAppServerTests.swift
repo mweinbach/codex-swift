@@ -740,6 +740,89 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(cancelledParams["error"] is NSNull)
     }
 
+    func testRuntimeNoticeAndModelEventsEmitRustNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .warning(WarningEvent(message: "heads up"))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .guardianWarning(WarningEvent(message: "approval needed"))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .skillsUpdateAvailable
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .deprecationNotice(DeprecationNoticeEvent(summary: "old flag", details: nil))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .modelReroute(ModelRerouteEvent(
+                fromModel: "gpt-5.4",
+                toModel: "gpt-5.4-cyber",
+                reason: .highRiskCyberActivity
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .modelVerification(ModelVerificationEvent(verifications: [.trustedAccessForCyber]))
+        )
+
+        let warning = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(warning[0]["method"] as? String, "warning")
+        let warningParams = try XCTUnwrap(warning[0]["params"] as? [String: Any])
+        XCTAssertEqual(warningParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(warningParams["message"] as? String, "heads up")
+
+        let guardian = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(guardian[0]["method"] as? String, "guardianWarning")
+        let guardianParams = try XCTUnwrap(guardian[0]["params"] as? [String: Any])
+        XCTAssertEqual(guardianParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(guardianParams["message"] as? String, "approval needed")
+
+        let skills = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(skills[0]["method"] as? String, "skills/changed")
+        let skillsParams = try XCTUnwrap(skills[0]["params"] as? [String: Any])
+        XCTAssertTrue(skillsParams.isEmpty)
+
+        let deprecation = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(deprecation[0]["method"] as? String, "deprecationNotice")
+        let deprecationParams = try XCTUnwrap(deprecation[0]["params"] as? [String: Any])
+        XCTAssertEqual(deprecationParams["summary"] as? String, "old flag")
+        XCTAssertTrue(deprecationParams["details"] is NSNull)
+
+        let rerouted = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(rerouted[0]["method"] as? String, "model/rerouted")
+        let reroutedParams = try XCTUnwrap(rerouted[0]["params"] as? [String: Any])
+        XCTAssertEqual(reroutedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(reroutedParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(reroutedParams["fromModel"] as? String, "gpt-5.4")
+        XCTAssertEqual(reroutedParams["toModel"] as? String, "gpt-5.4-cyber")
+        XCTAssertEqual(reroutedParams["reason"] as? String, "highRiskCyberActivity")
+
+        let verification = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(verification[0]["method"] as? String, "model/verification")
+        let verificationParams = try XCTUnwrap(verification[0]["params"] as? [String: Any])
+        XCTAssertEqual(verificationParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(verificationParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(verificationParams["verifications"] as? [String], ["trustedAccessForCyber"])
+    }
+
     func testRuntimeRealtimeLifecycleEventsEmitNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

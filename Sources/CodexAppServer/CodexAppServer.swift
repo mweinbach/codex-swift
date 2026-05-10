@@ -8212,6 +8212,89 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func warningNotification(threadID: String, event: WarningEvent) -> [String: Any] {
+        [
+            "method": "warning",
+            "params": [
+                "threadId": threadID,
+                "message": event.message
+            ]
+        ]
+    }
+
+    fileprivate static func guardianWarningNotification(threadID: String, event: WarningEvent) -> [String: Any] {
+        [
+            "method": "guardianWarning",
+            "params": [
+                "threadId": threadID,
+                "message": event.message
+            ]
+        ]
+    }
+
+    fileprivate static func skillsChangedNotification() -> [String: Any] {
+        [
+            "method": "skills/changed",
+            "params": [:]
+        ]
+    }
+
+    fileprivate static func deprecationNoticeNotification(_ event: DeprecationNoticeEvent) -> [String: Any] {
+        [
+            "method": "deprecationNotice",
+            "params": [
+                "summary": event.summary,
+                "details": event.details as Any? ?? NSNull()
+            ]
+        ]
+    }
+
+    fileprivate static func modelReroutedNotification(
+        threadID: String,
+        turnID: String,
+        event: ModelRerouteEvent
+    ) -> [String: Any] {
+        [
+            "method": "model/rerouted",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "fromModel": event.fromModel,
+                "toModel": event.toModel,
+                "reason": modelRerouteReason(event.reason)
+            ]
+        ]
+    }
+
+    fileprivate static func modelVerificationNotification(
+        threadID: String,
+        turnID: String,
+        event: ModelVerificationEvent
+    ) -> [String: Any] {
+        [
+            "method": "model/verification",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "verifications": event.verifications.map(modelVerification)
+            ]
+        ]
+    }
+
+    private static func modelRerouteReason(_ reason: ModelRerouteReason) -> String {
+        switch reason {
+        case .highRiskCyberActivity:
+            return "highRiskCyberActivity"
+        }
+    }
+
+    private static func modelVerification(_ verification: ModelVerification) -> String {
+        switch verification {
+        case .trustedAccessForCyber:
+            return "trustedAccessForCyber"
+        }
+    }
+
     fileprivate static func realtimeStartedNotification(
         threadID: String,
         event: RealtimeConversationStartedEvent
@@ -8405,6 +8488,18 @@ public enum CodexAppServer {
             )
         case let .mcpStartupUpdate(update):
             return mcpServerStatusUpdatedNotification(update)
+        case let .warning(event):
+            return warningNotification(threadID: threadID, event: event)
+        case let .guardianWarning(event):
+            return guardianWarningNotification(threadID: threadID, event: event)
+        case .skillsUpdateAvailable:
+            return skillsChangedNotification()
+        case let .deprecationNotice(event):
+            return deprecationNoticeNotification(event)
+        case let .modelReroute(event):
+            return modelReroutedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .modelVerification(event):
+            return modelVerificationNotification(threadID: threadID, turnID: turnID, event: event)
         case let .realtimeConversationStarted(event):
             return realtimeStartedNotification(threadID: threadID, event: event)
         case let .realtimeConversationSdp(event):
