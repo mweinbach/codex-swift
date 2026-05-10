@@ -117,11 +117,26 @@ final class StatusEventsTests: XCTestCase {
 
     func testTaskEventsIncludeNullOptionalsLikeRust() throws {
         try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: nil), [
-            "model_context_window": NSNull()
+            "model_context_window": NSNull(),
+            "collaboration_mode_kind": "default"
         ])
         try XCTAssertJSONObjectEqual(TaskStartedEvent(modelContextWindow: 128_000), [
-            "model_context_window": 128_000
+            "model_context_window": 128_000,
+            "collaboration_mode_kind": "default"
         ])
+        try XCTAssertJSONObjectEqual(
+            TaskStartedEvent(modelContextWindow: nil, collaborationModeKind: .plan),
+            [
+                "model_context_window": NSNull(),
+                "collaboration_mode_kind": "plan"
+            ]
+        )
+
+        let legacyStarted = try JSONDecoder().decode(
+            TaskStartedEvent.self,
+            from: Data(#"{"model_context_window":null}"#.utf8)
+        )
+        XCTAssertEqual(legacyStarted.collaborationModeKind, .defaultMode)
 
         try XCTAssertJSONObjectEqual(TaskCompleteEvent(lastAgentMessage: nil), [
             "last_agent_message": NSNull()

@@ -9,12 +9,19 @@ final class EventMessageTests: XCTestCase {
             "id": "submission-1",
             "msg": [
                 "type": "task_started",
-                "model_context_window": NSNull()
+                "model_context_window": NSNull(),
+                "collaboration_mode_kind": "default"
             ]
         ])
 
         let data = try JSONEncoder().encode(event)
-        XCTAssertEqual(try JSONDecoder().decode(Event.self, from: data), event)
+        XCTAssertEqual(
+            try JSONDecoder().decode(Event.self, from: data),
+            Event(id: "submission-1", msg: .taskStarted(TaskStartedEvent(
+                modelContextWindow: nil,
+                collaborationModeKind: .defaultMode
+            )))
+        )
     }
 
     func testTurnLifecycleAliasesAndTimingFieldsMatchRust() throws {

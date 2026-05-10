@@ -382,7 +382,10 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
         self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
         self.startedAt = try container.decodeIfPresent(Int64.self, forKey: .startedAt)
         self.modelContextWindow = try container.decodeIfPresent(Int64.self, forKey: .modelContextWindow)
-        self.collaborationModeKind = try container.decodeIfPresent(CollaborationModeKind.self, forKey: .collaborationModeKind)
+        self.collaborationModeKind = try container.decodeIfPresent(
+            CollaborationModeKind.self,
+            forKey: .collaborationModeKind
+        ) ?? .defaultMode
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -390,7 +393,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
         try container.encodeIfPresent(turnID, forKey: .turnID)
         try container.encodeIfPresent(startedAt, forKey: .startedAt)
         try container.encodeIfPresentOrNull(modelContextWindow, forKey: .modelContextWindow)
-        try container.encodeIfPresent(collaborationModeKind, forKey: .collaborationModeKind)
+        try container.encode(collaborationModeKind ?? .defaultMode, forKey: .collaborationModeKind)
     }
 }
 
