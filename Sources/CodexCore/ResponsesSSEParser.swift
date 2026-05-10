@@ -24,6 +24,9 @@ public struct ResponsesSSEParser: Sendable {
     public init() {}
 
     public mutating func receive(data: String) -> [ResponseEvent] {
+        guard responseCompleted == nil else {
+            return []
+        }
         guard let event = try? JSONDecoder().decode(SSEEvent.self, from: Data(data.utf8)) else {
             return []
         }

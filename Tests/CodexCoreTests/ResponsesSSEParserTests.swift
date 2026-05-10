@@ -70,6 +70,23 @@ final class ResponsesSSEParserTests: XCTestCase {
         ])
     }
 
+    func testCompletedStopsProcessingLaterFramesLikeRust() {
+        let text = sse([
+            #"{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"kept"}]}}"#,
+            #"{"type":"response.completed","response":{"id":"resp_first"}}"#,
+            #"{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ignored"}]}}"#,
+            #"{"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber"]}}"#,
+            #"{"type":"response.completed","response":{"id":"resp_second"}}"#
+        ])
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "kept")]))),
+            .success(.completed(responseID: "resp_first", tokenUsage: nil))
+        ])
+    }
+
     func testMetadataEventEmitsDedupedModelVerificationsLikeRust() {
         let text = sse([
             #"{"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber","unknown","trusted_access_for_cyber"]}}"#,
