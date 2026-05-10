@@ -790,6 +790,8 @@ Source baseline inspected for this scaffold:
   - routed Swift exec-policy checks through the Rust-style PowerShell `-Command`/`-c` body parser so prefix rules, heuristics, and proposed amendments evaluate inner PowerShell words such as `Get-Content Cargo.toml` instead of the wrapper argv.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` PowerShell force-delete heuristic
   - matched Rust's detection of `Remove-Item`/alias commands paired with `-Force`, including chained or punctuation-adjacent forms, so Windows PowerShell delete operations are classified as dangerous while non-force deletes remain unflagged.
+- `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` Cmd delete/removal heuristics
+  - matched Rust's `cmd.exe` command-body tokenization for `cmd /c` and `/r`, including single-string command bodies and embedded `&`/`&&`/`|`/`||` operators, so `del`/`erase` with `/f` and `rd`/`rmdir` with `/s /q` are classified as dangerous while non-force/non-quiet examples remain unflagged.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/core/src/thread_rollout_truncation.rs`

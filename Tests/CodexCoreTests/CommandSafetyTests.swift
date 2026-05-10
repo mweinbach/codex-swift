@@ -228,6 +228,35 @@ final class CommandSafetyTests: XCTestCase {
         ]))
     }
 
+    func testWindowsCmdDeleteHeuristicsMatchRustDangerClassifier() {
+        for args in [
+            ["cmd", "/c", "del", "/f", "test.txt"],
+            ["cmd", "/c", "erase", "/F", "test.txt"],
+            ["cmd", "/c", "rd", "/s", "/q", "test"],
+            ["cmd", "/c", "rmdir", "/s", "/q", "test"],
+            ["cmd", "/c", "echo", "hello", "&", "del", "/f", "file.txt"],
+            ["cmd", "/c", "del /f file.txt"],
+            ["cmd", "/c", "echo hello & del /f file.txt"],
+            ["cmd", "/c", "echo hi&del /f file.txt"],
+            ["cmd", "/c", "echo hi&&del /f file.txt"],
+            ["cmd", "/c", "echo hi||del /f file.txt"],
+            ["cmd", "/c", "echo hi&rmdir /s /q testdir"],
+            ["cmd.exe", "/r", "DEL", "/F", "file.txt"]
+        ] {
+            XCTAssertTrue(CommandSafety.commandMightBeDangerous(args), "expected \(args) to be dangerous")
+        }
+
+        for args in [
+            ["cmd", "/c", "del", "test.txt"],
+            ["cmd", "/c", "del", "C:/foo/bar.txt"],
+            ["cmd", "/c", "rd", "/s", "test"],
+            ["cmd", "/c", "rd", "C:/source"],
+            ["cmd", "/c", "echo", "del", "/f"]
+        ] {
+            XCTAssertFalse(CommandSafety.commandMightBeDangerous(args), "expected \(args) to be safe")
+        }
+    }
+
     func testWindowsPowerShellSafeWrappers() {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "powershell.exe",

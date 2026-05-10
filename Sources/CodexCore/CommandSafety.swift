@@ -1022,11 +1022,86 @@ public enum CommandSafety {
             return false
         }
 
-        guard index < rest.count, rest[index].caseInsensitiveCompare("start") == .orderedSame else {
+        let remaining = Array(rest.dropFirst(index))
+        guard !remaining.isEmpty else {
             return false
         }
+        let cmdTokens: [String]
+        if remaining.count == 1 {
+            cmdTokens = shellLikeSplit(remaining[0]) ?? [remaining[0]]
+        } else {
+            cmdTokens = remaining
+        }
+        let tokens = cmdTokens.flatMap(splitEmbeddedCmdOperators)
+        let segments = splitCmdSegments(tokens)
+        return segments.contains { segment in
+            guard let command = segment.first?.lowercased() else {
+                return false
+            }
+            if command == "start", argsHaveURL(segment) {
+                return true
+            }
+            if (command == "del" || command == "erase"), hasCmdFlag("/f", in: segment) {
+                return true
+            }
+            if (command == "rd" || command == "rmdir"),
+               hasCmdFlag("/s", in: segment),
+               hasCmdFlag("/q", in: segment) {
+                return true
+            }
+            return false
+        }
+    }
 
-        return argsHaveURL(Array(rest.dropFirst(index + 1)))
+    private static func splitEmbeddedCmdOperators(_ token: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var index = token.startIndex
+        while index < token.endIndex {
+            let character = token[index]
+            if character == "&" || character == "|" {
+                let atom = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !atom.isEmpty {
+                    parts.append(atom)
+                }
+                current.removeAll(keepingCapacity: true)
+                let nextIndex = token.index(after: index)
+                if nextIndex < token.endIndex, token[nextIndex] == character {
+                    parts.append(String(token[index...nextIndex]))
+                    index = token.index(after: nextIndex)
+                } else {
+                    parts.append(String(character))
+                    index = nextIndex
+                }
+                continue
+            }
+            current.append(character)
+            index = token.index(after: index)
+        }
+        let atom = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !atom.isEmpty {
+            parts.append(atom)
+        }
+        return parts
+    }
+
+    private static func splitCmdSegments(_ tokens: [String]) -> [[String]] {
+        let separators: Set<String> = ["&", "&&", "|", "||"]
+        var segments: [[String]] = [[]]
+        for token in tokens {
+            if separators.contains(token) {
+                if segments.last?.isEmpty == false {
+                    segments.append([])
+                }
+            } else {
+                segments[segments.count - 1].append(token)
+            }
+        }
+        return segments.filter { !$0.isEmpty }
+    }
+
+    private static func hasCmdFlag(_ flag: String, in segment: [String]) -> Bool {
+        segment.contains { $0.caseInsensitiveCompare(flag) == .orderedSame }
     }
 
     private static func isDirectGUILaunch(_ command: [String]) -> Bool {
