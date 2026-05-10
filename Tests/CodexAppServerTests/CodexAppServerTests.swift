@@ -837,6 +837,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandboxPolicy`")
     }
 
+    func testApprovalsReviewerOverridesRejectUnknownVariantsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases = [
+            #"{"id":2,"method":"thread/start","params":{"approvalsReviewer":"bogus"}}"#,
+            #"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)","approvalsReviewer":"bogus"}}"#,
+            #"{"id":4,"method":"thread/fork","params":{"threadId":"\#(threadID)","approvalsReviewer":"bogus"}}"#,
+            #"{"id":5,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"approvalsReviewer":"bogus"}}"#
+        ]
+
+        for rawRequest in cases {
+            let messages = try decodeMessages(processor.processLine(Data(rawRequest.utf8)))
+            XCTAssertEqual(messages.count, 1)
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(
+                error["message"] as? String,
+                "unknown variant `bogus`, expected one of `user`, `auto_review`, `guardian_subagent`"
+            )
+        }
+    }
+
     func testTurnStartRejectsOversizedV2TextInputLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

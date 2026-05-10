@@ -945,7 +945,7 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
-        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+        let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
@@ -1155,7 +1155,7 @@ public enum CodexAppServer {
         let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
         let modelProvider = runtimeConfig.selectedModelProviderID
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
-        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+        let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let sandbox = runtimeConfig.legacySandboxPolicy()
 
@@ -1232,7 +1232,7 @@ public enum CodexAppServer {
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
-        let approvalsReviewer = approvalsReviewerParam(params?["approvalsReviewer"])
+        let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
@@ -1555,6 +1555,7 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let input = v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
+        _ = try approvalsReviewerParam(params?["approvalsReviewer"])
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -15503,14 +15504,22 @@ public enum CodexAppServer {
         stringParam(value).flatMap(AskForApproval.init(rawValue:))
     }
 
-    private static func approvalsReviewerParam(_ value: Any?) -> ApprovalsReviewer? {
-        switch stringParam(value) {
+    private static func approvalsReviewerParam(_ value: Any?) throws -> ApprovalsReviewer? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let rawValue = stringParam(value) else {
+            throw AppServerError.invalidRequest("invalid value for field `approvalsReviewer`")
+        }
+        switch rawValue {
         case "user":
             return .user
         case "guardian_subagent", "auto_review":
             return .autoReview
         default:
-            return nil
+            throw AppServerError.invalidRequest(
+                "unknown variant `\(rawValue)`, expected one of `user`, `auto_review`, `guardian_subagent`"
+            )
         }
     }
 
