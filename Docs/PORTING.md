@@ -792,6 +792,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's detection of `Remove-Item`/alias commands paired with `-Force`, including chained or punctuation-adjacent forms, so Windows PowerShell delete operations are classified as dangerous while non-force deletes remain unflagged.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` Cmd delete/removal heuristics
   - matched Rust's `cmd.exe` command-body tokenization for `cmd /c` and `/r`, including single-string command bodies and embedded `&`/`&&`/`|`/`||` operators, so `del`/`erase` with `/f` and `rd`/`rmdir` with `/s /q` are classified as dangerous while non-force/non-quiet examples remain unflagged.
+- `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` remaining Windows dangerous edge cases
+  - added parity coverage for quoted `cmd /c start` URL launches, empty-title `start "" https://...` launches, PowerShell `rm` alias force deletes, and the Rust-safe case where `-Force` appears in a separate PowerShell segment from `Remove-Item`.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
 - `codex-rs/core/src/thread_rollout_truncation.rs`
