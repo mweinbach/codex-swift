@@ -735,6 +735,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(emptyPlan.isEmpty)
     }
 
+    func testRuntimeThreadGoalUpdatedEventEmitsRustNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let eventThreadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+
+        await processor.handleRuntimeEvent(
+            threadID: "subscribed-thread",
+            turnID: "runtime-turn",
+            event: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                threadID: eventThreadID,
+                turnID: "goal-turn",
+                goal: ThreadGoal(
+                    threadID: eventThreadID,
+                    objective: "finish the port",
+                    status: .active,
+                    tokenBudget: 10_000,
+                    tokensUsed: 123,
+                    timeUsedSeconds: 45,
+                    createdAt: 1_700_000_000,
+                    updatedAt: 1_700_000_123
+                )
+            ))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["method"] as? String, "thread/goal/updated")
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, eventThreadID.description)
+        XCTAssertEqual(params["turnId"] as? String, "goal-turn")
+        let goal = try XCTUnwrap(params["goal"] as? [String: Any])
+        XCTAssertEqual(goal["threadId"] as? String, eventThreadID.description)
+        XCTAssertEqual(goal["objective"] as? String, "finish the port")
+        XCTAssertEqual(goal["status"] as? String, "active")
+        XCTAssertEqual(goal["tokenBudget"] as? Int, 10_000)
+        XCTAssertEqual(goal["tokensUsed"] as? Int, 123)
+        XCTAssertEqual(goal["timeUsedSeconds"] as? Int, 45)
+        XCTAssertEqual(goal["createdAt"] as? Int, 1_700_000_000)
+        XCTAssertEqual(goal["updatedAt"] as? Int, 1_700_000_123)
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

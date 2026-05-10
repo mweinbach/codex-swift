@@ -8078,12 +8078,16 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func threadGoalUpdatedNotification(threadID: String, goal: [String: Any]) -> [String: Any] {
+    fileprivate static func threadGoalUpdatedNotification(
+        threadID: String,
+        turnID: String? = nil,
+        goal: [String: Any]
+    ) -> [String: Any] {
         [
             "method": "thread/goal/updated",
             "params": [
                 "threadId": threadID,
-                "turnId": NSNull(),
+                "turnId": turnID as Any? ?? NSNull(),
                 "goal": goal
             ]
         ]
@@ -8622,6 +8626,12 @@ public enum CodexAppServer {
                 threadID: threadID,
                 turnID: turnID,
                 planUpdate: planUpdate
+            )
+        case let .threadGoalUpdated(event):
+            return threadGoalUpdatedNotification(
+                threadID: event.threadID.description,
+                turnID: event.turnID,
+                goal: threadGoalObject(event.goal)
             )
         case let .mcpStartupUpdate(update):
             return mcpServerStatusUpdatedNotification(update)
