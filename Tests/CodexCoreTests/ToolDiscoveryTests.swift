@@ -266,6 +266,127 @@ final class ToolDiscoveryTests: XCTestCase {
         XCTAssertEqual(filtered.map(\.id), ["connector_alpha", "connector_gamma"])
     }
 
+    func testToolSuggestConnectorIDsIncludeConfiguredDiscoverables() {
+        let ids = toolSuggestConnectorIDs(
+            pluginConnectorIDs: [],
+            toolSuggest: ToolSuggestConfig(discoverables: [
+                ToolSuggestDiscoverable(
+                    type: .connector,
+                    id: "connector_2128aebfecb84f64a069897515042a44"
+                ),
+                ToolSuggestDiscoverable(type: .plugin, id: "slack@openai-curated"),
+                ToolSuggestDiscoverable(type: .connector, id: "   ")
+            ])
+        )
+
+        XCTAssertEqual(ids, ["connector_2128aebfecb84f64a069897515042a44"])
+    }
+
+    func testToolSuggestConnectorIDsExcludeDisabledToolSuggestions() {
+        let ids = toolSuggestConnectorIDs(
+            pluginConnectorIDs: ["connector_calendar"],
+            toolSuggest: ToolSuggestConfig(
+                discoverables: [
+                    ToolSuggestDiscoverable(type: .connector, id: "connector_gmail")
+                ],
+                disabledTools: [
+                    ToolSuggestDisabledTool(type: .connector, id: "connector_calendar"),
+                    ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+                ]
+            )
+        )
+
+        XCTAssertEqual(ids, ["connector_gmail"])
+    }
+
+    func testFilterToolSuggestDiscoverablePluginsMatchesRustSelectionRules() {
+        let candidates = [
+            DiscoverablePluginInfo(
+                id: "sample@openai-curated",
+                name: "Sample",
+                description: "Configured plugin",
+                hasSkills: true,
+                mcpServerNames: ["sample-docs"],
+                appConnectorIDs: ["connector_calendar"]
+            ),
+            DiscoverablePluginInfo(
+                id: "slack@openai-curated",
+                name: "Slack",
+                description: "Allowlisted plugin",
+                hasSkills: true,
+                mcpServerNames: ["slack"],
+                appConnectorIDs: []
+            ),
+            DiscoverablePluginInfo(
+                id: "installed@openai-curated",
+                name: "Installed",
+                description: nil,
+                hasSkills: false,
+                mcpServerNames: [],
+                appConnectorIDs: []
+            ),
+            DiscoverablePluginInfo(
+                id: "other@openai-curated",
+                name: "Other",
+                description: nil,
+                hasSkills: false,
+                mcpServerNames: [],
+                appConnectorIDs: []
+            )
+        ]
+
+        let filtered = filterToolSuggestDiscoverablePlugins(
+            candidates: candidates,
+            installedPluginIDs: ["installed@openai-curated"],
+            allowlistedPluginIDs: ["slack@openai-curated"],
+            toolSuggest: ToolSuggestConfig(
+                discoverables: [
+                    ToolSuggestDiscoverable(type: .plugin, id: "sample@openai-curated")
+                ],
+                disabledTools: [
+                    ToolSuggestDisabledTool(type: .plugin, id: "other@openai-curated")
+                ]
+            ),
+            pluginsEnabled: true
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["sample@openai-curated", "slack@openai-curated"])
+    }
+
+    func testFilterToolSuggestDiscoverablePluginsOmitsDisabledAndFeatureDisabled() {
+        let slack = DiscoverablePluginInfo(
+            id: "slack@openai-curated",
+            name: "Slack",
+            description: nil,
+            hasSkills: true,
+            mcpServerNames: [],
+            appConnectorIDs: []
+        )
+
+        XCTAssertEqual(
+            filterToolSuggestDiscoverablePlugins(
+                candidates: [slack],
+                installedPluginIDs: [],
+                allowlistedPluginIDs: ["slack@openai-curated"],
+                toolSuggest: ToolSuggestConfig(disabledTools: [
+                    ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+                ]),
+                pluginsEnabled: true
+            ),
+            []
+        )
+        XCTAssertEqual(
+            filterToolSuggestDiscoverablePlugins(
+                candidates: [slack],
+                installedPluginIDs: [],
+                allowlistedPluginIDs: ["slack@openai-curated"],
+                toolSuggest: ToolSuggestConfig(),
+                pluginsEnabled: false
+            ),
+            []
+        )
+    }
+
     func testBuildRequestPluginInstallElicitationRequestUsesExpectedShape() throws {
         let args = RequestPluginInstallArgs(
             toolType: .connector,

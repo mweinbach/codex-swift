@@ -202,7 +202,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/tools/handlers/request_plugin_install_spec.rs`
   - hosted `request_plugin_install` Responses API tool schema, description guardrails, discoverable connector/plugin listing order, plugin capability fallback summaries, `tool_suggest` registration gate, and parallel-tool-call support flag
 - `codex-rs/tools/src/tool_discovery.rs` and `codex-rs/tools/src/request_plugin_install.rs`
-  - request-plugin-install discoverable connector/plugin metadata, entry collection, snake_case tool/action enums, Codex TUI plugin filtering, `tool_suggestion` elicitation metadata, connector install completion checks, Rust-shaped MCP elicitation request construction, and decline-always persistence into `tool_suggest.disabled_tools`
+  - request-plugin-install discoverable connector/plugin metadata, entry collection, snake_case tool/action enums, Codex TUI plugin filtering, `tool_suggestion` elicitation metadata, connector install completion checks, Rust-shaped MCP elicitation request construction, decline-always persistence into `tool_suggest.disabled_tools`, configured connector suggestion ID collection, and installed/disabled/allowlisted/configured plugin suggestion filtering
 - `codex-rs/core/src/unified_exec/errors.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`

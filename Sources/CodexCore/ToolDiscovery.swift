@@ -348,6 +348,79 @@ public func filterToolSuggestDiscoverableConnectors(
         }
 }
 
+public func toolSuggestConnectorIDs(
+    pluginConnectorIDs: [String],
+    toolSuggest: ToolSuggestConfig
+) -> Set<String> {
+    var connectorIDs = Set(pluginConnectorIDs)
+    connectorIDs.formUnion(
+        toolSuggest.discoverables.compactMap { discoverable in
+            guard discoverable.type == .connector,
+                  let normalized = discoverable.normalized()
+            else {
+                return nil
+            }
+            return normalized.id
+        }
+    )
+    let disabledConnectorIDs = Set<String>(
+        toolSuggest.disabledTools.compactMap { disabledTool in
+            guard disabledTool.type == .connector,
+                  let normalized = disabledTool.normalized()
+            else {
+                return nil
+            }
+            return normalized.id
+        }
+    )
+    connectorIDs.subtract(disabledConnectorIDs)
+    return connectorIDs
+}
+
+public func filterToolSuggestDiscoverablePlugins(
+    candidates: [DiscoverablePluginInfo],
+    installedPluginIDs: Set<String>,
+    allowlistedPluginIDs: Set<String>,
+    toolSuggest: ToolSuggestConfig,
+    pluginsEnabled: Bool
+) -> [DiscoverablePluginInfo] {
+    guard pluginsEnabled else {
+        return []
+    }
+    let configuredPluginIDs = Set<String>(
+        toolSuggest.discoverables.compactMap { discoverable in
+            guard discoverable.type == .plugin,
+                  let normalized = discoverable.normalized()
+            else {
+                return nil
+            }
+            return normalized.id
+        }
+    )
+    let disabledPluginIDs = Set<String>(
+        toolSuggest.disabledTools.compactMap { disabledTool in
+            guard disabledTool.type == .plugin,
+                  let normalized = disabledTool.normalized()
+            else {
+                return nil
+            }
+            return normalized.id
+        }
+    )
+    return candidates
+        .filter { plugin in
+            !installedPluginIDs.contains(plugin.id)
+                && !disabledPluginIDs.contains(plugin.id)
+                && (allowlistedPluginIDs.contains(plugin.id) || configuredPluginIDs.contains(plugin.id))
+        }
+        .sorted {
+            if $0.name != $1.name {
+                return $0.name < $1.name
+            }
+            return $0.id < $1.id
+        }
+}
+
 public func filterDisallowedConnectors(
     _ connectors: [DiscoverableConnectorInfo],
     originatorValue: String
