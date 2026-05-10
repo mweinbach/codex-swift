@@ -3931,7 +3931,13 @@ public enum CodexAppServer {
                 manifest: manifest
             )
         } ?? []
-        let apps = sourcePath.map { localPluginApps(root: $0, manifest: manifest) } ?? []
+        let apps = sourcePath.map {
+            localPluginAppSummariesForRead(
+                root: $0,
+                manifest: manifest,
+                configuration: configuration
+            )
+        } ?? []
         let mcpServers = sourcePath.map { localPluginMcpServerNames(root: $0, manifest: manifest) } ?? []
         let description: Any
         if sourceType == "git", sourcePath == nil {
@@ -3993,6 +3999,7 @@ public enum CodexAppServer {
         )
         let installedPlugin = installedPlugins.first { $0["id"] as? String == pluginID }
         let disabledSkillNames = Set(installedPlugin?["disabled_skill_names"] as? [String] ?? [])
+        let appIDs = (plugin["release"] as? [String: Any])?["app_ids"] as? [String] ?? []
         return [
             "plugin": [
                 "marketplaceName": marketplaceName,
@@ -4001,7 +4008,12 @@ public enum CodexAppServer {
                 "description": nullable(remotePluginDescription(plugin)),
                 "skills": remotePluginSkills(plugin, disabledSkillNames: disabledSkillNames),
                 "hooks": [],
-                "apps": [],
+                "apps": remotePluginAppSummaries(
+                    appIDs: appIDs,
+                    runtimeConfig: runtimeConfig,
+                    configuration: configuration,
+                    auth: auth
+                ),
                 "mcpServers": []
             ].nullStripped(keepNulls: true)
         ]
@@ -4056,6 +4068,87 @@ public enum CodexAppServer {
                 "enabled": !disabledSkillNames.contains(name)
             ].nullStripped(keepNulls: true)
         }
+    }
+
+    private static func remotePluginAppSummaries(
+        appIDs: [String],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) -> [[String: Any]] {
+        let pluginAppIDs = Set(appIDs.compactMap { id -> String? in
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty || !isConnectorIDAllowed(trimmed, originatorValue: configuration.originator) ? nil : trimmed
+        })
+        guard !pluginAppIDs.isEmpty else {
+            return []
+        }
+
+        var appsByID: [String: [String: Any]] = [:]
+        var canDetermineAuthState = false
+        if runtimeConfig.features.isEnabled(.apps) {
+            for app in (try? connectorDirectoryApps(
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            )) ?? [] {
+                guard let id = app["id"] as? String, pluginAppIDs.contains(id) else {
+                    continue
+                }
+                appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
+            }
+
+            if let accessibleConnectors = try? configuration.accessibleConnectorProvider(runtimeConfig, true) {
+                canDetermineAuthState = true
+                for app in appInfosForAccessibleConnectors(filterDisallowedConnectors(
+                    accessibleConnectors,
+                    originatorValue: configuration.originator
+                )) {
+                    guard let id = app["id"] as? String, pluginAppIDs.contains(id) else {
+                        continue
+                    }
+                    appsByID[id] = appInfoByMergingConnectorAppInfo(
+                        existing: appsByID[id],
+                        incoming: app,
+                        recomputeInstallURLOnNameMerge: false
+                    )
+                }
+            }
+        }
+
+        for id in pluginAppIDs where appsByID[id] == nil {
+            appsByID[id] = placeholderPluginAppInfo(connectorID: id)
+        }
+
+        return sortedAppInfos(Array(appsByID.values)).map { app in
+            let id = app["id"] as? String ?? ""
+            let name = app["name"] as? String ?? id
+            return [
+                "id": id,
+                "name": name,
+                "description": app["description"] as Any? ?? NSNull(),
+                "installUrl": stringParam(app["installUrl"]) ?? connectorInstallURL(name: name, connectorID: id),
+                "needsAuth": canDetermineAuthState ? !(app["isAccessible"] as? Bool ?? false) : false
+            ].nullStripped(keepNulls: true)
+        }
+    }
+
+    private static func placeholderPluginAppInfo(connectorID: String) -> [String: Any] {
+        [
+            "id": connectorID,
+            "name": connectorID,
+            "description": NSNull(),
+            "logoUrl": NSNull(),
+            "logoUrlDark": NSNull(),
+            "distributionChannel": NSNull(),
+            "branding": NSNull(),
+            "appMetadata": NSNull(),
+            "labels": NSNull(),
+            "installUrl": connectorInstallURL(name: connectorID, connectorID: connectorID),
+            "isAccessible": false,
+            "isEnabled": true,
+            "pluginDisplayNames": []
+        ].nullStripped(keepNulls: true)
     }
 
     private static func remotePluginSkillInterface(_ interface: [String: Any]?) -> Any {
@@ -4469,6 +4562,75 @@ public enum CodexAppServer {
             })
         }
         return appSummaries.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
+    }
+
+    private static func localPluginAppSummariesForRead(
+        root: URL,
+        manifest: LocalPluginManifest,
+        configuration: CodexAppServerConfiguration
+    ) -> [[String: Any]] {
+        let localApps = localPluginApps(root: root, manifest: manifest)
+        let pluginAppIDs = Set(localApps.compactMap { stringParam($0["id"]) })
+        guard !pluginAppIDs.isEmpty else {
+            return []
+        }
+        guard let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        ), runtimeConfig.features.isEnabled(.apps) else {
+            return localApps
+        }
+
+        var appsByID = Dictionary(
+            uniqueKeysWithValues: localApps.compactMap { app -> (String, [String: Any])? in
+                guard let id = stringParam(app["id"]) else {
+                    return nil
+                }
+                return (id, app)
+            }
+        )
+        let auth = try? currentAuth(configuration: configuration)
+        if let auth, case .chatGPT = auth.kind {
+            let catalogApps = (try? connectorDirectoryApps(
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            )) ?? []
+            for app in catalogApps {
+                guard let id = stringParam(app["id"]),
+                      pluginAppIDs.contains(id)
+                else {
+                    continue
+                }
+                let name = normalizeConnectorName(app["name"] as? String, connectorID: id)
+                appsByID[id] = [
+                    "id": id,
+                    "name": name,
+                    "description": app["description"] as Any? ?? NSNull(),
+                    "installUrl": stringParam(app["installUrl"]) ?? connectorInstallURL(name: name, connectorID: id),
+                    "needsAuth": false
+                ].nullStripped(keepNulls: true)
+            }
+        }
+
+        let usesChatGPTBackend: Bool
+        if case .chatGPT = auth?.kind {
+            usesChatGPTBackend = true
+        } else {
+            usesChatGPTBackend = false
+        }
+        guard let accessibleConnectors = try? configuration.accessibleConnectorProvider(
+            runtimeConfig,
+            usesChatGPTBackend
+        ) else {
+            return appsByID.values.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
+        }
+        let accessibleIDs = Set(accessibleConnectors.filter(\.isAccessible).map(\.id))
+        for id in pluginAppIDs {
+            appsByID[id]?["needsAuth"] = !accessibleIDs.contains(id)
+        }
+        return appsByID.values.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
     }
 
     private static func pluginAppsNeedingAuthForInstall(

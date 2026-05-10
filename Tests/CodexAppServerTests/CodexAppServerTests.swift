@@ -5452,6 +5452,100 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(plugin["mcpServers"] as? [String], ["radar"])
     }
 
+    func testPluginReadReturnsLiveAppNeedsAuth() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let pluginRoot = sourceRoot.appendingPathComponent("plugins/weather", isDirectory: true)
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        try """
+        {
+          "apps": {
+            "alpha": {
+              "id": "alpha",
+              "name": "Local Alpha"
+            },
+            "beta": {
+              "id": "beta",
+              "name": "Local Beta"
+            }
+          }
+        }
+        """.write(
+            to: pluginRoot.appendingPathComponent(".app.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let directoryBody = """
+        {
+          "apps": [
+            {
+              "id": "alpha",
+              "name": "Alpha",
+              "description": "Alpha connector",
+              "installUrl": "https://chatgpt.example/apps/alpha"
+            },
+            {
+              "id": "beta",
+              "name": "Beta",
+              "description": "Beta connector"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            },
+            accessibleConnectorProvider: { _, _ in
+                [
+                    DiscoverableConnectorInfo(
+                        id: "beta",
+                        name: "Beta App",
+                        description: "Beta connector",
+                        installURL: nil,
+                        isAccessible: true,
+                        isEnabled: true
+                    )
+                ]
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            configuration: configuration
+        )
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let apps = try XCTUnwrap(plugin["apps"] as? [[String: Any]])
+        XCTAssertEqual(apps.map { $0["id"] as? String }, ["alpha", "beta"])
+        XCTAssertEqual(apps.map { $0["name"] as? String }, ["Alpha", "Beta"])
+        XCTAssertEqual(apps.map { $0["needsAuth"] as? Bool }, [true, false])
+        XCTAssertEqual(apps[0]["description"] as? String, "Alpha connector")
+        XCTAssertEqual(apps[0]["installUrl"] as? String, "https://chatgpt.example/apps/alpha")
+        XCTAssertEqual(apps[1]["installUrl"] as? String, "https://chatgpt.com/apps/beta/beta")
+    }
+
     func testPluginReadUsesInlineManifestHooks() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
@@ -5582,7 +5676,11 @@ final class CodexAppServerTests: XCTestCase {
         """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
 
         let pluginID = "plugins~Plugin_00000000000000000000000000000000"
-        let detailBody = remotePluginDetailBody(id: pluginID, scope: "GLOBAL")
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            scope: "GLOBAL",
+            appIDs: ["connector_alpha", "connector_beta", "connector_missing"]
+        )
         let installedBody = """
         {
           "plugins": [
@@ -5613,6 +5711,18 @@ final class CodexAppServerTests: XCTestCase {
           }
         }
         """
+        let connectorDirectoryBody = """
+        {
+          "apps": [
+            {
+              "id": "connector_alpha",
+              "name": "Alpha",
+              "description": "Alpha connector"
+            }
+          ],
+          "next_token": null
+        }
+        """
         let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -5623,9 +5733,23 @@ final class CodexAppServerTests: XCTestCase {
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
                 case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                case ("/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(connectorDirectoryBody.utf8))
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
+            },
+            accessibleConnectorProvider: { _, _ in
+                [
+                    DiscoverableConnectorInfo(
+                        id: "connector_beta",
+                        name: "Beta",
+                        description: "Beta connector",
+                        installURL: "https://chatgpt.com/apps/beta/connector_beta",
+                        isAccessible: true,
+                        isEnabled: true
+                    )
+                ]
             }
         )
 
@@ -5656,7 +5780,23 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(skills[0]["shortDescription"] as? String, "Create a plan from issues")
         XCTAssertTrue(skills[0]["path"] is NSNull)
         XCTAssertEqual(skills[0]["enabled"] as? Bool, false)
-        XCTAssertEqual((plugin["apps"] as? [[String: Any]])?.count, 0)
+        let apps = try XCTUnwrap(plugin["apps"] as? [[String: Any]])
+        XCTAssertEqual(apps.map { $0["id"] as? String }, ["connector_beta", "connector_alpha", "connector_missing"])
+        XCTAssertEqual(apps[0]["name"] as? String, "Beta")
+        XCTAssertEqual(apps[0]["description"] as? String, "Beta connector")
+        XCTAssertEqual(apps[0]["installUrl"] as? String, "https://chatgpt.com/apps/beta/connector_beta")
+        XCTAssertEqual(apps[0]["needsAuth"] as? Bool, false)
+        XCTAssertEqual(apps[1]["name"] as? String, "Alpha")
+        XCTAssertEqual(apps[1]["description"] as? String, "Alpha connector")
+        XCTAssertEqual(apps[1]["installUrl"] as? String, "https://chatgpt.com/apps/alpha/connector_alpha")
+        XCTAssertEqual(apps[1]["needsAuth"] as? Bool, true)
+        XCTAssertEqual(apps[2]["name"] as? String, "connector_missing")
+        XCTAssertTrue(apps[2]["description"] is NSNull)
+        XCTAssertEqual(
+            apps[2]["installUrl"] as? String,
+            "https://chatgpt.com/apps/connector-missing/connector_missing"
+        )
+        XCTAssertEqual(apps[2]["needsAuth"] as? Bool, true)
         XCTAssertEqual((plugin["hooks"] as? [[String: Any]])?.count, 0)
         XCTAssertEqual(plugin["mcpServers"] as? [String], [])
         XCTAssertTrue(capture.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
@@ -16730,7 +16870,8 @@ private func remotePluginDetailBody(
     status: String = "ENABLED",
     installationPolicy: String = "AVAILABLE",
     releaseVersion: String? = nil,
-    bundleDownloadURL: String? = nil
+    bundleDownloadURL: String? = nil,
+    appIDs: [String] = []
 ) -> String {
     let workspaceFields = scope == "WORKSPACE" ? """
     ,
@@ -16752,6 +16893,7 @@ private func remotePluginDetailBody(
         }
       ]
     """ : ""
+    let appIDsJSON = appIDs.map { #""\#($0)""# }.joined(separator: ", ")
     return """
     {
       "id": "\(id)",
@@ -16765,7 +16907,7 @@ private func remotePluginDetailBody(
         "description": "Track work in Linear",
         \(releaseVersion.map { #""version": "\#($0)","# } ?? "")
         \(bundleDownloadURL.map { #""bundle_download_url": "\#($0)","# } ?? "")
-        "app_ids": [],
+        "app_ids": [\(appIDsJSON)],
         "keywords": ["issue-tracking", "project management"],
         "interface": {
           "short_description": "Plan and track work",
