@@ -224,6 +224,175 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(origin["agent_role"] as? String, "worker")
     }
 
+    func testTraceReduceRecordsInferenceLifecycleAndUsage() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request.json"
+        ]
+        let responsePayload: [String: Any] = [
+            "raw_payload_id": "payload-response",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/response.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 5, wallTime: 106, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "inference-1",
+                "response_id": "resp-1",
+                "upstream_request_id": "req-1",
+                "response_payload": responsePayload
+            ]),
+            traceEvent(seq: 6, wallTime: 107, threadID: "thread-root", payload: [
+                "type": "codex_turn_ended",
+                "codex_turn_id": "turn-1",
+                "status": "completed"
+            ])
+        ])
+        try writeJSONObject(["input": []], to: bundle.appendingPathComponent("payloads/request.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-1",
+            "token_usage": [
+                "input_tokens": 11,
+                "cached_input_tokens": 3,
+                "output_tokens": 7,
+                "reasoning_output_tokens": 2
+            ],
+            "output_items": []
+        ], to: bundle.appendingPathComponent("payloads/response.json", isDirectory: false))
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let inference = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        XCTAssertEqual(inference["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(inference["codex_turn_id"] as? String, "turn-1")
+        XCTAssertEqual(inference["model"] as? String, "gpt-test")
+        XCTAssertEqual(inference["provider_name"] as? String, "openai")
+        XCTAssertEqual(inference["response_id"] as? String, "resp-1")
+        XCTAssertEqual(inference["upstream_request_id"] as? String, "req-1")
+        XCTAssertEqual(inference["raw_request_payload_id"] as? String, "payload-request")
+        XCTAssertEqual(inference["raw_response_payload_id"] as? String, "payload-response")
+        XCTAssertEqual(inference["request_item_ids"] as? [String], [])
+        XCTAssertEqual(inference["response_item_ids"] as? [String], [])
+
+        let execution = try XCTUnwrap(inference["execution"] as? [String: Any])
+        XCTAssertEqual(execution["started_seq"] as? Int, 4)
+        XCTAssertEqual(execution["ended_seq"] as? Int, 5)
+        XCTAssertEqual(execution["status"] as? String, "completed")
+
+        let usage = try XCTUnwrap(inference["usage"] as? [String: Any])
+        XCTAssertEqual(usage["input_tokens"] as? Int, 11)
+        XCTAssertEqual(usage["cached_input_tokens"] as? Int, 3)
+        XCTAssertEqual(usage["output_tokens"] as? Int, 7)
+        XCTAssertEqual(usage["reasoning_output_tokens"] as? Int, 2)
+
+        let rawPayloads = try XCTUnwrap(state["raw_payloads"] as? [String: Any])
+        XCTAssertNotNil(rawPayloads["payload-request"])
+        XCTAssertNotNil(rawPayloads["payload-response"])
+    }
+
+    func testTraceReduceClosesRunningInferenceOnTurnEndAndPreservesLatePartialPayload() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request.json"
+        ]
+        let partialResponsePayload: [String: Any] = [
+            "raw_payload_id": "payload-partial-response",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/partial-response.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", payload: [
+                "type": "codex_turn_ended",
+                "codex_turn_id": "turn-1",
+                "status": "failed"
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_cancelled",
+                "inference_call_id": "inference-1",
+                "upstream_request_id": "req-late",
+                "reason": "stream mapper noticed cancellation after turn end",
+                "partial_response_payload": partialResponsePayload
+            ])
+        ])
+        try writeJSONObject(["input": []], to: bundle.appendingPathComponent("payloads/request.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": NSNull(),
+            "token_usage": NSNull(),
+            "output_items": []
+        ], to: bundle.appendingPathComponent("payloads/partial-response.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let inference = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        let execution = try XCTUnwrap(inference["execution"] as? [String: Any])
+        XCTAssertEqual(execution["status"] as? String, "failed")
+        XCTAssertEqual(execution["ended_seq"] as? Int, 4)
+        XCTAssertEqual(inference["upstream_request_id"] as? String, "req-late")
+        XCTAssertEqual(inference["raw_response_payload_id"] as? String, "payload-partial-response")
+    }
+
     func testTraceReduceRejectsUnsupportedSemanticEvents() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)

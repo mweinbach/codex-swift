@@ -74,6 +74,10 @@ struct DebugTraceReducer {
             try startCodexTurn(event: event, payload: payload)
         case "codex_turn_ended":
             try endCodexTurn(event: event, payload: payload)
+        case "inference_started":
+            try startInference(event: event, payload: payload)
+        case "inference_completed", "inference_failed", "inference_cancelled":
+            try endInference(event: event, payload: payload, type: type)
         case "protocol_event_observed", "other":
             break
         default:
@@ -192,6 +196,163 @@ struct DebugTraceReducer {
         turn["execution"] = execution
         turns[turnID] = turn
         rollout["codex_turns"] = turns
+        try closeRunningInferenceCalls(
+            turnID: turnID,
+            turnStatus: status,
+            event: event
+        )
+    }
+
+    private mutating func startInference(event: [String: Any], payload: [String: Any]) throws {
+        let inferenceID = try Self.requiredString(payload, key: "inference_call_id")
+        let threadID = try Self.requiredString(payload, key: "thread_id")
+        let turnID = try Self.requiredString(payload, key: "codex_turn_id")
+        let requestPayload = try Self.requiredDictionary(payload, key: "request_payload")
+
+        let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+        guard let turn = turns[turnID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownCodexTurnForInference(
+                inferenceID: inferenceID,
+                turnID: turnID
+            )
+        }
+        if let turnThreadID = turn["thread_id"] as? String,
+           turnThreadID != threadID {
+            throw DebugTraceReducerError.mismatchedInferenceTurnThread(
+                inferenceID: inferenceID,
+                eventThreadID: threadID,
+                turnID: turnID,
+                turnThreadID: turnThreadID
+            )
+        }
+
+        var inferenceCalls = try Self.dictionaryMap(rollout["inference_calls"], key: "inference_calls")
+        if inferenceCalls[inferenceID] != nil {
+            throw DebugTraceReducerError.duplicateInference(inferenceID)
+        }
+
+        inferenceCalls[inferenceID] = [
+            "inference_call_id": inferenceID,
+            "thread_id": threadID,
+            "codex_turn_id": turnID,
+            "execution": try executionWindow(
+                event: event,
+                status: "running",
+                endedAt: NSNull(),
+                endedSeq: NSNull()
+            ),
+            "model": try Self.requiredString(payload, key: "model"),
+            "provider_name": try Self.requiredString(payload, key: "provider_name"),
+            "response_id": NSNull(),
+            "upstream_request_id": NSNull(),
+            "request_item_ids": [],
+            "response_item_ids": [],
+            "tool_call_ids_started_by_response": [],
+            "usage": NSNull(),
+            "raw_request_payload_id": try Self.requiredString(requestPayload, key: "raw_payload_id"),
+            "raw_response_payload_id": NSNull()
+        ]
+        rollout["inference_calls"] = inferenceCalls
+    }
+
+    private mutating func endInference(event: [String: Any], payload: [String: Any], type: String) throws {
+        let inferenceID = try Self.requiredString(payload, key: "inference_call_id")
+        var inferenceCalls = try Self.dictionaryMap(rollout["inference_calls"], key: "inference_calls")
+        guard var inference = inferenceCalls[inferenceID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownInference(inferenceID)
+        }
+
+        let status: String
+        let responsePayloadKey: String
+        switch type {
+        case "inference_completed":
+            status = "completed"
+            responsePayloadKey = "response_payload"
+            inference["response_id"] = Self.nullableString(payload["response_id"])
+        case "inference_failed":
+            status = "failed"
+            responsePayloadKey = "partial_response_payload"
+        case "inference_cancelled":
+            status = "cancelled"
+            responsePayloadKey = "partial_response_payload"
+        default:
+            throw DebugTraceReducerError.unsupportedPayload(type)
+        }
+
+        if let upstreamRequestID = payload["upstream_request_id"] as? String {
+            inference["upstream_request_id"] = upstreamRequestID
+        }
+        if let responsePayload = payload[responsePayloadKey] as? [String: Any] {
+            inference["raw_response_payload_id"] = try Self.requiredString(responsePayload, key: "raw_payload_id")
+            if let usage = try tokenUsage(from: responsePayload) {
+                inference["usage"] = usage
+            }
+        }
+
+        guard var execution = inference["execution"] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("inference execution for \(inferenceID)")
+        }
+        if execution["status"] as? String == "running" {
+            execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+            execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+            execution["status"] = status
+            inference["execution"] = execution
+        }
+        inferenceCalls[inferenceID] = inference
+        rollout["inference_calls"] = inferenceCalls
+    }
+
+    private mutating func closeRunningInferenceCalls(
+        turnID: String,
+        turnStatus: String,
+        event: [String: Any]
+    ) throws {
+        let inferenceStatus: String
+        switch turnStatus {
+        case "running":
+            return
+        case "completed", "cancelled":
+            inferenceStatus = "cancelled"
+        case "failed":
+            inferenceStatus = "failed"
+        case "aborted":
+            inferenceStatus = "aborted"
+        default:
+            inferenceStatus = turnStatus
+        }
+
+        var inferenceCalls = try Self.dictionaryMap(rollout["inference_calls"], key: "inference_calls")
+        for (inferenceID, value) in inferenceCalls {
+            guard var inference = value as? [String: Any],
+                  inference["codex_turn_id"] as? String == turnID,
+                  var execution = inference["execution"] as? [String: Any],
+                  execution["status"] as? String == "running"
+            else {
+                continue
+            }
+            execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+            execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+            execution["status"] = inferenceStatus
+            inference["execution"] = execution
+            inferenceCalls[inferenceID] = inference
+        }
+        rollout["inference_calls"] = inferenceCalls
+    }
+
+    private func tokenUsage(from responsePayload: [String: Any]) throws -> Any? {
+        guard let path = responsePayload["path"] as? String else {
+            return nil
+        }
+        let payload = try Self.loadJSONObject(at: bundleURL.appendingPathComponent(path, isDirectory: false))
+        guard let usage = payload["token_usage"] as? [String: Any] else {
+            return nil
+        }
+        return [
+            "input_tokens": try Self.requiredInt(usage, key: "input_tokens"),
+            "cached_input_tokens": try Self.requiredInt(usage, key: "cached_input_tokens"),
+            "output_tokens": try Self.requiredInt(usage, key: "output_tokens"),
+            "reasoning_output_tokens": try Self.requiredInt(usage, key: "reasoning_output_tokens")
+        ]
     }
 
     private func executionWindow(
@@ -281,6 +442,13 @@ struct DebugTraceReducer {
         return dictionary
     }
 
+    private static func requiredDictionary(_ dictionary: [String: Any], key: String) throws -> [String: Any] {
+        guard let value = dictionary[key] as? [String: Any] else {
+            throw DebugTraceReducerError.missingField(key)
+        }
+        return value
+    }
+
     private static func loadJSONObject(at url: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: url)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -326,6 +494,15 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
     case duplicateCodexTurn(String)
     case unknownCodexTurn(String)
     case mismatchedTurnThread(turnID: String, eventThreadID: String, turnThreadID: String)
+    case duplicateInference(String)
+    case unknownInference(String)
+    case unknownCodexTurnForInference(inferenceID: String, turnID: String)
+    case mismatchedInferenceTurnThread(
+        inferenceID: String,
+        eventThreadID: String,
+        turnID: String,
+        turnThreadID: String
+    )
 
     var description: String {
         switch self {
@@ -351,6 +528,14 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "codex turn end referenced unknown turn \(turnID)"
         case let .mismatchedTurnThread(turnID, eventThreadID, turnThreadID):
             return "codex turn end for \(turnID) used thread \(eventThreadID), but the turn belongs to \(turnThreadID)"
+        case let .duplicateInference(inferenceID):
+            return "duplicate inference start for \(inferenceID)"
+        case let .unknownInference(inferenceID):
+            return "inference completion referenced unknown call \(inferenceID)"
+        case let .unknownCodexTurnForInference(inferenceID, turnID):
+            return "inference start \(inferenceID) referenced unknown codex turn \(turnID)"
+        case let .mismatchedInferenceTurnThread(inferenceID, eventThreadID, turnID, turnThreadID):
+            return "inference start \(inferenceID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         }
     }
 }
