@@ -9,6 +9,9 @@ public enum APIError: Error, Equatable, CustomStringConvertible, Sendable {
     case usageNotIncluded
     case retryable(message: String, delay: Duration?)
     case rateLimit(String)
+    case invalidRequest(message: String)
+    case cyberPolicy(message: String)
+    case serverOverloaded
 
     public init(rateLimitError: RateLimitError) {
         self = .rateLimit(String(describing: rateLimitError))
@@ -32,6 +35,12 @@ public enum APIError: Error, Equatable, CustomStringConvertible, Sendable {
             return "retryable error: \(message)"
         case let .rateLimit(message):
             return "rate limit: \(message)"
+        case let .invalidRequest(message):
+            return "invalid request: \(message)"
+        case let .cyberPolicy(message):
+            return "cyber policy: \(message)"
+        case .serverOverloaded:
+            return "server overloaded"
         }
     }
 }

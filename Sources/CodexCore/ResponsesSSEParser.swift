@@ -142,6 +142,12 @@ public struct ResponsesSSEParser: Sendable {
             responseError = .quotaExceeded
         case "usage_not_included":
             responseError = .usageNotIncluded
+        case "cyber_policy":
+            responseError = .cyberPolicy(message: Self.cyberPolicyMessage(error.message))
+        case "invalid_prompt":
+            responseError = .invalidRequest(message: error.message ?? "Invalid request.")
+        case "server_is_overloaded", "slow_down":
+            responseError = .serverOverloaded
         default:
             responseError = .retryable(
                 message: error.message ?? "",
@@ -194,6 +200,13 @@ public struct ResponsesSSEParser: Sendable {
             return .milliseconds(Int64((value * 1_000).rounded(.towardZero)))
         }
         return nil
+    }
+
+    private static func cyberPolicyMessage(_ message: String?) -> String {
+        guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "This request has been flagged for possible cybersecurity risk."
+        }
+        return message
     }
 }
 

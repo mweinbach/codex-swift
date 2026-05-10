@@ -152,6 +152,30 @@ final class ResponsesSSEParserTests: XCTestCase {
         XCTAssertEqual(failure(forCode: "context_length_exceeded"), .contextWindowExceeded)
         XCTAssertEqual(failure(forCode: "insufficient_quota"), .quotaExceeded)
         XCTAssertEqual(failure(forCode: "usage_not_included"), .usageNotIncluded)
+        XCTAssertEqual(failure(forCode: "server_is_overloaded"), .serverOverloaded)
+        XCTAssertEqual(failure(forCode: "slow_down"), .serverOverloaded)
+        XCTAssertEqual(failure(forCode: "invalid_prompt"), .invalidRequest(message: "boom"))
+        XCTAssertEqual(failure(forCode: "cyber_policy"), .cyberPolicy(message: "boom"))
+    }
+
+    func testFailedCyberPolicyUsesRustFallbackForEmptyMessage() {
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.failed","response":{"error":{"code":"cyber_policy","message":"   "}}}"#
+        ]))
+
+        XCTAssertEqual(events, [
+            .failure(.cyberPolicy(message: "This request has been flagged for possible cybersecurity risk."))
+        ])
+    }
+
+    func testFailedInvalidPromptUsesRustFallbackForMissingMessage() {
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.failed","response":{"error":{"code":"invalid_prompt"}}}"#
+        ]))
+
+        XCTAssertEqual(events, [
+            .failure(.invalidRequest(message: "Invalid request."))
+        ])
     }
 
     func testParsesRetryAfterMillisecondsAndAzureSeconds() {

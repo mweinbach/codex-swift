@@ -24,6 +24,15 @@ final class APIErrorTests: XCTestCase {
             "retryable error: try again"
         )
         XCTAssertEqual(String(describing: APIError.rateLimit("credits exhausted")), "rate limit: credits exhausted")
+        XCTAssertEqual(
+            String(describing: APIError.invalidRequest(message: "bad prompt")),
+            "invalid request: bad prompt"
+        )
+        XCTAssertEqual(
+            String(describing: APIError.cyberPolicy(message: "blocked")),
+            "cyber policy: blocked"
+        )
+        XCTAssertEqual(String(describing: APIError.serverOverloaded), "server overloaded")
     }
 
     func testRateLimitErrorConversionMatchesRustFromImplementation() {
