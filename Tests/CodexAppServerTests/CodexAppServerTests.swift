@@ -1652,6 +1652,60 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(persistedGoal)
     }
 
+    func testThreadResumeEmitsGoalSnapshotWhenFeatureEnabled() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-22-00",
+            timestamp: "2025-01-06T07:22:00Z",
+            preview: "goal snapshot",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "goal snapshot"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","status":"paused"}}"#.utf8
+        )))
+
+        let resume = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual(resume.count, 2)
+        let resumeThread = try XCTUnwrap((resume[0]["result"] as? [String: Any])?["thread"] as? [String: Any])
+        XCTAssertEqual(resumeThread["id"] as? String, threadID)
+        XCTAssertEqual(resume[1]["method"] as? String, "thread/goal/updated")
+        let updateParams = try XCTUnwrap(resume[1]["params"] as? [String: Any])
+        XCTAssertEqual(updateParams["threadId"] as? String, threadID)
+        XCTAssertEqual(updateParams["turnId"] as? NSNull, NSNull())
+        let goal = try XCTUnwrap(updateParams["goal"] as? [String: Any])
+        XCTAssertEqual(goal["objective"] as? String, "keep polishing")
+        XCTAssertEqual(goal["status"] as? String, "paused")
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/goal/clear","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+
+        let clearedResume = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual(clearedResume.count, 2)
+        XCTAssertEqual(clearedResume[1]["method"] as? String, "thread/goal/cleared")
+        let clearedParams = try XCTUnwrap(clearedResume[1]["params"] as? [String: Any])
+        XCTAssertEqual(clearedParams["threadId"] as? String, threadID)
+    }
+
     func testThreadGoalMethodsValidateEnabledInputs() async throws {
         let temp = try TemporaryDirectory()
         try """

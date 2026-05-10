@@ -7966,6 +7966,34 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadGoalResumeSnapshotNotification(
+        threadID: String,
+        configuration: CodexAppServerConfiguration
+    ) -> [String: Any]? {
+        guard let runtimeConfig = try? CodexConfigLoader.load(codexHome: configuration.codexHome),
+              runtimeConfig.features.isEnabled(.goals),
+              let stateStore = configuration.stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return nil
+        }
+        let goal: ThreadGoal?
+        do {
+            goal = try runAsyncBlocking {
+                try await stateStore.getThreadGoal(threadID: parsedThreadID)
+            }
+        } catch {
+            return nil
+        }
+        guard let goal else {
+            return threadGoalClearedNotification(threadID: threadID)
+        }
+        return threadGoalUpdatedNotification(
+            threadID: threadID,
+            goal: threadGoalObject(goal)
+        )
+    }
+
     fileprivate static func turnStartedNotification(threadID: String, turn: [String: Any]) -> [String: Any] {
         [
             "method": "turn/started",
@@ -14809,6 +14837,12 @@ final class CodexAppServerMessageProcessor {
                        let threadID = thread["id"] as? String {
                         rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                         subscribeCurrentConnection(toThreadID: threadID)
+                        if let notification = CodexAppServer.threadGoalResumeSnapshotNotification(
+                            threadID: threadID,
+                            configuration: configuration
+                        ) {
+                            notifications.append(notification)
+                        }
                     }
                 case "thread/fork":
                     try CodexAppServer.requireThreadForkExperimentalFieldsAPI(
