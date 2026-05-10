@@ -4,6 +4,8 @@ struct DebugTraceReducer {
     private let bundleURL: URL
     private var rollout: [String: Any]
     private var rawPayloads: [String: [String: Any]] = [:]
+    private var threadConversationSnapshots: [String: [String]] = [:]
+    private var nextConversationItemOrdinal = 1
     private var nextTerminalOperationOrdinal = 1
 
     init(bundleURL: URL) throws {
@@ -246,7 +248,7 @@ struct DebugTraceReducer {
             throw DebugTraceReducerError.duplicateInference(inferenceID)
         }
 
-        inferenceCalls[inferenceID] = [
+        var inference: [String: Any] = [
             "inference_call_id": inferenceID,
             "thread_id": threadID,
             "codex_turn_id": turnID,
@@ -267,6 +269,14 @@ struct DebugTraceReducer {
             "raw_request_payload_id": try Self.requiredString(requestPayload, key: "raw_payload_id"),
             "raw_response_payload_id": NSNull()
         ]
+        inference["request_item_ids"] = try reduceInferenceRequest(
+            event: event,
+            inferenceID: inferenceID,
+            threadID: threadID,
+            codexTurnID: turnID,
+            requestPayload: requestPayload
+        )
+        inferenceCalls[inferenceID] = inference
         rollout["inference_calls"] = inferenceCalls
     }
 
@@ -302,6 +312,13 @@ struct DebugTraceReducer {
             if let usage = try tokenUsage(from: responsePayload) {
                 inference["usage"] = usage
             }
+            inference["response_item_ids"] = try reduceInferenceResponse(
+                event: event,
+                inferenceID: inferenceID,
+                threadID: try Self.requiredString(inference, key: "thread_id"),
+                codexTurnID: try Self.requiredString(inference, key: "codex_turn_id"),
+                responsePayload: responsePayload
+            )
         }
 
         guard var execution = inference["execution"] as? [String: Any] else {
@@ -528,6 +545,279 @@ struct DebugTraceReducer {
             "raw_response_payload_id": NSNull()
         ]
         rollout["compaction_requests"] = requests
+    }
+
+    private mutating func reduceInferenceRequest(
+        event: [String: Any],
+        inferenceID: String,
+        threadID: String,
+        codexTurnID: String,
+        requestPayload: [String: Any]
+    ) throws -> [String] {
+        let rawPayloadID = try Self.requiredString(requestPayload, key: "raw_payload_id")
+        let payload = try loadRawPayloadJSON(requestPayload)
+        guard let input = payload["input"] as? [Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("inference request payload \(rawPayloadID) input")
+        }
+        let normalized = try input.map { try normalizeConversationItem($0, rawPayloadID: rawPayloadID) }
+        let requestItemIDs: [String]
+        if let previousResponseID = payload["previous_response_id"] as? String {
+            let inferenceCalls = try Self.dictionaryMap(rollout["inference_calls"], key: "inference_calls")
+            guard var previousItemIDs = inferenceCalls.values.compactMap({ value -> [String]? in
+                guard let inference = value as? [String: Any],
+                      inference["thread_id"] as? String == threadID,
+                      inference["response_id"] as? String == previousResponseID
+                else {
+                    return nil
+                }
+                return (inference["request_item_ids"] as? [String] ?? [])
+                    + (inference["response_item_ids"] as? [String] ?? [])
+            }).first else {
+                throw DebugTraceReducerError.unknownPreviousResponse(
+                    inferenceID: inferenceID,
+                    previousResponseID: previousResponseID
+                )
+            }
+            previousItemIDs += try reconcileConversationItems(
+                normalized,
+                event: event,
+                threadID: threadID,
+                codexTurnID: codexTurnID,
+                startIndex: previousItemIDs.count,
+                mode: .appendOnly,
+                producedBy: []
+            )
+            requestItemIDs = previousItemIDs
+        } else {
+            requestItemIDs = try reconcileConversationItems(
+                normalized,
+                event: event,
+                threadID: threadID,
+                codexTurnID: codexTurnID,
+                startIndex: 0,
+                mode: .fullSnapshot,
+                producedBy: []
+            )
+        }
+        try appendThreadConversationItems(threadID: threadID, itemIDs: requestItemIDs)
+        threadConversationSnapshots[threadID] = requestItemIDs
+        return requestItemIDs
+    }
+
+    private mutating func reduceInferenceResponse(
+        event: [String: Any],
+        inferenceID: String,
+        threadID: String,
+        codexTurnID: String,
+        responsePayload: [String: Any]
+    ) throws -> [String] {
+        let rawPayloadID = try Self.requiredString(responsePayload, key: "raw_payload_id")
+        let payload = try loadRawPayloadJSON(responsePayload)
+        guard let outputItems = payload["output_items"] as? [Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("inference response payload \(rawPayloadID) output_items")
+        }
+        let normalized = try outputItems.map { try normalizeConversationItem($0, rawPayloadID: rawPayloadID) }
+        let responseItemIDs = try reconcileConversationItems(
+            normalized,
+            event: event,
+            threadID: threadID,
+            codexTurnID: codexTurnID,
+            startIndex: threadConversationSnapshots[threadID]?.count ?? 0,
+            mode: .appendOnly,
+            producedBy: [["type": "inference", "inference_call_id": inferenceID]]
+        )
+        try appendThreadConversationItems(threadID: threadID, itemIDs: responseItemIDs)
+        threadConversationSnapshots[threadID, default: []] += responseItemIDs
+        return responseItemIDs
+    }
+
+    private mutating func reconcileConversationItems(
+        _ items: [NormalizedConversationItem],
+        event: [String: Any],
+        threadID: String,
+        codexTurnID: String,
+        startIndex: Int,
+        mode: ConversationReconcileMode,
+        producedBy: [[String: Any]]
+    ) throws -> [String] {
+        let previousSnapshot = threadConversationSnapshots[threadID] ?? []
+        var itemIDs: [String] = []
+        for (offset, item) in items.enumerated() {
+            let index = startIndex + offset
+            let itemID: String
+            if let previousItemID = previousSnapshot[safe: index] {
+                if conversationItem(previousItemID, matches: item) {
+                    itemID = previousItemID
+                } else if mode == .fullSnapshot,
+                          let matched = findMatchingSnapshotItem(
+                            previousSnapshot: previousSnapshot,
+                            usedItemIDs: itemIDs,
+                            normalized: item
+                          ) {
+                    itemID = matched
+                } else if mode == .appendOnly {
+                    throw DebugTraceReducerError.conversationMismatch(
+                        turnID: codexTurnID,
+                        threadID: threadID,
+                        index: index,
+                        existingItemID: previousItemID
+                    )
+                } else {
+                    itemID = try createConversationItem(
+                        item,
+                        event: event,
+                        threadID: threadID,
+                        codexTurnID: codexTurnID,
+                        producedBy: producedBy
+                    )
+                }
+            } else if mode == .fullSnapshot,
+                      let matched = findMatchingSnapshotItem(
+                        previousSnapshot: previousSnapshot,
+                        usedItemIDs: itemIDs,
+                        normalized: item
+                      ) {
+                itemID = matched
+            } else {
+                itemID = try createConversationItem(
+                    item,
+                    event: event,
+                    threadID: threadID,
+                    codexTurnID: codexTurnID,
+                    producedBy: producedBy
+                )
+            }
+            try updateConversationItem(itemID, producedBy: producedBy)
+            try attachModelVisibleToolItem(itemID: itemID, normalized: item)
+            itemIDs.append(itemID)
+        }
+        return itemIDs
+    }
+
+    private mutating func createConversationItem(
+        _ item: NormalizedConversationItem,
+        event: [String: Any],
+        threadID: String,
+        codexTurnID: String,
+        producedBy: [[String: Any]]
+    ) throws -> String {
+        let itemID = nextConversationItemID()
+        var conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        conversationItems[itemID] = [
+            "item_id": itemID,
+            "thread_id": threadID,
+            "codex_turn_id": codexTurnID,
+            "first_seen_at_unix_ms": try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            "role": item.role,
+            "channel": item.channel.map { $0 as Any } ?? NSNull(),
+            "kind": item.kind,
+            "body": ["parts": item.parts],
+            "call_id": item.callID.map { $0 as Any } ?? NSNull(),
+            "produced_by": producedBy
+        ]
+        rollout["conversation_items"] = conversationItems
+        return itemID
+    }
+
+    private mutating func updateConversationItem(_ itemID: String, producedBy: [[String: Any]]) throws {
+        guard !producedBy.isEmpty else {
+            return
+        }
+        var conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        guard var item = conversationItems[itemID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("conversation item \(itemID)")
+        }
+        var producers = item["produced_by"] as? [[String: Any]] ?? []
+        for producer in producedBy where !producers.contains(where: { NSDictionary(dictionary: $0).isEqual(to: producer) }) {
+            producers.append(producer)
+        }
+        item["produced_by"] = producers
+        conversationItems[itemID] = item
+        rollout["conversation_items"] = conversationItems
+    }
+
+    private mutating func appendThreadConversationItems(threadID: String, itemIDs: [String]) throws {
+        var threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard var thread = threads[threadID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownThread(threadID)
+        }
+        var threadItemIDs = thread["conversation_item_ids"] as? [String] ?? []
+        for itemID in itemIDs where !threadItemIDs.contains(itemID) {
+            threadItemIDs.append(itemID)
+        }
+        thread["conversation_item_ids"] = threadItemIDs
+        threads[threadID] = thread
+        rollout["threads"] = threads
+    }
+
+    private mutating func attachModelVisibleToolItem(itemID: String, normalized: NormalizedConversationItem) throws {
+        guard let callID = normalized.callID else {
+            return
+        }
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        let matchingIDs = toolCalls.compactMap { toolCallID, value -> String? in
+            guard let toolCall = value as? [String: Any],
+                  toolCall["model_visible_call_id"] as? String == callID
+            else {
+                return nil
+            }
+            return toolCallID
+        }
+        guard matchingIDs.count == 1, let toolCallID = matchingIDs.first,
+              var toolCall = toolCalls[toolCallID] as? [String: Any]
+        else {
+            return
+        }
+        let key: String?
+        switch normalized.kind {
+        case "function_call", "custom_tool_call":
+            key = "model_visible_call_item_ids"
+        case "function_call_output", "custom_tool_call_output":
+            key = "model_visible_output_item_ids"
+        default:
+            key = nil
+        }
+        guard let key else {
+            return
+        }
+        var ids = toolCall[key] as? [String] ?? []
+        if !ids.contains(itemID) {
+            ids.append(itemID)
+        }
+        toolCall[key] = ids
+        toolCalls[toolCallID] = toolCall
+        rollout["tool_calls"] = toolCalls
+    }
+
+    private func findMatchingSnapshotItem(
+        previousSnapshot: [String],
+        usedItemIDs: [String],
+        normalized: NormalizedConversationItem
+    ) -> String? {
+        previousSnapshot.first { itemID in
+            !usedItemIDs.contains(itemID) && conversationItem(itemID, matches: normalized)
+        }
+    }
+
+    private func conversationItem(_ itemID: String, matches normalized: NormalizedConversationItem) -> Bool {
+        guard let conversationItems = rollout["conversation_items"] as? [String: Any],
+              let item = conversationItems[itemID] as? [String: Any],
+              item["role"] as? String == normalized.role,
+              (item["channel"] as? String) == normalized.channel,
+              item["kind"] as? String == normalized.kind,
+              (item["call_id"] as? String) == normalized.callID,
+              let body = item["body"] as? [String: Any],
+              let existingParts = body["parts"] as? [[String: Any]]
+        else {
+            return false
+        }
+        return Self.conversationParts(existingParts, match: normalized.parts)
+    }
+
+    private mutating func nextConversationItemID() -> String {
+        let itemID = "conversation_item:\(nextConversationItemOrdinal)"
+        nextConversationItemOrdinal += 1
+        return itemID
     }
 
     private mutating func completeCompactionRequest(
@@ -934,6 +1224,77 @@ struct DebugTraceReducer {
         }
     }
 
+    private func normalizeConversationItem(_ value: Any, rawPayloadID: String) throws -> NormalizedConversationItem {
+        guard let item = value as? [String: Any],
+              let type = item["type"] as? String
+        else {
+            throw DebugTraceReducerError.invalidTraceObject("model item in payload \(rawPayloadID)")
+        }
+        switch type {
+        case "message":
+            guard let role = item["role"] as? String else {
+                throw DebugTraceReducerError.invalidTraceObject("message item in payload \(rawPayloadID) role")
+            }
+            return NormalizedConversationItem(
+                role: role,
+                channel: Self.channel(fromPhase: item["phase"] as? String),
+                kind: "message",
+                parts: Self.contentParts(item["content"], rawPayloadID: rawPayloadID),
+                callID: nil
+            )
+        case "function_call":
+            return NormalizedConversationItem(
+                role: "assistant",
+                channel: "commentary",
+                kind: "function_call",
+                parts: [Self.rawTextOrJSONPart(item["arguments"], rawPayloadID: rawPayloadID)],
+                callID: item["call_id"] as? String
+            )
+        case "function_call_output":
+            return NormalizedConversationItem(
+                role: "tool",
+                channel: "commentary",
+                kind: "function_call_output",
+                parts: Self.toolOutputParts(item["output"], rawPayloadID: rawPayloadID),
+                callID: item["call_id"] as? String
+            )
+        case "custom_tool_call":
+            return NormalizedConversationItem(
+                role: "assistant",
+                channel: "commentary",
+                kind: "custom_tool_call",
+                parts: [Self.customToolCallPart(item, rawPayloadID: rawPayloadID)],
+                callID: item["call_id"] as? String
+            )
+        case "custom_tool_call_output":
+            return NormalizedConversationItem(
+                role: "tool",
+                channel: "commentary",
+                kind: "custom_tool_call_output",
+                parts: Self.toolOutputParts(item["output"], rawPayloadID: rawPayloadID),
+                callID: item["call_id"] as? String
+            )
+        case "tool_search_call", "web_search_call", "image_generation_call", "local_shell_call":
+            return NormalizedConversationItem(
+                role: "assistant",
+                channel: "commentary",
+                kind: "function_call",
+                parts: [Self.jsonPart(item, rawPayloadID: rawPayloadID)],
+                callID: item["call_id"] as? String
+            )
+        case "tool_search_output", "mcp_tool_call_output":
+            return NormalizedConversationItem(
+                role: "tool",
+                channel: "commentary",
+                kind: "function_call_output",
+                parts: [Self.jsonPart(item, rawPayloadID: rawPayloadID)],
+                callID: item["call_id"] as? String
+            )
+        default:
+            throw DebugTraceReducerError.unsupportedModelItem(type: type, rawPayloadID: rawPayloadID)
+        }
+    }
+
     private func loadRawPayloadJSON(_ payloadRef: [String: Any]) throws -> [String: Any] {
         let path = try Self.requiredString(payloadRef, key: "path")
         return try Self.loadJSONObject(at: bundleURL.appendingPathComponent(path, isDirectory: false))
@@ -1154,6 +1515,124 @@ struct DebugTraceReducer {
         }
         return string
     }
+
+    private static func channel(fromPhase phase: String?) -> String? {
+        switch phase {
+        case "commentary":
+            return "commentary"
+        case "final_answer":
+            return "final"
+        case "summary":
+            return "summary"
+        default:
+            return nil
+        }
+    }
+
+    private static func contentParts(_ content: Any?, rawPayloadID: String) -> [[String: Any]] {
+        guard let content = content as? [[String: Any]] else {
+            return [payloadRefPart(label: "content", rawPayloadID: rawPayloadID)]
+        }
+        var parts: [[String: Any]] = []
+        for part in content {
+            switch part["type"] as? String {
+            case "input_text", "output_text", "text":
+                if let text = part["text"] as? String {
+                    parts.append(["type": "text", "text": text])
+                }
+            case "input_image":
+                parts.append(payloadRefPart(label: "input_image", rawPayloadID: rawPayloadID))
+            case let type?:
+                parts.append(payloadRefPart(label: type, rawPayloadID: rawPayloadID))
+            case nil:
+                parts.append(payloadRefPart(label: "content", rawPayloadID: rawPayloadID))
+            }
+        }
+        if parts.isEmpty {
+            parts.append(payloadRefPart(label: "empty_content", rawPayloadID: rawPayloadID))
+        }
+        return parts
+    }
+
+    private static func rawTextOrJSONPart(_ value: Any?, rawPayloadID: String) -> [String: Any] {
+        if let text = value as? String {
+            if let data = text.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data),
+               JSONSerialization.isValidJSONObject(json) {
+                return jsonPart(json, rawPayloadID: rawPayloadID)
+            }
+            return ["type": "text", "text": text]
+        }
+        if let value, JSONSerialization.isValidJSONObject(value) {
+            return jsonPart(value, rawPayloadID: rawPayloadID)
+        }
+        return payloadRefPart(label: "payload", rawPayloadID: rawPayloadID)
+    }
+
+    private static func customToolCallPart(_ item: [String: Any], rawPayloadID: String) -> [String: Any] {
+        guard let input = item["input"] as? String else {
+            return jsonPart(item, rawPayloadID: rawPayloadID)
+        }
+        if item["name"] as? String == "exec" {
+            return ["type": "code", "language": "javascript", "source": input]
+        }
+        return ["type": "text", "text": input]
+    }
+
+    private static func toolOutputParts(_ output: Any?, rawPayloadID: String) -> [[String: Any]] {
+        if let text = output as? String {
+            return [["type": "text", "text": text]]
+        }
+        if let array = output as? [[String: Any]] {
+            return contentParts(array, rawPayloadID: rawPayloadID)
+        }
+        if let output, JSONSerialization.isValidJSONObject(output) {
+            return [jsonPart(output, rawPayloadID: rawPayloadID)]
+        }
+        return [payloadRefPart(label: "tool_output", rawPayloadID: rawPayloadID)]
+    }
+
+    private static func jsonPart(_ value: Any, rawPayloadID: String) -> [String: Any] {
+        [
+            "type": "json",
+            "summary": jsonSummary(value),
+            "raw_payload_id": rawPayloadID
+        ]
+    }
+
+    private static func payloadRefPart(label: String, rawPayloadID: String) -> [String: Any] {
+        [
+            "type": "payload_ref",
+            "label": label,
+            "raw_payload_id": rawPayloadID
+        ]
+    }
+
+    private static func jsonSummary(_ value: Any) -> String {
+        var summary = jsonString(value)
+        if summary.count > 240 {
+            summary = String(summary.prefix(240)) + "..."
+        }
+        return summary
+    }
+
+    private static func conversationParts(_ left: [[String: Any]], match right: [[String: Any]]) -> Bool {
+        guard left.count == right.count else {
+            return false
+        }
+        return zip(left, right).allSatisfy { lhs, rhs in
+            if lhs["type"] as? String == "json",
+               rhs["type"] as? String == "json" {
+                return lhs["summary"] as? String == rhs["summary"] as? String
+            }
+            return NSDictionary(dictionary: lhs).isEqual(to: rhs)
+        }
+    }
+}
+
+private enum ConversationReconcileMode {
+    case fullSnapshot
+    case appendOnly
 }
 
 private struct ThreadSpawnMetadata {
@@ -1171,6 +1650,20 @@ private struct TerminalEndResult {
 private struct DispatchTerminalRequest {
     var terminalID: String
     var request: [String: Any]
+}
+
+private struct NormalizedConversationItem {
+    var role: String
+    var channel: String?
+    var kind: String
+    var parts: [[String: Any]]
+    var callID: String?
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
 }
 
 private enum DebugTraceReducerError: Error, CustomStringConvertible {
@@ -1227,6 +1720,9 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         existingThreadID: String,
         eventThreadID: String
     )
+    case unknownPreviousResponse(inferenceID: String, previousResponseID: String)
+    case conversationMismatch(turnID: String, threadID: String, index: Int, existingItemID: String)
+    case unsupportedModelItem(type: String, rawPayloadID: String)
 
     var description: String {
         switch self {
@@ -1292,6 +1788,12 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "terminal operation \(operationID) changed process id from \(existingTerminalID) to \(responseTerminalID)"
         case let .mismatchedTerminalSessionThread(terminalID, existingThreadID, eventThreadID):
             return "terminal session \(terminalID) belongs to thread \(existingThreadID), not \(eventThreadID)"
+        case let .unknownPreviousResponse(inferenceID, previousResponseID):
+            return "incremental inference request \(inferenceID) referenced unknown previous_response_id \(previousResponseID)"
+        case let .conversationMismatch(turnID, threadID, index, existingItemID):
+            return "model conversation mismatch while reducing turn \(turnID) for thread \(threadID) at item index \(index): existing item \(existingItemID) does not match the current model payload item"
+        case let .unsupportedModelItem(type, rawPayloadID):
+            return "unsupported model item type \(type) in payload \(rawPayloadID)"
         }
     }
 }

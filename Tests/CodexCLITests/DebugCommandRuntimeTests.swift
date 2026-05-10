@@ -324,6 +324,328 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertNotNil(rawPayloads["payload-response"])
     }
 
+    func testTraceReduceReducesConversationSnapshotsAndResponseOutputs() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request.json"
+        ]
+        let responsePayload: [String: Any] = [
+            "raw_payload_id": "payload-response",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/response.json"
+        ]
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "inference-1",
+                "response_id": "resp-1",
+                "response_payload": responsePayload
+            ])
+        ])
+        try writeJSONObject([
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [["type": "input_text", "text": "run tests"]]
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/request.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-1",
+            "output_items": [
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [["type": "output_text", "text": "tests passed"]]
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/response.json", isDirectory: false))
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let inference = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        XCTAssertEqual(inference["request_item_ids"] as? [String], ["conversation_item:1"])
+        XCTAssertEqual(inference["response_item_ids"] as? [String], ["conversation_item:2"])
+
+        let threads = try XCTUnwrap(state["threads"] as? [String: Any])
+        let thread = try XCTUnwrap(threads["thread-root"] as? [String: Any])
+        XCTAssertEqual(thread["conversation_item_ids"] as? [String], ["conversation_item:1", "conversation_item:2"])
+
+        let items = try XCTUnwrap(state["conversation_items"] as? [String: Any])
+        let userItem = try XCTUnwrap(items["conversation_item:1"] as? [String: Any])
+        XCTAssertEqual(userItem["role"] as? String, "user")
+        XCTAssertEqual(userItem["kind"] as? String, "message")
+        let userBody = try XCTUnwrap(userItem["body"] as? [String: Any])
+        let userParts = try XCTUnwrap(userBody["parts"] as? [[String: Any]])
+        XCTAssertEqual(userParts.first?["text"] as? String, "run tests")
+
+        let assistantItem = try XCTUnwrap(items["conversation_item:2"] as? [String: Any])
+        XCTAssertEqual(assistantItem["role"] as? String, "assistant")
+        XCTAssertEqual(assistantItem["kind"] as? String, "message")
+        let producers = try XCTUnwrap(assistantItem["produced_by"] as? [[String: Any]])
+        XCTAssertEqual(producers.first?["type"] as? String, "inference")
+        XCTAssertEqual(producers.first?["inference_call_id"] as? String, "inference-1")
+        let assistantBody = try XCTUnwrap(assistantItem["body"] as? [String: Any])
+        let assistantParts = try XCTUnwrap(assistantBody["parts"] as? [[String: Any]])
+        XCTAssertEqual(assistantParts.first?["text"] as? String, "tests passed")
+    }
+
+    func testTraceReduceReusesFullSnapshotHistoryWithoutDedupingNewIdenticalItems() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let firstRequest: [String: Any] = [
+            "raw_payload_id": "payload-request-1",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-1.json"
+        ]
+        let secondRequest: [String: Any] = [
+            "raw_payload_id": "payload-request-2",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-2.json"
+        ]
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": firstRequest
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-2",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-2",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-2",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": secondRequest
+            ])
+        ])
+        let okMessage: [String: Any] = [
+            "type": "message",
+            "role": "user",
+            "content": [["type": "input_text", "text": "ok"]]
+        ]
+        try writeJSONObject(["input": [okMessage]], to: bundle.appendingPathComponent("payloads/request-1.json", isDirectory: false))
+        try writeJSONObject([
+            "input": [
+                okMessage,
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [["type": "output_text", "text": "ack"]]
+                ],
+                okMessage
+            ]
+        ], to: bundle.appendingPathComponent("payloads/request-2.json", isDirectory: false))
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let first = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        let second = try XCTUnwrap(inferences["inference-2"] as? [String: Any])
+        XCTAssertEqual(first["request_item_ids"] as? [String], ["conversation_item:1"])
+        XCTAssertEqual(
+            second["request_item_ids"] as? [String],
+            ["conversation_item:1", "conversation_item:2", "conversation_item:3"]
+        )
+        let items = try XCTUnwrap(state["conversation_items"] as? [String: Any])
+        XCTAssertEqual(items.count, 3)
+        let threads = try XCTUnwrap(state["threads"] as? [String: Any])
+        let thread = try XCTUnwrap(threads["thread-root"] as? [String: Any])
+        XCTAssertEqual(
+            thread["conversation_item_ids"] as? [String],
+            ["conversation_item:1", "conversation_item:2", "conversation_item:3"]
+        )
+    }
+
+    func testTraceReduceIncrementalRequestCarriesPriorRequestAndResponseItems() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let firstRequest: [String: Any] = [
+            "raw_payload_id": "payload-request-1",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-1.json"
+        ]
+        let firstResponse: [String: Any] = [
+            "raw_payload_id": "payload-response-1",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/response-1.json"
+        ]
+        let secondRequest: [String: Any] = [
+            "raw_payload_id": "payload-request-2",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-2.json"
+        ]
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": firstRequest
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "inference-1",
+                "response_id": "resp-1",
+                "response_payload": firstResponse
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-2",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 7, wallTime: 107, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-2",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-2",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": secondRequest
+            ])
+        ])
+        try writeJSONObject([
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [["type": "input_text", "text": "run tests"]]
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/request-1.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-1",
+            "output_items": [
+                [
+                    "type": "function_call",
+                    "name": "shell",
+                    "arguments": "{\"cmd\":\"swift test\"}",
+                    "call_id": "call-1"
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/response-1.json", isDirectory: false))
+        try writeJSONObject([
+            "type": "response.create",
+            "previous_response_id": "resp-1",
+            "input": [
+                [
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "tests passed"
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/request-2.json", isDirectory: false))
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let first = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        let second = try XCTUnwrap(inferences["inference-2"] as? [String: Any])
+        XCTAssertEqual(first["request_item_ids"] as? [String], ["conversation_item:1"])
+        XCTAssertEqual(first["response_item_ids"] as? [String], ["conversation_item:2"])
+        XCTAssertEqual(
+            second["request_item_ids"] as? [String],
+            ["conversation_item:1", "conversation_item:2", "conversation_item:3"]
+        )
+
+        let items = try XCTUnwrap(state["conversation_items"] as? [String: Any])
+        let outputItem = try XCTUnwrap(items["conversation_item:3"] as? [String: Any])
+        XCTAssertEqual(outputItem["role"] as? String, "tool")
+        XCTAssertEqual(outputItem["kind"] as? String, "function_call_output")
+        XCTAssertEqual(outputItem["call_id"] as? String, "call-1")
+        let threads = try XCTUnwrap(state["threads"] as? [String: Any])
+        let thread = try XCTUnwrap(threads["thread-root"] as? [String: Any])
+        XCTAssertEqual(
+            thread["conversation_item_ids"] as? [String],
+            ["conversation_item:1", "conversation_item:2", "conversation_item:3"]
+        )
+    }
+
     func testTraceReduceClosesRunningInferenceOnTurnEndAndPreservesLatePartialPayload() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
