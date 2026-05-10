@@ -56,6 +56,7 @@ let exitCode = await cli.runAsync(
     resumeRunner: runResumeCommand,
     mcpServerRunner: runMcpServerCommand,
     appServerRunner: runAppServerCommand,
+    appRunner: runAppCommand,
     execPolicyRunner: runExecPolicyCommand,
     sandboxRunner: runSandboxCommand,
     debugRunner: { request in try await DebugCommandRuntime.run(request) },
@@ -442,6 +443,10 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             arguments: buildGeneratorArguments(outDir: outDir, experimental: experimental)
         )
     }
+}
+
+private func runAppCommand(_ request: CodexCLI.AppCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try AppCommandRuntime.run(request)
 }
 
 private func runAppServerGenerator(

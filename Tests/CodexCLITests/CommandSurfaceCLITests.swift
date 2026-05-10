@@ -594,6 +594,67 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncAppParsesPathAndDownloadURLLikeRust() async {
+        var requests: [CodexCLI.AppCommandRequest] = []
+
+        for arguments in [
+            ["app"],
+            ["app", "/repo"],
+            ["app", "--download-url", "https://example.test/Codex.dmg", "/repo"],
+            ["app", "--download-url=https://example.test/Codex.dmg"]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                appRunner: { request in
+                    requests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(requests, [
+            CodexCLI.AppCommandRequest(path: ".", downloadURLOverride: nil),
+            CodexCLI.AppCommandRequest(path: "/repo", downloadURLOverride: nil),
+            CodexCLI.AppCommandRequest(path: "/repo", downloadURLOverride: "https://example.test/Codex.dmg"),
+            CodexCLI.AppCommandRequest(path: ".", downloadURLOverride: "https://example.test/Codex.dmg")
+        ])
+    }
+
+    func testRunAsyncAppRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["app", "--download-url"],
+                "codex-swift: missing value for --download-url"
+            ),
+            (
+                ["app", "--verbose"],
+                "codex-swift: unsupported option for command 'app': --verbose"
+            ),
+            (
+                ["app", "/repo", "extra"],
+                "codex-swift: unexpected argument for command 'app': extra"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                appRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncDebugModelsParsesBundledFlagAndOverrides() async {
         var stdout: [String] = []
         var receivedRequest: CodexCLI.DebugCommandRequest?
@@ -780,7 +841,6 @@ final class CommandSurfaceCLITests: XCTestCase {
             "mcp-server",
             "app-server",
             "remote-control",
-            "app",
             "debug",
             "resume",
             "fork",
