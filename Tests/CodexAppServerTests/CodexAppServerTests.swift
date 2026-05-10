@@ -5394,6 +5394,224 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingDeleteIDError["message"] as? String, "missing field `remotePluginId`")
     }
 
+    func testPluginShareListReturnsCreatedWorkspacePlugins() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let createdBody = """
+        {
+          "plugins": [
+            \(remotePluginDetailBody(id: pluginID, name: "demo-plugin", displayName: "Demo Plugin", scope: "WORKSPACE"))
+          ],
+          "pagination": {
+            "limit": 200,
+            "next_page_token": null
+          }
+        }
+        """
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "demo-plugin",
+              "scope": "WORKSPACE",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Demo Plugin",
+                "description": "Demo plugin description",
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/workspace/created", "limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(createdBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=WORKSPACE"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/list","params":{}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
+        XCTAssertTrue(data[0]["localPluginPath"] is NSNull)
+        let plugin = try XCTUnwrap(data[0]["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["id"] as? String, pluginID)
+        XCTAssertEqual(plugin["source"] as? [String: String], ["type": "remote"])
+        XCTAssertEqual(plugin["installed"] as? Bool, true)
+        XCTAssertEqual(plugin["enabled"] as? Bool, true)
+        let shareContext = try XCTUnwrap(plugin["shareContext"] as? [String: Any])
+        XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
+        let shareTargets = try XCTUnwrap(shareContext["shareTargets"] as? [[String: Any]])
+        XCTAssertEqual(shareTargets.map { $0["principalId"] as? String }, ["user-ada__account-123"])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer chatgpt-token", "Bearer chatgpt-token"])
+    }
+
+    func testPluginShareUpdateTargetsForwardsWorkspaceTargetAndFiltersResponse() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let capture = MCPHTTPTransportCapture()
+        let responseBody = """
+        {
+          "principals": [
+            {
+              "principal_type": "user",
+              "principal_id": "owner-1",
+              "name": "Owner"
+            },
+            {
+              "principal_type": "user",
+              "principal_id": "user-1",
+              "name": "Gavin"
+            },
+            {
+              "principal_type": "workspace",
+              "principal_id": "account-123",
+              "name": "Workspace"
+            }
+          ]
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path) {
+                case ("PUT", "/backend-api/ps/plugins/plugins_123/shares"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(responseBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins_123","discoverability":"UNLISTED","shareTargets":[{"principalType":"user","principalId":"user-1"}]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["discoverability"] as? String, "UNLISTED")
+        let principals = try XCTUnwrap(result["principals"] as? [[String: Any]])
+        XCTAssertEqual(principals.count, 1)
+        XCTAssertEqual(principals[0]["principalType"] as? String, "user")
+        XCTAssertEqual(principals[0]["principalId"] as? String, "user-1")
+        XCTAssertEqual(principals[0]["name"] as? String, "Gavin")
+        let request = try XCTUnwrap(capture.requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["discoverability"] as? String, "UNLISTED")
+        let targets = try XCTUnwrap(body["targets"] as? [[String: Any]])
+        XCTAssertEqual(targets.count, 2)
+        XCTAssertEqual(targets[0]["principal_type"] as? String, "user")
+        XCTAssertEqual(targets[0]["principal_id"] as? String, "user-1")
+        XCTAssertEqual(targets[1]["principal_type"] as? String, "workspace")
+        XCTAssertEqual(targets[1]["principal_id"] as? String, "account-123")
+    }
+
+    func testPluginShareDeleteRemovesCreatedWorkspacePlugin() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path) {
+                case ("DELETE", "/backend-api/public/plugins/workspace/plugins_123"):
+                    return URLSessionTransportResponse(statusCode: 204, body: Data())
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/delete","params":{"remotePluginId":"plugins_123"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["DELETE"])
+        XCTAssertEqual(capture.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer chatgpt-token")
+        XCTAssertEqual(capture.requests.first?.value(forHTTPHeaderField: "chatgpt-account-id"), "account-123")
+    }
+
     func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path
