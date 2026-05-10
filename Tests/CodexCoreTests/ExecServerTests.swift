@@ -2,6 +2,147 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testRouterDispatchesInitializeRequestLikeRust() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        let request = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        )
+
+        let outbound = await router.handleRequest(request, using: handler)
+
+        XCTAssertEqual(outbound?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+    }
+
+    func testRouterConvertsHandlerFailuresToErrorResponsesLikeRust() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        let request = ExecServerJSONRPCRequest(
+            id: .string("dupe"),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        )
+
+        _ = await router.handleRequest(request, using: handler)
+        let duplicate = await router.handleRequest(request, using: handler)
+
+        XCTAssertEqual(duplicate?.jsonRPCMessage, ExecServerRPC.error(
+            id: .string("dupe"),
+            error: ExecServerRPC.invalidRequest("initialize may only be sent once per connection")
+        ))
+    }
+
+    func testRouterConvertsInvalidParamsToRustErrorCode() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler()
+        let request = ExecServerJSONRPCRequest(
+            id: .integer(7),
+            method: execServerInitializeMethod,
+            params: .object(["resumeSessionId": .string("session-1")])
+        )
+
+        let outbound = await router.handleRequest(request, using: handler)
+
+        guard case let .error(requestID, error) = outbound else {
+            return XCTFail("Expected invalid params error")
+        }
+        XCTAssertEqual(requestID, .integer(7))
+        XCTAssertEqual(error.code, -32602)
+        XCTAssertTrue(error.message.contains("invalid params:"))
+        XCTAssertTrue(error.message.contains("clientName"))
+    }
+
+    func testRouterDispatchesInitializedNotificationLikeRust() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+
+        await XCTAssertThrowsHandlerNotificationError(
+            try await router.handleNotification(
+                ExecServerJSONRPCNotification(method: execServerInitializedMethod, params: .object([:])),
+                using: handler
+            ),
+            message: "received `initialized` notification before `initialize`"
+        )
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await router.handleNotification(
+            ExecServerJSONRPCNotification(method: execServerInitializedMethod, params: .object([:])),
+            using: handler
+        )
+        _ = try await handler.requireInitialized(for: "exec")
+    }
+
+    func testRouterUsesRustFamilyInitializationErrorsBeforeExecutionRoutes() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        let processRead = ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerProcessReadMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerReadParams(processId: "p1"))
+        )
+        let fsRead = ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerFsReadFileMethod,
+            params: .object(["path": .string("/tmp/file")])
+        )
+
+        let processReadResponse = await router.handleRequest(processRead, using: handler)
+        XCTAssertEqual(processReadResponse, .error(
+            requestID: .integer(1),
+            error: ExecServerRPC.invalidRequest("client must call initialize before using exec methods")
+        ))
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        let fsReadResponse = await router.handleRequest(fsRead, using: handler)
+        XCTAssertEqual(fsReadResponse, .error(
+            requestID: .integer(2),
+            error: ExecServerRPC.invalidRequest("client must send initialized before using filesystem methods")
+        ))
+    }
+
+    func testRouterReportsPendingRegisteredAndUnknownMethodsWithRustStubMessage() async throws {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+
+        let pending = await router.handleRequest(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "p1"))
+        ), using: handler)
+        let unknown = await router.handleRequest(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: "made/up",
+            params: .object([:])
+        ), using: handler)
+
+        XCTAssertEqual(pending, .error(
+            requestID: .integer(1),
+            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `process/terminate` yet")
+        ))
+        XCTAssertEqual(unknown, .error(
+            requestID: .integer(2),
+            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `made/up` yet")
+        ))
+    }
+
+    func testRouterRejectsUnexpectedNotificationsLikeRustProcessor() async {
+        let router = ExecServerRouter()
+        let handler = ExecServerHandler()
+
+        await XCTAssertThrowsRouterNotificationError(
+            try await router.handleNotification(
+                ExecServerJSONRPCNotification(method: "surprise", params: .object([:])),
+                using: handler
+            ),
+            message: "unexpected exec-server notification: surprise"
+        )
+    }
+
     func testHandlerInitializeAttachesSessionAndRejectsDuplicateLikeRust() async throws {
         let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
         let handler = ExecServerHandler(sessionRegistry: registry)
@@ -315,6 +456,22 @@ final class ExecServerTests: XCTestCase {
             _ = try await expression()
             XCTFail("Expected exec-server handler notification error", file: file, line: line)
         } catch let error as ExecServerHandlerNotificationError {
+            XCTAssertEqual(error.message, message, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
+    }
+
+    private func XCTAssertThrowsRouterNotificationError(
+        _ expression: @autoclosure () async throws -> some Any,
+        message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server router notification error", file: file, line: line)
+        } catch let error as ExecServerRouterNotificationError {
             XCTAssertEqual(error.message, message, file: file, line: line)
         } catch {
             XCTFail("Unexpected error: \(error)", file: file, line: line)

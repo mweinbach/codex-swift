@@ -376,6 +376,8 @@ Source baseline inspected for this scaffold:
   - Swift now carries the exec-server session attachment registry semantics for fresh session IDs, one active connection per session, detached-session resume, old-connection eviction checks, TTL expiration, and Rust-shaped invalid-request errors for unknown, expired, and already-attached resume attempts. Process-handler shutdown and notification-sender rebinding remain pending with the live processor port.
 - `codex-rs/exec-server/src/server/handler.rs` initialization state
   - Swift now mirrors the exec-server handler initialization gate: one `initialize` request per connection, retry after failed attach, exact `initialized` notification ordering error, method-family errors before `initialize` or before `initialized`, resumed-session invalid-request handling, and shutdown detachment for later resume. Process, filesystem, HTTP body-stream, and notification-sender execution remain pending.
+- `codex-rs/exec-server/src/server/registry.rs` route registration
+  - Swift now has the exec-server JSON-RPC request/notification dispatch layer for `initialize`, `initialized`, process, filesystem, HTTP, unknown-method, invalid-params, and handler-failure error envelopes. The route layer preserves Rust's initialization/family validation before the still-pending process, filesystem, HTTP body-stream, and live transport execution paths.
 - `codex-rs/exec/src/cli.rs` `codex exec resume`
   - `codex exec resume` now accepts Rust's `--all` provider/cwd bypass flag and subcommand-local `--image`/`-i` attachments, carrying them through non-interactive resume target resolution while preserving the `--last <prompt>` positional reinterpretation.
 - `codex-rs/protocol/src/protocol.rs` session configuration event model
