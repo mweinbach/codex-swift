@@ -4,15 +4,21 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
     public var managedConfigPath: URL?
     public var managedPreferencesBase64: String?
     public var requirementsPath: URL?
+    public var ignoreUserConfig: Bool
+    public var ignoreUserAndProjectExecPolicyRules: Bool
 
     public init(
         managedConfigPath: URL? = nil,
         managedPreferencesBase64: String? = nil,
-        requirementsPath: URL? = nil
+        requirementsPath: URL? = nil,
+        ignoreUserConfig: Bool = false,
+        ignoreUserAndProjectExecPolicyRules: Bool = false
     ) {
         self.managedConfigPath = managedConfigPath
         self.managedPreferencesBase64 = managedPreferencesBase64
         self.requirementsPath = requirementsPath
+        self.ignoreUserConfig = ignoreUserConfig
+        self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
     }
 }
 
@@ -142,11 +148,15 @@ public enum CodexConfigLayerLoader {
 
         let userConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let userPath = try AbsolutePath(absolutePath: userConfigFile.standardizedFileURL.path)
-        layers.append(try loadRequiredConfigLayer(
-            configFile: userConfigFile,
-            source: .user(file: userPath),
-            fileManager: fileManager
-        ))
+        if overrides.ignoreUserConfig {
+            layers.append(ConfigLayerEntry(name: .user(file: userPath), config: .table([:])))
+        } else {
+            layers.append(try loadRequiredConfigLayer(
+                configFile: userConfigFile,
+                source: .user(file: userPath),
+                fileManager: fileManager
+            ))
+        }
 
         if let cwd {
             let projectRootMarkers = try projectRootMarkers(from: mergedConfig(layers: layers))
@@ -185,7 +195,11 @@ public enum CodexConfigLayerLoader {
             ))
         }
 
-        return try ConfigLayerStack(layers: layers, requirements: try requirementsToml.requirements())
+        return try ConfigLayerStack(
+            layers: layers,
+            requirements: try requirementsToml.requirements(),
+            ignoreUserAndProjectExecPolicyRules: overrides.ignoreUserAndProjectExecPolicyRules
+        )
     }
 
     public static func readConfig(

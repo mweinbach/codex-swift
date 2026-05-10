@@ -205,6 +205,43 @@ final class ConfigLayerLoaderTests: XCTestCase {
         )
     }
 
+    func testIgnoreUserConfigKeepsEmptyUserLayerLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try """
+        model = "from-user-config"
+        invalid = [
+        """.write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            overrides: ConfigLayerLoaderOverrides(ignoreUserConfig: true),
+            systemConfigFile: nil
+        )
+
+        let userLayer = try XCTUnwrap(stack.getUserLayer())
+        XCTAssertEqual(userLayer.config, .table([:]))
+        guard case let .table(effectiveConfig) = stack.effectiveConfig() else {
+            return XCTFail("expected table config")
+        }
+        XCTAssertNil(effectiveConfig["model"])
+    }
+
+    func testIgnoreRulesMarksConfigStackLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            overrides: ConfigLayerLoaderOverrides(ignoreUserAndProjectExecPolicyRules: true),
+            systemConfigFile: nil
+        )
+
+        XCTAssertTrue(stack.ignoreUserAndProjectExecPolicyRules)
+    }
+
     func testManagedPreferencesTakeHighestPrecedence() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

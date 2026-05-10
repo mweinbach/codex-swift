@@ -7503,6 +7503,14 @@ public final class ExecPolicyManager: @unchecked Sendable {
     ) throws -> ExecPolicy {
         var policyPaths: [URL] = []
         for layer in configStack.getLayers(ordering: .lowestPrecedenceFirst) {
+            if configStack.ignoreUserAndProjectExecPolicyRules {
+                switch layer.name {
+                case .user, .project:
+                    continue
+                case .mdm, .system, .sessionFlags, .legacyManagedConfigTomlFromFile, .legacyManagedConfigTomlFromMdm:
+                    break
+                }
+            }
             guard let configFolder = layer.configFolder() else {
                 continue
             }

@@ -3792,6 +3792,77 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testLoadExecPolicySkipsUserAndProjectRulesWhenConfiguredLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let systemFolder = tempDir.url.appendingPathComponent("system-codex", isDirectory: true)
+        let userFolder = tempDir.url.appendingPathComponent("user-codex", isDirectory: true)
+        let projectDotCodex = tempDir.url
+            .appendingPathComponent("repo", isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        for folder in [systemFolder, userFolder, projectDotCodex] {
+            try FileManager.default.createDirectory(
+                at: folder.appendingPathComponent("rules", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        try #"prefix_rule(pattern=["pwd"], decision="prompt")"#.write(
+            to: systemFolder.appendingPathComponent("rules/system.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"prefix_rule(pattern=["rm"], decision="forbidden")"#.write(
+            to: userFolder.appendingPathComponent("rules/user.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"prefix_rule(pattern=["ls"], decision="prompt")"#.write(
+            to: projectDotCodex.appendingPathComponent("rules/project.rules"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try ConfigLayerStack(
+            layers: [
+                ConfigLayerEntry(
+                    name: .system(file: try AbsolutePath(absolutePath: systemFolder.appendingPathComponent("config.toml").path)),
+                    config: .table([:])
+                ),
+                ConfigLayerEntry(
+                    name: .user(file: try AbsolutePath(absolutePath: userFolder.appendingPathComponent("config.toml").path)),
+                    config: .table([:])
+                ),
+                ConfigLayerEntry(
+                    name: .project(dotCodexFolder: try AbsolutePath(absolutePath: projectDotCodex.path)),
+                    config: .table([:])
+                )
+            ],
+            ignoreUserAndProjectExecPolicyRules: true
+        )
+        let policy = try ExecPolicyManager.load(features: .withDefaults(), configStack: stack).current()
+
+        XCTAssertEqual(
+            policy.check(tokens("pwd"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .prompt,
+                matchedRules: [.prefixRuleMatch(matchedPrefix: tokens("pwd"), decision: .prompt)]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(tokens("rm", "-rf", "/tmp"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("rm", "-rf", "/tmp"), decision: .allow)]
+            )
+        )
+        XCTAssertEqual(
+            policy.check(tokens("ls"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("ls"), decision: .allow)]
+            )
+        )
+    }
+
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")

@@ -198,24 +198,29 @@ public struct ConfigLayerStack: Equatable, Sendable {
     public private(set) var layers: [ConfigLayerEntry]
     public private(set) var userLayerIndex: Int?
     public var requirements: ConfigRequirements
+    public var ignoreUserAndProjectExecPolicyRules: Bool
 
     public init(
         layers: [ConfigLayerEntry],
-        requirements: ConfigRequirements = .default
+        requirements: ConfigRequirements = .default,
+        ignoreUserAndProjectExecPolicyRules: Bool = false
     ) throws {
         self.layers = layers
         self.userLayerIndex = try Self.verifyLayerOrdering(layers)
         self.requirements = requirements
+        self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
     }
 
     private init(
         validatedLayers layers: [ConfigLayerEntry],
         userLayerIndex: Int?,
-        requirements: ConfigRequirements
+        requirements: ConfigRequirements,
+        ignoreUserAndProjectExecPolicyRules: Bool
     ) {
         self.layers = layers
         self.userLayerIndex = userLayerIndex
         self.requirements = requirements
+        self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
     }
 
     public func getUserLayer() -> ConfigLayerEntry? {
@@ -237,7 +242,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
             return ConfigLayerStack(
                 validatedLayers: nextLayers,
                 userLayerIndex: userLayerIndex,
-                requirements: requirements
+                requirements: requirements,
+                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
             )
         }
 
@@ -246,7 +252,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
             return ConfigLayerStack(
                 validatedLayers: nextLayers,
                 userLayerIndex: insertionIndex,
-                requirements: requirements
+                requirements: requirements,
+                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
             )
         }
 
@@ -254,7 +261,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
         return ConfigLayerStack(
             validatedLayers: nextLayers,
             userLayerIndex: nextLayers.count - 1,
-            requirements: requirements
+            requirements: requirements,
+            ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
         )
     }
 

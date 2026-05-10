@@ -235,7 +235,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/safety.rs`
   - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
-  - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading, exec approval requirement derivation, heredoc single-command prefix matching without auto-amendments, amendment proposals, and default allow-prefix file appending
+  - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading including Rust's user/project rule skip flag, exec approval requirement derivation, heredoc single-command prefix matching without auto-amendments, amendment proposals, and default allow-prefix file appending
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
@@ -391,7 +391,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cloud-tasks/src/exec_command.rs` task creation path
   - `codex cloud exec` prompt/stdin loading, `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path
-  - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, Rust-shaped assistant/reasoning/web-search completed items plus turn usage/failure error shape, `--output-last-message` writes, and Rust's `--ephemeral` no-rollout persistence mode for fresh exec runs
+  - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, Rust-shaped assistant/reasoning/web-search completed items plus turn usage/failure error shape, `--output-last-message` writes, Rust's `--ephemeral` no-rollout persistence mode for fresh exec runs, `--ignore-user-config` empty-user-layer/runtime-config skipping, and `--ignore-rules` user/project execpolicy rule skipping
 - Initial `codex-rs/core/src/unified_exec` tool-session behavior
   - non-interactive `exec_command` can now keep long-running commands alive, return a session ID, and continue them through `write_stdin` with Rust-shaped unified exec output sections
 - Initial `codex-rs/exec/src/lib.rs` review operation dispatch

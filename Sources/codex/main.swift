@@ -65,14 +65,25 @@ let exitCode = await cli.runAsync(
 )
 exit(exitCode)
 
-private func resolvedAuthSettings(overrides: CliConfigOverrides) throws -> (codexHome: URL, settings: CodexRuntimeConfig) {
+private func resolvedAuthSettings(
+    overrides: CliConfigOverrides,
+    loaderOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
+) throws -> (codexHome: URL, settings: CodexRuntimeConfig) {
     let codexHome = try CodexHome.find()
     let settings = try CodexConfigLoader.load(
         codexHome: codexHome,
         cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
-        overrides: overrides
+        overrides: overrides,
+        managedConfigOverrides: loaderOverrides
     )
     return (codexHome, settings)
+}
+
+private func execLoaderOverrides(options: CodexCLI.ExecCommandOptions) -> ConfigLayerLoaderOverrides {
+    ConfigLayerLoaderOverrides(
+        ignoreUserConfig: options.ignoreUserConfig,
+        ignoreUserAndProjectExecPolicyRules: options.ignoreRules
+    )
 }
 
 private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
@@ -678,11 +689,16 @@ private func runNonInteractiveExec(
     )
 
     let environment = ProcessInfo.processInfo.environment
-    let (codexHome, settings) = try resolvedAuthSettings(overrides: configOverrides)
+    let loaderOverrides = execLoaderOverrides(options: options)
+    let (codexHome, settings) = try resolvedAuthSettings(
+        overrides: configOverrides,
+        loaderOverrides: loaderOverrides
+    )
     let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
         codexHome: codexHome,
         cwd: cwd,
         cliOverrides: configOverrides,
+        overrides: loaderOverrides,
         environment: environment
     )
     let hookHandlers = HookConfig.configuredHandlers(from: configStack, codexHome: codexHome, environment: environment)

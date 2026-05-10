@@ -188,10 +188,16 @@ public enum CodexConfigLoader {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
+        let userConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL
         for configFile in baseConfigLayerFiles(
             codexHome: codexHome,
             systemConfigFile: systemConfigFile
         ) {
+            if managedConfigOverrides.ignoreUserConfig,
+               configFile.standardizedFileURL == userConfigFile
+            {
+                continue
+            }
             if fileManager.fileExists(atPath: configFile.path) {
                 let contents = try String(contentsOf: configFile, encoding: .utf8)
                 parsed.merge(try ParsedCodexConfigToml.parse(

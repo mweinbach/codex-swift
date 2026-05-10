@@ -807,6 +807,22 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.forcedLoginMethod, .api)
     }
 
+    func testIgnoreUserConfigSkipsRuntimeUserConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model = "from-user-config"
+        invalid = [
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(ignoreUserConfig: true)
+        )
+
+        XCTAssertNil(config.model)
+    }
+
     func testRequirementsTomlRejectsDisallowedRuntimeApprovalPolicyLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
