@@ -113,6 +113,28 @@ public enum ShellResolver {
         return command
     }
 
+    public static func extractPowerShellCommand(_ command: [String]) -> (shell: String, script: String)? {
+        guard command.count >= 3,
+              detectShellType(command[0]) == .powerShell
+        else {
+            return nil
+        }
+
+        var index = 1
+        while index + 1 < command.count {
+            let flag = command[index].lowercased()
+            guard ["-nologo", "-noprofile", "-command", "-c"].contains(flag) else {
+                return nil
+            }
+            if flag == "-command" || flag == "-c" {
+                return (command[0], command[index + 1])
+            }
+            index += 1
+        }
+
+        return nil
+    }
+
     public static func defaultUserShell() -> Shell {
         defaultUserShell(userShellPath: currentUserShellPath())
     }
