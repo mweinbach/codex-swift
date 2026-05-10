@@ -4,7 +4,7 @@ public actor ExecServerProcessStore {
     public typealias OutboundNotification = @Sendable (ExecServerJSONRPCNotification) async -> Void
 
     private static let retainedOutputBytesPerProcess = 1024 * 1024
-    private let outboundNotification: OutboundNotification
+    private var outboundNotification: OutboundNotification
     private let retentionDelayNanoseconds: UInt64
     private var processes: [String: ExecServerProcessState] = [:]
 
@@ -13,6 +13,10 @@ public actor ExecServerProcessStore {
         outboundNotification: @escaping OutboundNotification = { _ in }
     ) {
         self.retentionDelayNanoseconds = retentionDelayNanoseconds
+        self.outboundNotification = outboundNotification
+    }
+
+    public func setOutboundNotification(_ outboundNotification: @escaping OutboundNotification) {
         self.outboundNotification = outboundNotification
     }
 

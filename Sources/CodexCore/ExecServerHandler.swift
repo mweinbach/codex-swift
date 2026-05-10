@@ -5,7 +5,7 @@ public actor ExecServerHandler {
 
     private let sessionRegistry: ExecServerSessionRegistry
     private let fileSystem: ExecServerFileSystem
-    private let processStore: ExecServerProcessStore
+    private let suppliedProcessStore: ExecServerProcessStore?
     private let httpClient: ExecServerHTTPClient
     private let outboundNotification: OutboundNotification
     private var session: ExecServerSessionHandle?
@@ -22,7 +22,7 @@ public actor ExecServerHandler {
     ) {
         self.sessionRegistry = sessionRegistry
         self.fileSystem = fileSystem
-        self.processStore = processStore ?? ExecServerProcessStore(outboundNotification: outboundNotification)
+        self.suppliedProcessStore = processStore
         self.httpClient = httpClient
         self.outboundNotification = outboundNotification
     }
@@ -34,7 +34,11 @@ public actor ExecServerHandler {
 
         initializeRequested = true
         do {
-            let session = try await sessionRegistry.attach(resumeSessionID: params.resumeSessionId)
+            let session = try await sessionRegistry.attach(
+                resumeSessionID: params.resumeSessionId,
+                processStore: suppliedProcessStore,
+                outboundNotification: outboundNotification
+            )
             self.session = session
             return ExecServerInitializeResponse(sessionId: session.sessionID)
         } catch {
@@ -67,11 +71,10 @@ public actor ExecServerHandler {
     public func shutdown() async {
         guard let session else {
             cancelHTTPBodyStreams()
-            await processStore.shutdown()
+            await suppliedProcessStore?.shutdown()
             return
         }
         cancelHTTPBodyStreams()
-        await processStore.shutdown()
         await session.detach()
     }
 
@@ -133,23 +136,23 @@ public actor ExecServerHandler {
     }
 
     public func startProcess(_ params: ExecServerExecParams) async throws -> ExecServerExecResponse {
-        _ = try await requireInitialized(for: "exec")
-        return try await processStore.start(params)
+        let session = try await requireInitialized(for: "exec")
+        return try await session.processStore.start(params)
     }
 
     public func readProcess(_ params: ExecServerReadParams) async throws -> ExecServerReadResponse {
-        _ = try await requireInitialized(for: "exec")
-        return try await processStore.read(params)
+        let session = try await requireInitialized(for: "exec")
+        return try await session.processStore.read(params)
     }
 
     public func writeProcess(_ params: ExecServerWriteParams) async throws -> ExecServerWriteResponse {
-        _ = try await requireInitialized(for: "exec")
-        return try await processStore.write(params)
+        let session = try await requireInitialized(for: "exec")
+        return try await session.processStore.write(params)
     }
 
     public func terminateProcess(_ params: ExecServerTerminateParams) async throws -> ExecServerTerminateResponse {
-        _ = try await requireInitialized(for: "exec")
-        return try await processStore.terminate(params)
+        let session = try await requireInitialized(for: "exec")
+        return try await session.processStore.terminate(params)
     }
 
     public func httpRequest(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {

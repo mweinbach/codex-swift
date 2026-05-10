@@ -1003,6 +1003,150 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
+    func testConnectionProcessorResumesDetachedSessionWithoutKillingProcessLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        )
+        let first = await processor.makeConnection()
+        let firstInitialize = await first.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "first"))
+        ))))
+        _ = await first.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        let start = await first.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-resume",
+                argv: ["/bin/sh", "-c", "sleep 5"],
+                cwd: FileManager.default.currentDirectoryPath,
+                env: [:],
+                tty: false
+            ))
+        ))))
+
+        _ = await first.handle(.disconnected(reason: nil))
+        let second = await processor.makeConnection()
+        let resumed = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(
+                clientName: "second",
+                resumeSessionId: "session-1"
+            ))
+        ))))
+        _ = await second.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        let read = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerProcessReadMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerReadParams(processId: "proc-resume"))
+        ))))
+        let terminated = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(5),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "proc-resume"))
+        ))))
+
+        XCTAssertEqual(firstInitialize?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        XCTAssertEqual(start?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("proc-resume")])
+        ))
+        XCTAssertEqual(resumed?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        guard case let .response(_, result) = read else {
+            return XCTFail("Expected process/read response after resume")
+        }
+        let readResponse = try decodeJSONValue(result, as: ExecServerReadResponse.self)
+        XCTAssertTrue(readResponse.chunks.isEmpty)
+        XCTAssertFalse(readResponse.exited)
+        XCTAssertFalse(readResponse.closed)
+        XCTAssertNil(readResponse.failure)
+        XCTAssertEqual(terminated?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(5),
+            result: .object(["running": .bool(true)])
+        ))
+    }
+
+    func testConnectionProcessorRebindsProcessNotificationsAfterResumeLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        )
+        let first = await processor.makeConnection()
+        _ = await first.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "first"))
+        ))))
+        _ = await first.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        _ = await first.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-resume-notify",
+                argv: ["/bin/sh", "-c", "IFS= read line; printf 'resumed:%s\\n' \"$line\""],
+                cwd: FileManager.default.currentDirectoryPath,
+                env: [:],
+                tty: false,
+                pipeStdin: true
+            ))
+        ))))
+
+        _ = await first.handle(.disconnected(reason: nil))
+        let second = await processor.makeConnection()
+        _ = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(
+                clientName: "second",
+                resumeSessionId: "session-1"
+            ))
+        ))))
+        _ = await second.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        let write = await second.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerProcessWriteMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerWriteParams(
+                processId: "proc-resume-notify",
+                chunk: ExecServerByteChunk(Array("hello\n".utf8))
+            ))
+        ))))
+        let notifications = try await collectProcessLifecycleNotifications(
+            from: second,
+            processId: "proc-resume-notify"
+        )
+        let retained = try await readProcessUntilClosed(second, processId: "proc-resume-notify")
+
+        XCTAssertEqual(write?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(4),
+            result: .object(["status": .string("accepted")])
+        ))
+        XCTAssertEqual(notifications.output?.stream, .stdout)
+        XCTAssertEqual(notifications.output?.chunk.bytes, Array("resumed:hello\n".utf8))
+        XCTAssertEqual(notifications.exited?.exitCode, 0)
+        XCTAssertEqual(retained.output, "resumed:hello\n")
+        XCTAssertEqual(retained.exitCode, 0)
+        XCTAssertTrue(retained.closed)
+    }
+
     func testConnectionProcessorIgnoresClosedConnectionAfterResumeLikeRust() async throws {
         let processor = ExecServerConnectionProcessor(
             sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))

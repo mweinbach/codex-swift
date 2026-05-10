@@ -5,6 +5,7 @@ public actor ExecServerSessionRegistry {
 
     private struct SessionEntry: Sendable {
         let sessionID: String
+        let processStore: ExecServerProcessStore
         var currentConnectionID: String?
         var detachedConnectionID: String?
         var detachedExpiresAt: Date?
@@ -28,9 +29,14 @@ public actor ExecServerSessionRegistry {
         self.sleep = sleep
     }
 
-    public func attach(resumeSessionID: String? = nil) async throws -> ExecServerSessionHandle {
+    public func attach(
+        resumeSessionID: String? = nil,
+        processStore suppliedProcessStore: ExecServerProcessStore? = nil,
+        outboundNotification: @escaping ExecServerProcessStore.OutboundNotification = { _ in }
+    ) async throws -> ExecServerSessionHandle {
         let connectionID = makeID()
         let sessionID: String
+        let processStore: ExecServerProcessStore
 
         if let resumeSessionID {
             guard var entry = sessions[resumeSessionID] else {
@@ -38,6 +44,7 @@ public actor ExecServerSessionRegistry {
             }
             if isExpired(entry, at: now()) {
                 sessions.removeValue(forKey: resumeSessionID)
+                await entry.processStore.shutdown()
                 throw ExecServerRPC.invalidRequest("unknown session id \(resumeSessionID)")
             }
             if entry.currentConnectionID != nil {
@@ -48,20 +55,25 @@ public actor ExecServerSessionRegistry {
             entry.detachedExpiresAt = nil
             sessions[resumeSessionID] = entry
             sessionID = resumeSessionID
+            processStore = entry.processStore
         } else {
             sessionID = makeID()
+            processStore = suppliedProcessStore ?? ExecServerProcessStore(outboundNotification: outboundNotification)
             sessions[sessionID] = SessionEntry(
                 sessionID: sessionID,
+                processStore: processStore,
                 currentConnectionID: connectionID,
                 detachedConnectionID: nil,
                 detachedExpiresAt: nil
             )
         }
 
+        await processStore.setOutboundNotification(outboundNotification)
         return ExecServerSessionHandle(
             registry: self,
             sessionID: sessionID,
-            connectionID: connectionID
+            connectionID: connectionID,
+            processStore: processStore
         )
     }
 
@@ -101,6 +113,9 @@ public actor ExecServerSessionRegistry {
             return
         }
         sessions.removeValue(forKey: sessionID)
+        Task {
+            await entry.processStore.shutdown()
+        }
     }
 
     private func isExpired(_ entry: SessionEntry, at date: Date) -> Bool {
@@ -117,11 +132,18 @@ public struct ExecServerSessionHandle: Sendable {
     private let registry: ExecServerSessionRegistry
     public let sessionID: String
     public let connectionID: String
+    public let processStore: ExecServerProcessStore
 
-    fileprivate init(registry: ExecServerSessionRegistry, sessionID: String, connectionID: String) {
+    fileprivate init(
+        registry: ExecServerSessionRegistry,
+        sessionID: String,
+        connectionID: String,
+        processStore: ExecServerProcessStore
+    ) {
         self.registry = registry
         self.sessionID = sessionID
         self.connectionID = connectionID
+        self.processStore = processStore
     }
 
     public func isSessionAttached() async -> Bool {
@@ -129,6 +151,7 @@ public struct ExecServerSessionHandle: Sendable {
     }
 
     public func detach() async {
+        await processStore.setOutboundNotification { _ in }
         await registry.detach(sessionID: sessionID, connectionID: connectionID)
     }
 }
