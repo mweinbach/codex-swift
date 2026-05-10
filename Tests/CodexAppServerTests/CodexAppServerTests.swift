@@ -5702,6 +5702,44 @@ final class CodexAppServerTests: XCTestCase {
           "enabled": true
         }
         """
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "version": "1.2.3",
+                "bundle_download_url": "https://bundles.example/linear.tar.gz",
+                "app_ids": [],
+                "interface": {},
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
         let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -5717,6 +5755,10 @@ final class CodexAppServerTests: XCTestCase {
                         return URLSessionTransportResponse(statusCode: 409, body: Data("cache missing before mutation".utf8))
                     }
                     return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=WORKSPACE&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
@@ -5730,7 +5772,7 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["authPolicy"] as? String, "ON_USE")
         XCTAssertEqual((result["appsNeedingAuth"] as? [Any])?.count, 0)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "POST"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "POST", "GET", "GET"])
         XCTAssertEqual(
             try String(contentsOf: installedMarker, encoding: .utf8),
             "from-remote-bundle"
@@ -5738,12 +5780,185 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
             "Bearer chatgpt-token",
             nil,
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token",
             "Bearer chatgpt-token"
         ])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
             "account-123",
             nil,
+            "account-123",
+            "account-123",
             "account-123"
+        ])
+    }
+
+    func testPluginInstallRemoteRefreshesInstalledBundleCacheAfterMutation() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins_123"
+        let linearSource = temp.url.appendingPathComponent("linear-source", isDirectory: true)
+        try writePluginFixture(
+            root: linearSource,
+            relativePath: "linear",
+            pluginName: "linear",
+            version: "0.0.1-local-ignored",
+            marker: "from-linear-bundle"
+        )
+        let linearBundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: linearSource.appendingPathComponent("linear", isDirectory: true),
+            in: temp.url
+        )
+        let notionSource = temp.url.appendingPathComponent("notion-source", isDirectory: true)
+        try writePluginFixture(
+            root: notionSource,
+            relativePath: "notion",
+            pluginName: "notion",
+            version: "0.0.1-local-ignored",
+            marker: "from-installed-sync"
+        )
+        let notionBundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: notionSource.appendingPathComponent("notion", isDirectory: true),
+            in: temp.url
+        )
+        let staleCacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/stale", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: staleCacheRoot.appendingPathComponent("old/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "https://bundles.example/linear.tar.gz"
+        )
+        let installBody = """
+        {
+          "id": "\(pluginID)",
+          "enabled": true
+        }
+        """
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "version": "1.2.3",
+                "bundle_download_url": "https://bundles.example/linear.tar.gz",
+                "app_ids": [],
+                "interface": {},
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            },
+            {
+              "id": "plugins_456",
+              "name": "notion",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Notion",
+                "description": "Track notes in Notion",
+                "version": "9.9.9",
+                "bundle_download_url": "https://bundles.example/notion.tar.gz",
+                "app_ids": [],
+                "interface": {},
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: linearBundleBytes)
+                case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                case ("GET", "/notion.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: notionBundleBytes)
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=WORKSPACE&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        let syncedMarker = temp.url.appendingPathComponent(
+            "plugins/cache/chatgpt-global/notion/9.9.9/marker.txt",
+            isDirectory: false
+        )
+        XCTAssertEqual(try String(contentsOf: syncedMarker, encoding: .utf8), "from-installed-sync")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleCacheRoot.path))
+        XCTAssertEqual(capture.requests.map { $0.url?.path ?? "" }, [
+            "/backend-api/ps/plugins/\(pluginID)",
+            "/linear.tar.gz",
+            "/backend-api/ps/plugins/\(pluginID)/install",
+            "/backend-api/ps/plugins/installed",
+            "/notion.tar.gz",
+            "/backend-api/ps/plugins/installed"
         ])
     }
 
@@ -6099,6 +6314,44 @@ final class CodexAppServerTests: XCTestCase {
           "enabled": true
         }
         """
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "version": "1.2.3",
+                "bundle_download_url": "https://bundles.example/linear.tar.gz",
+                "app_ids": [],
+                "interface": {},
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
         let connectorBody = """
         {
           "apps": [
@@ -6123,6 +6376,10 @@ final class CodexAppServerTests: XCTestCase {
                     return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
                 case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=WORKSPACE&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(connectorBody.utf8))
                 default:
@@ -6143,16 +6400,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(appsNeedingAuth[0]["description"] as? String, "Weather connector")
         XCTAssertEqual(appsNeedingAuth[0]["installUrl"] as? String, "https://chatgpt.com/apps/weather/connector_weather")
         XCTAssertEqual(appsNeedingAuth[0]["needsAuth"] as? Bool, true)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod }, ["GET", "GET", "POST", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod }, ["GET", "GET", "POST", "GET", "GET", "GET"])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
             "Bearer chatgpt-token",
             nil,
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token",
             "Bearer chatgpt-token",
             "Bearer chatgpt-token"
         ])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
             "account-123",
             nil,
+            "account-123",
+            "account-123",
             "account-123",
             "account-123"
         ])

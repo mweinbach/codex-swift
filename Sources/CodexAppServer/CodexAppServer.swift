@@ -4967,6 +4967,15 @@ public enum CodexAppServer {
                 "install remote plugin: remote plugin mutation returned unexpected enabled state for `\(remotePluginID)`: expected true, got false"
             )
         }
+        _ = refreshRemoteInstalledPluginCachesAfterMutation(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            currentMutation: (
+                marketplaceName: bundle.marketplaceName,
+                pluginName: bundle.pluginName
+            )
+        )
         let appsNeedingAuth = pluginAppsNeedingAuthForInstall(
             installedPath: installedPath,
             runtimeConfig: runtimeConfig,
@@ -4977,6 +4986,128 @@ public enum CodexAppServer {
             "authPolicy": detail["authentication_policy"] as? String ?? "ON_USE",
             "appsNeedingAuth": appsNeedingAuth
         ]
+    }
+
+    private struct RemoteInstalledPluginCacheRefreshOutcome {
+        var installedPluginIDs: Set<String> = []
+        var removedCachePluginIDs: Set<String> = []
+        var failedRemotePluginIDs: Set<String> = []
+    }
+
+    private static func refreshRemoteInstalledPluginCachesAfterMutation(
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth,
+        currentMutation: (marketplaceName: String, pluginName: String)? = nil
+    ) -> RemoteInstalledPluginCacheRefreshOutcome {
+        guard runtimeConfig.features.isEnabled(.plugins),
+              runtimeConfig.features.isEnabled(.remotePlugin)
+        else {
+            return RemoteInstalledPluginCacheRefreshOutcome()
+        }
+        var outcome = RemoteInstalledPluginCacheRefreshOutcome()
+        var installedPluginNamesByMarketplace: [String: Set<String>] = [
+            "chatgpt-global": [],
+            "workspace-directory": []
+        ]
+        for scope in ["GLOBAL", "WORKSPACE"] {
+            let marketplaceName = remotePluginMarketplaceName(forScope: scope)
+            let plugins: [[String: Any]]
+            do {
+                plugins = try remotePluginPagesOrThrow(
+                    path: "/ps/plugins/installed",
+                    queryItems: [
+                        URLQueryItem(name: "scope", value: scope),
+                        URLQueryItem(name: "includeDownloadUrls", value: "true")
+                    ],
+                    runtimeConfig: runtimeConfig,
+                    configuration: configuration,
+                    auth: auth,
+                    failurePrefix: "refresh remote installed plugin cache"
+                )
+            } catch {
+                return outcome
+            }
+            for plugin in plugins {
+                let remotePluginID = plugin["id"] as? String ?? ""
+                guard let pluginName = plugin["name"] as? String,
+                      !pluginName.isEmpty
+                else {
+                    if !remotePluginID.isEmpty {
+                        outcome.failedRemotePluginIDs.insert(remotePluginID)
+                    }
+                    continue
+                }
+                installedPluginNamesByMarketplace[marketplaceName, default: []].insert(pluginName)
+                let localPluginID = "\(pluginName)@\(marketplaceName)"
+                let release = plugin["release"] as? [String: Any]
+                let releaseVersion = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let releaseVersion,
+                   !releaseVersion.isEmpty,
+                   activeLocalPluginVersion(id: localPluginID, codexHome: configuration.codexHome) == releaseVersion {
+                    continue
+                }
+                do {
+                    let bundle = try validateRemotePluginBundleMetadata(
+                        remotePluginID: remotePluginID.isEmpty ? localPluginID : remotePluginID,
+                        detail: plugin,
+                        environment: configuration.environment
+                    )
+                    _ = try downloadAndInstallRemotePluginBundle(
+                        bundle,
+                        configuration: configuration,
+                        failurePrefix: "refresh remote installed plugin cache"
+                    )
+                    outcome.installedPluginIDs.insert(localPluginID)
+                } catch {
+                    outcome.failedRemotePluginIDs.insert(remotePluginID.isEmpty ? localPluginID : remotePluginID)
+                }
+            }
+        }
+        let removed = removeStaleRemotePluginCaches(
+            codexHome: configuration.codexHome,
+            installedPluginNamesByMarketplace: installedPluginNamesByMarketplace,
+            currentMutation: currentMutation
+        )
+        outcome.removedCachePluginIDs.formUnion(removed)
+        return outcome
+    }
+
+    private static func removeStaleRemotePluginCaches(
+        codexHome: URL,
+        installedPluginNamesByMarketplace: [String: Set<String>],
+        currentMutation: (marketplaceName: String, pluginName: String)?
+    ) -> Set<String> {
+        let cacheRoot = codexHome.appendingPathComponent("plugins/cache", isDirectory: true)
+        var removed: Set<String> = []
+        for marketplaceName in ["chatgpt-global", "workspace-directory"] {
+            let marketplaceRoot = cacheRoot.appendingPathComponent(marketplaceName, isDirectory: true)
+            guard let entries = try? FileManager.default.contentsOfDirectory(
+                at: marketplaceRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+            let installedPluginNames = installedPluginNamesByMarketplace[marketplaceName] ?? []
+            for entry in entries {
+                let pluginName = entry.lastPathComponent
+                if installedPluginNames.contains(pluginName) {
+                    continue
+                }
+                if currentMutation?.marketplaceName == marketplaceName,
+                   currentMutation?.pluginName == pluginName {
+                    continue
+                }
+                do {
+                    try FileManager.default.removeItem(at: entry)
+                    removed.insert("\(pluginName)@\(marketplaceName)")
+                } catch {
+                    continue
+                }
+            }
+        }
+        return removed
     }
 
     private struct RemotePluginBundleMetadata {
@@ -5701,6 +5832,11 @@ public enum CodexAppServer {
                 "uninstall remote plugin: remote plugin mutation returned unexpected enabled state for `\(pluginID)`: expected false, got true"
             )
         }
+        _ = refreshRemoteInstalledPluginCachesAfterMutation(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth
+        )
         do {
             try removeRemotePluginCache(
                 codexHome: configuration.codexHome,
