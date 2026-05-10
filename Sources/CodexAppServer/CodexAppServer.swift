@@ -7308,14 +7308,8 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any]? {
         let paths = externalAgentConfigPaths(cwd: cwd, configuration: configuration)
-        guard var settings = try externalAgentSettings(at: paths.sourceSettings) else {
+        guard let settings = try effectiveExternalAgentSettings(at: paths.sourceSettings) else {
             return nil
-        }
-        let localSettingsPath = paths.sourceSettings
-            .deletingLastPathComponent()
-            .appendingPathComponent("settings.local.json", isDirectory: false)
-        if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
-            mergeJSONSettings(into: &settings, incoming: localSettings)
         }
 
         let migrated = try externalAgentConfigValue(from: settings)
@@ -7552,14 +7546,8 @@ public enum CodexAppServer {
         }
         paths = externalAgentConfigPaths(cwd: cwd, configuration: configuration)
 
-        guard var settings = try externalAgentSettings(at: paths.sourceSettings) else {
+        guard let settings = try effectiveExternalAgentSettings(at: paths.sourceSettings) else {
             return
-        }
-        let localSettingsPath = paths.sourceSettings
-            .deletingLastPathComponent()
-            .appendingPathComponent("settings.local.json", isDirectory: false)
-        if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
-            mergeJSONSettings(into: &settings, incoming: localSettings)
         }
 
         let migrated = try externalAgentConfigValue(from: settings)
@@ -8726,14 +8714,17 @@ public enum CodexAppServer {
     }
 
     private static func effectiveExternalAgentSettings(at path: URL) throws -> [String: Any]? {
-        guard var settings = try externalAgentSettings(at: path) else {
-            return nil
-        }
+        var settings = try externalAgentSettings(at: path)
         let localSettingsPath = path
             .deletingLastPathComponent()
             .appendingPathComponent("settings.local.json", isDirectory: false)
         if let localSettings = try externalAgentLocalSettings(at: localSettingsPath) {
-            mergeJSONSettings(into: &settings, incoming: localSettings)
+            if var existingSettings = settings {
+                mergeJSONSettings(into: &existingSettings, incoming: localSettings)
+                settings = existingSettings
+            } else {
+                settings = localSettings
+            }
         }
         return settings
     }

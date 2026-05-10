@@ -8940,6 +8940,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(migrated.contains("OBJECT"))
     }
 
+    func testExternalAgentConfigImportConfigUsesLocalSettingsWhenBaseSettingsAreMissing() throws {
+        let codexHome = try TemporaryDirectory()
+        let repo = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let claudeSettings = repo.url.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeSettings, withIntermediateDirectories: true)
+        try """
+        {
+          "env": {
+            "LOCAL_ONLY": "yes",
+            "FLAG": true,
+            "COUNT": 3
+          },
+          "sandbox": { "enabled": true }
+        }
+        """.write(
+            to: claudeSettings.appendingPathComponent("settings.local.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":"\#(repo.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let migrated = try String(
+            contentsOf: repo.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migrated.contains(#"sandbox_mode = "workspace-write""#))
+        XCTAssertTrue(migrated.contains(#"LOCAL_ONLY = "yes""#))
+        XCTAssertTrue(migrated.contains(#"FLAG = "true""#))
+        XCTAssertTrue(migrated.contains(#"COUNT = "3""#))
+    }
+
     func testExternalAgentConfigDetectAndImportMcpServersMigratesConvertibleEntries() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()
