@@ -684,6 +684,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["diff"] as? String, unifiedDiff)
     }
 
+    func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpStartupUpdate(McpStartupUpdateEvent(server: "docs", status: .starting))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpStartupUpdate(McpStartupUpdateEvent(server: "docs", status: .ready))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpStartupUpdate(McpStartupUpdateEvent(server: "broken", status: .failed(error: "boom")))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpStartupUpdate(McpStartupUpdateEvent(server: "slow", status: .cancelled))
+        )
+
+        let starting = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(starting.count, 1)
+        XCTAssertEqual(starting[0]["method"] as? String, "mcpServer/startupStatus/updated")
+        let startingParams = try XCTUnwrap(starting[0]["params"] as? [String: Any])
+        XCTAssertEqual(startingParams["name"] as? String, "docs")
+        XCTAssertEqual(startingParams["status"] as? String, "starting")
+        XCTAssertTrue(startingParams["error"] is NSNull)
+
+        let ready = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let readyParams = try XCTUnwrap(ready[0]["params"] as? [String: Any])
+        XCTAssertEqual(readyParams["name"] as? String, "docs")
+        XCTAssertEqual(readyParams["status"] as? String, "ready")
+        XCTAssertTrue(readyParams["error"] is NSNull)
+
+        let failed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let failedParams = try XCTUnwrap(failed[0]["params"] as? [String: Any])
+        XCTAssertEqual(failedParams["name"] as? String, "broken")
+        XCTAssertEqual(failedParams["status"] as? String, "failed")
+        XCTAssertEqual(failedParams["error"] as? String, "boom")
+
+        let cancelled = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let cancelledParams = try XCTUnwrap(cancelled[0]["params"] as? [String: Any])
+        XCTAssertEqual(cancelledParams["name"] as? String, "slow")
+        XCTAssertEqual(cancelledParams["status"] as? String, "cancelled")
+        XCTAssertTrue(cancelledParams["error"] is NSNull)
+    }
+
     func testAcceptedLineAnalyticsUploadsOnTurnCompletion() async throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

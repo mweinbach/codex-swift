@@ -8185,6 +8185,33 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func mcpServerStatusUpdatedNotification(_ update: McpStartupUpdateEvent) -> [String: Any] {
+        let status: String
+        let error: Any
+        switch update.status {
+        case .starting:
+            status = "starting"
+            error = NSNull()
+        case .ready:
+            status = "ready"
+            error = NSNull()
+        case let .failed(message):
+            status = "failed"
+            error = message
+        case .cancelled:
+            status = "cancelled"
+            error = NSNull()
+        }
+        return [
+            "method": "mcpServer/startupStatus/updated",
+            "params": [
+                "name": update.server,
+                "status": status,
+                "error": error
+            ]
+        ]
+    }
+
     fileprivate static func runtimeEventNotification(
         threadID: String,
         turnID: String,
@@ -8197,6 +8224,8 @@ public enum CodexAppServer {
                 turnID: turnID,
                 diff: turnDiff.unifiedDiff
             )
+        case let .mcpStartupUpdate(update):
+            return mcpServerStatusUpdatedNotification(update)
         default:
             return nil
         }
