@@ -862,6 +862,160 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(credits["balance"] as? String, "12.50")
     }
 
+    func testRuntimeItemDeltaEventsEmitRustProgressNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let cases: [(EventMessage, String, [String: Any])] = [
+            (
+                .agentMessageContentDelta(AgentMessageContentDeltaEvent(
+                    threadID: "event-thread",
+                    turnID: "event-turn",
+                    itemID: "agent-1",
+                    delta: "hello"
+                )),
+                "item/agentMessage/delta",
+                ["itemId": "agent-1", "delta": "hello"]
+            ),
+            (
+                .planDelta(PlanDeltaEvent(
+                    threadID: "event-thread",
+                    turnID: "event-turn",
+                    itemID: "plan-1",
+                    delta: "next"
+                )),
+                "item/plan/delta",
+                ["itemId": "plan-1", "delta": "next"]
+            ),
+            (
+                .reasoningContentDelta(ReasoningContentDeltaEvent(
+                    threadID: "event-thread",
+                    turnID: "event-turn",
+                    itemID: "reason-1",
+                    delta: "summary",
+                    summaryIndex: 2
+                )),
+                "item/reasoning/summaryTextDelta",
+                ["itemId": "reason-1", "delta": "summary", "summaryIndex": Int64(2)]
+            ),
+            (
+                .reasoningRawContentDelta(ReasoningRawContentDeltaEvent(
+                    threadID: "event-thread",
+                    turnID: "event-turn",
+                    itemID: "reason-raw-1",
+                    delta: "raw",
+                    contentIndex: 3
+                )),
+                "item/reasoning/textDelta",
+                ["itemId": "reason-raw-1", "delta": "raw", "contentIndex": Int64(3)]
+            ),
+            (
+                .agentReasoningSectionBreak(AgentReasoningSectionBreakEvent(
+                    itemID: "reason-1",
+                    summaryIndex: 4
+                )),
+                "item/reasoning/summaryPartAdded",
+                ["itemId": "reason-1", "summaryIndex": Int64(4)]
+            )
+        ]
+
+        for (event, _, _) in cases {
+            await processor.handleRuntimeEvent(threadID: "thread-1", turnID: "turn-1", event: event)
+        }
+
+        for (_, method, expected) in cases {
+            let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+            XCTAssertEqual(messages.count, 1)
+            XCTAssertEqual(messages[0]["method"] as? String, method)
+            let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+            XCTAssertEqual(params["threadId"] as? String, "thread-1")
+            XCTAssertEqual(params["turnId"] as? String, "turn-1")
+            for (key, value) in expected {
+                switch value {
+                case let intValue as Int64:
+                    XCTAssertEqual(params[key] as? Int, Int(intValue))
+                case let stringValue as String:
+                    XCTAssertEqual(params[key] as? String, stringValue)
+                default:
+                    XCTFail("unsupported expected value for \(key)")
+                }
+            }
+        }
+    }
+
+    func testRuntimeCommandAndPatchProgressEventsEmitRustNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .execCommandOutputDelta(ExecCommandOutputDeltaEvent(
+                callID: "cmd-1",
+                stream: .stdout,
+                chunk: [0x48, 0x69, 0x20, 0xFF]
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .terminalInteraction(TerminalInteractionEvent(
+                callID: "cmd-1",
+                processID: "proc-1",
+                stdin: "q\n"
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .patchApplyUpdated(PatchApplyUpdatedEvent(
+                callID: "patch-1",
+                changes: [
+                    "b.swift": .update(unifiedDiff: "@@ -1 +1 @@\n-old\n+new", movePath: "Sources/B.swift"),
+                    "a.swift": .add(content: "let a = 1\n"),
+                    "c.swift": .delete(content: "let c = 1\n")
+                ]
+            ))
+        )
+
+        let outputMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(outputMessages[0]["method"] as? String, "item/commandExecution/outputDelta")
+        let outputParams = try XCTUnwrap(outputMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(outputParams["turnId"] as? String, "turn-1")
+        XCTAssertEqual(outputParams["itemId"] as? String, "cmd-1")
+        XCTAssertEqual(outputParams["delta"] as? String, "Hi \u{FFFD}")
+
+        let terminalMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(terminalMessages[0]["method"] as? String, "item/commandExecution/terminalInteraction")
+        let terminalParams = try XCTUnwrap(terminalMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(terminalParams["itemId"] as? String, "cmd-1")
+        XCTAssertEqual(terminalParams["processId"] as? String, "proc-1")
+        XCTAssertEqual(terminalParams["stdin"] as? String, "q\n")
+
+        let patchMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(patchMessages[0]["method"] as? String, "item/fileChange/patchUpdated")
+        let patchParams = try XCTUnwrap(patchMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(patchParams["itemId"] as? String, "patch-1")
+        let changes = try XCTUnwrap(patchParams["changes"] as? [[String: Any]])
+        XCTAssertEqual(changes.map { $0["path"] as? String }, ["a.swift", "b.swift", "c.swift"])
+        XCTAssertEqual(changes[0]["diff"] as? String, "let a = 1\n")
+        XCTAssertEqual((changes[0]["kind"] as? [String: Any])?["type"] as? String, "add")
+        XCTAssertEqual(changes[1]["diff"] as? String, "@@ -1 +1 @@\n-old\n+new\n\nMoved to: Sources/B.swift")
+        let updateKind = try XCTUnwrap(changes[1]["kind"] as? [String: Any])
+        XCTAssertEqual(updateKind["type"] as? String, "update")
+        XCTAssertEqual(updateKind["movePath"] as? String, "Sources/B.swift")
+        XCTAssertEqual((changes[2]["kind"] as? [String: Any])?["type"] as? String, "delete")
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

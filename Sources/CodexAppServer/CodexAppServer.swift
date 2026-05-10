@@ -8266,6 +8266,173 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func agentMessageDeltaNotification(
+        threadID: String,
+        turnID: String,
+        event: AgentMessageContentDeltaEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/agentMessage/delta",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.itemID,
+                "delta": event.delta
+            ]
+        ]
+    }
+
+    fileprivate static func planDeltaNotification(threadID: String, turnID: String, event: PlanDeltaEvent) -> [String: Any] {
+        [
+            "method": "item/plan/delta",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.itemID,
+                "delta": event.delta
+            ]
+        ]
+    }
+
+    fileprivate static func reasoningSummaryTextDeltaNotification(
+        threadID: String,
+        turnID: String,
+        event: ReasoningContentDeltaEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/reasoning/summaryTextDelta",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.itemID,
+                "delta": event.delta,
+                "summaryIndex": event.summaryIndex
+            ]
+        ]
+    }
+
+    fileprivate static func reasoningTextDeltaNotification(
+        threadID: String,
+        turnID: String,
+        event: ReasoningRawContentDeltaEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/reasoning/textDelta",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.itemID,
+                "delta": event.delta,
+                "contentIndex": event.contentIndex
+            ]
+        ]
+    }
+
+    fileprivate static func reasoningSummaryPartAddedNotification(
+        threadID: String,
+        turnID: String,
+        event: AgentReasoningSectionBreakEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/reasoning/summaryPartAdded",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.itemID,
+                "summaryIndex": event.summaryIndex
+            ]
+        ]
+    }
+
+    fileprivate static func commandExecutionOutputDeltaNotification(
+        threadID: String,
+        turnID: String,
+        event: ExecCommandOutputDeltaEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/commandExecution/outputDelta",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.callID,
+                "delta": String(decoding: event.chunk, as: UTF8.self)
+            ]
+        ]
+    }
+
+    fileprivate static func terminalInteractionNotification(
+        threadID: String,
+        turnID: String,
+        event: TerminalInteractionEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/commandExecution/terminalInteraction",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.callID,
+                "processId": event.processID,
+                "stdin": event.stdin
+            ]
+        ]
+    }
+
+    fileprivate static func fileChangePatchUpdatedNotification(
+        threadID: String,
+        turnID: String,
+        event: PatchApplyUpdatedEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/fileChange/patchUpdated",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "itemId": event.callID,
+                "changes": fileUpdateChanges(event.changes)
+            ]
+        ]
+    }
+
+    private static func fileUpdateChanges(_ changes: [String: FileChange]) -> [[String: Any]] {
+        changes
+            .map { path, change in
+                [
+                    "path": path,
+                    "kind": fileUpdateChangeKind(change),
+                    "diff": fileUpdateChangeDiff(change)
+                ]
+            }
+            .sorted { lhs, rhs in
+                (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
+            }
+    }
+
+    private static func fileUpdateChangeKind(_ change: FileChange) -> [String: Any] {
+        switch change {
+        case .add:
+            return ["type": "add"]
+        case .delete:
+            return ["type": "delete"]
+        case let .update(_, movePath):
+            return [
+                "type": "update",
+                "movePath": movePath as Any? ?? NSNull()
+            ]
+        }
+    }
+
+    private static func fileUpdateChangeDiff(_ change: FileChange) -> String {
+        switch change {
+        case let .add(content), let .delete(content):
+            return content
+        case let .update(unifiedDiff, movePath):
+            guard let movePath else {
+                return unifiedDiff
+            }
+            return "\(unifiedDiff)\n\nMoved to: \(movePath)"
+        }
+    }
+
     fileprivate static func mcpServerStatusUpdatedNotification(_ update: McpStartupUpdateEvent) -> [String: Any] {
         let status: String
         let error: Any
@@ -8716,6 +8883,22 @@ public enum CodexAppServer {
             return realtimeNotification(threadID: threadID, event: event)
         case let .realtimeConversationClosed(event):
             return realtimeClosedNotification(threadID: threadID, event: event)
+        case let .agentMessageContentDelta(event):
+            return agentMessageDeltaNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .planDelta(event):
+            return planDeltaNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .reasoningContentDelta(event):
+            return reasoningSummaryTextDeltaNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .reasoningRawContentDelta(event):
+            return reasoningTextDeltaNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .agentReasoningSectionBreak(event):
+            return reasoningSummaryPartAddedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .execCommandOutputDelta(event):
+            return commandExecutionOutputDeltaNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .terminalInteraction(event):
+            return terminalInteractionNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .patchApplyUpdated(event):
+            return fileChangePatchUpdatedNotification(threadID: threadID, turnID: turnID, event: event)
         default:
             return nil
         }
