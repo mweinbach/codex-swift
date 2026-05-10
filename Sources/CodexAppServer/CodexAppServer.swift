@@ -3230,7 +3230,8 @@ public enum CodexAppServer {
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration,
         auth: AppServerAuth,
-        failurePrefix: String
+        failurePrefix: String,
+        method: String = "GET"
     ) throws -> [String: Any] {
         let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
         guard var components = URLComponents(string: normalizedBaseURL + path) else {
@@ -3241,7 +3242,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("\(failurePrefix): invalid remote plugin catalog base URL path")
         }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
         if let accountID = auth.accountID, !accountID.isEmpty {
             request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
@@ -4960,10 +4961,86 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
         if isValidRemotePluginID(pluginID) {
-            throw AppServerError.invalidRequest("remote plugin uninstall is not enabled")
+            try remotePluginUninstall(pluginID: pluginID, configuration: configuration)
+            return [:]
         }
         try localPluginUninstall(pluginID: pluginID, configuration: configuration)
         return [:]
+    }
+
+    private static func remotePluginUninstall(
+        pluginID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
+        guard runtimeConfig.features.isEnabled(.plugins) else {
+            throw AppServerError.invalidRequest("remote plugin uninstall is not enabled")
+        }
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            throw AppServerError.invalidRequest("uninstall remote plugin: chatgpt authentication required for remote plugin catalog")
+        }
+        let detail = try remotePluginObject(
+            path: "/ps/plugins/\(pluginID)",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "uninstall remote plugin"
+        )
+        let pluginName = detail["name"] as? String ?? pluginID
+        let marketplaceName = remotePluginMarketplaceName(forScope: detail["scope"] as? String ?? "GLOBAL")
+        let response = try remotePluginObject(
+            path: "/plugins/\(pluginID)/uninstall",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "uninstall remote plugin",
+            method: "POST"
+        )
+        if let responsePluginID = response["id"] as? String, responsePluginID != pluginID {
+            throw AppServerError.internalError(
+                "uninstall remote plugin: remote plugin mutation returned unexpected plugin id: expected `\(pluginID)`, got `\(responsePluginID)`"
+            )
+        }
+        if let enabled = response["enabled"] as? Bool, enabled {
+            throw AppServerError.internalError(
+                "uninstall remote plugin: remote plugin mutation returned unexpected enabled state for `\(pluginID)`: expected false, got true"
+            )
+        }
+        do {
+            try removeRemotePluginCache(
+                codexHome: configuration.codexHome,
+                marketplaceName: marketplaceName,
+                pluginName: pluginName,
+                legacyPluginID: pluginID
+            )
+        } catch {
+            throw AppServerError.internalError("uninstall remote plugin: \(error)")
+        }
+    }
+
+    private static func removeRemotePluginCache(
+        codexHome: URL,
+        marketplaceName: String,
+        pluginName: String,
+        legacyPluginID: String
+    ) throws {
+        let cacheRoot = codexHome.appendingPathComponent("plugins/cache", isDirectory: true)
+        let pluginRoot = cacheRoot
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .appendingPathComponent(pluginName, isDirectory: true)
+        if FileManager.default.fileExists(atPath: pluginRoot.path) {
+            try FileManager.default.removeItem(at: pluginRoot)
+        }
+        let legacyRoot = cacheRoot
+            .appendingPathComponent(marketplaceName, isDirectory: true)
+            .appendingPathComponent(legacyPluginID, isDirectory: true)
+        if FileManager.default.fileExists(atPath: legacyRoot.path) {
+            try FileManager.default.removeItem(at: legacyRoot)
+        }
     }
 
     private static func localPluginUninstall(

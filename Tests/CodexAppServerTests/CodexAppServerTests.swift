@@ -5559,7 +5559,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(leftoverCheckouts, [])
     }
 
-    func testPluginUninstallValidatesIdsAndReportsRemoteDisabled() throws {
+    func testPluginUninstallValidatesIdsAndReportsRemoteDisabledWhenPluginsDisabled() throws {
         let temp = try TemporaryDirectory()
 
         let invalid = try appServerResponse(
@@ -5570,6 +5570,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidError["code"] as? Int, -32600)
         XCTAssertEqual(invalidError["message"] as? String, "invalid remote plugin id")
 
+        try """
+        [features]
+        plugins = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         let remoteDisabled = try appServerResponse(
             #"{"id":2,"method":"plugin/uninstall","params":{"pluginId":"plugins~Plugin_gmail","forceRemoteSync":true}}"#,
             codexHome: temp.url
@@ -5577,6 +5581,125 @@ final class CodexAppServerTests: XCTestCase {
         let remoteDisabledError = try XCTUnwrap(remoteDisabled["error"] as? [String: Any])
         XCTAssertEqual(remoteDisabledError["code"] as? Int, -32600)
         XCTAssertEqual(remoteDisabledError["message"] as? String, "remote plugin uninstall is not enabled")
+    }
+
+    func testPluginUninstallRemovesRemotePluginCacheAfterCloudMutation() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins~Plugin_linear"
+        let detailBody = remotePluginDetailBody(id: pluginID, name: "linear", displayName: "Linear", scope: "GLOBAL")
+        let uninstallBody = #"{"id":"plugins~Plugin_linear","enabled":false}"#
+        let cacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/linear", isDirectory: true)
+        let legacyCacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/\(pluginID)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: cacheRoot.appendingPathComponent("1.0.0/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: legacyCacheRoot.appendingPathComponent("local/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("POST", "/backend-api/plugins/\(pluginID)/uninstall"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(uninstallBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/uninstall","params":{"pluginId":"\#(pluginID)","forceRemoteSync":true}}"#,
+            configuration: configuration
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheRoot.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyCacheRoot.path))
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "POST"])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer chatgpt-token", "Bearer chatgpt-token"])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, ["account-123", "account-123"])
+    }
+
+    func testPluginUninstallUsesRemoteDetailScopeForWorkspaceCache() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins_69f27c3e67848191a45cbaa5f2adb39d"
+        let detailBody = remotePluginDetailBody(id: pluginID, name: "skill-improver", displayName: "Skill Improver", scope: "WORKSPACE")
+        let uninstallBody = #"{"id":"plugins_69f27c3e67848191a45cbaa5f2adb39d","enabled":false}"#
+        let workspaceCacheRoot = temp.url.appendingPathComponent("plugins/cache/workspace-directory/skill-improver", isDirectory: true)
+        let globalCacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/skill-improver", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workspaceCacheRoot.appendingPathComponent("1.0.0/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: globalCacheRoot.appendingPathComponent("1.0.0/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.httpMethod, request.url?.path) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("POST", "/backend-api/plugins/\(pluginID)/uninstall"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(uninstallBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/uninstall","params":{"pluginId":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspaceCacheRoot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: globalCacheRoot.path))
     }
 
     func testMarketplaceUpgradeReturnsRustEmptyOutcomeWithoutConfiguredGitMarketplaces() throws {
