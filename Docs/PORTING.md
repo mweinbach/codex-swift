@@ -849,6 +849,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's `thread/start` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread resume/fork experimental gating
   - matched Rust's field-level experimental API guards for `thread/resume.history`, `thread/resume.path`, `thread/resume.permissions`, `thread/resume.excludeTurns`, `thread/resume.persistFullHistory`, `thread/fork.path`, `thread/fork.permissions`, `thread/fork.excludeTurns`, `thread/fork.persistFullHistory`, and nested `askForApproval.granular`.
+- `codex-rs/app-server` deprecated `persistExtendedHistory`
+  - matched Rust's legacy `persistExtendedHistory` handling on `thread/start`, `thread/resume`, and `thread/fork`: experimental clients receive a `deprecationNotice` with the Rust summary/details and the request continues, while clients without experimental API access get the same `persistFullHistory` capability error.
 - `codex-rs/app-server` thread resume/fork override compatibility
   - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread-resume response shape

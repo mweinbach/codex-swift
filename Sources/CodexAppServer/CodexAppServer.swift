@@ -595,6 +595,10 @@ public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
     private static let maxUserInputTextScalars = 1 << 20
+    fileprivate static let persistExtendedHistoryDeprecationSummary =
+        "persistExtendedHistory is deprecated and ignored"
+    fileprivate static let persistExtendedHistoryDeprecationDetails =
+        "Remove this parameter. App-server always uses limited history persistence."
     fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
     fileprivate static let platformFamily = "unix"
@@ -1409,6 +1413,9 @@ public enum CodexAppServer {
         if boolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
         }
+        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
+        }
     }
 
     fileprivate static func requireThreadStartContextOverrideCompatibility(params: [String: Any]?) throws {
@@ -1441,6 +1448,9 @@ public enum CodexAppServer {
         if boolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/resume.persistFullHistory requires experimentalApi capability")
         }
+        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/resume.persistFullHistory requires experimentalApi capability")
+        }
     }
 
     fileprivate static func requireThreadForkExperimentalFieldsAPI(
@@ -1463,6 +1473,16 @@ public enum CodexAppServer {
         if boolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/fork.persistFullHistory requires experimentalApi capability")
         }
+        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+            throw AppServerError.invalidRequest("thread/fork.persistFullHistory requires experimentalApi capability")
+        }
+    }
+
+    fileprivate static func persistExtendedHistoryDeprecationNoticeNotification() -> [String: Any] {
+        deprecationNoticeNotification(DeprecationNoticeEvent(
+            summary: persistExtendedHistoryDeprecationSummary,
+            details: persistExtendedHistoryDeprecationDetails
+        ))
     }
 
     fileprivate static func requireThreadContextOverrideCompatibility(params: [String: Any]?) throws {
@@ -16194,6 +16214,9 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadStartContextOverrideCompatibility(params: params)
+                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                        notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
+                    }
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
@@ -16275,6 +16298,9 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
+                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                        notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
+                    }
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
@@ -16294,6 +16320,9 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
+                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                        notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
+                    }
                     let result = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {

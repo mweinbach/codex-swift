@@ -134,6 +134,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadPersistExtendedHistoryEmitsDeprecationNoticeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"persistExtendedHistory":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(startMessages.count, 3)
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+        try assertPersistExtendedHistoryDeprecationNotice(startMessages[1])
+        XCTAssertEqual(startMessages[2]["method"] as? String, "thread/started")
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","persistExtendedHistory":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(resumeMessages.count, 2)
+        XCTAssertNotNil(resumeMessages[0]["result"] as? [String: Any])
+        try assertPersistExtendedHistoryDeprecationNotice(resumeMessages[1])
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)","persistExtendedHistory":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(forkMessages.count, 3)
+        XCTAssertNotNil(forkMessages[0]["result"] as? [String: Any])
+        try assertPersistExtendedHistoryDeprecationNotice(forkMessages[1])
+        XCTAssertEqual(forkMessages[2]["method"] as? String, "thread/started")
+    }
+
     func testThreadStartExperimentalFieldsRequireExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 
@@ -144,7 +180,8 @@ final class CodexAppServerTests: XCTestCase {
             (#"{"permissions":{"profile":"readOnly"}}"#, "thread/start.permissions"),
             (#"{"mockExperimentalField":"mock"}"#, "thread/start.mockExperimentalField"),
             (#"{"experimentalRawEvents":true}"#, "thread/start.experimentalRawEvents"),
-            (#"{"persistFullHistory":true}"#, "thread/start.persistFullHistory")
+            (#"{"persistFullHistory":true}"#, "thread/start.persistFullHistory"),
+            (#"{"persistExtendedHistory":true}"#, "thread/start.persistFullHistory")
         ]
 
         for (index, testCase) in cases.enumerated() {
@@ -162,7 +199,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
 
-        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"experimentalRawEvents":false,"persistFullHistory":false}}"#.utf8)))
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"experimentalRawEvents":false,"persistFullHistory":false,"persistExtendedHistory":false}}"#.utf8)))
 
         XCTAssertNotNil(messages[0]["result"] as? [String: Any])
         XCTAssertNil(messages[0]["error"])
@@ -2332,7 +2369,8 @@ final class CodexAppServerTests: XCTestCase {
             (#""path":"/tmp/rollout.jsonl""#, "thread/resume.path"),
             (#""permissions":{"profile":"readOnly"}"#, "thread/resume.permissions"),
             (#""excludeTurns":true"#, "thread/resume.excludeTurns"),
-            (#""persistFullHistory":true"#, "thread/resume.persistFullHistory")
+            (#""persistFullHistory":true"#, "thread/resume.persistFullHistory"),
+            (#""persistExtendedHistory":true"#, "thread/resume.persistFullHistory")
         ]
 
         for (index, testCase) in cases.enumerated() {
@@ -2466,7 +2504,8 @@ final class CodexAppServerTests: XCTestCase {
             (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
             (#""permissions":{"profile":"readOnly"}"#, "thread/fork.permissions"),
             (#""excludeTurns":true"#, "thread/fork.excludeTurns"),
-            (#""persistFullHistory":true"#, "thread/fork.persistFullHistory")
+            (#""persistFullHistory":true"#, "thread/fork.persistFullHistory"),
+            (#""persistExtendedHistory":true"#, "thread/fork.persistFullHistory")
         ]
 
         for (index, testCase) in cases.enumerated() {
@@ -12289,6 +12328,27 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func assertPersistExtendedHistoryDeprecationNotice(
+        _ message: [String: Any],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        XCTAssertEqual(message["method"] as? String, "deprecationNotice", file: file, line: line)
+        let params = try XCTUnwrap(message["params"] as? [String: Any], file: file, line: line)
+        XCTAssertEqual(
+            params["summary"] as? String,
+            "persistExtendedHistory is deprecated and ignored",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            params["details"] as? String,
+            "Remove this parameter. App-server always uses limited history persistence.",
+            file: file,
+            line: line
+        )
     }
 
     private func testConfiguration(
