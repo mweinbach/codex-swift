@@ -23,6 +23,13 @@ final class ApplyPatchInvocationTests: XCTestCase {
         )
     }
 
+    func testBashHeredocApplypatchAliasMatchesRustInvocationParser() {
+        assertBody(
+            maybeParseApplyPatch(["bash", "-lc", heredocScript(prefix: "", command: "applypatch")]),
+            workdir: nil
+        )
+    }
+
     func testBashNonLoginShellHeredocExtractsPatchBody() {
         assertBody(
             maybeParseApplyPatch(["bash", "-c", heredocScript(prefix: "")]),
@@ -205,9 +212,9 @@ final class ApplyPatchInvocationTests: XCTestCase {
         """
     }
 
-    private func heredocScript(prefix: String, suffix: String = "") -> String {
+    private func heredocScript(prefix: String, suffix: String = "", command: String = "apply_patch") -> String {
         """
-        \(prefix)apply_patch <<'PATCH'
+        \(prefix)\(command) <<'PATCH'
         \(singleAddPatch)
         PATCH\(suffix)
         """

@@ -131,7 +131,7 @@ Source baseline inspected for this scaffold:
   - initial native `CodexApplyPatch` target and `apply_patch` executable
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
 - `codex-rs/apply-patch/src/invocation.rs`
-  - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
+  - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, shell heredoc `applypatch` alias detection, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
 - `codex-rs/arg0/src/lib.rs` apply-patch dispatch path
   - `codex` executable dispatch for `apply_patch`/`applypatch` argv0 aliases, hidden `--codex-run-as-apply-patch` argument execution, Rust-matching standalone empty-stdin/extra-argument failures, temporary `apply_patch`/`applypatch` symlink directory prepended to `PATH`, and shared apply-patch command result routing
 - `codex-rs/arg0/src/lib.rs` startup dotenv loading
