@@ -164,6 +164,8 @@ Source baseline inspected for this scaffold:
   - executable `codex debug models --bundled` now emits the Swift bundled model catalog as JSON through the debug command runtime. Online raw catalog refresh for `codex debug models` without `--bundled` remains pending.
 - `codex-rs/cli/src/main.rs` debug clear-memories runtime
   - executable `codex debug clear-memories` now resolves the effective config, clears Rust-compatible `state_5.sqlite` memory rows when present, preserves the no-state-db message path, and removes contents under both memory roots while preserving the root directories.
+- `codex-rs/cli/src/main.rs` debug prompt-input runtime
+  - executable `codex debug prompt-input` now emits a pretty-printed JSON model input list with environment context, local image conversion, optional prompt text, and Rust's CRLF/CR prompt normalization. Full Rust session startup side effects, tool router construction, skills injection, and configured environment expansion remain pending.
 - `codex-rs/stdio-to-uds`
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
 - `codex-rs/ansi-escape`

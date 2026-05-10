@@ -5,6 +5,72 @@ import SQLite3
 import XCTest
 
 final class DebugCommandRuntimeTests: XCTestCase {
+    func testPromptInputOutputsEnvironmentImagesAndNormalizedPrompt() async throws {
+        let temp = try TemporaryDirectory()
+        let imagePath = temp.url.appendingPathComponent("image.png", isDirectory: false)
+        try writeTinyPNG(to: imagePath)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(
+                action: .promptInput(prompt: "hello\r\nworld\ragain", imagePaths: [imagePath.path])
+            ),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertNil(result.stderrMessage)
+        let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertTrue(output.contains("\n  {"))
+
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        XCTAssertEqual(decoded.count, 2)
+        guard case let .message(_, environmentRole, environmentContent, _) = decoded[0] else {
+            return XCTFail("expected environment context message")
+        }
+        XCTAssertEqual(environmentRole, "user")
+        guard case let .inputText(environmentText) = environmentContent.first else {
+            return XCTFail("expected environment text")
+        }
+        XCTAssertTrue(environmentText.contains("<environment_context>"))
+
+        guard case let .message(_, userRole, userContent, _) = decoded[1] else {
+            return XCTFail("expected user input message")
+        }
+        XCTAssertEqual(userRole, "user")
+        XCTAssertEqual(userContent.count, 4)
+        guard case let .inputText(openTag) = userContent[0],
+              case .inputImage = userContent[1],
+              case let .inputText(closeTag) = userContent[2],
+              case let .inputText(promptText) = userContent[3]
+        else {
+            return XCTFail("expected local image wrapper followed by prompt")
+        }
+        XCTAssertEqual(openTag, "<image name=[Image #1]>")
+        XCTAssertEqual(closeTag, "</image>")
+        XCTAssertEqual(promptText, "hello\nworld\nagain")
+    }
+
+    func testPromptInputWithoutUserItemsOnlyOutputsEnvironment() async throws {
+        let temp = try TemporaryDirectory()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        XCTAssertEqual(decoded.count, 1)
+        guard case let .message(_, role, content, _) = decoded[0] else {
+            return XCTFail("expected environment context message")
+        }
+        XCTAssertEqual(role, "user")
+        guard case let .inputText(text) = content.first else {
+            return XCTFail("expected environment text")
+        }
+        XCTAssertTrue(text.contains("<environment_context>"))
+    }
+
     func testClearMemoriesClearsStateRowsAndMemoryRoots() async throws {
         let temp = try TemporaryDirectory()
         let statePath = temp.url.appendingPathComponent("state_5.sqlite", isDirectory: false)
@@ -196,6 +262,12 @@ final class DebugCommandRuntimeTests: XCTestCase {
             XCTFail(message)
             throw NSError(domain: "DebugCommandRuntimeTests", code: Int(result))
         }
+    }
+
+    private func writeTinyPNG(to path: URL) throws {
+        let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        let data = try XCTUnwrap(Data(base64Encoded: encoded))
+        try data.write(to: path)
     }
 }
 

@@ -35,8 +35,8 @@ public enum DebugCommandRuntime {
             return try runModels(bundled: bundled)
         case .appServerSendMessageV2:
             return pendingRuntime("debug app-server send-message-v2")
-        case .promptInput:
-            return pendingRuntime("debug prompt-input")
+        case let .promptInput(prompt, imagePaths):
+            return try runPromptInput(prompt: prompt, imagePaths: imagePaths, request: request, dependencies: dependencies)
         case .traceReduce:
             return pendingRuntime("debug trace-reduce")
         case .clearMemories:
@@ -61,6 +61,66 @@ public enum DebugCommandRuntime {
             )
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+
+    private static func runPromptInput(
+        prompt: String?,
+        imagePaths: [String],
+        request: CodexCLI.DebugCommandRequest,
+        dependencies: Dependencies
+    ) throws -> CodexCLI.CommandExecutionResult {
+        let codexHome = try dependencies.findCodexHome()
+        let config = try dependencies.loadConfig(codexHome, request.configOverrides)
+        let input = makePromptInput(
+            prompt: prompt,
+            imagePaths: imagePaths,
+            config: config
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        let data = try encoder.encode(input)
+        guard let output = String(data: data, encoding: .utf8) else {
+            throw EncodingError.invalidValue(
+                input,
+                EncodingError.Context(
+                    codingPath: [],
+                    debugDescription: "Unable to encode debug prompt input as UTF-8"
+                )
+            )
+        }
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+
+    private static func makePromptInput(
+        prompt: String?,
+        imagePaths: [String],
+        config: CodexRuntimeConfig
+    ) -> [ResponseItem] {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let approvalPolicy = config.approvalPolicy ?? .onRequest
+        let sandboxPolicy = config.legacySandboxPolicy()
+        var input = [
+            EnvironmentContext
+                .fromTurnContext(
+                    TurnContext(
+                        cwd: cwd.path,
+                        approvalPolicy: approvalPolicy,
+                        sandboxPolicy: sandboxPolicy
+                    ),
+                    shell: ShellResolver.defaultUserShell()
+                )
+                .asResponseItem()
+        ]
+
+        var userInputs = imagePaths.map(UserInput.localImage(path:))
+        if let prompt {
+            userInputs.append(.text(prompt.replacingCRLFWithLF()))
+        }
+        if !userInputs.isEmpty {
+            input.append(ResponseInputItem(userInputs: userInputs).responseItem())
+        }
+
+        return input
     }
 
     private static func pendingRuntime(_ command: String) -> CodexCLI.CommandExecutionResult {
@@ -129,5 +189,12 @@ public enum DebugCommandRuntime {
         for entry in entries {
             try FileManager.default.removeItem(at: entry)
         }
+    }
+}
+
+private extension String {
+    func replacingCRLFWithLF() -> String {
+        replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 }
