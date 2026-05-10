@@ -1289,19 +1289,9 @@ private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) 
             executorID: executorID,
             name: name
         )
-        let client = try ExecServerRemoteExecutorRegistryClient(
-            baseURL: config.baseURL,
-            bearerToken: config.bearerToken
-        )
-        let response = try await client.registerExecutor(config.registrationRequest(registrationID: UUID()))
-        fputs(
-            "codex exec-server remote executor \(response.id) registered with executor_id \(response.executorId)\n",
-            stderr
-        )
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: exec-server remote rendezvous websocket runtime is not complete yet."
-        )
+        let executor = try ExecServerRemoteExecutor(config: config)
+        try await executor.run()
+        return CodexCLI.CommandExecutionResult(exitCode: 0)
     }
 }
 

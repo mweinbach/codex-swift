@@ -2085,6 +2085,105 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteExecutorRunnerRegistersConnectsAndSleepsLikeRust() async throws {
+        let config = try ExecServerRemoteExecutorConfiguration(
+            baseURL: "https://registry.example.test",
+            executorID: "exec-requested",
+            bearerToken: "registry-token"
+        )
+        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let recorder = RemoteExecutorRunRecorder(
+            responses: [ExecServerRemoteExecutorRegistrationResponse(
+                id: "registration-1",
+                executorId: "exec-1",
+                url: "wss://rendezvous.test/executor/exec-1"
+            )],
+            connectFailures: [false]
+        )
+        let executor = ExecServerRemoteExecutor(
+            config: config,
+            registrationID: registrationID,
+            registerExecutor: { request in await recorder.register(request) },
+            connectAndServe: { url, _ in try await recorder.connect(url) },
+            sleep: { seconds in try await recorder.sleep(seconds, stopAfter: 1) },
+            messageSink: { message in await recorder.message(message) }
+        )
+
+        do {
+            try await executor.run()
+            XCTFail("Expected test stop")
+        } catch RemoteExecutorRunStop.stopped {
+        } catch {
+            XCTFail("Unexpected remote executor runner error: \(error)")
+        }
+
+        let snapshot = await recorder.snapshot()
+        XCTAssertEqual(snapshot.requests.map(\.executorId), ["exec-requested"])
+        XCTAssertEqual(snapshot.requests.map(\.idempotencyId), [
+            "codex-exec-server-ca85dcc8eab43dfc6a5e632a7fe44adb7f5e904895bec68497baa50e37305fed"
+        ])
+        XCTAssertEqual(snapshot.connectedURLs, ["wss://rendezvous.test/executor/exec-1"])
+        XCTAssertEqual(snapshot.sleeps, [1.0])
+        XCTAssertEqual(snapshot.messages, [
+            "codex exec-server remote executor registration-1 registered with executor_id exec-1"
+        ])
+    }
+
+    func testRemoteExecutorRunnerRetriesWithRustBackoffAfterWebSocketFailures() async throws {
+        let config = try ExecServerRemoteExecutorConfiguration(
+            baseURL: "https://registry.example.test",
+            executorID: "exec-requested",
+            bearerToken: "registry-token"
+        )
+        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let recorder = RemoteExecutorRunRecorder(
+            responses: [
+                ExecServerRemoteExecutorRegistrationResponse(
+                    id: "registration-1",
+                    executorId: "exec-1",
+                    url: "wss://rendezvous.test/first"
+                ),
+                ExecServerRemoteExecutorRegistrationResponse(
+                    id: "registration-2",
+                    executorId: "exec-1",
+                    url: "wss://rendezvous.test/second"
+                )
+            ],
+            connectFailures: [true, true]
+        )
+        let executor = ExecServerRemoteExecutor(
+            config: config,
+            registrationID: registrationID,
+            registerExecutor: { request in await recorder.register(request) },
+            connectAndServe: { url, _ in try await recorder.connect(url) },
+            sleep: { seconds in try await recorder.sleep(seconds, stopAfter: 2) },
+            messageSink: { message in await recorder.message(message) }
+        )
+
+        do {
+            try await executor.run()
+            XCTFail("Expected test stop")
+        } catch RemoteExecutorRunStop.stopped {
+        } catch {
+            XCTFail("Unexpected remote executor runner error: \(error)")
+        }
+
+        let snapshot = await recorder.snapshot()
+        XCTAssertEqual(snapshot.requests.count, 2)
+        XCTAssertEqual(Set(snapshot.requests.map(\.idempotencyId)).count, 1)
+        XCTAssertEqual(snapshot.connectedURLs, [
+            "wss://rendezvous.test/first",
+            "wss://rendezvous.test/second"
+        ])
+        XCTAssertEqual(snapshot.sleeps, [1.0, 2.0])
+        XCTAssertEqual(snapshot.messages, [
+            "codex exec-server remote executor registration-1 registered with executor_id exec-1",
+            "failed to connect remote exec-server websocket: test websocket connect failed",
+            "codex exec-server remote executor registration-2 registered with executor_id exec-1",
+            "failed to connect remote exec-server websocket: test websocket connect failed"
+        ])
+    }
+
     func testRemoteExecutorConfigurationErrorsMatchRustMessages() {
         XCTAssertThrowsError(try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: "https://registry.example.test",
@@ -2323,6 +2422,71 @@ final class ExecServerTests: XCTestCase {
 
         func firstRequest() -> URLRequest? {
             requests.first
+        }
+    }
+
+    private enum RemoteExecutorRunStop: Error, Equatable, Sendable {
+        case stopped
+    }
+
+    private struct RemoteExecutorConnectFailure: Error, CustomStringConvertible, Sendable {
+        var description: String {
+            "test websocket connect failed"
+        }
+    }
+
+    private actor RemoteExecutorRunRecorder {
+        private var responses: [ExecServerRemoteExecutorRegistrationResponse]
+        private var connectFailures: [Bool]
+        private var requests: [ExecServerRemoteExecutorRegistrationRequest] = []
+        private var connectedURLs: [String] = []
+        private var sleeps: [TimeInterval] = []
+        private var messages: [String] = []
+
+        init(
+            responses: [ExecServerRemoteExecutorRegistrationResponse],
+            connectFailures: [Bool]
+        ) {
+            self.responses = responses
+            self.connectFailures = connectFailures
+        }
+
+        func register(
+            _ request: ExecServerRemoteExecutorRegistrationRequest
+        ) -> ExecServerRemoteExecutorRegistrationResponse {
+            requests.append(request)
+            if responses.count > 1 {
+                return responses.removeFirst()
+            }
+            return responses[0]
+        }
+
+        func connect(_ url: String) throws {
+            connectedURLs.append(url)
+            let shouldFail = connectFailures.isEmpty ? false : connectFailures.removeFirst()
+            if shouldFail {
+                throw RemoteExecutorConnectFailure()
+            }
+        }
+
+        func sleep(_ seconds: TimeInterval, stopAfter: Int) throws {
+            sleeps.append(seconds)
+            if sleeps.count >= stopAfter {
+                throw RemoteExecutorRunStop.stopped
+            }
+        }
+
+        func message(_ message: String) {
+            messages.append(message)
+        }
+
+        func snapshot() -> (
+            requests: [ExecServerRemoteExecutorRegistrationRequest],
+            connectedURLs: [String],
+            sleeps: [TimeInterval],
+            messages: [String]
+        ) {
+            (requests, connectedURLs, sleeps, messages)
         }
     }
 
