@@ -42,6 +42,11 @@ public struct LoadedConfigLayers: Equatable, Sendable {
     }
 }
 
+private struct LoadedProjectLayers: Equatable, Sendable {
+    var layers: [ConfigLayerEntry]
+    var startupWarnings: [String]
+}
+
 public enum ConfigLayerLoadError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidData(String)
     case readFailed(path: String, message: String)
@@ -137,6 +142,7 @@ public enum CodexConfigLayerLoader {
         try loadRequirementsFromLegacyScheme(into: &requirementsToml, loadedConfigLayers: loadedConfigLayers)
 
         var layers: [ConfigLayerEntry] = []
+        var startupWarnings: [String] = []
 
         if let systemConfigFile {
             let systemPath = try AbsolutePath(absolutePath: systemConfigFile.standardizedFileURL.path)
@@ -168,11 +174,14 @@ public enum CodexConfigLayerLoader {
                 projectRootMarkers: projectRootMarkers,
                 fileManager: fileManager
             )
-            layers.append(contentsOf: try loadProjectLayers(
+            let projectLayers = try loadProjectLayers(
+                codexHome: codexHome,
                 cwd: cwdURL,
                 projectRoot: projectRoot,
                 fileManager: fileManager
-            ))
+            )
+            layers.append(contentsOf: projectLayers.layers)
+            startupWarnings.append(contentsOf: projectLayers.startupWarnings)
         }
 
         if !cliOverrides.rawOverrides.isEmpty {
@@ -206,7 +215,8 @@ public enum CodexConfigLayerLoader {
             layers: layers,
             requirements: try requirementsToml.requirements(),
             requirementsToml: requirementsToml,
-            ignoreUserAndProjectExecPolicyRules: overrides.ignoreUserAndProjectExecPolicyRules
+            ignoreUserAndProjectExecPolicyRules: overrides.ignoreUserAndProjectExecPolicyRules,
+            startupWarnings: startupWarnings
         )
     }
 
@@ -438,16 +448,19 @@ public enum CodexConfigLayerLoader {
     }
 
     private static func loadProjectLayers(
+        codexHome: URL,
         cwd: URL,
         projectRoot: URL,
         fileManager: FileManager
-    ) throws -> [ConfigLayerEntry] {
+    ) throws -> LoadedProjectLayers {
         guard let cwdIndex = ancestorDirectories(from: cwd).firstIndex(of: projectRoot) else {
-            return []
+            return LoadedProjectLayers(layers: [], startupWarnings: [])
         }
 
         let dirs = Array(ancestorDirectories(from: cwd)[0...cwdIndex].reversed())
         var layers: [ConfigLayerEntry] = []
+        var startupWarnings: [String] = []
+        let normalizedCodexHome = normalizedPath(codexHome)
         for directory in dirs {
             let dotCodex = directory.appendingPathComponent(".codex", isDirectory: true)
             var isDirectory: ObjCBool = false
@@ -456,15 +469,60 @@ public enum CodexConfigLayerLoader {
             else {
                 continue
             }
+            guard normalizedPath(dotCodex) != normalizedCodexHome else {
+                continue
+            }
 
             let dotCodexPath = try AbsolutePath(absolutePath: dotCodex.standardizedFileURL.path)
             let configFile = dotCodex.appendingPathComponent("config.toml", isDirectory: false)
+            let rawConfig = try readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
+            let (config, ignoredKeys) = sanitizeProjectConfig(rawConfig)
+            if !ignoredKeys.isEmpty {
+                startupWarnings.append(projectIgnoredConfigKeysWarning(
+                    dotCodexFolder: dotCodexPath,
+                    ignoredKeys: ignoredKeys
+                ))
+            }
             layers.append(ConfigLayerEntry(
                 name: .project(dotCodexFolder: dotCodexPath),
-                config: try readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
+                config: config
             ))
         }
-        return layers
+        return LoadedProjectLayers(layers: layers, startupWarnings: startupWarnings)
+    }
+
+    private static let projectLocalConfigDenylist: [String] = [
+        "openai_base_url",
+        "chatgpt_base_url",
+        "model_provider",
+        "model_providers",
+        "notify",
+        "profile",
+        "profiles",
+        "experimental_realtime_ws_base_url",
+        "otel"
+    ]
+
+    private static func sanitizeProjectConfig(_ config: ConfigValue) -> (ConfigValue, [String]) {
+        guard case var .table(table) = config else {
+            return (config, [])
+        }
+        var ignoredKeys: [String] = []
+        for key in projectLocalConfigDenylist where table.removeValue(forKey: key) != nil {
+            ignoredKeys.append(key)
+        }
+        return (.table(table), ignoredKeys)
+    }
+
+    private static func projectIgnoredConfigKeysWarning(
+        dotCodexFolder: AbsolutePath,
+        ignoredKeys: [String]
+    ) -> String {
+        "Ignored unsupported project-local config keys in \(dotCodexFolder.path)/config.toml: \(ignoredKeys.joined(separator: ", ")). If you want these settings to apply, manually set them in your user-level config.toml."
+    }
+
+    private static func normalizedPath(_ url: URL) -> String {
+        (url.standardizedFileURL.path as NSString).standardizingPath
     }
 
     private static func ancestorDirectories(from url: URL) -> [URL] {

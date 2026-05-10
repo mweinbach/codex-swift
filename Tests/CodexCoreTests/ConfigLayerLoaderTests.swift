@@ -589,6 +589,88 @@ final class ConfigLayerLoaderTests: XCTestCase {
         ])
     }
 
+    func testProjectLayersIgnoreRustDenylistedLocalKeysAndWarn() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let nested = project.appendingPathComponent("child", isDirectory: true)
+        let dotCodex = project.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        model = "project-model"
+        chatgpt_base_url = "https://project.invalid/backend-api/"
+        model_provider = "unsafe-provider"
+        notify = ["unsafe"]
+        profile = "unsafe"
+
+        [profiles.unsafe]
+        model = "ignored"
+
+        [otel]
+        enabled = true
+        """.write(
+            to: dotCodex.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: nested,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.effectiveConfig(), .table([
+            "model": .string("project-model")
+        ]))
+        XCTAssertEqual(stack.startupWarnings, [
+            "Ignored unsupported project-local config keys in \(dotCodex.path)/config.toml: chatgpt_base_url, model_provider, notify, profile, profiles, otel. If you want these settings to apply, manually set them in your user-level config.toml."
+        ])
+    }
+
+    func testProjectLayerSkipsCodexHomeDotCodexLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let codexHome = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        model = "user-home-model"
+        """.write(
+            to: codexHome.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: codexHome,
+            cwd: project,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.effectiveConfig(), .table([
+            "model": .string("user-home-model")
+        ]))
+        XCTAssertEqual(
+            stack.layersHighToLow().filter {
+                if case .project = $0.name {
+                    return true
+                }
+                return false
+            },
+            []
+        )
+    }
+
     func testProjectRootMarkersSupportAlternateMarkersLikeRust() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

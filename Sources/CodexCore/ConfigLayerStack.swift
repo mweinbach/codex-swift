@@ -200,18 +200,21 @@ public struct ConfigLayerStack: Equatable, Sendable {
     public var requirements: ConfigRequirements
     public var requirementsToml: ConfigRequirementsToml
     public var ignoreUserAndProjectExecPolicyRules: Bool
+    public var startupWarnings: [String]
 
     public init(
         layers: [ConfigLayerEntry],
         requirements: ConfigRequirements = .default,
         requirementsToml: ConfigRequirementsToml = ConfigRequirementsToml(),
-        ignoreUserAndProjectExecPolicyRules: Bool = false
+        ignoreUserAndProjectExecPolicyRules: Bool = false,
+        startupWarnings: [String] = []
     ) throws {
         self.layers = layers
         self.userLayerIndex = try Self.verifyLayerOrdering(layers)
         self.requirements = requirements
         self.requirementsToml = requirementsToml
         self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
+        self.startupWarnings = startupWarnings
     }
 
     private init(
@@ -219,13 +222,15 @@ public struct ConfigLayerStack: Equatable, Sendable {
         userLayerIndex: Int?,
         requirements: ConfigRequirements,
         requirementsToml: ConfigRequirementsToml,
-        ignoreUserAndProjectExecPolicyRules: Bool
+        ignoreUserAndProjectExecPolicyRules: Bool,
+        startupWarnings: [String]
     ) {
         self.layers = layers
         self.userLayerIndex = userLayerIndex
         self.requirements = requirements
         self.requirementsToml = requirementsToml
         self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
+        self.startupWarnings = startupWarnings
     }
 
     public func getUserLayer() -> ConfigLayerEntry? {
@@ -249,7 +254,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
                 userLayerIndex: userLayerIndex,
                 requirements: requirements,
                 requirementsToml: requirementsToml,
-                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
+                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules,
+                startupWarnings: startupWarnings
             )
         }
 
@@ -260,7 +266,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
                 userLayerIndex: insertionIndex,
                 requirements: requirements,
                 requirementsToml: requirementsToml,
-                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
+                ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules,
+                startupWarnings: startupWarnings
             )
         }
 
@@ -270,7 +277,8 @@ public struct ConfigLayerStack: Equatable, Sendable {
             userLayerIndex: nextLayers.count - 1,
             requirements: requirements,
             requirementsToml: requirementsToml,
-            ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules
+            ignoreUserAndProjectExecPolicyRules: ignoreUserAndProjectExecPolicyRules,
+            startupWarnings: startupWarnings
         )
     }
 
