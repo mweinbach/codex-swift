@@ -345,6 +345,27 @@ final class ModelProviderInfoTests: XCTestCase {
         )
     }
 
+    func testSupportsRemoteCompactionMatchesRustProviderRules() {
+        XCTAssertTrue(ModelProviderInfo.createOpenAIProvider(environment: [:]).supportsRemoteCompaction())
+        XCTAssertTrue(ModelProviderInfo(
+            name: "Azure",
+            baseURL: "https://example.com/openai",
+            envKey: "AZURE_OPENAI_API_KEY",
+            wireAPI: .responses
+        ).supportsRemoteCompaction())
+        XCTAssertTrue(ModelProviderInfo(
+            name: "test",
+            baseURL: "https://foo.openai.azure.com/openai",
+            wireAPI: .chat
+        ).supportsRemoteCompaction())
+        XCTAssertFalse(ModelProviderInfo(
+            name: "Example",
+            baseURL: "https://example.com/v1",
+            envKey: "API_KEY",
+            wireAPI: .responses
+        ).supportsRemoteCompaction())
+    }
+
     func testAzureResponsesEndpointDetectionMatchesRustCases() {
         let positiveCases = [
             "https://foo.openai.azure.com/openai",
@@ -370,7 +391,7 @@ final class ModelProviderInfoTests: XCTestCase {
         for baseURL in negativeCases {
             XCTAssertFalse(apiProvider(name: "test", baseURL: baseURL, wireAPI: .responses).isAzureResponsesEndpoint(), baseURL)
         }
-        XCTAssertFalse(apiProvider(name: "Azure", baseURL: "https://example.com", wireAPI: .chat).isAzureResponsesEndpoint())
+        XCTAssertTrue(apiProvider(name: "Azure", baseURL: "https://example.com", wireAPI: .chat).isAzureResponsesEndpoint())
     }
 
     func testAuthModeWireValues() throws {

@@ -1,5 +1,27 @@
 import Foundation
 
+private let azureResponsesBaseURLMarkers = [
+    "openai.azure.",
+    "cognitiveservices.azure.",
+    "aoai.azure.",
+    "azure-api.",
+    "azurefd.",
+    "windows.net/openai"
+]
+
+private func isAzureResponsesProvider(name: String, baseURL: String?) -> Bool {
+    if name.caseInsensitiveCompare("azure") == .orderedSame {
+        return true
+    }
+
+    guard let baseURL else {
+        return false
+    }
+
+    let lowercasedBaseURL = baseURL.lowercased()
+    return azureResponsesBaseURLMarkers.contains { lowercasedBaseURL.contains($0) }
+}
+
 public enum AuthMode: String, Codable, Equatable, Sendable {
     case apiKey = "apikey"
     case chatGPT = "chatgpt"
@@ -154,27 +176,7 @@ public struct APIProvider: Equatable, Sendable {
     }
 
     public func isAzureResponsesEndpoint() -> Bool {
-        guard wireAPI == .responses else {
-            return false
-        }
-
-        if name.caseInsensitiveCompare("azure") == .orderedSame {
-            return true
-        }
-
-        let lowercasedBaseURL = baseURL.lowercased()
-        return lowercasedBaseURL.contains("openai.azure.")
-            || Self.matchesAzureResponsesBaseURL(lowercasedBaseURL)
-    }
-
-    private static func matchesAzureResponsesBaseURL(_ lowercasedBaseURL: String) -> Bool {
-        [
-            "cognitiveservices.azure.",
-            "aoai.azure.",
-            "azure-api.",
-            "azurefd.",
-            "windows.net/openai"
-        ].contains { lowercasedBaseURL.contains($0) }
+        isAzureResponsesProvider(name: name, baseURL: baseURL)
     }
 
     private static func trimmingTrailingSlashes(_ value: String) -> String {
@@ -471,6 +473,10 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
 
     public func isAmazonBedrock() -> Bool {
         name == Self.amazonBedrockProviderName
+    }
+
+    public func supportsRemoteCompaction() -> Bool {
+        isOpenAI() || isAzureResponsesProvider(name: name, baseURL: baseURL)
     }
 
     public func capabilities() -> ModelProviderCapabilities {

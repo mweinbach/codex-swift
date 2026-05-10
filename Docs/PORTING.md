@@ -304,7 +304,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, readiness dispatch/error-wrapping seam, explicit `--local-provider` over `oss_provider` resolution, CLI-model precedence over provider defaults, and non-interactive `--oss` startup readiness wiring
 - `codex-rs/core/src/model_provider_info.rs` plus provider URL/Azure helpers from `codex-rs/codex-api/src/provider.rs`
-  - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, and Azure Responses endpoint detection
+  - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, Azure Responses endpoint detection, and OpenAI/Azure remote-compaction support detection
 - `codex-rs/core/src/exec_env.rs` and shell-environment policy types from `codex-rs/core/src/config/types.rs`
   - shell environment inheritance modes, case-insensitive wildcard include/exclude patterns, default sensitive-name filtering, set overrides, include-only post-filtering, and profile-use flag conversion
 - `codex-rs/common/src/config_summary.rs`
