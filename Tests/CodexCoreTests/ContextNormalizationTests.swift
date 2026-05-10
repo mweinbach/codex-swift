@@ -205,6 +205,96 @@ final class ContextNormalizationTests: XCTestCase {
         XCTAssertEqual(customItems, [])
     }
 
+    func testStripImagesWhenUnsupportedLeavesImageCapableHistoryUnchanged() {
+        var items: [ResponseItem] = [
+            .message(role: "user", content: [
+                .inputText(text: "see"),
+                .inputImage(imageURL: "data:image/png;base64,abc", detail: .high)
+            ]),
+            .imageGenerationCall(id: "ig-1", status: "completed", result: "BASE64")
+        ]
+        let original = items
+
+        ContextNormalization.stripImagesWhenUnsupported(inputModalities: [.text, .image], items: &items)
+
+        XCTAssertEqual(items, original)
+    }
+
+    func testStripImagesWhenUnsupportedReplacesMessageAndToolOutputImagesLikeRust() {
+        var items: [ResponseItem] = [
+            .message(role: "user", content: [
+                .inputText(text: "see"),
+                .inputImage(imageURL: "data:image/png;base64,abc", detail: .high),
+                .outputText(text: "kept")
+            ]),
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputText(text: "caption"),
+                        .inputImage(imageURL: "data:image/png;base64,tool", detail: .original)
+                    ],
+                    success: true
+                )
+            ),
+            .customToolCallOutput(
+                callID: "custom-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputImage(imageURL: "data:image/png;base64,custom", detail: .high)
+                    ],
+                    success: false
+                )
+            ),
+            .imageGenerationCall(
+                id: "ig-1",
+                status: "completed",
+                revisedPrompt: "prompt",
+                result: "BASE64"
+            )
+        ]
+
+        ContextNormalization.stripImagesWhenUnsupported(inputModalities: [.text], items: &items)
+
+        let placeholder = ContextNormalization.imageContentOmittedPlaceholder
+        XCTAssertEqual(items, [
+            .message(role: "user", content: [
+                .inputText(text: "see"),
+                .inputText(text: placeholder),
+                .outputText(text: "kept")
+            ]),
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputText(text: "caption"),
+                        .inputText(text: placeholder)
+                    ],
+                    success: true
+                )
+            ),
+            .customToolCallOutput(
+                callID: "custom-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputText(text: placeholder)
+                    ],
+                    success: false
+                )
+            ),
+            .imageGenerationCall(
+                id: "ig-1",
+                status: "completed",
+                revisedPrompt: "prompt",
+                result: ""
+            )
+        ])
+    }
+
     private func shellAction(_ command: [String]) -> LocalShellAction {
         .exec(LocalShellExecAction(command: command))
     }

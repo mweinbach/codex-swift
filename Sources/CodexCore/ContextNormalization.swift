@@ -1,6 +1,8 @@
 import Foundation
 
 public enum ContextNormalization {
+    public static let imageContentOmittedPlaceholder = "image content omitted because you do not support image input"
+
     public static func ensureCallOutputsPresent(_ items: inout [ResponseItem]) {
         var missingOutputsToInsert: [(index: Int, item: ResponseItem)] = []
 
@@ -232,6 +234,55 @@ public enum ContextNormalization {
         removeOrphanOutputs(&items)
     }
 
+    public static func stripImagesWhenUnsupported(
+        inputModalities: [InputModality],
+        items: inout [ResponseItem]
+    ) {
+        guard !inputModalities.contains(.image) else {
+            return
+        }
+
+        items = items.map { item in
+            switch item {
+            case let .message(id, role, content, phase):
+                return .message(
+                    id: id,
+                    role: role,
+                    content: content.map(Self.strippingImageContent),
+                    phase: phase
+                )
+
+            case let .functionCallOutput(callID, output):
+                return .functionCallOutput(callID: callID, output: Self.strippingImageOutput(from: output))
+
+            case let .customToolCallOutput(callID, name, output):
+                return .customToolCallOutput(callID: callID, name: name, output: Self.strippingImageOutput(from: output))
+
+            case let .imageGenerationCall(id, status, revisedPrompt, _):
+                return .imageGenerationCall(
+                    id: id,
+                    status: status,
+                    revisedPrompt: revisedPrompt,
+                    result: ""
+                )
+
+            case .reasoning,
+                 .localShellCall,
+                 .functionCall,
+                 .toolSearchCall,
+                 .customToolCall,
+                 .toolSearchOutput,
+                 .webSearchCall,
+                 .ghostSnapshot,
+                 .compaction,
+                 .contextCompaction,
+                 .knownPersisted,
+                 .other:
+                return item
+            }
+        }
+    }
+
     @discardableResult
     private static func removeFirstMatching(
         from items: inout [ResponseItem],
@@ -242,5 +293,37 @@ public enum ContextNormalization {
         }
         items.remove(at: index)
         return true
+    }
+
+    private static func strippingImageContent(_ item: ContentItem) -> ContentItem {
+        switch item {
+        case .inputImage:
+            return .inputText(text: imageContentOmittedPlaceholder)
+        case .inputText,
+             .outputText:
+            return item
+        }
+    }
+
+    private static func strippingImageOutput(from output: FunctionCallOutputPayload) -> FunctionCallOutputPayload {
+        guard let contentItems = output.contentItems else {
+            return output
+        }
+        return FunctionCallOutputPayload(
+            content: output.content,
+            contentItems: contentItems.map(Self.strippingImageOutputContent),
+            success: output.success
+        )
+    }
+
+    private static func strippingImageOutputContent(
+        _ item: FunctionCallOutputContentItem
+    ) -> FunctionCallOutputContentItem {
+        switch item {
+        case .inputImage:
+            return .inputText(text: imageContentOmittedPlaceholder)
+        case .inputText:
+            return item
+        }
     }
 }

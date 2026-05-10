@@ -922,6 +922,8 @@ Source baseline inspected for this scaffold:
   - added SQLite `get_thread`, `upsert_thread`, and `insert_thread_if_absent` equivalents with Rust's full metadata column bindings, created/updated second-plus-millisecond persistence, first-message empty-string fallback, default `"enabled"` memory mode on insert, conflict upsert preservation for existing git fields and memory mode, no-overwrite insert semantics, and thread-spawn edge materialization from persisted session source strings.
 - `codex-rs/state/src/runtime/threads.rs` rollout metadata application
   - added SQLite `apply_rollout_items` equivalent with a Swift `ThreadMetadataBuilder`, existing-row fallback vs. builder-created metadata, rollout-path refresh, session-meta/turn-context/token-count/user-message mutation, existing-git preference, override-or-file-mtime updated-at refresh, new-thread memory-mode initialization, session-meta memory-mode restore, and dynamic-tool extraction after thread upsert.
+- `codex-rs/core/src/context_manager/normalize.rs` unsupported image normalization
+  - ported Rust's `strip_images_when_unsupported` behavior for text-only model contexts: message `input_image` blocks and structured function/custom tool output images are replaced with the exact Rust placeholder text, image-generation result payloads are cleared, and image-capable model contexts are left unchanged.
 
 ## Known Gaps
 
