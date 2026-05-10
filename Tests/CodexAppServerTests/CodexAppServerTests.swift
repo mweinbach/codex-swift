@@ -136,11 +136,7 @@ final class CodexAppServerTests: XCTestCase {
 
     func testThreadStartFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
-        try """
-        [mcp_servers.required_broken]
-        command = "codex-definitely-not-a-real-binary"
-        required = true
-        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try writeRequiredBrokenMCPConfig(codexHome: temp.url)
         let processor = try initializedProcessor(configuration: testConfiguration(
             codexHome: temp.url,
             environment: ["PATH": ""]
@@ -159,6 +155,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: temp.url.appendingPathComponent("sessions", isDirectory: true).path
         ))
+    }
+
+    func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: ["PATH": ""]
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+        try writeRequiredBrokenMCPConfig(codexHome: temp.url)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+
+        try assertRequiredBrokenMCPStartupError(messages)
+    }
+
+    func testThreadForkFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: ["PATH": ""]
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+        try writeRequiredBrokenMCPConfig(codexHome: temp.url)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+
+        try assertRequiredBrokenMCPStartupError(messages)
     }
 
     func testThreadPersistExtendedHistoryEmitsDeprecationNoticeLikeRust() throws {
@@ -13100,6 +13138,31 @@ final class CodexAppServerTests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    private func writeRequiredBrokenMCPConfig(codexHome: URL) throws {
+        try """
+        [mcp_servers.required_broken]
+        command = "codex-definitely-not-a-real-binary"
+        required = true
+        """.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+    }
+
+    private func assertRequiredBrokenMCPStartupError(
+        _ messages: [[String: Any]],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        XCTAssertEqual(messages.count, 1, file: file, line: line)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any], file: file, line: line)
+        XCTAssertEqual(error["code"] as? Int, -32603, file: file, line: line)
+        let message = try XCTUnwrap(error["message"] as? String, file: file, line: line)
+        XCTAssertTrue(
+            message.contains("required MCP servers failed to initialize: required_broken"),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(message.contains("codex-definitely-not-a-real-binary"), file: file, line: line)
     }
 
     private func testConfiguration(

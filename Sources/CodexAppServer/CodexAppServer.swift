@@ -868,13 +868,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerStartedConversation {
-        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
-        if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
-            mcpServers: runtimeConfig.mcpServers,
-            environment: configuration.environment
-        ) {
-            throw AppServerError.internalError(message)
-        }
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
@@ -913,6 +907,19 @@ public enum CodexAppServer {
             sandbox: sandbox,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue
         )
+    }
+
+    private static func loadRuntimeConfigForThreadStartup(
+        configuration: CodexAppServerConfiguration
+    ) throws -> CodexRuntimeConfig {
+        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
+            mcpServers: runtimeConfig.mcpServers,
+            environment: configuration.environment
+        ) {
+            throw AppServerError.internalError(message)
+        }
+        return runtimeConfig
     }
 
     fileprivate static func threadResumeResult(
@@ -954,7 +961,7 @@ public enum CodexAppServer {
             defaultProvider: configuration.defaultModelProvider,
             turns: buildTurnsFromRolloutEvents(at: rolloutPath)
         )
-        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
         let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
         let modelProvider = runtimeConfig.selectedModelProviderID
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
@@ -1024,7 +1031,7 @@ public enum CodexAppServer {
             )
         }
         let sourceSummary = try RolloutSummary(path: sourceRolloutPath, defaultProvider: configuration.defaultModelProvider)
-        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
