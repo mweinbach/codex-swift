@@ -2944,8 +2944,22 @@ public enum CodexAppServer {
 
         var result = try localPluginListResult(cwds: cwds, configuration: configuration)
         let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        if !kinds.contains("local") || (params?["marketplaceKinds"] == nil && runtimeConfig.features.isEnabled(.remotePlugin)) {
+            let remoteMarketplaces = remotePluginMarketplaces(
+                includeGlobal: params?["marketplaceKinds"] == nil,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration
+            )
+            if !remoteMarketplaces.isEmpty {
+                result["marketplaces"] = mergeRemotePluginMarketplaces(
+                    local: marketplaces,
+                    remote: remoteMarketplaces
+                )
+            }
+        }
+        let updatedMarketplaces = result["marketplaces"] as? [[String: Any]] ?? []
         result["featuredPluginIds"] = featuredPluginIDs(
-            for: marketplaces,
+            for: updatedMarketplaces,
             runtimeConfig: runtimeConfig,
             configuration: configuration
         )
@@ -2987,6 +3001,212 @@ public enum CodexAppServer {
             "marketplaceLoadErrors": loadErrors,
             "featuredPluginIds": []
         ]
+    }
+
+    private static func mergeRemotePluginMarketplaces(
+        local marketplaces: [[String: Any]],
+        remote remoteMarketplaces: [[String: Any]]
+    ) -> [[String: Any]] {
+        var merged = marketplaces
+        for remoteMarketplace in remoteMarketplaces {
+            guard let name = remoteMarketplace["name"] as? String else {
+                continue
+            }
+            if let index = merged.firstIndex(where: { $0["name"] as? String == name }) {
+                merged[index] = remoteMarketplace
+            } else {
+                merged.append(remoteMarketplace)
+            }
+        }
+        return merged
+    }
+
+    private static func remotePluginMarketplaces(
+        includeGlobal: Bool,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) -> [[String: Any]] {
+        guard includeGlobal,
+              let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind,
+              let directory = remotePluginPage(
+                path: "/ps/plugins/list",
+                queryItems: [
+                    URLQueryItem(name: "scope", value: "GLOBAL"),
+                    URLQueryItem(name: "limit", value: "200")
+                ],
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+              ),
+              let installed = remotePluginPage(
+                path: "/ps/plugins/installed",
+                queryItems: [URLQueryItem(name: "scope", value: "GLOBAL")],
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+              )
+        else {
+            return []
+        }
+
+        guard let marketplace = remotePluginMarketplace(
+            name: "chatgpt-global",
+            displayName: "ChatGPT Plugins",
+            directoryPlugins: directory,
+            installedPlugins: installed,
+            includeInstalledOnly: true
+        ) else {
+            return []
+        }
+        return [marketplace]
+    }
+
+    private static func remotePluginPage(
+        path: String,
+        queryItems: [URLQueryItem],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) -> [[String: Any]]? {
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
+        guard var components = URLComponents(string: normalizedBaseURL + path) else {
+            return nil
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
+        if let accountID = auth.accountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        guard let response = try? configuration.pluginHTTPTransport(request),
+              (200..<300).contains(response.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+        else {
+            return nil
+        }
+        return object["plugins"] as? [[String: Any]] ?? []
+    }
+
+    private static func remotePluginMarketplace(
+        name: String,
+        displayName: String,
+        directoryPlugins: [[String: Any]],
+        installedPlugins: [[String: Any]],
+        includeInstalledOnly: Bool
+    ) -> [String: Any]? {
+        let directoryByID = remotePluginsByID(directoryPlugins)
+        let installedByID = remotePluginsByID(installedPlugins)
+        let ids = Set(directoryByID.keys)
+            .union(includeInstalledOnly ? Set(installedByID.keys) : [])
+            .sorted()
+        guard !ids.isEmpty else {
+            return nil
+        }
+        let plugins = ids.compactMap { id -> [String: Any]? in
+            let plugin = directoryByID[id] ?? installedByID[id]
+            guard let plugin else {
+                return nil
+            }
+            return remotePluginSummary(plugin, installed: installedByID[id])
+        }
+        .sorted { left, right in
+            let leftDisplay = remotePluginDisplayName(left)
+            let rightDisplay = remotePluginDisplayName(right)
+            let folded = leftDisplay.lowercased().compare(rightDisplay.lowercased())
+            if folded != .orderedSame {
+                return folded == .orderedAscending
+            }
+            if leftDisplay != rightDisplay {
+                return leftDisplay < rightDisplay
+            }
+            return (left["id"] as? String ?? "") < (right["id"] as? String ?? "")
+        }
+        return [
+            "name": name,
+            "path": NSNull(),
+            "interface": ["displayName": displayName],
+            "plugins": plugins
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func remotePluginsByID(_ plugins: [[String: Any]]) -> [String: [String: Any]] {
+        plugins.reduce(into: [:]) { result, plugin in
+            guard let id = plugin["id"] as? String else {
+                return
+            }
+            result[id] = plugin
+        }
+    }
+
+    private static func remotePluginSummary(_ plugin: [String: Any], installed: [String: Any]?) -> [String: Any] {
+        [
+            "id": plugin["id"] as? String ?? "",
+            "name": plugin["name"] as? String ?? "",
+            "shareContext": NSNull(),
+            "source": ["type": "remote"],
+            "installed": installed != nil,
+            "enabled": installed?["enabled"] as? Bool ?? false,
+            "installPolicy": plugin["installation_policy"] as? String ?? "NOT_AVAILABLE",
+            "authPolicy": plugin["authentication_policy"] as? String ?? "ON_USE",
+            "availability": remotePluginAvailability(plugin["status"] as? String),
+            "interface": remotePluginInterface(plugin),
+            "keywords": (plugin["release"] as? [String: Any])?["keywords"] as? [String] ?? []
+        ].nullStripped()
+    }
+
+    private static func remotePluginDisplayName(_ plugin: [String: Any]) -> String {
+        if let interface = plugin["interface"] as? [String: Any],
+           let displayName = interface["displayName"] as? String,
+           !displayName.isEmpty {
+            return displayName
+        }
+        return plugin["name"] as? String ?? ""
+    }
+
+    private static func remotePluginAvailability(_ status: String?) -> String {
+        status == "DISABLED_BY_ADMIN" ? "DISABLED_BY_ADMIN" : "AVAILABLE"
+    }
+
+    private static func remotePluginInterface(_ plugin: [String: Any]) -> Any {
+        guard let release = plugin["release"] as? [String: Any],
+              let interface = release["interface"] as? [String: Any]
+        else {
+            return NSNull()
+        }
+        let displayName = (release["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [
+            "displayName": nullable(displayName?.isEmpty == false ? displayName : nil),
+            "shortDescription": nullable(interface["short_description"] as? String),
+            "longDescription": nullable(interface["long_description"] as? String),
+            "developerName": nullable(interface["developer_name"] as? String),
+            "category": nullable(interface["category"] as? String),
+            "capabilities": interface["capabilities"] as? [String] ?? [],
+            "websiteUrl": nullable(interface["website_url"] as? String),
+            "privacyPolicyUrl": nullable(interface["privacy_policy_url"] as? String),
+            "termsOfServiceUrl": nullable(interface["terms_of_service_url"] as? String),
+            "defaultPrompt": nullable(remotePluginDefaultPrompt(interface["default_prompt"] as? String)),
+            "brandColor": nullable(interface["brand_color"] as? String),
+            "composerIcon": NSNull(),
+            "composerIconUrl": nullable(interface["composer_icon_url"] as? String),
+            "logo": NSNull(),
+            "logoUrl": nullable(interface["logo_url"] as? String),
+            "screenshots": [],
+            "screenshotUrls": interface["screenshot_urls"] as? [String] ?? []
+        ].nullStripped()
+    }
+
+    private static func remotePluginDefaultPrompt(_ prompt: String?) -> [String]? {
+        guard let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty
+        else {
+            return nil
+        }
+        return prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     }
 
     private static func featuredPluginIDs(

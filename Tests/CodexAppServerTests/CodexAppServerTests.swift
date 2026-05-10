@@ -4209,6 +4209,146 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(request.value(forHTTPHeaderField: "chatgpt-account-id"))
     }
 
+    func testPluginListIncludesRemoteGlobalMarketplaceWhenRemotePluginEnabled() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let directoryBody = """
+        {
+          "plugins": [
+            {
+              "id": "plugins~Plugin_00000000000000000000000000000000",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "app_ids": [],
+                "keywords": ["issue-tracking", "project management"],
+                "interface": {
+                  "short_description": "Plan and track work",
+                  "capabilities": ["Read", "Write"],
+                  "logo_url": "https://example.com/linear.png",
+                  "screenshot_urls": ["https://example.com/linear-shot.png"]
+                },
+                "skills": []
+              }
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "plugins~Plugin_00000000000000000000000000000000",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "app_ids": [],
+                "keywords": ["issue-tracking", "project management"],
+                "interface": {
+                  "short_description": "Plan and track work",
+                  "capabilities": ["Read", "Write"],
+                  "logo_url": "https://example.com/linear.png",
+                  "screenshot_urls": ["https://example.com/linear-shot.png"]
+                },
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/list", "scope=GLOBAL&limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404)
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "chatgpt-global")
+        XCTAssertTrue(marketplaces[0]["path"] is NSNull)
+        let marketplaceInterface = try XCTUnwrap(marketplaces[0]["interface"] as? [String: Any])
+        XCTAssertEqual(marketplaceInterface["displayName"] as? String, "ChatGPT Plugins")
+
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["id"] as? String, "plugins~Plugin_00000000000000000000000000000000")
+        XCTAssertEqual(plugins[0]["name"] as? String, "linear")
+        XCTAssertEqual(plugins[0]["installed"] as? Bool, true)
+        XCTAssertEqual(plugins[0]["enabled"] as? Bool, true)
+        XCTAssertEqual(plugins[0]["installPolicy"] as? String, "AVAILABLE")
+        XCTAssertEqual(plugins[0]["authPolicy"] as? String, "ON_USE")
+        XCTAssertEqual(plugins[0]["availability"] as? String, "AVAILABLE")
+        let source = try XCTUnwrap(plugins[0]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "remote")
+        let interface = try XCTUnwrap(plugins[0]["interface"] as? [String: Any])
+        XCTAssertEqual(interface["displayName"] as? String, "Linear")
+        XCTAssertEqual(interface["shortDescription"] as? String, "Plan and track work")
+        XCTAssertEqual(interface["capabilities"] as? [String], ["Read", "Write"])
+        XCTAssertEqual(interface["logoUrl"] as? String, "https://example.com/linear.png")
+        XCTAssertEqual(interface["screenshotUrls"] as? [String], ["https://example.com/linear-shot.png"])
+        XCTAssertEqual(plugins[0]["keywords"] as? [String], ["issue-tracking", "project management"])
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
+    }
+
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
