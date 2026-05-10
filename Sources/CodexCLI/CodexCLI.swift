@@ -133,6 +133,7 @@ public struct CodexCLI: Sendable {
                 return .resume(
                     sessionID: resume.resumeSessionID,
                     last: resume.last,
+                    all: resume.all,
                     prompt: prompt,
                     outputSchema: outputSchema
                 )
@@ -155,11 +156,13 @@ public struct CodexCLI: Sendable {
     public struct ExecResumeCommand: Equatable, Sendable {
         public let sessionID: String?
         public let last: Bool
+        public let all: Bool
         public let prompt: String?
 
-        public init(sessionID: String?, last: Bool, prompt: String?) {
+        public init(sessionID: String?, last: Bool, all: Bool = false, prompt: String?) {
             self.sessionID = sessionID
             self.last = last
+            self.all = all
             self.prompt = prompt
         }
 
@@ -196,7 +199,13 @@ public struct CodexCLI: Sendable {
 
     public enum ResolvedExecInitialOperation: Equatable, Sendable {
         case userTurn(prompt: NonInteractivePromptResolution, outputSchema: JSONValue?)
-        case resume(sessionID: String?, last: Bool, prompt: NonInteractivePromptResolution, outputSchema: JSONValue?)
+        case resume(
+            sessionID: String?,
+            last: Bool,
+            all: Bool,
+            prompt: NonInteractivePromptResolution,
+            outputSchema: JSONValue?
+        )
         case review(ReviewRequest)
     }
 
@@ -1305,11 +1314,16 @@ public struct CodexCLI: Sendable {
         rootPrompt: String?
     ) -> ParseResult<ExecResumeCommand> {
         var last = false
+        var all = false
         var positionals: [String] = []
 
         for argument in arguments {
             if argument == "--last" {
                 last = true
+                continue
+            }
+            if argument == "--all" {
+                all = true
                 continue
             }
             if argument.hasPrefix("-") {
@@ -1334,6 +1348,7 @@ public struct CodexCLI: Sendable {
         return .success(ExecResumeCommand(
             sessionID: positionals.first,
             last: last,
+            all: all,
             prompt: prompt
         ))
     }

@@ -352,6 +352,8 @@ Source baseline inspected for this scaffold:
   - conversation path response payloads, new/cleared/resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
 - `codex-rs/exec/src/lib.rs` resume target resolution
   - `codex resume` parser-to-runtime bridge for explicit session IDs, `--last`, provider-filtered newest-session lookup, `--all` provider bypass, and non-interactive picker listing over saved rollout files
+- `codex-rs/exec/src/cli.rs` `codex exec resume`
+  - `codex exec resume` now accepts Rust's `--all` provider/cwd bypass flag and carries it through non-interactive resume target resolution while preserving the `--last <prompt>` positional reinterpretation.
 - `codex-rs/protocol/src/protocol.rs` session configuration event model
   - session-configured payloads with conversation id, model/provider, approval and sandbox policies, history metadata, optional reasoning effort, optional recursive initial messages, and rollout path
 - `codex-rs/protocol/src/protocol.rs` response-wrapper event models

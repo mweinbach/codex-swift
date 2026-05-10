@@ -79,6 +79,7 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         for arguments in [
             ["exec", "resume", "--last", "fix it"],
+            ["exec", "resume", "--last", "--all", "fix it everywhere"],
             ["exec", "resume", "123e4567-e89b-12d3-a456-426614174000", "follow up"]
         ] {
             let exitCode = await CodexCLI().runAsync(
@@ -94,6 +95,12 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(receivedRequests.map(\.action), [
             .resume(CodexCLI.ExecResumeCommand(sessionID: "fix it", last: true, prompt: nil)),
+            .resume(CodexCLI.ExecResumeCommand(
+                sessionID: "fix it everywhere",
+                last: true,
+                all: true,
+                prompt: nil
+            )),
             .resume(CodexCLI.ExecResumeCommand(
                 sessionID: "123e4567-e89b-12d3-a456-426614174000",
                 last: false,
@@ -173,8 +180,35 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(operation, .resume(
             sessionID: nil,
             last: true,
+            all: false,
             prompt: NonInteractivePromptResolution(prompt: "fix it"),
             outputSchema: .object(["type": .string("string")])
+        ))
+    }
+
+    func testExecCommandRequestResolvesResumeAllLikeRust() throws {
+        let request = CodexCLI.ExecCommandRequest(
+            arguments: [],
+            action: .resume(CodexCLI.ExecResumeCommand(
+                sessionID: "123e4567-e89b-12d3-a456-426614174000",
+                last: false,
+                all: true,
+                prompt: "follow up"
+            ))
+        )
+
+        let operation = try request.resolvedInitialOperation(
+            stdinIsTerminal: true,
+            readStdin: { throw TestError("stdin should not be read") },
+            readFile: { _ in throw TestError("schema should not be read") }
+        )
+
+        XCTAssertEqual(operation, .resume(
+            sessionID: "123e4567-e89b-12d3-a456-426614174000",
+            last: false,
+            all: true,
+            prompt: NonInteractivePromptResolution(prompt: "follow up"),
+            outputSchema: nil
         ))
     }
 
@@ -182,7 +216,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (["exec", "--output-schema"], "codex-swift: missing value for --output-schema"),
             (["exec", "ship", "extra"], "codex-swift: unexpected argument for command 'exec': extra"),
-            (["exec", "resume", "--all"], "codex-swift: unsupported option for command 'exec resume': --all")
+            (["exec", "resume", "--bogus"], "codex-swift: unsupported option for command 'exec resume': --bogus")
         ]
 
         for (arguments, expectedMessage) in cases {
