@@ -113,67 +113,21 @@ final class ProjectDocTests: XCTestCase {
         XCTAssertEqual(discovery.map { $0.lastPathComponent }, [ProjectDoc.defaultFilename])
     }
 
-    func testSkillsAreAppendedToProjectDoc() throws {
+    func testSkillsAreNotAppendedToProjectDocLikeRust() throws {
         let tmp = try CoreTemporaryDirectory()
         try write("base doc", to: tmp.url.appendingPathComponent("AGENTS.md"))
 
-        let result = ProjectDoc.getUserInstructions(
-            config: config(cwd: tmp.url),
-            skills: [
-                SkillMetadata(
-                    name: "pdf-processing",
-                    description: "extract from pdfs",
-                    path: "/skills/pdf-processing/SKILL.md",
-                    scope: .user
-                )
-            ]
-        )
+        let result = ProjectDoc.getUserInstructions(config: config(cwd: tmp.url))
 
-        XCTAssertEqual(
-            result,
-            """
-            base doc
-
-
-            ## Skills
-            \(Skills.sectionIntro)
-            ### Available skills
-            - pdf-processing: extract from pdfs (file: /skills/pdf-processing/SKILL.md)
-            ### How to use skills
-            \(Skills.sectionGuidance)
-
-            """
-        )
+        XCTAssertEqual(result, "base doc")
     }
 
-    func testSkillsRenderWithoutProjectDoc() throws {
+    func testSkillsDoNotCreateProjectDocUserInstructionsLikeRust() throws {
         let tmp = try CoreTemporaryDirectory()
 
-        let result = ProjectDoc.getUserInstructions(
-            config: config(cwd: tmp.url),
-            skills: [
-                SkillMetadata(
-                    name: "linting",
-                    description: "run swiftlint",
-                    path: "/skills/linting/SKILL.md",
-                    scope: .user
-                )
-            ]
-        )
+        let result = ProjectDoc.getUserInstructions(config: config(cwd: tmp.url))
 
-        XCTAssertEqual(
-            result,
-            """
-
-            ## Skills
-            \(Skills.sectionIntro)
-            ### Available skills
-            - linting: run swiftlint (file: /skills/linting/SKILL.md)
-            ### How to use skills
-            \(Skills.sectionGuidance)
-
-            """
-        )
+        XCTAssertNil(result)
     }
 
     func testConfigLoaderReadsProjectDocSettings() throws {

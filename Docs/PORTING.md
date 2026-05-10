@@ -283,7 +283,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/user_instructions.rs`
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
 - `codex-rs/core/src/project_doc.rs`
-  - AGENTS.md/AGENTS.override.md discovery from git root to cwd, project-doc byte limits, fallback filenames, configured instruction merging, and runtime skill-section append behavior
+  - AGENTS.md/AGENTS.override.md discovery from git root to cwd, project-doc byte limits, fallback filenames, configured instruction merging, and Rust's separation between project-doc user instructions and available-skill developer instructions
 - Pure helpers and templates from `codex-rs/core/src/compact.rs` and `codex-rs/core/templates/compact`
   - compaction prompt resources, content-item text joining, user-message extraction/filtering, summary-prefix detection, and token-limited compacted-history construction
 - `codex-rs/core/src/prompts.rs` and `codex-rs/core/computer_use_prompt.md`

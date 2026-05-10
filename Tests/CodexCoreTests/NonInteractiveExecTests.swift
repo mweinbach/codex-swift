@@ -116,6 +116,68 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(environmentText.contains("<environment_context>"))
     }
 
+    func testMakePromptIncludesAvailableSkillsAsDeveloperContextLikeRust() throws {
+        let root = "/tmp/skills"
+        let skill = SkillMetadata(
+            name: "linting",
+            description: "run swiftlint",
+            path: "\(root)/linting/SKILL.md",
+            scope: .user
+        )
+        let availableSkills = try XCTUnwrap(
+            Skills.buildAvailableSkills(
+                outcome: SkillLoadOutcome(
+                    skills: [skill],
+                    skillRoots: [root],
+                    skillRootByPath: [skill.path: root]
+                ),
+                budget: .characters(120)
+            ),
+            "expected skills to render"
+        )
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            developerInstructions: "Follow developer notes.",
+            availableSkills: availableSkills,
+            userInstructions: UserInstructions(directory: "/tmp/project", text: "Project notes.")
+        )
+
+        XCTAssertEqual(prompt.input.count, 3)
+        guard case let .message(_, developerRole, developerContent, _) = prompt.input[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 3)
+        guard case let .inputText(permissionsText) = developerContent[0],
+              case let .inputText(developerText) = developerContent[1],
+              case let .inputText(skillsText) = developerContent[2]
+        else {
+            return XCTFail("expected permissions, developer instructions, and available skills")
+        }
+        XCTAssertTrue(permissionsText.contains("<permissions instructions>"))
+        XCTAssertEqual(developerText, "Follow developer notes.")
+        XCTAssertTrue(skillsText.contains("### Available skills"))
+        XCTAssertTrue(skillsText.contains("- linting: run swiftlint (file: /tmp/skills/linting/SKILL.md)"))
+        XCTAssertTrue(skillsText.contains("How to use skills"))
+
+        guard case let .message(_, userRole, userContent, _) = prompt.input[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(userRole, "user")
+        XCTAssertTrue(userContent.contains { item in
+            guard case let .inputText(text) = item else {
+                return false
+            }
+            return text.contains("Project notes.")
+        })
+    }
+
     func testMakePromptPlacesResumeHistoryBeforeNewUserInput() {
         let history: [ResponseItem] = [
             .message(role: "user", content: [.inputText(text: "previous request")]),

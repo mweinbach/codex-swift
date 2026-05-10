@@ -35,10 +35,8 @@ public enum ProjectDoc {
 
     public static func getUserInstructions(
         config: ProjectDocConfig,
-        skills: [SkillMetadata]? = nil,
         fileManager: FileManager = .default
     ) -> String? {
-        let skillsSection = skills.flatMap(Skills.renderSkillsSection)
         let projectDocs: String?
         do {
             projectDocs = try readProjectDocs(config: config, fileManager: fileManager)
@@ -46,20 +44,15 @@ public enum ProjectDoc {
             return config.userInstructions
         }
 
-        let combinedProjectDocs = mergeProjectDocsWithSkills(
-            projectDocs: projectDocs,
-            skillsSection: skillsSection
-        )
-
         var parts: [String] = []
         if let userInstructions = config.userInstructions {
             parts.append(userInstructions)
         }
-        if let combinedProjectDocs {
+        if let projectDocs {
             if !parts.isEmpty {
                 parts.append(separator)
             }
-            parts.append(combinedProjectDocs)
+            parts.append(projectDocs)
         }
 
         return parts.isEmpty ? nil : parts.joined()
@@ -159,19 +152,6 @@ public enum ProjectDoc {
             }
         }
         return names
-    }
-
-    static func mergeProjectDocsWithSkills(projectDocs: String?, skillsSection: String?) -> String? {
-        switch (projectDocs, skillsSection) {
-        case let (doc?, skills?):
-            return "\(doc)\n\n\(skills)"
-        case let (doc?, nil):
-            return doc
-        case let (nil, skills?):
-            return skills
-        case (nil, nil):
-            return nil
-        }
     }
 
     private static func directoryChainAndGitRoot(

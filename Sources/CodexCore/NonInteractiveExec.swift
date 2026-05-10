@@ -50,6 +50,7 @@ public enum NonInteractiveExec {
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
+        availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil
     ) -> [ResponseItem] {
         let context = TurnContext(
@@ -70,6 +71,12 @@ public enum NonInteractiveExec {
         }
         if let developerInstructions, !developerInstructions.isEmpty {
             developerContent.append(.inputText(text: developerInstructions))
+        }
+        if let availableSkills {
+            developerContent.append(.inputText(text: Skills.renderAvailableSkillsBody(
+                skillRootLines: availableSkills.skillRootLines,
+                skillLines: availableSkills.skillLines
+            )))
         }
         if !developerContent.isEmpty {
             input.append(.message(role: "developer", content: developerContent))
@@ -101,6 +108,7 @@ public enum NonInteractiveExec {
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
+        availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
@@ -114,6 +122,7 @@ public enum NonInteractiveExec {
             includeEnvironmentContext: includeEnvironmentContext,
             includePermissionsInstructions: includePermissionsInstructions,
             developerInstructions: developerInstructions,
+            availableSkills: availableSkills,
             userInstructions: userInstructions
         )
         input.append(contentsOf: history)
