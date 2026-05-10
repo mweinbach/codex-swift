@@ -181,19 +181,28 @@ public struct CodexCLI: Sendable {
         public let outputSchemaPath: String?
         public let lastMessageFile: String?
         public let skipGitRepoCheck: Bool
+        public let ephemeral: Bool
+        public let ignoreUserConfig: Bool
+        public let ignoreRules: Bool
 
         public init(
             json: Bool = false,
             imagePaths: [String] = [],
             outputSchemaPath: String? = nil,
             lastMessageFile: String? = nil,
-            skipGitRepoCheck: Bool = false
+            skipGitRepoCheck: Bool = false,
+            ephemeral: Bool = false,
+            ignoreUserConfig: Bool = false,
+            ignoreRules: Bool = false
         ) {
             self.json = json
             self.imagePaths = imagePaths
             self.outputSchemaPath = outputSchemaPath
             self.lastMessageFile = lastMessageFile
             self.skipGitRepoCheck = skipGitRepoCheck
+            self.ephemeral = ephemeral
+            self.ignoreUserConfig = ignoreUserConfig
+            self.ignoreRules = ignoreRules
         }
     }
 
@@ -502,6 +511,9 @@ public struct CodexCLI: Sendable {
           --search                          Enable web search.
           --add-dir <DIR>                   Additional writable directory.
           -i, --image <FILE>                Attach image(s) to the initial prompt.
+          --ephemeral                       Run without persisting session files.
+          --ignore-user-config              Do not load $CODEX_HOME/config.toml.
+          --ignore-rules                    Do not load user or project rules files.
           -h, --help                        Print help.
           -V, --version                     Print version.
 
@@ -1147,6 +1159,9 @@ public struct CodexCLI: Sendable {
         var outputSchemaPath: String?
         var lastMessageFile: String?
         var skipGitRepoCheck = false
+        var ephemeral = false
+        var ignoreUserConfig = false
+        var ignoreRules = false
         var actionTokens: [String] = []
         var index = 0
 
@@ -1171,6 +1186,18 @@ public struct CodexCLI: Sendable {
                 continue
             case "--skip-git-repo-check":
                 skipGitRepoCheck = true
+                index += 1
+                continue
+            case "--ephemeral":
+                ephemeral = true
+                index += 1
+                continue
+            case "--ignore-user-config":
+                ignoreUserConfig = true
+                index += 1
+                continue
+            case "--ignore-rules":
+                ignoreRules = true
                 index += 1
                 continue
             case "--output-schema":
@@ -1261,6 +1288,12 @@ public struct CodexCLI: Sendable {
             switch parseExecResumeCommand(Array(actionTokens.dropFirst()), rootPrompt: nil) {
             case let .success(parsed):
                 imagePaths.append(contentsOf: parsed.imagePaths)
+                json = json || parsed.json
+                lastMessageFile = parsed.lastMessageFile ?? lastMessageFile
+                skipGitRepoCheck = skipGitRepoCheck || parsed.skipGitRepoCheck
+                ephemeral = ephemeral || parsed.ephemeral
+                ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
+                ignoreRules = ignoreRules || parsed.ignoreRules
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -1269,6 +1302,12 @@ public struct CodexCLI: Sendable {
             switch parseExecResumeCommand(Array(actionTokens.dropFirst(2)), rootPrompt: actionTokens[0]) {
             case let .success(parsed):
                 imagePaths.append(contentsOf: parsed.imagePaths)
+                json = json || parsed.json
+                lastMessageFile = parsed.lastMessageFile ?? lastMessageFile
+                skipGitRepoCheck = skipGitRepoCheck || parsed.skipGitRepoCheck
+                ephemeral = ephemeral || parsed.ephemeral
+                ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
+                ignoreRules = ignoreRules || parsed.ignoreRules
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -1292,7 +1331,10 @@ public struct CodexCLI: Sendable {
                     imagePaths: imagePaths,
                     outputSchemaPath: outputSchemaPath,
                     lastMessageFile: lastMessageFile,
-                    skipGitRepoCheck: skipGitRepoCheck
+                    skipGitRepoCheck: skipGitRepoCheck,
+                    ephemeral: ephemeral,
+                    ignoreUserConfig: ignoreUserConfig,
+                    ignoreRules: ignoreRules
                 ),
                 configOverrides: configOverrides
             ))
@@ -1314,6 +1356,12 @@ public struct CodexCLI: Sendable {
     private struct ParsedExecResume {
         let command: ExecResumeCommand
         let imagePaths: [String]
+        let json: Bool
+        let lastMessageFile: String?
+        let skipGitRepoCheck: Bool
+        let ephemeral: Bool
+        let ignoreUserConfig: Bool
+        let ignoreRules: Bool
     }
 
     private func parseExecResumeCommand(
@@ -1323,6 +1371,12 @@ public struct CodexCLI: Sendable {
         var last = false
         var all = false
         var imagePaths: [String] = []
+        var json = false
+        var lastMessageFile: String?
+        var skipGitRepoCheck = false
+        var ephemeral = false
+        var ignoreUserConfig = false
+        var ignoreRules = false
         var positionals: [String] = []
         var index = 0
 
@@ -1345,6 +1399,41 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
+            if argument == "--json" || argument == "--experimental-json" {
+                json = true
+                index += 1
+                continue
+            }
+            if argument == "--skip-git-repo-check" {
+                skipGitRepoCheck = true
+                index += 1
+                continue
+            }
+            if argument == "--ephemeral" {
+                ephemeral = true
+                index += 1
+                continue
+            }
+            if argument == "--ignore-user-config" {
+                ignoreUserConfig = true
+                index += 1
+                continue
+            }
+            if argument == "--ignore-rules" {
+                ignoreRules = true
+                index += 1
+                continue
+            }
+            if argument == "--output-last-message" || argument == "-o" {
+                switch value(after: argument, at: index) {
+                case let .success(path):
+                    lastMessageFile = path
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
             if argument == "--image" || argument == "-i" {
                 switch value(after: argument, at: index) {
                 case let .success(paths):
@@ -1360,8 +1449,29 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
+            if argument.hasPrefix("--output-last-message=") {
+                lastMessageFile = String(argument.dropFirst("--output-last-message=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                lastMessageFile = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
             if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
                 imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
+                index += 1
+                continue
+            }
+            if execOptionConsumesValue(argument) {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                index += 2
+                continue
+            }
+            if execFlagWithoutValue(argument) || argument.contains("=") && execAssignmentOption(argument) {
                 index += 1
                 continue
             }
@@ -1392,7 +1502,13 @@ public struct CodexCLI: Sendable {
                 all: all,
                 prompt: prompt
             ),
-            imagePaths: imagePaths
+            imagePaths: imagePaths,
+            json: json,
+            lastMessageFile: lastMessageFile,
+            skipGitRepoCheck: skipGitRepoCheck,
+            ephemeral: ephemeral,
+            ignoreUserConfig: ignoreUserConfig,
+            ignoreRules: ignoreRules
         ))
     }
 
@@ -1430,7 +1546,13 @@ public struct CodexCLI: Sendable {
             "--oss",
             "--full-auto",
             "--dangerously-bypass-approvals-and-sandbox",
-            "--yolo"
+            "--yolo",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--json",
+            "--experimental-json"
         ].contains(argument)
     }
 

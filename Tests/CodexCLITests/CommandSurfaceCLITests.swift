@@ -39,6 +39,9 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "--output-last-message=/tmp/last.txt",
                 "--image",
                 "one.png,two.png",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
                 "ship it"
             ],
             stderr: { _ in XCTFail("stderr should not be written") },
@@ -54,7 +57,53 @@ final class CommandSurfaceCLITests: XCTestCase {
             imagePaths: ["one.png", "two.png"],
             outputSchemaPath: "/tmp/schema.json",
             lastMessageFile: "/tmp/last.txt",
-            skipGitRepoCheck: true
+            skipGitRepoCheck: true,
+            ephemeral: true,
+            ignoreUserConfig: true,
+            ignoreRules: true
+        ))
+    }
+
+    func testRunAsyncExecResumeAcceptsRustGlobalFlagsAfterSubcommand() async {
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "exec",
+                "resume",
+                "--last",
+                "--json",
+                "--model",
+                "gpt-5.2-codex",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "-o",
+                "/tmp/resume-output.md",
+                "echo resume-with-global-flags-after-subcommand"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .resume(CodexCLI.ExecResumeCommand(
+            sessionID: "echo resume-with-global-flags-after-subcommand",
+            last: true,
+            prompt: nil
+        )))
+        XCTAssertEqual(receivedRequest?.options, CodexCLI.ExecCommandOptions(
+            json: true,
+            lastMessageFile: "/tmp/resume-output.md",
+            skipGitRepoCheck: true,
+            ephemeral: true,
+            ignoreUserConfig: true,
+            ignoreRules: true
         ))
     }
 

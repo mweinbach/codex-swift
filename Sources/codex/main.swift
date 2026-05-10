@@ -789,10 +789,11 @@ private func runNonInteractiveExec(
         cwd: cwd,
         conversationID: conversationID,
         modelProviderID: providerResolution.id,
-        rolloutPath: rolloutPath
+        rolloutPath: rolloutPath,
+        ephemeral: options.ephemeral
     )
-    defer { try? recorder.shutdown() }
-    try recorder.recordItems([
+    defer { try? recorder?.shutdown() }
+    try recorder?.recordItems([
         .turnContext(TurnContextItem(
             cwd: cwd.path,
             approvalPolicy: approvalPolicy,
@@ -806,11 +807,11 @@ private func runNonInteractiveExec(
         ))
     ])
     if let newUserItem = userPromptItem {
-        try recorder.recordItems([.responseItem(newUserItem)])
+        try recorder?.recordItems([.responseItem(newUserItem)])
     }
     let hookAdditionalItems = sessionStartHookAdditionalItems + userPromptSubmitHookAdditionalItems
     if !hookAdditionalItems.isEmpty {
-        try recorder.recordItems(hookAdditionalItems.map(RolloutRecordItem.responseItem))
+        try recorder?.recordItems(hookAdditionalItems.map(RolloutRecordItem.responseItem))
     }
     if sessionStartOutcome.shouldStop {
         return CodexCLI.CommandExecutionResult(
@@ -873,7 +874,7 @@ private func runNonInteractiveExec(
             )
         }
     )
-    try recorder.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
+    try recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
 
     let result = NonInteractiveExec.finish(
         responseEvents: loopResult.events,
@@ -899,10 +900,14 @@ private func createExecRolloutRecorder(
     cwd: URL,
     conversationID: ConversationId,
     modelProviderID: String,
-    rolloutPath: URL?
-) throws -> RolloutRecorder {
+    rolloutPath: URL?,
+    ephemeral: Bool
+) throws -> RolloutRecorder? {
     if let rolloutPath {
         return try RolloutRecorder.resume(path: rolloutPath)
+    }
+    guard !ephemeral else {
+        return nil
     }
 
     return try RolloutRecorder.create(

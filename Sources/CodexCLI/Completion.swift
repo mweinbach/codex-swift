@@ -179,6 +179,9 @@ public enum CompletionGenerator {
         RootOption(longName: "search", shortName: nil, summary: "Enable web search.", takesValue: false),
         RootOption(longName: "add-dir", shortName: nil, summary: "Additional writable directory.", takesValue: true),
         RootOption(longName: "image", shortName: "i", summary: "Attach image(s) to the initial prompt.", takesValue: true),
+        RootOption(longName: "ephemeral", shortName: nil, summary: "Run without persisting session files.", takesValue: false),
+        RootOption(longName: "ignore-user-config", shortName: nil, summary: "Do not load $CODEX_HOME/config.toml.", takesValue: false),
+        RootOption(longName: "ignore-rules", shortName: nil, summary: "Do not load user or project rules files.", takesValue: false),
         RootOption(longName: "help", shortName: "h", summary: "Print help.", takesValue: false),
         RootOption(longName: "version", shortName: "V", summary: "Print version.", takesValue: false)
     ]
