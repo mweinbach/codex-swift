@@ -994,6 +994,8 @@ Source baseline inspected for this scaffold:
   - added Swift parity for base-instruction token estimates, first/last item removal preserving function/local-shell/custom-tool call-output invariants, local-shell output prompt normalization, user-image replacement no-ops, and custom-tool output truncation.
 - `codex-rs/core/src/context_manager/history.rs` Codex-generated item classifier
   - added Swift parity for Rust's `is_codex_generated_item` helper, classifying function/tool-search/custom-tool outputs and developer messages as Codex-generated while leaving model-generated assistant/tool-call items under the separate model-generated classifier.
+- `codex-rs/core/src/context_manager/updates.rs` persisted context update helpers
+  - added Swift `ContextUpdateBuilder` parity for environment diffs from persisted `TurnContextItem` baselines, full environment reinjection when the baseline is missing, `include_environment_context` suppression, realtime start/end developer updates, custom realtime start instructions, and Rust's previous-turn realtime fallback for older records without `realtime_active`.
 
 ## Known Gaps
 
@@ -1019,7 +1021,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior
 - remaining `RolloutItem` serialization and structured payload models for future response-item variants
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
-- remaining `ContextManager` lifecycle wiring around live session integration and full compaction lifecycle
+- remaining `ContextManager` lifecycle wiring around live session integration, full compaction lifecycle, and context update persistence wiring
 - live hook command integration of event runtimes into session/tool execution
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.
