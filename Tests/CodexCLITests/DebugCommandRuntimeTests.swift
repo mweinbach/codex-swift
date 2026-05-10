@@ -783,6 +783,186 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(result["stdout"] as? String, "hi\n")
     }
 
+    func testTraceReduceRecordsDispatchOnlyWriteStdinTerminalOperation() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let invocationPayload: [String: Any] = [
+            "raw_payload_id": "payload-stdin-invocation",
+            "kind": ["type": "tool_invocation"],
+            "path": "payloads/stdin-invocation.json"
+        ]
+        let resultPayload: [String: Any] = [
+            "raw_payload_id": "payload-stdin-result",
+            "kind": ["type": "tool_result"],
+            "path": "payloads/stdin-result.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "tool-stdin",
+                "model_visible_call_id": "call-stdin",
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "write_stdin"],
+                "summary": ["type": "generic", "label": "write_stdin", "input_preview": NSNull(), "output_preview": NSNull()],
+                "invocation_payload": invocationPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "tool-stdin",
+                "status": "completed",
+                "result_payload": resultPayload
+            ])
+        ])
+        try writeJSONObject([
+            "tool_name": "write_stdin",
+            "tool_namespace": NSNull(),
+            "payload": [
+                "type": "function",
+                "arguments": #"{"session_id":123,"chars":"echo hi\n","yield_time_ms":250,"max_output_tokens":2000}"#
+            ]
+        ], to: bundle.appendingPathComponent("payloads/stdin-invocation.json", isDirectory: false))
+        try writeJSONObject([
+            "type": "direct_response",
+            "response_item": [
+                "type": "function_call_output",
+                "call_id": "call-stdin",
+                "output": "hi\n"
+            ]
+        ], to: bundle.appendingPathComponent("payloads/stdin-result.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let toolCalls = try XCTUnwrap(state["tool_calls"] as? [String: Any])
+        let toolCall = try XCTUnwrap(toolCalls["tool-stdin"] as? [String: Any])
+        XCTAssertEqual(toolCall["terminal_operation_id"] as? String, "terminal_operation:1")
+        XCTAssertEqual(toolCall["raw_invocation_payload_id"] as? String, "payload-stdin-invocation")
+        XCTAssertEqual(toolCall["raw_result_payload_id"] as? String, "payload-stdin-result")
+        XCTAssertEqual(toolCall["raw_runtime_payload_ids"] as? [String], [])
+        let summary = try XCTUnwrap(toolCall["summary"] as? [String: Any])
+        XCTAssertEqual(summary["type"] as? String, "terminal")
+        XCTAssertEqual(summary["operation_id"] as? String, "terminal_operation:1")
+
+        let operations = try XCTUnwrap(state["terminal_operations"] as? [String: Any])
+        let operation = try XCTUnwrap(operations["terminal_operation:1"] as? [String: Any])
+        XCTAssertEqual(operation["terminal_id"] as? String, "123")
+        XCTAssertEqual(operation["tool_call_id"] as? String, "tool-stdin")
+        XCTAssertEqual(operation["kind"] as? String, "write_stdin")
+        XCTAssertEqual(operation["raw_payload_ids"] as? [String], ["payload-stdin-invocation", "payload-stdin-result"])
+        let execution = try XCTUnwrap(operation["execution"] as? [String: Any])
+        XCTAssertEqual(execution["started_seq"] as? Int, 3)
+        XCTAssertEqual(execution["ended_seq"] as? Int, 4)
+        XCTAssertEqual(execution["status"] as? String, "completed")
+        let request = try XCTUnwrap(operation["request"] as? [String: Any])
+        XCTAssertEqual(request["type"] as? String, "write_stdin")
+        XCTAssertEqual(request["stdin"] as? String, "echo hi\n")
+        XCTAssertEqual(request["yield_time_ms"] as? Int, 250)
+        XCTAssertEqual(request["max_output_tokens"] as? Int, 2000)
+        let terminalResult = try XCTUnwrap(operation["result"] as? [String: Any])
+        XCTAssertNil(terminalResult["exit_code"] as? Int)
+        XCTAssertEqual(terminalResult["stdout"] as? String, "hi\n")
+        XCTAssertEqual(terminalResult["stderr"] as? String, "")
+        XCTAssertEqual(terminalResult["formatted_output"] as? String, "hi\n")
+
+        let sessions = try XCTUnwrap(state["terminal_sessions"] as? [String: Any])
+        let session = try XCTUnwrap(sessions["123"] as? [String: Any])
+        XCTAssertEqual(session["created_by_operation_id"] as? String, "terminal_operation:1")
+        XCTAssertEqual(session["operation_ids"] as? [String], ["terminal_operation:1"])
+    }
+
+    func testTraceReduceProjectsCodeModeWriteStdinResultFields() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let invocationPayload: [String: Any] = [
+            "raw_payload_id": "payload-stdin-invocation",
+            "kind": ["type": "tool_invocation"],
+            "path": "payloads/stdin-invocation.json"
+        ]
+        let resultPayload: [String: Any] = [
+            "raw_payload_id": "payload-stdin-result",
+            "kind": ["type": "tool_result"],
+            "path": "payloads/stdin-result.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "tool-stdin",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": "runtime-tool-1",
+                "requester": ["type": "code_cell", "code_cell_id": "code_cell:call-code"],
+                "kind": ["type": "write_stdin"],
+                "summary": ["type": "generic", "label": "write_stdin", "input_preview": NSNull(), "output_preview": NSNull()],
+                "invocation_payload": invocationPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "tool-stdin",
+                "status": "completed",
+                "result_payload": resultPayload
+            ])
+        ])
+        try writeJSONObject([
+            "tool_name": "write_stdin",
+            "tool_namespace": NSNull(),
+            "payload": [
+                "type": "function",
+                "arguments": #"{"session_id":456,"chars":"","yield_time_ms":1000,"max_output_tokens":4000}"#
+            ]
+        ], to: bundle.appendingPathComponent("payloads/stdin-invocation.json", isDirectory: false))
+        try writeJSONObject([
+            "type": "code_mode_response",
+            "value": [
+                "chunk_id": "abc123",
+                "wall_time_seconds": 1.25,
+                "exit_code": 0,
+                "original_token_count": 3,
+                "output": "done\n"
+            ]
+        ], to: bundle.appendingPathComponent("payloads/stdin-result.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let operations = try XCTUnwrap(state["terminal_operations"] as? [String: Any])
+        let operation = try XCTUnwrap(operations["terminal_operation:1"] as? [String: Any])
+        let terminalResult = try XCTUnwrap(operation["result"] as? [String: Any])
+        XCTAssertEqual(terminalResult["exit_code"] as? Int, 0)
+        XCTAssertEqual(terminalResult["stdout"] as? String, "done\n")
+        XCTAssertEqual(terminalResult["stderr"] as? String, "")
+        XCTAssertEqual(terminalResult["formatted_output"] as? String, "done\n")
+        XCTAssertEqual(terminalResult["original_token_count"] as? Int, 3)
+        XCTAssertEqual(terminalResult["chunk_id"] as? String, "abc123")
+    }
+
     func testTraceReduceDerivesToolCallThreadFromTurnContext() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)

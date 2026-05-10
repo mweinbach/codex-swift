@@ -367,7 +367,7 @@ struct DebugTraceReducer {
             throw DebugTraceReducerError.duplicateToolCall(toolCallID)
         }
 
-        toolCalls[toolCallID] = [
+        var toolCall: [String: Any] = [
             "tool_call_id": toolCallID,
             "model_visible_call_id": Self.nullableString(payload["model_visible_call_id"]),
             "code_mode_runtime_tool_id": Self.nullableString(payload["code_mode_runtime_tool_id"]),
@@ -389,6 +389,14 @@ struct DebugTraceReducer {
             "raw_result_payload_id": NSNull(),
             "raw_runtime_payload_ids": []
         ]
+        if let operationID = try startDispatchTerminalOperationIfNeeded(event: event, toolCall: toolCall, payload: payload) {
+            toolCall["terminal_operation_id"] = operationID
+            toolCall["summary"] = [
+                "type": "terminal",
+                "operation_id": operationID
+            ]
+        }
+        toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
     }
 
@@ -456,6 +464,16 @@ struct DebugTraceReducer {
         execution["status"] = try Self.requiredString(payload, key: "status")
         toolCall["execution"] = execution
         toolCall["raw_result_payload_id"] = try Self.optionalRawPayloadID(payload["result_payload"])
+        if let operationID = toolCall["terminal_operation_id"] as? String,
+           (toolCall["raw_runtime_payload_ids"] as? [String] ?? []).isEmpty {
+            try endDispatchTerminalOperation(
+                event: event,
+                operationID: operationID,
+                threadID: try Self.requiredString(toolCall, key: "thread_id"),
+                status: try Self.requiredString(payload, key: "status"),
+                resultPayload: payload["result_payload"] as? [String: Any]
+            )
+        }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
     }
@@ -554,6 +572,102 @@ struct DebugTraceReducer {
             rawRuntimePayloadIDs.append(rawPayloadID)
         }
         toolCall["raw_runtime_payload_ids"] = rawRuntimePayloadIDs
+    }
+
+    private mutating func startDispatchTerminalOperationIfNeeded(
+        event: [String: Any],
+        toolCall: [String: Any],
+        payload: [String: Any]
+    ) throws -> String? {
+        guard terminalOperationKind(for: toolCall) == "write_stdin",
+              let invocationPayload = payload["invocation_payload"] as? [String: Any]
+        else {
+            return nil
+        }
+        let rawPayloadID = try Self.requiredString(invocationPayload, key: "raw_payload_id")
+        let invocationJSON = try loadRawPayloadJSON(invocationPayload)
+        let request = try dispatchWriteStdinRequest(fromInvocationPayload: invocationJSON)
+        let operationID = nextTerminalOperationID()
+        let toolCallID = try Self.requiredString(toolCall, key: "tool_call_id")
+        let threadID = try Self.requiredString(toolCall, key: "thread_id")
+        let terminalID = request.terminalID
+
+        var terminalOperations = try Self.dictionaryMap(rollout["terminal_operations"], key: "terminal_operations")
+        terminalOperations[operationID] = [
+            "operation_id": operationID,
+            "terminal_id": terminalID,
+            "tool_call_id": toolCallID,
+            "kind": "write_stdin",
+            "execution": try executionWindow(
+                event: event,
+                status: "running",
+                endedAt: NSNull(),
+                endedSeq: NSNull()
+            ),
+            "request": request.request,
+            "result": NSNull(),
+            "model_observations": [],
+            "raw_payload_ids": [rawPayloadID]
+        ]
+        rollout["terminal_operations"] = terminalOperations
+        try ensureTerminalSession(
+            threadID: threadID,
+            terminalID: terminalID,
+            operationID: operationID,
+            startedAt: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            startedSeq: try Self.requiredInt(event, key: "seq")
+        )
+        return operationID
+    }
+
+    private mutating func endDispatchTerminalOperation(
+        event: [String: Any],
+        operationID: String,
+        threadID: String,
+        status: String,
+        resultPayload: [String: Any]?
+    ) throws {
+        let parsedResult: (rawPayloadID: String, result: [String: Any])?
+        if let resultPayload {
+            let rawPayloadID = try Self.requiredString(resultPayload, key: "raw_payload_id")
+            parsedResult = (rawPayloadID, try dispatchTerminalResult(fromResultPayload: try loadRawPayloadJSON(resultPayload)))
+        } else {
+            parsedResult = nil
+        }
+
+        var terminalOperations = try Self.dictionaryMap(rollout["terminal_operations"], key: "terminal_operations")
+        guard var operation = terminalOperations[operationID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownTerminalOperation(operationID)
+        }
+        guard var execution = operation["execution"] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("terminal operation execution for \(operationID)")
+        }
+        execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+        execution["status"] = status
+        operation["execution"] = execution
+        if let parsedResult {
+            operation["result"] = parsedResult.result
+            var rawPayloadIDs = operation["raw_payload_ids"] as? [String] ?? []
+            if !rawPayloadIDs.contains(parsedResult.rawPayloadID) {
+                rawPayloadIDs.append(parsedResult.rawPayloadID)
+            }
+            operation["raw_payload_ids"] = rawPayloadIDs
+        }
+        terminalOperations[operationID] = operation
+        rollout["terminal_operations"] = terminalOperations
+
+        if let terminalID = operation["terminal_id"] as? String,
+           let startedAt = execution["started_at_unix_ms"] as? Int,
+           let startedSeq = execution["started_seq"] as? Int {
+            try ensureTerminalSession(
+                threadID: threadID,
+                terminalID: terminalID,
+                operationID: operationID,
+                startedAt: startedAt,
+                startedSeq: startedSeq
+            )
+        }
     }
 
     private mutating func startTerminalOperation(
@@ -742,6 +856,32 @@ struct DebugTraceReducer {
         }
     }
 
+    private func dispatchWriteStdinRequest(fromInvocationPayload payload: [String: Any]) throws -> DispatchTerminalRequest {
+        guard (payload["tool_name"] as? String) == "write_stdin" else {
+            throw DebugTraceReducerError.invalidTraceObject("dispatch terminal request")
+        }
+        let toolPayload = try Self.requiredDictionary(payload, key: "payload")
+        guard (toolPayload["type"] as? String) == "function" else {
+            throw DebugTraceReducerError.invalidTraceObject("write_stdin dispatch payload")
+        }
+        let arguments = try Self.requiredString(toolPayload, key: "arguments")
+        guard let argumentsData = arguments.data(using: .utf8),
+              let args = try JSONSerialization.jsonObject(with: argumentsData) as? [String: Any],
+              let terminalID = Self.terminalID(from: args["session_id"])
+        else {
+            throw DebugTraceReducerError.missingField("session_id")
+        }
+        return DispatchTerminalRequest(
+            terminalID: terminalID,
+            request: [
+                "type": "write_stdin",
+                "stdin": args["chars"] as? String ?? "",
+                "yield_time_ms": args["yield_time_ms"] ?? NSNull(),
+                "max_output_tokens": args["max_output_tokens"] ?? NSNull()
+            ]
+        )
+    }
+
     private func terminalResult(fromEndPayload payload: [String: Any]) throws -> TerminalEndResult {
         let result: [String: Any] = [
             "exit_code": try Self.requiredInt(payload, key: "exit_code"),
@@ -752,6 +892,46 @@ struct DebugTraceReducer {
             "chunk_id": NSNull()
         ]
         return TerminalEndResult(terminalID: payload["process_id"] as? String, result: result)
+    }
+
+    private func dispatchTerminalResult(fromResultPayload payload: [String: Any]) throws -> [String: Any] {
+        let type = try Self.requiredString(payload, key: "type")
+        switch type {
+        case "direct_response":
+            let responseItem = try Self.requiredDictionary(payload, key: "response_item")
+            let output = Self.jsonTextContent(responseItem["output"]) ?? Self.jsonString(responseItem)
+            return [
+                "exit_code": NSNull(),
+                "stdout": output,
+                "stderr": "",
+                "formatted_output": output,
+                "original_token_count": NSNull(),
+                "chunk_id": NSNull()
+            ]
+        case "code_mode_response":
+            let value = try Self.requiredDictionary(payload, key: "value")
+            let output = value["output"] as? String ?? (Self.jsonTextContent(value["output"]) ?? Self.jsonString(value))
+            return [
+                "exit_code": value["exit_code"] ?? NSNull(),
+                "stdout": output,
+                "stderr": "",
+                "formatted_output": output,
+                "original_token_count": value["original_token_count"] ?? NSNull(),
+                "chunk_id": value["chunk_id"] ?? NSNull()
+            ]
+        case "error":
+            let error = try Self.requiredString(payload, key: "error")
+            return [
+                "exit_code": NSNull(),
+                "stdout": "",
+                "stderr": error,
+                "formatted_output": error,
+                "original_token_count": NSNull(),
+                "chunk_id": NSNull()
+            ]
+        default:
+            throw DebugTraceReducerError.invalidTraceObject("dispatch terminal response \(type)")
+        }
     }
 
     private func loadRawPayloadJSON(_ payloadRef: [String: Any]) throws -> [String: Any] {
@@ -939,6 +1119,41 @@ struct DebugTraceReducer {
         }
         return value
     }
+
+    private static func terminalID(from value: Any?) -> String? {
+        switch value {
+        case let string as String where !string.isEmpty:
+            return string
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return nil
+        }
+    }
+
+    private static func jsonTextContent(_ value: Any?) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let array as [[String: Any]]:
+            let text = array.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            return text.isEmpty ? nil : text
+        case nil, is NSNull:
+            return nil
+        case let value?:
+            return jsonString(value)
+        }
+    }
+
+    private static func jsonString(_ value: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return "\(value)"
+        }
+        return string
+    }
 }
 
 private struct ThreadSpawnMetadata {
@@ -951,6 +1166,11 @@ private struct ThreadSpawnMetadata {
 private struct TerminalEndResult {
     var terminalID: String?
     var result: [String: Any]
+}
+
+private struct DispatchTerminalRequest {
+    var terminalID: String
+    var request: [String: Any]
 }
 
 private enum DebugTraceReducerError: Error, CustomStringConvertible {
