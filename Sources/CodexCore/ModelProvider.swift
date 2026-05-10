@@ -39,8 +39,8 @@ public protocol ModelProvider: Sendable {
     func capabilities() -> ModelProviderCapabilities
     func supportsAttestation() -> Bool
     func accountState() throws -> ProviderAccountState
-    func apiProvider(environment: [String: String]) -> APIProvider
-    func runtimeBaseURL() -> String?
+    func apiProvider(environment: [String: String]) throws -> APIProvider
+    func runtimeBaseURL() throws -> String?
     func apiAuth(environment: [String: String]) throws -> StaticAPIAuthProvider
 }
 
@@ -95,11 +95,11 @@ public struct ConfiguredModelProvider: ModelProvider {
         return ProviderAccountState(account: account, requiresOpenAIAuth: true)
     }
 
-    public func apiProvider(environment: [String: String] = ProcessInfo.processInfo.environment) -> APIProvider {
+    public func apiProvider(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> APIProvider {
         info.toAPIProvider(authMode: effectiveAuthMode, environment: environment)
     }
 
-    public func runtimeBaseURL() -> String? {
+    public func runtimeBaseURL() throws -> String? {
         info.baseURL
     }
 
@@ -140,17 +140,62 @@ public struct AmazonBedrockModelProvider: ModelProvider {
         ProviderAccountState(account: .amazonBedrock, requiresOpenAIAuth: false)
     }
 
-    public func apiProvider(environment: [String: String] = ProcessInfo.processInfo.environment) -> APIProvider {
-        info.toAPIProvider(authMode: nil, environment: environment)
+    public func apiProvider(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> APIProvider {
+        let configured = info.toAPIProvider(authMode: nil, environment: environment)
+        return APIProvider(
+            name: configured.name,
+            baseURL: try bedrockRuntimeBaseURL(),
+            queryParams: configured.queryParams,
+            wireAPI: configured.wireAPI,
+            headers: configured.headers,
+            retry: configured.retry,
+            streamIdleTimeoutMilliseconds: configured.streamIdleTimeoutMilliseconds
+        )
     }
 
-    public func runtimeBaseURL() -> String? {
-        info.baseURL
+    public func runtimeBaseURL() throws -> String? {
+        try bedrockRuntimeBaseURL()
     }
 
     public func apiAuth(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> StaticAPIAuthProvider {
-        StaticAPIAuthProvider()
+        if let token = environment[Self.awsBearerTokenEnvVar]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty {
+            guard aws.regionFromConfig != nil else {
+                throw ModelProviderError.amazonBedrockBearerTokenMissingRegion
+            }
+            return StaticAPIAuthProvider(bearerToken: token)
+        }
+        return StaticAPIAuthProvider()
     }
+
+    private static let awsBearerTokenEnvVar = "AWS_BEARER_TOKEN_BEDROCK"
+
+    private var aws: ModelProviderAWSAuthInfo {
+        info.aws ?? ModelProviderAWSAuthInfo()
+    }
+
+    private func bedrockRuntimeBaseURL() throws -> String {
+        let region = aws.regionFromConfig ?? "us-east-1"
+        guard Self.supportedMantleRegions.contains(region) else {
+            throw ModelProviderError.unsupportedAmazonBedrockRegion(region)
+        }
+        return "https://bedrock-mantle.\(region).api.aws/openai/v1"
+    }
+
+    private static let supportedMantleRegions: Set<String> = [
+        "us-east-2",
+        "us-east-1",
+        "us-west-2",
+        "ap-southeast-3",
+        "ap-south-1",
+        "ap-northeast-1",
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "eu-south-1",
+        "eu-north-1",
+        "sa-east-1"
+    ]
 }
 
 private extension ChatGPTPlanType {

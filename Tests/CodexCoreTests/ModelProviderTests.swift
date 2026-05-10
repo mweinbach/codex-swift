@@ -10,12 +10,12 @@ final class ModelProviderTests: XCTestCase {
         XCTAssertEqual(provider.capabilities(), ModelProviderCapabilities())
     }
 
-    func testConfiguredProviderRuntimeBaseURLUsesConfiguredBaseURL() {
+    func testConfiguredProviderRuntimeBaseURLUsesConfiguredBaseURL() throws {
         let provider = ModelProviderFactory.create(
             providerInfo: providerInfo(baseURL: "https://example.test/v1")
         )
 
-        XCTAssertEqual(provider.runtimeBaseURL(), "https://example.test/v1")
+        XCTAssertEqual(try provider.runtimeBaseURL(), "https://example.test/v1")
     }
 
     func testOpenAIProviderReturnsUnauthenticatedOpenAIAccountState() throws {
@@ -81,7 +81,7 @@ final class ModelProviderTests: XCTestCase {
         )
         XCTAssertTrue(provider.supportsAttestation())
         XCTAssertEqual(
-            provider.apiProvider(environment: [:]).baseURL,
+            try provider.apiProvider(environment: [:]).baseURL,
             "https://chatgpt.com/backend-api/codex"
         )
     }
@@ -173,11 +173,59 @@ final class ModelProviderTests: XCTestCase {
             auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "openai-api-key", tokens: nil, lastRefresh: nil)
         )
 
-        XCTAssertEqual(provider.apiProvider(environment: [:]).baseURL, "https://api.openai.com/v1")
-        XCTAssertEqual(provider.apiProvider(environment: [:]).headers, ["X-Test": "1"])
+        XCTAssertEqual(try provider.apiProvider(environment: [:]).baseURL, "https://api.openai.com/v1")
+        XCTAssertEqual(try provider.apiProvider(environment: [:]).headers, ["X-Test": "1"])
         XCTAssertEqual(
             try provider.apiAuth(environment: ["CUSTOM_API_KEY": "provider-token"]),
             StaticAPIAuthProvider(bearerToken: "provider-token")
+        )
+    }
+
+    func testAmazonBedrockProviderUsesConfiguredRegionEndpointLikeRust() throws {
+        var info = ModelProviderInfo.createAmazonBedrockProvider()
+        info.aws = ModelProviderAWSAuthInfo(profile: "codex-bedrock", region: " eu-central-1 ")
+        let provider = ModelProviderFactory.create(providerInfo: info)
+
+        XCTAssertEqual(
+            try provider.runtimeBaseURL(),
+            "https://bedrock-mantle.eu-central-1.api.aws/openai/v1"
+        )
+        XCTAssertEqual(
+            try provider.apiProvider(environment: [:]).baseURL,
+            "https://bedrock-mantle.eu-central-1.api.aws/openai/v1"
+        )
+    }
+
+    func testAmazonBedrockProviderRejectsUnsupportedRegionLikeRust() {
+        var info = ModelProviderInfo.createAmazonBedrockProvider()
+        info.aws = ModelProviderAWSAuthInfo(region: "us-west-1")
+        let provider = ModelProviderFactory.create(providerInfo: info)
+
+        XCTAssertThrowsError(try provider.runtimeBaseURL()) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Fatal error: Amazon Bedrock Mantle does not support region `us-west-1`"
+            )
+        }
+    }
+
+    func testAmazonBedrockBearerTokenAuthRequiresConfiguredRegionLikeRust() throws {
+        let provider = ModelProviderFactory.create(providerInfo: .createAmazonBedrockProvider())
+
+        XCTAssertThrowsError(try provider.apiAuth(environment: ["AWS_BEARER_TOKEN_BEDROCK": " bearer-token "])) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Fatal error: Amazon Bedrock bearer token auth requires `model_providers.amazon-bedrock.aws.region`"
+            )
+        }
+
+        var info = ModelProviderInfo.createAmazonBedrockProvider()
+        info.aws = ModelProviderAWSAuthInfo(region: "us-west-2")
+        let regionProvider = ModelProviderFactory.create(providerInfo: info)
+
+        XCTAssertEqual(
+            try regionProvider.apiAuth(environment: ["AWS_BEARER_TOKEN_BEDROCK": " bearer-token "]),
+            StaticAPIAuthProvider(bearerToken: "bearer-token")
         )
     }
 

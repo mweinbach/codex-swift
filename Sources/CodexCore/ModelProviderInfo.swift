@@ -198,6 +198,8 @@ public struct APIProvider: Equatable, Sendable {
 
 public enum ModelProviderError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingEnvironmentVariable(name: String, instructions: String?)
+    case amazonBedrockBearerTokenMissingRegion
+    case unsupportedAmazonBedrockRegion(String)
     case validation(String)
 
     public var description: String {
@@ -207,6 +209,10 @@ public enum ModelProviderError: Error, Equatable, CustomStringConvertible, Senda
                 return "Missing environment variable \(name). \(instructions)"
             }
             return "Missing environment variable \(name)"
+        case .amazonBedrockBearerTokenMissingRegion:
+            return "Fatal error: Amazon Bedrock bearer token auth requires `model_providers.amazon-bedrock.aws.region`"
+        case let .unsupportedAmazonBedrockRegion(region):
+            return "Fatal error: Amazon Bedrock Mantle does not support region `\(region)`"
         case let .validation(message):
             return message
         }
@@ -683,6 +689,15 @@ public struct ModelProviderAWSAuthInfo: Codable, Equatable, Sendable {
     public init(profile: String? = nil, region: String? = nil) {
         self.profile = profile
         self.region = region
+    }
+
+    public var regionFromConfig: String? {
+        guard let trimmed = region?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty
+        else {
+            return nil
+        }
+        return trimmed
     }
 }
 
