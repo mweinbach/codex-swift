@@ -110,6 +110,55 @@ final class CloudTaskClientTests: XCTestCase {
         }
     }
 
+    func testTaskDiffRejectsAttemptZeroWithRustMessage() async {
+        let token = AuthTokenData(idToken: "id", accessToken: "access", refreshToken: "refresh", accountID: "account")
+        let transport = URLSessionAPITransport { _ in
+            URLSessionTransportResponse(statusCode: 200, body: Data(Self.taskResponseJSON(diff: Self.validDiff).utf8))
+        }
+        let client = CloudTaskClient(
+            configuration: CloudTaskClientConfiguration(codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)),
+            transport: transport,
+            tokenLoader: { token },
+            errorLog: { _ in }
+        )
+
+        await XCTAssertThrowsErrorAsync(try await client.taskDiff(taskID: "task_123", attempt: 0)) { error in
+            XCTAssertEqual((error as? CloudTaskClientError)?.description, "attempt must be at least 1")
+        }
+    }
+
+    func testTaskDiffKeepsCurrentAttemptBeforeEqualSiblingMetadataLikeRustStableSort() async throws {
+        let token = AuthTokenData(idToken: "id", accessToken: "access", refreshToken: "refresh", accountID: "account")
+        let currentDiff = Self.diff(named: "current")
+        let siblingADiff = Self.diff(named: "sibling-a")
+        let siblingBDiff = Self.diff(named: "sibling-b")
+        let transport = URLSessionAPITransport { request in
+            if request.url?.path == "/backend-api/wham/tasks/task_123/turns/turn-current/sibling_turns" {
+                return URLSessionTransportResponse(statusCode: 200, body: Data(Self.siblingAttemptsJSON(
+                    firstDiff: siblingBDiff,
+                    secondDiff: siblingADiff
+                ).utf8))
+            }
+            return URLSessionTransportResponse(statusCode: 200, body: Data(Self.taskAttemptDetailsJSON(
+                turnID: "turn-current",
+                diff: currentDiff
+            ).utf8))
+        }
+        let client = CloudTaskClient(
+            configuration: CloudTaskClientConfiguration(codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)),
+            transport: transport,
+            tokenLoader: { token },
+            errorLog: { _ in }
+        )
+
+        let firstAttempt = try await client.taskDiff(taskID: "task_123", attempt: 1)
+        let secondAttempt = try await client.taskDiff(taskID: "task_123", attempt: 2)
+        let thirdAttempt = try await client.taskDiff(taskID: "task_123", attempt: 3)
+        XCTAssertEqual(firstAttempt, currentDiff)
+        XCTAssertEqual(secondAttempt, siblingADiff)
+        XCTAssertEqual(thirdAttempt, siblingBDiff)
+    }
+
     func testCreateTaskResolvesEnvironmentLabelBranchAndReturnsBrowserURL() async throws {
         let token = AuthTokenData(idToken: "id", accessToken: "access", refreshToken: "refresh", accountID: "account")
         let capturedRequests = AsyncCapture<[URLRequest]>()
@@ -363,6 +412,17 @@ final class CloudTaskClientTests: XCTestCase {
     +after
     """ + "\n"
 
+    private static func diff(named name: String) -> String {
+        """
+        diff --git a/\(name).txt b/\(name).txt
+        --- a/\(name).txt
+        +++ b/\(name).txt
+        @@ -1 +1 @@
+        -before
+        +\(name)
+        """ + "\n"
+    }
+
     private static func taskResponseJSON(diff: String) -> String {
         let payload: [String: Any] = [
             "current_diff_task_turn": [
@@ -370,6 +430,52 @@ final class CloudTaskClientTests: XCTestCase {
                     [
                         "type": "pr",
                         "output_diff": ["diff": diff]
+                    ]
+                ]
+            ]
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func taskAttemptDetailsJSON(turnID: String, diff: String) -> String {
+        let payload: [String: Any] = [
+            "current_assistant_turn": [
+                "id": turnID,
+                "output_items": []
+            ],
+            "current_diff_task_turn": [
+                "output_items": [
+                    [
+                        "type": "pr",
+                        "output_diff": ["diff": diff]
+                    ]
+                ]
+            ]
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func siblingAttemptsJSON(firstDiff: String, secondDiff: String) -> String {
+        let payload: [String: Any] = [
+            "sibling_turns": [
+                [
+                    "id": "turn-b",
+                    "output_items": [
+                        [
+                            "type": "pr",
+                            "output_diff": ["diff": firstDiff]
+                        ]
+                    ]
+                ],
+                [
+                    "id": "turn-a",
+                    "output_items": [
+                        [
+                            "type": "pr",
+                            "output_diff": ["diff": secondDiff]
+                        ]
                     ]
                 ]
             ]

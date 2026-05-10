@@ -31,6 +31,7 @@ public enum CloudTaskClientError: Error, Equatable, CustomStringConvertible, Sen
     case ambiguousEnvironmentLabel(String)
     case noAttemptsAvailable
     case noDiffAvailable(taskID: String)
+    case attemptMustBeAtLeastOne
     case attemptUnavailable(requested: Int, available: Int)
 
     public var description: String {
@@ -57,6 +58,8 @@ public enum CloudTaskClientError: Error, Equatable, CustomStringConvertible, Sen
             return "No attempts available"
         case let .noDiffAvailable(taskID):
             return "No diff available for task \(taskID); it may still be running."
+        case .attemptMustBeAtLeastOne:
+            return "attempt must be at least 1"
         case let .attemptUnavailable(requested, available):
             return "Attempt \(requested) not available; only \(available) attempt(s) found"
         }
@@ -318,7 +321,7 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
             }
         }
 
-        attempts.sort(by: Self.compareAttempts)
+        attempts = Self.stableSortedAttempts(attempts)
         if attempts.isEmpty {
             throw CloudTaskClientError.noDiffAvailable(taskID: id.rawValue)
         }
@@ -330,11 +333,29 @@ public struct CloudTaskClient<Transport: APITransport>: Sendable {
             throw CloudTaskClientError.noAttemptsAvailable
         }
         let desired = attempt ?? 1
+        guard desired >= 1 else {
+            throw CloudTaskClientError.attemptMustBeAtLeastOne
+        }
         let index = desired - 1
         guard attempts.indices.contains(index) else {
             throw CloudTaskClientError.attemptUnavailable(requested: desired, available: attempts.count)
         }
         return attempts[index]
+    }
+
+    private static func stableSortedAttempts(_ attempts: [AttemptDiffData]) -> [AttemptDiffData] {
+        attempts
+            .enumerated()
+            .sorted { lhs, rhs in
+                if compareAttempts(lhs: lhs.element, rhs: rhs.element) {
+                    return true
+                }
+                if compareAttempts(lhs: rhs.element, rhs: lhs.element) {
+                    return false
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     private static func compareAttempts(lhs: AttemptDiffData, rhs: AttemptDiffData) -> Bool {
