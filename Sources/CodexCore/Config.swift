@@ -109,6 +109,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var toolOutputTokenLimit: Int?
     public var ossProvider: String?
     public var toolSuggest: ToolSuggestConfig
+    public var checkForUpdateOnStartup: Bool
 
     public init(
         model: String? = nil,
@@ -213,6 +214,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.toolOutputTokenLimit = toolOutputTokenLimit
         self.ossProvider = ossProvider
         self.toolSuggest = ToolSuggestConfig()
+        self.checkForUpdateOnStartup = true
     }
 
     public init(
@@ -1803,6 +1805,12 @@ private struct ParsedCodexConfigToml {
         if let ossProvider = values["oss_provider"] {
             config.ossProvider = try stringValue(ossProvider, key: "\(keyPrefix)oss_provider")
         }
+        if let checkForUpdate = values["check_for_update_on_startup"] {
+            config.checkForUpdateOnStartup = try boolValue(
+                checkForUpdate,
+                key: "\(keyPrefix)check_for_update_on_startup"
+            )
+        }
     }
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
@@ -1848,6 +1856,7 @@ private struct ParsedCodexConfigToml {
             || key == "project_doc_fallback_filenames"
             || key == "tool_output_token_limit"
             || key == "oss_provider"
+            || key == "check_for_update_on_startup"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {

@@ -60,6 +60,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.toolOutputTokenLimit)
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
+        XCTAssertTrue(config.checkForUpdateOnStartup)
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
@@ -105,6 +106,7 @@ final class ConfigLoaderTests: XCTestCase {
         mcp_oauth_callback_url = "https://example.com/callback"
         tool_output_token_limit = 12000
         oss_provider = "ollama"
+        check_for_update_on_startup = false
 
         [audio]
         microphone = "USB Mic"
@@ -172,6 +174,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
+        XCTAssertFalse(config.checkForUpdateOnStartup)
     }
 
     func testPromptInstructionBlocksCanBeDisabledFromConfigAndProfilesLikeRust() throws {
