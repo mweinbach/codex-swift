@@ -3887,9 +3887,11 @@ public enum CodexAppServer {
         pluginName: String,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
         let manifestPath = URL(fileURLWithPath: marketplacePath, isDirectory: false)
+        let config = try localPluginReadConfig(
+            marketplaceManifestPath: manifestPath,
+            configuration: configuration
+        )
         let marketplace = try pluginMarketplaceEntry(
             manifestPath: manifestPath,
             config: config,
@@ -3958,6 +3960,24 @@ public enum CodexAppServer {
                 "mcpServers": mcpServers
             ].nullStripped(keepNulls: true)
         ]
+    }
+
+    private static func localPluginReadConfig(
+        marketplaceManifestPath: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> ConfigValue {
+        do {
+            return try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cwd: marketplaceManifestPath.deletingLastPathComponent(),
+                cliOverrides: configuration.cliConfigOverrides,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment,
+                systemConfigFile: nil
+            ).effectiveConfig()
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
     }
 
     private static func remotePluginReadResult(
@@ -4655,6 +4675,12 @@ public enum CodexAppServer {
             configuration: configuration,
             auth: auth
         )) ?? []
+        let accessibleIDs: Set<String>
+        if let accessibleConnectors = try? configuration.accessibleConnectorProvider(runtimeConfig, true) {
+            accessibleIDs = Set(accessibleConnectors.filter(\.isAccessible).map(\.id))
+        } else {
+            accessibleIDs = []
+        }
         return connectors
             .filter { connector in
                 guard let id = connector["id"] as? String else {
@@ -4662,6 +4688,7 @@ public enum CodexAppServer {
                 }
                 return pluginAppIDs.contains(id)
                     && isConnectorIDAllowed(id, originatorValue: configuration.originator)
+                    && !accessibleIDs.contains(id)
             }
             .map { connector in
                 let id = connector["id"] as? String ?? ""

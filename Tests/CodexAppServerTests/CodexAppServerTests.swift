@@ -5149,6 +5149,32 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginReadUsesMarketplaceProjectConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".codex", isDirectory: true), withIntermediateDirectories: true)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+
+        try """
+        [plugins."weather@debug"]
+        enabled = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try """
+        [plugins."weather@debug"]
+        enabled = false
+        """.write(to: sourceRoot.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        XCTAssertEqual(summary["enabled"] as? Bool, false)
+    }
+
     func testPluginReadDescribesUninstalledGitSourceWithoutCloning() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = temp.url.appendingPathComponent("marketplace", isDirectory: true)
@@ -7206,6 +7232,10 @@ final class CodexAppServerTests: XCTestCase {
               "id": "connector_weather",
               "name": "Weather"
             },
+            "calendar": {
+              "id": "connector_calendar",
+              "name": "Calendar"
+            },
             "disallowed": {
               "id": "asdk_app_6938a94a61d881918ef32cb999ff937c",
               "name": "Disallowed app"
@@ -7249,6 +7279,11 @@ final class CodexAppServerTests: XCTestCase {
               "description": "Weather connector"
             },
             {
+              "id": "connector_calendar",
+              "name": "Calendar",
+              "description": "Already authorized calendar connector"
+            },
+            {
               "id": "asdk_app_6938a94a61d881918ef32cb999ff937c",
               "name": "Disallowed app",
               "description": "Filtered app"
@@ -7274,6 +7309,17 @@ final class CodexAppServerTests: XCTestCase {
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
+            },
+            accessibleConnectorProvider: { _, _ in
+                [
+                    DiscoverableConnectorInfo(
+                        id: "connector_calendar",
+                        name: "Calendar",
+                        description: "Already authorized calendar connector",
+                        isAccessible: true,
+                        isEnabled: true
+                    )
+                ]
             }
         )
 
