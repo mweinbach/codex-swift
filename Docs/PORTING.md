@@ -368,6 +368,8 @@ Source baseline inspected for this scaffold:
   - `codex fork` parser-to-runtime bridge for explicit session IDs, `--last`, `--all`, root and fork-scoped `--remote` / `--remote-auth-token-env` option precedence, provider-filtered newest-session lookup, and picker listing over saved rollout files; the actual interactive fork TUI remains pending with the broader interactive runtime
 - `codex-rs/exec-server/src/server/transport.rs`, `remote.rs`, and CLI `exec-server`
   - `codex exec-server` now parses Rust's `--listen`, `--remote`, `--executor-id`, and `--name` flags, rejects root remote-mode flags, enforces `--listen`/`--remote` conflicts and remote executor-id requirements, validates `stdio`/`stdio://`/`ws://IP:PORT` listen URLs, and preserves remote executor base URL, executor id, name, and bearer-token normalization errors. The actual exec-server JSON-RPC/WebSocket/stdio serving runtime remains pending.
+- `codex-rs/exec-server/src/protocol.rs`
+  - Swift now carries Rust's exec-server method constants plus initialize, process start/read/write/terminate, filesystem, HTTP request/streaming body, and process notification wire models, including transparent base64 byte chunks, camelCase field names, defaulted optional fields, `stdio`/`stdout`/`stderr`/`pty` stream tags, and filesystem sandbox-context payloads. The live processor/transport remains pending.
 - `codex-rs/exec/src/cli.rs` `codex exec resume`
   - `codex exec resume` now accepts Rust's `--all` provider/cwd bypass flag and subcommand-local `--image`/`-i` attachments, carrying them through non-interactive resume target resolution while preserving the `--last <prompt>` positional reinterpretation.
 - `codex-rs/protocol/src/protocol.rs` session configuration event model

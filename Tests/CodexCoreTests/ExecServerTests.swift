@@ -2,6 +2,254 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testProtocolMethodConstantsMatchRust() {
+        XCTAssertEqual(execServerInitializeMethod, "initialize")
+        XCTAssertEqual(execServerInitializedMethod, "initialized")
+        XCTAssertEqual(execServerProcessStartMethod, "process/start")
+        XCTAssertEqual(execServerProcessReadMethod, "process/read")
+        XCTAssertEqual(execServerProcessWriteMethod, "process/write")
+        XCTAssertEqual(execServerProcessTerminateMethod, "process/terminate")
+        XCTAssertEqual(execServerProcessOutputDeltaMethod, "process/output")
+        XCTAssertEqual(execServerProcessExitedMethod, "process/exited")
+        XCTAssertEqual(execServerProcessClosedMethod, "process/closed")
+        XCTAssertEqual(execServerFsReadFileMethod, "fs/readFile")
+        XCTAssertEqual(execServerFsWriteFileMethod, "fs/writeFile")
+        XCTAssertEqual(execServerFsCreateDirectoryMethod, "fs/createDirectory")
+        XCTAssertEqual(execServerFsGetMetadataMethod, "fs/getMetadata")
+        XCTAssertEqual(execServerFsReadDirectoryMethod, "fs/readDirectory")
+        XCTAssertEqual(execServerFsRemoveMethod, "fs/remove")
+        XCTAssertEqual(execServerFsCopyMethod, "fs/copy")
+        XCTAssertEqual(execServerHttpRequestMethod, "http/request")
+        XCTAssertEqual(execServerHttpRequestBodyDeltaMethod, "http/request/bodyDelta")
+    }
+
+    func testByteChunkUsesTransparentBase64StringLikeRust() throws {
+        let chunk = ExecServerByteChunk(Array("hello".utf8))
+
+        let data = try JSONEncoder().encode(chunk)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "\"aGVsbG8=\"")
+        XCTAssertEqual(try JSONDecoder().decode(ExecServerByteChunk.self, from: data), chunk)
+    }
+
+    func testProcessProtocolWireShapesMatchRustCamelCase() throws {
+        let params = ExecServerExecParams(
+            processId: "proc-1",
+            argv: ["zsh", "-lc", "echo hi"],
+            cwd: "/repo",
+            envPolicy: ExecServerExecEnvPolicy(
+                inherit: .core,
+                ignoreDefaultExcludes: false,
+                exclude: ["SECRET_*"],
+                set: ["FOO": "bar"],
+                includeOnly: ["PATH"]
+            ),
+            env: ["TERM": "xterm-256color"],
+            tty: true,
+            pipeStdin: true,
+            arg0: "codex"
+        )
+
+        try XCTAssertJSONObjectEqual(params, [
+            "processId": "proc-1",
+            "argv": ["zsh", "-lc", "echo hi"],
+            "cwd": "/repo",
+            "envPolicy": [
+                "inherit": "core",
+                "ignoreDefaultExcludes": false,
+                "exclude": ["SECRET_*"],
+                "set": ["FOO": "bar"],
+                "includeOnly": ["PATH"]
+            ],
+            "env": ["TERM": "xterm-256color"],
+            "tty": true,
+            "pipeStdin": true,
+            "arg0": "codex"
+        ])
+
+        let defaulted = try JSONDecoder().decode(ExecServerExecParams.self, from: Data(#"""
+        {
+          "processId": "proc-2",
+          "argv": ["pwd"],
+          "cwd": "/repo",
+          "env": {},
+          "tty": false
+        }
+        """#.utf8))
+        XCTAssertEqual(defaulted.pipeStdin, false)
+        XCTAssertNil(defaulted.envPolicy)
+        XCTAssertNil(defaulted.arg0)
+    }
+
+    func testReadAndNotificationWireShapesCarryBase64Chunks() throws {
+        let readResponse = ExecServerReadResponse(
+            chunks: [
+                ExecServerProcessOutputChunk(
+                    seq: 7,
+                    stream: .stdout,
+                    chunk: ExecServerByteChunk(Array("hi\n".utf8))
+                )
+            ],
+            nextSeq: 8,
+            exited: true,
+            exitCode: 0,
+            closed: false
+        )
+
+        try XCTAssertJSONObjectEqual(readResponse, [
+            "chunks": [
+                [
+                    "seq": 7,
+                    "stream": "stdout",
+                    "chunk": "aGkK"
+                ]
+            ],
+            "nextSeq": 8,
+            "exited": true,
+            "exitCode": 0,
+            "closed": false
+        ])
+
+        try XCTAssertJSONObjectEqual(ExecServerOutputDeltaNotification(
+            processId: "proc-1",
+            seq: 9,
+            stream: .pty,
+            chunk: ExecServerByteChunk(Array(">".utf8))
+        ), [
+            "processId": "proc-1",
+            "seq": 9,
+            "stream": "pty",
+            "chunk": "Pg=="
+        ])
+    }
+
+    func testFilesystemProtocolWireShapesIncludeSandboxContext() throws {
+        let sandbox = FileSystemSandboxContext(
+            permissions: .readOnly(),
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            windowsSandboxLevel: .restrictedToken,
+            windowsSandboxPrivateDesktop: true,
+            useLegacyLandlock: false
+        )
+        let params = ExecServerFsCopyParams(
+            sourcePath: try AbsolutePath(absolutePath: "/repo/a.txt"),
+            destinationPath: try AbsolutePath(absolutePath: "/repo/b.txt"),
+            recursive: false,
+            sandbox: sandbox
+        )
+
+        try XCTAssertJSONObjectEqual(params, [
+            "sourcePath": "/repo/a.txt",
+            "destinationPath": "/repo/b.txt",
+            "recursive": false,
+            "sandbox": [
+                "permissions": [
+                    "type": "managed",
+                    "file_system": [
+                        "type": "restricted",
+                        "entries": [
+                            [
+                                "path": [
+                                    "type": "special",
+                                    "value": ["kind": "root"]
+                                ],
+                                "access": "read"
+                            ]
+                        ]
+                    ],
+                    "network": "restricted"
+                ],
+                "cwd": "/repo",
+                "windowsSandboxLevel": "restricted-token",
+                "windowsSandboxPrivateDesktop": true,
+                "useLegacyLandlock": false
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(FileSystemSandboxContext.self, from: Data(#"""
+        {
+          "permissions": { "type": "disabled" },
+          "windowsSandboxLevel": "disabled"
+        }
+        """#.utf8))
+        XCTAssertEqual(decoded.windowsSandboxPrivateDesktop, false)
+        XCTAssertEqual(decoded.useLegacyLandlock, false)
+    }
+
+    func testHttpRequestDefaultsAndTimeoutNullMatchRust() throws {
+        let omitted = try JSONDecoder().decode(ExecServerHttpRequestParams.self, from: Data(#"""
+        {
+          "method": "GET",
+          "url": "https://example.test",
+          "requestId": "req-omitted-timeout"
+        }
+        """#.utf8))
+        let nullTimeout = try JSONDecoder().decode(ExecServerHttpRequestParams.self, from: Data(#"""
+        {
+          "method": "GET",
+          "url": "https://example.test",
+          "requestId": "req-null-timeout",
+          "timeoutMs": null
+        }
+        """#.utf8))
+        let explicitTimeout = try JSONDecoder().decode(ExecServerHttpRequestParams.self, from: Data(#"""
+        {
+          "method": "POST",
+          "url": "https://example.test",
+          "requestId": "req-explicit-timeout",
+          "headers": [{ "name": "x-test", "value": "1" }],
+          "bodyBase64": "aGVsbG8=",
+          "timeoutMs": 1234,
+          "streamResponse": true
+        }
+        """#.utf8))
+
+        XCTAssertEqual(omitted.requestId, "req-omitted-timeout")
+        XCTAssertNil(omitted.timeoutMs)
+        XCTAssertEqual(omitted.headers, [])
+        XCTAssertNil(omitted.body)
+        XCTAssertFalse(omitted.streamResponse)
+        XCTAssertEqual(nullTimeout.requestId, "req-null-timeout")
+        XCTAssertNil(nullTimeout.timeoutMs)
+        XCTAssertEqual(explicitTimeout.timeoutMs, 1234)
+        XCTAssertEqual(explicitTimeout.body, ExecServerByteChunk(Array("hello".utf8)))
+
+        try XCTAssertJSONObjectEqual(ExecServerHttpRequestParams(
+            method: "POST",
+            url: "https://example.test",
+            headers: [ExecServerHttpHeader(name: "x-test", value: "1")],
+            body: ExecServerByteChunk(Array("hello".utf8)),
+            timeoutMs: 1234,
+            requestId: "req-explicit-timeout",
+            streamResponse: true
+        ), [
+            "method": "POST",
+            "url": "https://example.test",
+            "headers": [["name": "x-test", "value": "1"]],
+            "bodyBase64": "aGVsbG8=",
+            "timeoutMs": 1234,
+            "requestId": "req-explicit-timeout",
+            "streamResponse": true
+        ])
+    }
+
+    func testHttpBodyDeltaDefaultsMatchRust() throws {
+        let decoded = try JSONDecoder().decode(ExecServerHttpRequestBodyDeltaNotification.self, from: Data(#"""
+        {
+          "requestId": "req-1",
+          "seq": 1,
+          "deltaBase64": "aGk="
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, ExecServerHttpRequestBodyDeltaNotification(
+            requestId: "req-1",
+            seq: 1,
+            delta: ExecServerByteChunk(Array("hi".utf8))
+        ))
+        XCTAssertFalse(decoded.done)
+        XCTAssertNil(decoded.error)
+    }
+
     func testListenURLParserAcceptsRustSupportedForms() throws {
         XCTAssertEqual(try ExecServerListenURLParser.parse("stdio"), .stdio)
         XCTAssertEqual(try ExecServerListenURLParser.parse("stdio://"), .stdio)
