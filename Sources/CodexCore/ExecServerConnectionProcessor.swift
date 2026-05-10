@@ -60,6 +60,21 @@ public actor ExecServerConnection {
         }
     }
 
+    public func handleStdioLine(_ line: String, connectionLabel: String) async -> ExecServerOutboundMessage? {
+        guard let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: line, connectionLabel: connectionLabel) else {
+            return nil
+        }
+        return await handle(event)
+    }
+
+    public func handleWebSocketText(_ text: String, connectionLabel: String) async -> ExecServerOutboundMessage? {
+        await handle(ExecServerJSONRPCCodec.webSocketTextEvent(text, connectionLabel: connectionLabel))
+    }
+
+    public func handleWebSocketBinary(_ data: Data, connectionLabel: String) async -> ExecServerOutboundMessage? {
+        await handle(ExecServerJSONRPCCodec.webSocketBinaryEvent(data, connectionLabel: connectionLabel))
+    }
+
     public func shutdown() async {
         await close()
     }

@@ -2,6 +2,89 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testJSONRPCCodecSkipsBlankStdioLinesLikeRust() {
+        XCTAssertNil(ExecServerJSONRPCCodec.stdioEvent(fromLine: "", connectionLabel: "stdio"))
+        XCTAssertNil(ExecServerJSONRPCCodec.stdioEvent(fromLine: " \t\n", connectionLabel: "stdio"))
+    }
+
+    func testJSONRPCCodecDecodesStdioLineToMessageEventLikeRust() throws {
+        let line = #"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#
+
+        let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: line, connectionLabel: "exec-server stdio")
+
+        XCTAssertEqual(event, .message(.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: .object(["clientName": .string("client")])
+        ))))
+    }
+
+    func testJSONRPCCodecReportsMalformedStdioLineWithRustLabel() {
+        let event = ExecServerJSONRPCCodec.stdioEvent(fromLine: "{", connectionLabel: "exec-server stdio")
+
+        guard case let .malformedMessage(reason)? = event else {
+            return XCTFail("Expected malformed stdio message")
+        }
+        XCTAssertTrue(reason.hasPrefix("failed to parse JSON-RPC message from exec-server stdio:"))
+    }
+
+    func testJSONRPCCodecDecodesWebSocketTextAndBinaryLikeRust() throws {
+        let text = #"{"method":"initialized","params":{}}"#
+        let binary = Data(#"{"id":"a","result":{"ok":true}}"#.utf8)
+
+        let textEvent = ExecServerJSONRPCCodec.webSocketTextEvent(text, connectionLabel: "exec-server websocket 127.0.0.1:9")
+        let binaryEvent = ExecServerJSONRPCCodec.webSocketBinaryEvent(binary, connectionLabel: "exec-server websocket 127.0.0.1:9")
+
+        XCTAssertEqual(textEvent, .message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        XCTAssertEqual(binaryEvent, .message(.response(ExecServerJSONRPCResponse(
+            id: .string("a"),
+            result: .object(["ok": .bool(true)])
+        ))))
+    }
+
+    func testJSONRPCCodecReportsMalformedWebSocketPayloadsWithRustLabel() {
+        let textEvent = ExecServerJSONRPCCodec.webSocketTextEvent("{", connectionLabel: "exec-server websocket peer")
+        let binaryEvent = ExecServerJSONRPCCodec.webSocketBinaryEvent(Data("{".utf8), connectionLabel: "exec-server websocket peer")
+
+        guard case let .malformedMessage(textReason) = textEvent else {
+            return XCTFail("Expected malformed websocket text")
+        }
+        guard case let .malformedMessage(binaryReason) = binaryEvent else {
+            return XCTFail("Expected malformed websocket binary")
+        }
+        XCTAssertTrue(textReason.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
+        XCTAssertTrue(binaryReason.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
+    }
+
+    func testJSONRPCCodecEncodesOutboundStdioLinesLikeRust() throws {
+        let message = ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        )
+
+        let line = try ExecServerJSONRPCCodec.encodeLine(message)
+
+        XCTAssertEqual(line.last, 0x0A)
+        let decoded = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(line.dropLast()))
+        XCTAssertEqual(decoded, message)
+    }
+
+    func testJSONRPCCodecEncodesOutboundWebSocketTextLikeRust() throws {
+        let message = ExecServerRPC.error(
+            id: .integer(-1),
+            error: ExecServerRPC.invalidRequest("bad")
+        )
+
+        let text = try ExecServerJSONRPCCodec.encodeWebSocketText(message)
+        let decoded = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(text.utf8))
+
+        XCTAssertEqual(decoded, message)
+        XCTAssertFalse(text.contains("\n"))
+    }
+
     func testConnectionProcessorRoutesMessagesSequentiallyLikeRust() async throws {
         let processor = ExecServerConnectionProcessor(
             sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
@@ -34,6 +117,43 @@ final class ExecServerTests: XCTestCase {
             requestID: .integer(2),
             error: ExecServerRPC.methodNotFound("exec-server stub does not implement `process/terminate` yet")
         ))
+    }
+
+    func testConnectionProcessorHandlesStdioCodecEventsLikeRust() async throws {
+        let processor = ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        )
+        let connection = await processor.makeConnection()
+        let blank = await connection.handleStdioLine("  ", connectionLabel: "exec-server stdio")
+        let initialize = await connection.handleStdioLine(
+            #"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#,
+            connectionLabel: "exec-server stdio"
+        )
+        let malformed = await connection.handleStdioLine("{", connectionLabel: "exec-server stdio")
+
+        XCTAssertNil(blank)
+        XCTAssertEqual(initialize?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(1),
+            result: .object(["sessionId": .string("session-1")])
+        ))
+        guard case let .error(requestID, error) = malformed else {
+            return XCTFail("Expected malformed stdio error")
+        }
+        XCTAssertEqual(requestID, .integer(-1))
+        XCTAssertEqual(error.code, -32600)
+        XCTAssertTrue(error.message.hasPrefix("failed to parse JSON-RPC message from exec-server stdio:"))
+    }
+
+    func testConnectionProcessorHandlesWebSocketCodecEventsLikeRust() async {
+        let connection = ExecServerConnection()
+        let malformed = await connection.handleWebSocketText("{", connectionLabel: "exec-server websocket peer")
+
+        guard case let .error(requestID, error) = malformed else {
+            return XCTFail("Expected malformed websocket error")
+        }
+        XCTAssertEqual(requestID, .integer(-1))
+        XCTAssertEqual(error.code, -32600)
+        XCTAssertTrue(error.message.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
     }
 
     func testConnectionProcessorReportsMalformedMessagesWithRustRequestID() async {
