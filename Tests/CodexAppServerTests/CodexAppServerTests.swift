@@ -552,6 +552,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data["actual_chars"] as? Int, (1 << 20) + 1)
     }
 
+    func testTurnStartRejectsOversizedV2TextInputBeforeThreadLookupLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let oversized = String(repeating: "x", count: (1 << 20) + 1)
+        let request: [String: Any] = [
+            "id": 1,
+            "method": "turn/start",
+            "params": [
+                "threadId": "not-a-thread-id",
+                "input": [
+                    ["type": "text", "text": oversized]
+                ]
+            ]
+        ]
+
+        let response = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "Input exceeds the maximum length of 1048576 characters.")
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["input_error_code"] as? String, "input_too_large")
+        XCTAssertEqual(data["max_chars"] as? Int, 1 << 20)
+        XCTAssertEqual(data["actual_chars"] as? Int, (1 << 20) + 1)
+    }
+
     func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -637,6 +663,39 @@ final class CodexAppServerTests: XCTestCase {
                     ["type": "text", "text": first],
                     ["type": "image", "url": "https://example.test/ignored-for-limit.png"],
                     ["type": "text", "text": second]
+                ]
+            ]
+        ]
+
+        let response = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "Input exceeds the maximum length of 1048576 characters.")
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["input_error_code"] as? String, "input_too_large")
+        XCTAssertEqual(data["max_chars"] as? Int, 1 << 20)
+        XCTAssertEqual(data["actual_chars"] as? Int, (1 << 20) + 1)
+    }
+
+    func testTurnSteerRejectsOversizedV2TextInputBeforeActiveTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let oversized = String(repeating: "x", count: (1 << 20) + 1)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/steer",
+            "params": [
+                "threadId": threadID,
+                "expectedTurnId": "turn-does-not-exist",
+                "input": [
+                    ["type": "text", "text": oversized]
                 ]
             ]
         ]

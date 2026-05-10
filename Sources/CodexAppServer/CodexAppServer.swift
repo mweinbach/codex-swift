@@ -1325,6 +1325,8 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let input = v2UserInputs(params?["input"])
+        try validateV2UserInputLimit(input)
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -1335,8 +1337,6 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
-        let input = v2UserInputs(params?["input"])
-        try validateV2UserInputLimit(input)
         if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             try recorder.recordItems([
@@ -1495,12 +1495,6 @@ public enum CodexAppServer {
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
-        guard let expectedTurnID = stringParam(params?["expectedTurnId"]) else {
-            throw AppServerError.invalidRequest("missing expectedTurnId")
-        }
-        guard !expectedTurnID.isEmpty else {
-            throw AppServerError.invalidRequest("expectedTurnId must not be empty")
-        }
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -1508,6 +1502,14 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        guard let expectedTurnID = stringParam(params?["expectedTurnId"]) else {
+            throw AppServerError.invalidRequest("missing expectedTurnId")
+        }
+        guard !expectedTurnID.isEmpty else {
+            throw AppServerError.invalidRequest("expectedTurnId must not be empty")
+        }
+        let input = v2UserInputs(params?["input"])
+        try validateV2UserInputLimit(input)
         guard let activeTurnID else {
             throw AppServerError.invalidRequest("no active turn to steer")
         }
@@ -1516,8 +1518,6 @@ public enum CodexAppServer {
                 "expected active turn id `\(expectedTurnID)` but found `\(activeTurnID)`"
             )
         }
-        let input = v2UserInputs(params?["input"])
-        try validateV2UserInputLimit(input)
         guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) else {
             throw AppServerError.invalidRequest("input must not be empty")
         }
