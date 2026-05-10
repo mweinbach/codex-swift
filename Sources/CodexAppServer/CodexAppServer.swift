@@ -763,6 +763,19 @@ public enum CodexAppServer {
             configuration: configuration,
             archivedOnly: boolParam(params?["archived"], defaultValue: false)
         )
+        try reconcileStateStoreSearchHits(
+            configuration: configuration,
+            pageSize: pageSize,
+            cursor: cursor,
+            allowedSources: sourceFilter.allowedSources,
+            sourceMatcher: sourceFilter.matcher,
+            modelProviders: modelProviders,
+            archivedOnly: boolParam(params?["archived"], defaultValue: false),
+            cwdFilters: cwdFilters,
+            searchTerm: stringParam(params?["searchTerm"]),
+            sortKey: sortKey,
+            sortDirection: sortDirection
+        )
         return [
             "data": try threadObjects(for: page.items, configuration: configuration),
             "nextCursor": (page.nextCursor?.token as Any?) ?? NSNull(),
@@ -9728,6 +9741,63 @@ public enum CodexAppServer {
                 overlays[summary.id] = metadata
             }
             return overlays
+        }
+    }
+
+    private static func reconcileStateStoreSearchHits(
+        configuration: CodexAppServerConfiguration,
+        pageSize: Int,
+        cursor: ConversationCursor?,
+        allowedSources: [SessionSource],
+        sourceMatcher: SessionSourceMatcher?,
+        modelProviders: [String]?,
+        archivedOnly: Bool,
+        cwdFilters: [String]?,
+        searchTerm: String?,
+        sortKey: ConversationSortKey,
+        sortDirection: ConversationSortDirection
+    ) throws {
+        guard let stateStore = configuration.stateStore,
+              let searchTerm,
+              !searchTerm.isEmpty
+        else {
+            return
+        }
+        let filters = ThreadListFilterOptions(
+            archivedOnly: archivedOnly,
+            allowedSources: allowedSources.map(\.description),
+            modelProviders: modelProviders,
+            cwdFilters: cwdFilters?.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            anchor: cursor.map { ThreadListAnchor(timestamp: $0.anchorTimestamp) },
+            sortKey: threadListStoreSortKey(sortKey),
+            sortDirection: threadListStoreSortDirection(sortDirection),
+            searchTerm: searchTerm
+        )
+        try runAsyncBlocking {
+            let statePage = try await stateStore.listThreads(pageSize: pageSize, filters: filters)
+            for item in statePage.items {
+                if let sourceMatcher,
+                   !sourceMatcher.matches(threadListSessionSource(from: item.source)) {
+                    continue
+                }
+                guard FileManager.default.fileExists(atPath: item.rolloutPath) else {
+                    _ = try? await stateStore.deleteThread(threadID: item.id)
+                    continue
+                }
+                let conversation = ConversationItem(
+                    path: item.rolloutPath,
+                    head: [],
+                    createdAt: nil,
+                    updatedAt: nil
+                )
+                if let metadata = try? threadMetadata(
+                    for: conversation,
+                    defaultProvider: configuration.defaultModelProvider,
+                    archivedOnly: archivedOnly
+                ) {
+                    try? await stateStore.upsertThread(metadata)
+                }
+            }
         }
     }
 
