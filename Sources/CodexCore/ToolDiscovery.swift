@@ -15,6 +15,51 @@ public enum DiscoverableToolAction: String, Codable, Equatable, Sendable {
     case enable
 }
 
+public struct ToolSuggestDiscoverable: Equatable, Sendable {
+    public let type: DiscoverableToolType
+    public let id: String
+
+    public init(type: DiscoverableToolType, id: String) {
+        self.type = type
+        self.id = id
+    }
+
+    public func normalized() -> ToolSuggestDiscoverable? {
+        let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else { return nil }
+        return ToolSuggestDiscoverable(type: type, id: trimmedID)
+    }
+}
+
+public struct ToolSuggestDisabledTool: Equatable, Hashable, Sendable {
+    public let type: DiscoverableToolType
+    public let id: String
+
+    public init(type: DiscoverableToolType, id: String) {
+        self.type = type
+        self.id = id
+    }
+
+    public func normalized() -> ToolSuggestDisabledTool? {
+        let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else { return nil }
+        return ToolSuggestDisabledTool(type: type, id: trimmedID)
+    }
+}
+
+public struct ToolSuggestConfig: Equatable, Sendable {
+    public var discoverables: [ToolSuggestDiscoverable]
+    public var disabledTools: [ToolSuggestDisabledTool]
+
+    public init(
+        discoverables: [ToolSuggestDiscoverable] = [],
+        disabledTools: [ToolSuggestDisabledTool] = []
+    ) {
+        self.discoverables = discoverables
+        self.disabledTools = disabledTools
+    }
+}
+
 public struct DiscoverableConnectorInfo: Equatable, Sendable {
     public let id: String
     public let name: String

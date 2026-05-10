@@ -59,6 +59,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.projectDocFallbackFilenames, [])
         XCTAssertNil(config.toolOutputTokenLimit)
         XCTAssertNil(config.ossProvider)
+        XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
@@ -1435,6 +1436,107 @@ final class ConfigLoaderTests: XCTestCase {
                 "project_root_markers must be an array of strings"
             )
         }
+    }
+
+    func testToolSuggestDiscoverablesLoadFromConfigTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tool_suggest]
+        discoverables = [
+          { type = "connector", id = " connector_calendar " },
+          { type = "plugin", id = "sample@openai-curated" },
+          { type = "plugin", id = "   " },
+        ]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.toolSuggest.discoverables, [
+            ToolSuggestDiscoverable(type: .connector, id: "connector_calendar"),
+            ToolSuggestDiscoverable(type: .plugin, id: "sample@openai-curated")
+        ])
+        XCTAssertEqual(config.toolSuggest.disabledTools, [])
+    }
+
+    func testToolSuggestDisabledToolsLoadFromConfigTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tool_suggest]
+        disabled_tools = [
+          { type = "connector", id = " connector_calendar " },
+          { type = "plugin", id = "sample@openai-curated" },
+          { type = "connector", id = "" },
+          { type = "connector", id = "connector_calendar" },
+        ]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.toolSuggest.disabledTools, [
+            ToolSuggestDisabledTool(type: .connector, id: "connector_calendar"),
+            ToolSuggestDisabledTool(type: .plugin, id: "sample@openai-curated")
+        ])
+    }
+
+    func testToolSuggestDisabledToolsLoadFromArrayTablesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [[tool_suggest.disabled_tools]]
+        type = "connector"
+        id = " connector_calendar "
+
+        [[tool_suggest.disabled_tools]]
+        type = "plugin"
+        id = "sample@openai-curated"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.toolSuggest.disabledTools, [
+            ToolSuggestDisabledTool(type: .connector, id: "connector_calendar"),
+            ToolSuggestDisabledTool(type: .plugin, id: "sample@openai-curated")
+        ])
+    }
+
+    func testToolSuggestDisabledToolsMergeAcrossConfigLayersLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let project = dir.url.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try """
+        [tool_suggest]
+        disabled_tools = [
+          { type = "connector", id = "user_connector" },
+          { type = "plugin", id = "shared_plugin" },
+        ]
+        """.write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let projectDotCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDotCodex, withIntermediateDirectories: true)
+        try """
+        [tool_suggest]
+        disabled_tools = [
+          { type = "plugin", id = "shared_plugin" },
+          { type = "connector", id = "project_connector" },
+          { type = "plugin", id = "project_plugin" },
+        ]
+        """.write(to: projectDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.toolSuggest.disabledTools, [
+            ToolSuggestDisabledTool(type: .connector, id: "user_connector"),
+            ToolSuggestDisabledTool(type: .plugin, id: "shared_plugin"),
+            ToolSuggestDisabledTool(type: .connector, id: "project_connector"),
+            ToolSuggestDisabledTool(type: .plugin, id: "project_plugin")
+        ])
     }
 }
 

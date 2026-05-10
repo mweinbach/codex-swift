@@ -183,16 +183,18 @@ public enum McpConfigStore {
 
             let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
             let valueText = String(line[line.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = try ConfigValueParser.parseTomlLiteral(valueText)
 
             switch section {
             case .root, .other:
                 continue
             case let .server(name):
+                let value = try ConfigValueParser.parseTomlLiteral(valueText)
                 try builders[name, default: McpServerBuilder()].set(key: key, value: value, serverName: name)
             case let .serverTable(name, table):
+                let value = try ConfigValueParser.parseTomlLiteral(valueText)
                 try builders[name, default: McpServerBuilder()].set(table: table, key: key, value: value)
             case let .serverTool(name, tool):
+                let value = try ConfigValueParser.parseTomlLiteral(valueText)
                 try builders[name, default: McpServerBuilder()].set(tool: tool, key: key, value: value, serverName: name)
             }
         }

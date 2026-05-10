@@ -208,7 +208,9 @@ public enum ConfigValueParser {
             if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return .array([])
             }
-            return .array(try splitTopLevel(body, separator: ",").map(parseTomlLiteral))
+            return .array(try splitTopLevel(body, separator: ",")
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map(parseTomlLiteral))
         }
 
         if text.hasPrefix("{"), text.hasSuffix("}") {
@@ -217,7 +219,9 @@ public enum ConfigValueParser {
             if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return .table(table)
             }
-            for pair in try splitTopLevel(body, separator: ",") {
+            for pair in try splitTopLevel(body, separator: ",")
+                where !pair.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 guard let equalsIndex = pair.firstIndex(of: "=") else {
                     throw ConfigOverrideError.invalidInlineTable(raw)
                 }

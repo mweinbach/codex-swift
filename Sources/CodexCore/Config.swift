@@ -108,6 +108,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var projectDocFallbackFilenames: [String]
     public var toolOutputTokenLimit: Int?
     public var ossProvider: String?
+    public var toolSuggest: ToolSuggestConfig
 
     public init(
         model: String? = nil,
@@ -211,6 +212,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
         self.toolOutputTokenLimit = toolOutputTokenLimit
         self.ossProvider = ossProvider
+        self.toolSuggest = ToolSuggestConfig()
     }
 
     public init(
@@ -744,18 +746,20 @@ private struct ParsedCodexConfigToml {
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
+    var toolSuggest: [String: ConfigValue] = [:]
+    var toolSuggestDisabledToolLayers: [[ToolSuggestDisabledTool]] = []
     var skillsIncludeInstructions: Bool?
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
         var section = ConfigSection.topLevel
 
-        for rawLine in contents.split(whereSeparator: \.isNewline) {
-            let line = stripComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-
+        for line in try logicalTomlLines(contents) {
             if line.hasPrefix("[") {
                 section = try parseSectionHeader(line)
+                if case .toolSuggestDisabledToolsArray = section {
+                    parsed.appendToolSuggestDisabledToolTable()
+                }
                 if case let .profile(name) = section {
                     if parsed.profiles[name] == nil {
                         parsed.profiles[name] = [:]
@@ -839,6 +843,13 @@ private struct ParsedCodexConfigToml {
                         key: "skills.include_instructions"
                     )
                 }
+            case .toolSuggest:
+                parsed.toolSuggest[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .toolSuggestDisabledToolsArray:
+                parsed.mergeIntoLastToolSuggestDisabledToolTable(
+                    key: key,
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
             case let .profileFeatures(name):
                 parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -874,7 +885,77 @@ private struct ParsedCodexConfigToml {
         }
 
         parsed.mcpServers = try McpConfigStore.parseMcpServers(from: contents)
+        try parsed.recordToolSuggestDisabledToolLayer()
         return parsed
+    }
+
+    private static func logicalTomlLines(_ contents: String) throws -> [String] {
+        var logicalLines: [String] = []
+        var pending: String?
+
+        for rawLine in contents.split(whereSeparator: \.isNewline) {
+            let line = stripComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if let current = pending {
+                let combined = current + "\n" + line
+                if isCompleteTomlLine(combined) {
+                    logicalLines.append(combined)
+                    pending = nil
+                } else {
+                    pending = combined
+                }
+                continue
+            }
+
+            if isCompleteTomlLine(line) {
+                logicalLines.append(line)
+            } else {
+                pending = line
+            }
+        }
+
+        if let pending {
+            throw CodexConfigLoadError.invalidConfigLine(pending)
+        }
+        return logicalLines
+    }
+
+    private static func isCompleteTomlLine(_ line: String) -> Bool {
+        var quote: Character?
+        var squareDepth = 0
+        var braceDepth = 0
+        var previousWasBackslash = false
+
+        for character in line {
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            default:
+                continue
+            }
+        }
+
+        return quote == nil && squareDepth <= 0 && braceDepth <= 0
     }
 
     private static func normalizePathLikeValue(_ value: ConfigValue, key: String, baseURL: URL?) throws -> ConfigValue {
@@ -921,6 +1002,14 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "skills", parts[1] == "include_instructions" {
                 skillsIncludeInstructions = try Self.boolValue(value, key: path)
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "tool_suggest" {
+                toolSuggest[parts[1]] = value
+                if parts[1] == "disabled_tools" {
+                    try recordToolSuggestDisabledToolLayer()
+                }
                 continue
             }
 
@@ -1021,6 +1110,11 @@ private struct ParsedCodexConfigToml {
             realtime[key] = value
         }
 
+        for (key, value) in overlay.toolSuggest {
+            toolSuggest[key] = value
+        }
+        toolSuggestDisabledToolLayers.append(contentsOf: overlay.toolSuggestDisabledToolLayers)
+
         if let skillsIncludeInstructions = overlay.skillsIncludeInstructions {
             self.skillsIncludeInstructions = skillsIncludeInstructions
         }
@@ -1095,6 +1189,13 @@ private struct ParsedCodexConfigToml {
             )
         }
 
+        if case let .table(toolSuggestTable) = table["tool_suggest"] {
+            for (key, value) in toolSuggestTable {
+                toolSuggest[key] = value
+            }
+            try recordToolSuggestDisabledToolLayer(from: toolSuggestTable)
+        }
+
         if case let .table(toolsTable) = table["tools"],
            let webSearchValue = toolsTable["web_search"]
         {
@@ -1143,6 +1244,10 @@ private struct ParsedCodexConfigToml {
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
+        config.toolSuggest = try Self.toolSuggestConfigValue(
+            table: toolSuggest,
+            disabledToolLayers: toolSuggestDisabledToolLayers
+        )
 
         if let authStore = topLevel["cli_auth_credentials_store"] {
             let rawMode = try Self.stringValue(authStore, key: "cli_auth_credentials_store")
@@ -1341,6 +1446,125 @@ private struct ParsedCodexConfigToml {
             return
         }
         modelProviders[name] = existing.merging(overlay: overlay)
+    }
+
+    private mutating func appendToolSuggestDisabledToolTable() {
+        var array: [ConfigValue]
+        if case let .array(existing) = toolSuggest["disabled_tools"] {
+            array = existing
+        } else {
+            array = []
+        }
+        array.append(.table([:]))
+        toolSuggest["disabled_tools"] = .array(array)
+    }
+
+    private mutating func mergeIntoLastToolSuggestDisabledToolTable(key: String, value: ConfigValue) {
+        var array: [ConfigValue]
+        if case let .array(existing) = toolSuggest["disabled_tools"] {
+            array = existing
+        } else {
+            array = [.table([:])]
+        }
+        guard let lastIndex = array.indices.last else { return }
+        var table: [String: ConfigValue]
+        if case let .table(existing) = array[lastIndex] {
+            table = existing
+        } else {
+            table = [:]
+        }
+        table[key] = value
+        array[lastIndex] = .table(table)
+        toolSuggest["disabled_tools"] = .array(array)
+    }
+
+    private mutating func recordToolSuggestDisabledToolLayer() throws {
+        try recordToolSuggestDisabledToolLayer(from: toolSuggest)
+    }
+
+    private mutating func recordToolSuggestDisabledToolLayer(from table: [String: ConfigValue]) throws {
+        guard let disabledToolsValue = table["disabled_tools"] else { return }
+        let disabledTools = try Self.toolSuggestDisabledToolsValue(
+            disabledToolsValue,
+            key: "tool_suggest.disabled_tools"
+        )
+        guard !disabledTools.isEmpty else { return }
+        toolSuggestDisabledToolLayers.append(disabledTools)
+    }
+
+    private static func toolSuggestConfigValue(
+        table: [String: ConfigValue],
+        disabledToolLayers: [[ToolSuggestDisabledTool]]
+    ) throws -> ToolSuggestConfig {
+        for field in table.keys where !["discoverables", "disabled_tools"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("tool_suggest.\(field)")
+        }
+
+        let discoverables = try table["discoverables"].map {
+            try toolSuggestDiscoverablesValue($0, key: "tool_suggest.discoverables")
+        } ?? []
+
+        var disabledTools: [ToolSuggestDisabledTool] = []
+        var seen = Set<ToolSuggestDisabledTool>()
+        for layer in disabledToolLayers {
+            for disabledTool in layer {
+                guard let normalized = disabledTool.normalized(),
+                      seen.insert(normalized).inserted
+                else {
+                    continue
+                }
+                disabledTools.append(normalized)
+            }
+        }
+
+        return ToolSuggestConfig(
+            discoverables: discoverables,
+            disabledTools: disabledTools
+        )
+    }
+
+    private static func toolSuggestDiscoverablesValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> [ToolSuggestDiscoverable] {
+        try toolSuggestItemsValue(value, key: key).compactMap { item in
+            ToolSuggestDiscoverable(type: item.type, id: item.id).normalized()
+        }
+    }
+
+    private static func toolSuggestDisabledToolsValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> [ToolSuggestDisabledTool] {
+        try toolSuggestItemsValue(value, key: key).map { item in
+            ToolSuggestDisabledTool(type: item.type, id: item.id)
+        }
+    }
+
+    private static func toolSuggestItemsValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> [(type: DiscoverableToolType, id: String)] {
+        guard case let .array(values) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+
+        return try values.enumerated().map { index, value in
+            let itemKey = "\(key)[\(index)]"
+            guard case let .table(table) = value else {
+                throw CodexConfigLoadError.invalidStringValue(itemKey)
+            }
+            for field in table.keys where !["type", "id"].contains(field) {
+                throw CodexConfigLoadError.invalidConfigLine("\(itemKey).\(field)")
+            }
+            let type = try stringEnumValue(
+                DiscoverableToolType.self,
+                table["type"] ?? .none,
+                key: "\(itemKey).type"
+            )
+            let id = try stringValue(table["id"] ?? .none, key: "\(itemKey).id")
+            return (type: type, id: id)
+        }
     }
 
     private static func combinedModelProviders(
@@ -1893,7 +2117,10 @@ private struct ParsedCodexConfigToml {
         guard line.hasSuffix("]") else {
             throw CodexConfigLoadError.invalidTableHeader(line)
         }
-        let body = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        let isArrayTable = line.hasPrefix("[[")
+        let body = isArrayTable
+            ? String(line.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            : String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = try parseDottedKey(body)
         if parts.count == 1, parts[0] == "features" {
             return .features
@@ -1909,6 +2136,12 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 1, parts[0] == "skills" {
             return .skills
+        }
+        if parts.count == 1, parts[0] == "tool_suggest" {
+            return .toolSuggest
+        }
+        if parts.count == 2, parts[0] == "tool_suggest", parts[1] == "disabled_tools" {
+            return isArrayTable ? .toolSuggestDisabledToolsArray : .ignored
         }
         if parts.count == 2, parts[0] == "tools", parts[1] == "web_search" {
             return .toolsWebSearch
@@ -2098,6 +2331,8 @@ private enum ConfigSection {
     case audio
     case realtime
     case skills
+    case toolSuggest
+    case toolSuggestDisabledToolsArray
     case toolsWebSearch
     case toolsWebSearchLocation
     case profileFeatures(String)

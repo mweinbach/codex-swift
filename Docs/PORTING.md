@@ -1000,6 +1000,8 @@ Source baseline inspected for this scaffold:
   - added Swift typed `SessionThreadConfig`, `UserThreadConfig`, and `ThreadConfigSource` conversion into config-layer entries, preserving Rust's rule that non-empty session thread config becomes a `sessionFlags` layer above CLI overrides while user thread config and empty session config produce no layer yet.
 - `codex-rs/core/src/config/mod.rs` experimental runtime config fields
   - loaded Rust's top-level realtime websocket override strings, realtime start instructions, `experimental_thread_config_endpoint`, tagged `experimental_thread_store` (`local` / `in_memory`), `[audio]` realtime device preferences, and `[realtime]` session defaults into Swift runtime config from config files and CLI overrides; preserved Rust's load-time rejection for the removed `experimental_thread_store_endpoint`.
+- `codex-rs/config/src/types.rs` / `codex-rs/core/src/config/mod.rs` tool suggestion config
+  - added Swift `tool_suggest` config parsing for `discoverables` and `disabled_tools`, including Rust's connector/plugin kind tags, id trimming, empty-id dropping, repeated `[[tool_suggest.disabled_tools]]` tables, and low-to-high layer merge with first-entry dedupe for disabled tools.
 - `codex-rs/utils/absolute-path/src/lib.rs` home-directory path expansion
   - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
 - `codex-rs/protocol/src/models.rs` persisted web-search response-item actions
