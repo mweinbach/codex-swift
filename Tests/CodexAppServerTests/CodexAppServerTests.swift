@@ -941,6 +941,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
     }
 
+    func testThreadResumeUsesLatestTurnContextCwd() throws {
+        let temp = try TemporaryDirectory()
+        let staleCwd = temp.url.appendingPathComponent("stale", isDirectory: true)
+        let latestCwd = temp.url.appendingPathComponent("latest", isDirectory: true)
+        try FileManager.default.createDirectory(at: staleCwd, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: latestCwd, withIntermediateDirectories: true)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-00-00",
+            timestamp: "2025-01-05T13:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            cwd: staleCwd.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutItems(
+            to: rolloutPath,
+            timestamp: "2025-01-05T13:00:01Z",
+            items: [
+                .turnContext(TurnContextItem(
+                    turnID: "turn-1",
+                    cwd: latestCwd.path,
+                    approvalPolicy: .never,
+                    sandboxPolicy: .readOnly,
+                    model: "test-model",
+                    summary: .auto
+                ))
+            ]
+        )
+
+        let resumeResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let resumeResult = try XCTUnwrap(resumeResponse["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        XCTAssertEqual(resumeResult["cwd"] as? String, latestCwd.path)
+        XCTAssertEqual(resumedThread["cwd"] as? String, latestCwd.path)
+
+        let readResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let readResult = try XCTUnwrap(readResponse["result"] as? [String: Any])
+        let readThread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        XCTAssertEqual(readThread["cwd"] as? String, latestCwd.path)
+    }
+
     func testThreadForkExperimentalFieldsRequireExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 
@@ -10489,9 +10540,13 @@ final class CodexAppServerTests: XCTestCase {
     }
 
     private func appendRolloutEvents(to path: String, timestamp: String, events: [EventMessage]) throws {
+        try appendRolloutItems(to: path, timestamp: timestamp, items: events.map(RolloutRecordItem.eventMsg))
+    }
+
+    private func appendRolloutItems(to path: String, timestamp: String, items: [RolloutRecordItem]) throws {
         let encoder = JSONEncoder()
-        let lines = try events.map { event in
-            let line = RolloutLine(timestamp: timestamp, item: .eventMsg(event))
+        let lines = try items.map { item in
+            let line = RolloutLine(timestamp: timestamp, item: item)
             return String(data: try encoder.encode(line), encoding: .utf8)!
         }.joined(separator: "\n")
         let url = URL(fileURLWithPath: path)

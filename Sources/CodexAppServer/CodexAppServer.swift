@@ -15953,6 +15953,7 @@ private struct RolloutSummary {
         let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
         var meta: SessionMetaLine?
         var preview = ""
+        var latestTurnContextCwd: String?
 
         for rawLine in text.split(whereSeparator: \.isNewline) {
             guard let data = rawLine.data(using: .utf8),
@@ -15973,13 +15974,11 @@ private struct RolloutSummary {
                 if preview.isEmpty, let text = Self.itemPreview(item) {
                     preview = text
                 }
+            case let .turnContext(turnContext):
+                latestTurnContextCwd = turnContext.cwd
             case .compacted,
-                 .turnContext,
                  .eventMsg:
                 continue
-            }
-            if meta != nil, !preview.isEmpty {
-                break
             }
         }
 
@@ -15992,7 +15991,7 @@ private struct RolloutSummary {
         self.preview = preview
         self.modelProvider = meta.meta.modelProvider ?? defaultProvider
         self.createdAtUnixSeconds = Self.unixSeconds(meta.meta.timestamp)
-        self.cwd = meta.meta.cwd
+        self.cwd = latestTurnContextCwd ?? meta.meta.cwd
         self.cliVersion = meta.meta.cliVersion
         self.source = meta.meta.source
         self.threadSource = meta.meta.threadSource?.description
