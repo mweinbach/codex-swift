@@ -12129,6 +12129,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func realtimeControlResult(
+        method: String,
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool] = [:]
@@ -12169,7 +12170,121 @@ public enum CodexAppServer {
         guard runtimeConfig.features.isEnabled(.realtimeConversation) else {
             throw AppServerError.invalidRequest("thread \(threadID) does not support realtime conversation")
         }
+        try validateRealtimeControlParams(method: method, params: params)
         return [:]
+    }
+
+    private static func validateRealtimeControlParams(method: String, params: [String: Any]?) throws {
+        guard let params else {
+            throw AppServerError.invalidParams("missing field `threadId`")
+        }
+
+        switch method {
+        case "thread/realtime/start":
+            guard let outputModality = params["outputModality"] as? String else {
+                throw AppServerError.invalidParams("missing field `outputModality`")
+            }
+            guard outputModality == "text" || outputModality == "audio" else {
+                throw AppServerError.invalidParams(
+                    "unknown variant `\(outputModality)`, expected `text` or `audio`"
+                )
+            }
+            try validateRealtimeStartOptionals(params)
+        case "thread/realtime/appendAudio":
+            guard let audio = params["audio"] as? [String: Any] else {
+                throw AppServerError.invalidParams("missing field `audio`")
+            }
+            try validateRealtimeAudioChunk(audio)
+        case "thread/realtime/appendText":
+            guard params["text"] is String else {
+                throw AppServerError.invalidParams("missing field `text`")
+            }
+        case "thread/realtime/stop":
+            break
+        default:
+            break
+        }
+    }
+
+    private static func validateRealtimeStartOptionals(_ params: [String: Any]) throws {
+        if let prompt = params["prompt"], !(prompt is NSNull), !(prompt is String) {
+            throw AppServerError.invalidParams("invalid type for field `prompt`")
+        }
+        if let realtimeSessionID = params["realtimeSessionId"],
+           !(realtimeSessionID is NSNull),
+           !(realtimeSessionID is String)
+        {
+            throw AppServerError.invalidParams("invalid type for field `realtimeSessionId`")
+        }
+        if let voice = params["voice"], !(voice is NSNull) {
+            guard let voiceString = voice as? String else {
+                throw AppServerError.invalidParams("invalid type for field `voice`")
+            }
+            let validVoices: Set<String> = [
+                "alloy", "arbor", "ash", "ballad", "breeze", "cedar", "coral", "cove", "echo",
+                "ember", "juniper", "maple", "marin", "sage", "shimmer", "sol", "spruce", "vale", "verse"
+            ]
+            guard validVoices.contains(voiceString) else {
+                throw AppServerError.invalidParams("unknown variant `\(voiceString)`, expected a realtime voice")
+            }
+        }
+        if let transportValue = params["transport"], !(transportValue is NSNull) {
+            guard let transport = transportValue as? [String: Any],
+                  let type = transport["type"] as? String
+            else {
+                throw AppServerError.invalidParams("invalid transport")
+            }
+            switch type {
+            case "websocket":
+                break
+            case "webrtc":
+                guard transport["sdp"] is String else {
+                    throw AppServerError.invalidParams("missing field `sdp`")
+                }
+            default:
+                throw AppServerError.invalidParams(
+                    "unknown variant `\(type)`, expected `websocket` or `webrtc`"
+                )
+            }
+        }
+    }
+
+    private static func validateRealtimeAudioChunk(_ audio: [String: Any]) throws {
+        guard audio["data"] is String else {
+            throw AppServerError.invalidParams("missing field `data`")
+        }
+        _ = try unsignedIntegerParam(audio["sampleRate"], field: "sampleRate", upperBound: UInt64(UInt32.max))
+        _ = try unsignedIntegerParam(audio["numChannels"], field: "numChannels", upperBound: UInt64(UInt16.max))
+        if let samplesPerChannel = audio["samplesPerChannel"], !(samplesPerChannel is NSNull) {
+            _ = try unsignedIntegerParam(samplesPerChannel, field: "samplesPerChannel", upperBound: UInt64(UInt32.max))
+        }
+        if let itemID = audio["itemId"], !(itemID is NSNull), !(itemID is String) {
+            throw AppServerError.invalidParams("invalid type for field `itemId`")
+        }
+    }
+
+    private static func unsignedIntegerParam(_ value: Any?, field: String, upperBound: UInt64) throws -> UInt64 {
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else {
+                throw AppServerError.invalidParams("missing field `\(field)`")
+            }
+            let double = number.doubleValue
+            guard double.isFinite,
+                  double.rounded(.towardZero) == double,
+                  double >= 0,
+                  double <= Double(upperBound)
+            else {
+                throw AppServerError.invalidParams("invalid value for field `\(field)`")
+            }
+            return UInt64(double)
+        } else if let int = value as? Int, int >= 0 {
+            let integer = UInt64(int)
+            guard integer <= upperBound else {
+                throw AppServerError.invalidParams("invalid value for field `\(field)`")
+            }
+            return integer
+        }
+        throw AppServerError.invalidParams("missing field `\(field)`")
     }
 
     fileprivate static func mockExperimentalMethodResult(params: [String: Any]?) -> [String: Any] {
@@ -19973,6 +20088,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.realtimeControlResult(
+                            method: method,
                             params: params,
                             configuration: configuration,
                             runtimeFeatureEnablement: runtimeFeatureEnablement
