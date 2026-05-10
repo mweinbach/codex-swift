@@ -7,6 +7,9 @@ struct DebugTraceReducer {
     private var threadConversationSnapshots: [String: [String]] = [:]
     private var nextConversationItemOrdinal = 1
     private var nextTerminalOperationOrdinal = 1
+    private var codeCellIDsByRuntime: [String: String] = [:]
+    private var pendingCodeCellStarts: [String: PendingCodeCellStart] = [:]
+    private var pendingCodeCellLifecycleEvents: [String: [PendingCodeCellLifecycleEvent]] = [:]
 
     init(bundleURL: URL) throws {
         self.bundleURL = bundleURL
@@ -89,6 +92,12 @@ struct DebugTraceReducer {
             try endToolCallRuntime(event: event, payload: payload)
         case "tool_call_ended":
             try endToolCall(event: event, payload: payload)
+        case "code_cell_started":
+            try startCodeCell(event: event, payload: payload)
+        case "code_cell_initial_response":
+            try recordCodeCellInitialResponse(event: event, payload: payload)
+        case "code_cell_ended":
+            try endCodeCell(event: event, payload: payload)
         case "compaction_request_started":
             try startCompactionRequest(event: event, payload: payload)
         case "compaction_request_completed":
@@ -214,6 +223,11 @@ struct DebugTraceReducer {
         turns[turnID] = turn
         rollout["codex_turns"] = turns
         try closeRunningInferenceCalls(
+            turnID: turnID,
+            turnStatus: status,
+            event: event
+        )
+        try terminateRunningCodeCells(
             turnID: turnID,
             turnStatus: status,
             event: event
@@ -384,6 +398,7 @@ struct DebugTraceReducer {
             throw DebugTraceReducerError.duplicateToolCall(toolCallID)
         }
 
+        let requester = try toolCallRequester(from: payload, threadID: threadID)
         var toolCall: [String: Any] = [
             "tool_call_id": toolCallID,
             "model_visible_call_id": Self.nullableString(payload["model_visible_call_id"]),
@@ -396,7 +411,7 @@ struct DebugTraceReducer {
                 endedAt: NSNull(),
                 endedSeq: NSNull()
             ),
-            "requester": try Self.requiredDictionary(payload, key: "requester"),
+            "requester": requester,
             "kind": try Self.requiredDictionary(payload, key: "kind"),
             "model_visible_call_item_ids": [],
             "model_visible_output_item_ids": [],
@@ -415,6 +430,10 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try linkToolCallToCodeCell(toolCallID: toolCallID, requester: requester)
+        if isWaitToolKind(try Self.requiredDictionary(payload, key: "kind")) {
+            try linkWaitToolCallFromRequestPayload(threadID: threadID, toolCallID: toolCallID, payload["invocation_payload"])
+        }
         try syncTerminalModelObservation(toolCallID: toolCallID)
     }
 
@@ -495,6 +514,245 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+    }
+
+    private mutating func startCodeCell(event: [String: Any], payload: [String: Any]) throws {
+        let runtimeCellID = try Self.requiredString(payload, key: "runtime_cell_id")
+        let modelVisibleCallID = try Self.requiredString(payload, key: "model_visible_call_id")
+        let threadID = try codeCellThreadID(
+            event: event,
+            runtimeCellID: runtimeCellID,
+            eventName: "code cell start"
+        )
+        let codeCellID = "code_cell:\(modelVisibleCallID)"
+        try recordRuntimeCodeCellID(threadID: threadID, runtimeCellID: runtimeCellID, codeCellID: codeCellID)
+
+        let pending = PendingCodeCellStart(
+            seq: try Self.requiredInt(event, key: "seq"),
+            wallTimeUnixMS: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            threadID: threadID,
+            codexTurnID: event["codex_turn_id"] as? String,
+            codeCellID: codeCellID,
+            runtimeCellID: runtimeCellID,
+            modelVisibleCallID: modelVisibleCallID,
+            sourceJS: try Self.requiredString(payload, key: "source_js")
+        )
+        try startOrQueueCodeCell(pending)
+    }
+
+    private mutating func recordCodeCellInitialResponse(event: [String: Any], payload: [String: Any]) throws {
+        let runtimeCellID = try Self.requiredString(payload, key: "runtime_cell_id")
+        let threadID = try codeCellThreadID(
+            event: event,
+            runtimeCellID: runtimeCellID,
+            eventName: "code cell initial response"
+        )
+        let codeCellID = try codeCellIDForRuntimeCellID(
+            threadID: threadID,
+            runtimeCellID: runtimeCellID,
+            eventName: "code cell initial response"
+        )
+        let lifecycle = PendingCodeCellLifecycleEvent(
+            seq: try Self.requiredInt(event, key: "seq"),
+            wallTimeUnixMS: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            kind: .initialResponse(status: try Self.requiredString(payload, key: "status"))
+        )
+        try recordOrQueueCodeCellLifecycle(codeCellID: codeCellID, lifecycle)
+    }
+
+    private mutating func endCodeCell(event: [String: Any], payload: [String: Any]) throws {
+        let runtimeCellID = try Self.requiredString(payload, key: "runtime_cell_id")
+        let threadID = try codeCellThreadID(
+            event: event,
+            runtimeCellID: runtimeCellID,
+            eventName: "code cell end"
+        )
+        let codeCellID = try codeCellIDForRuntimeCellID(
+            threadID: threadID,
+            runtimeCellID: runtimeCellID,
+            eventName: "code cell end"
+        )
+        let lifecycle = PendingCodeCellLifecycleEvent(
+            seq: try Self.requiredInt(event, key: "seq"),
+            wallTimeUnixMS: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            kind: .ended(status: try Self.requiredString(payload, key: "status"))
+        )
+        try recordOrQueueCodeCellLifecycle(codeCellID: codeCellID, lifecycle)
+    }
+
+    private mutating func startOrQueueCodeCell(_ pending: PendingCodeCellStart) throws {
+        if try sourceItemIDForCodeCell(pending.codeCellID, threadID: pending.threadID, callID: pending.modelVisibleCallID) == nil {
+            let codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+            if codeCells[pending.codeCellID] != nil || pendingCodeCellStarts[pending.codeCellID] != nil {
+                throw DebugTraceReducerError.duplicateCodeCell(pending.codeCellID)
+            }
+            pendingCodeCellStarts[pending.codeCellID] = pending
+            return
+        }
+        try startQueuedCodeCell(pending)
+    }
+
+    private mutating func startQueuedCodeCell(_ pending: PendingCodeCellStart) throws {
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        if codeCells[pending.codeCellID] != nil {
+            throw DebugTraceReducerError.duplicateCodeCell(pending.codeCellID)
+        }
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard threads[pending.threadID] != nil else {
+            throw DebugTraceReducerError.unknownThread(pending.threadID)
+        }
+        if let codexTurnID = pending.codexTurnID {
+            let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+            guard let turn = turns[codexTurnID] as? [String: Any],
+                  let turnThreadID = turn["thread_id"] as? String
+            else {
+                throw DebugTraceReducerError.unknownCodexTurnForCodeCell(
+                    codeCellID: pending.codeCellID,
+                    turnID: codexTurnID
+                )
+            }
+            if turnThreadID != pending.threadID {
+                throw DebugTraceReducerError.mismatchedCodeCellTurnThread(
+                    codeCellID: pending.codeCellID,
+                    eventThreadID: pending.threadID,
+                    turnID: codexTurnID,
+                    turnThreadID: turnThreadID
+                )
+            }
+        }
+        guard let sourceItemID = try sourceItemIDForCodeCell(
+            pending.codeCellID,
+            threadID: pending.threadID,
+            callID: pending.modelVisibleCallID
+        ) else {
+            throw DebugTraceReducerError.missingCodeCellSource(
+                codeCellID: pending.codeCellID,
+                callID: pending.modelVisibleCallID
+            )
+        }
+        codeCells[pending.codeCellID] = [
+            "code_cell_id": pending.codeCellID,
+            "model_visible_call_id": pending.modelVisibleCallID,
+            "thread_id": pending.threadID,
+            "codex_turn_id": pending.codexTurnID.map { $0 as Any } ?? NSNull(),
+            "source_item_id": sourceItemID,
+            "output_item_ids": modelVisibleCodeCellOutputItemIDs(threadID: pending.threadID, callID: pending.modelVisibleCallID),
+            "runtime_cell_id": pending.runtimeCellID,
+            "execution": [
+                "started_at_unix_ms": pending.wallTimeUnixMS,
+                "started_seq": pending.seq,
+                "ended_at_unix_ms": NSNull(),
+                "ended_seq": NSNull(),
+                "status": "running"
+            ],
+            "runtime_status": "starting",
+            "initial_response_at_unix_ms": NSNull(),
+            "initial_response_seq": NSNull(),
+            "yielded_at_unix_ms": NSNull(),
+            "yielded_seq": NSNull(),
+            "source_js": pending.sourceJS,
+            "nested_tool_call_ids": nestedToolCallIDsForCodeCell(pending.codeCellID),
+            "wait_tool_call_ids": []
+        ]
+        rollout["code_cells"] = codeCells
+        try linkExistingOutputsToCodeCell(codeCellID: pending.codeCellID)
+        try flushPendingCodeCellLifecycleEvents(codeCellID: pending.codeCellID)
+    }
+
+    private mutating func recordOrQueueCodeCellLifecycle(
+        codeCellID: String,
+        _ lifecycle: PendingCodeCellLifecycleEvent
+    ) throws {
+        let codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        if codeCells[codeCellID] == nil {
+            if pendingCodeCellStarts[codeCellID] != nil {
+                pendingCodeCellLifecycleEvents[codeCellID, default: []].append(lifecycle)
+                return
+            }
+            throw DebugTraceReducerError.unknownCodeCell(codeCellID)
+        }
+        try applyCodeCellLifecycle(codeCellID: codeCellID, lifecycle)
+    }
+
+    private mutating func flushPendingCodeCellStarts() throws {
+        let readyIDs = try pendingCodeCellStarts.values.compactMap { pending -> String? in
+            try sourceItemIDForCodeCell(
+                pending.codeCellID,
+                threadID: pending.threadID,
+                callID: pending.modelVisibleCallID
+            ) == nil ? nil : pending.codeCellID
+        }
+        for codeCellID in readyIDs {
+            guard let pending = pendingCodeCellStarts.removeValue(forKey: codeCellID) else {
+                continue
+            }
+            try startQueuedCodeCell(pending)
+        }
+    }
+
+    private mutating func flushPendingCodeCellLifecycleEvents(codeCellID: String) throws {
+        guard let events = pendingCodeCellLifecycleEvents.removeValue(forKey: codeCellID) else {
+            return
+        }
+        for event in events {
+            try applyCodeCellLifecycle(codeCellID: codeCellID, event)
+        }
+    }
+
+    private mutating func applyCodeCellLifecycle(
+        codeCellID: String,
+        _ lifecycle: PendingCodeCellLifecycleEvent
+    ) throws {
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        guard var cell = codeCells[codeCellID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownCodeCell(codeCellID)
+        }
+        switch lifecycle.kind {
+        case let .initialResponse(status):
+            cell["initial_response_at_unix_ms"] = lifecycle.wallTimeUnixMS
+            cell["initial_response_seq"] = lifecycle.seq
+            cell["runtime_status"] = status
+            if status == "yielded" {
+                cell["yielded_at_unix_ms"] = lifecycle.wallTimeUnixMS
+                cell["yielded_seq"] = lifecycle.seq
+            }
+        case let .ended(status):
+            var execution = cell["execution"] as? [String: Any] ?? [:]
+            execution["ended_at_unix_ms"] = lifecycle.wallTimeUnixMS
+            execution["ended_seq"] = lifecycle.seq
+            execution["status"] = Self.executionStatus(forCodeCellStatus: status)
+            cell["execution"] = execution
+            cell["runtime_status"] = status
+        }
+        codeCells[codeCellID] = cell
+        rollout["code_cells"] = codeCells
+    }
+
+    private mutating func terminateRunningCodeCells(turnID: String, turnStatus: String, event: [String: Any]) throws {
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        let endingIDs = codeCells.compactMap { codeCellID, value -> String? in
+            guard let cell = value as? [String: Any],
+                  cell["codex_turn_id"] as? String == turnID,
+                  let execution = cell["execution"] as? [String: Any],
+                  execution["status"] as? String == "running"
+            else {
+                return nil
+            }
+            return codeCellID
+        }
+        for codeCellID in endingIDs {
+            guard var cell = codeCells[codeCellID] as? [String: Any] else {
+                continue
+            }
+            var execution = cell["execution"] as? [String: Any] ?? [:]
+            execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+            execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+            execution["status"] = turnStatus
+            cell["execution"] = execution
+            cell["runtime_status"] = "terminated"
+            codeCells[codeCellID] = cell
+        }
+        rollout["code_cells"] = codeCells
     }
 
     private mutating func startCompactionRequest(event: [String: Any], payload: [String: Any]) throws {
@@ -691,8 +949,10 @@ struct DebugTraceReducer {
             }
             try updateConversationItem(itemID, normalized: item, producedBy: producedBy)
             try attachModelVisibleToolItem(itemID: itemID, normalized: item)
+            try attachModelVisibleCodeCellItem(itemID: itemID, normalized: item)
             itemIDs.append(itemID)
         }
+        try flushPendingCodeCellStarts()
         return itemIDs
     }
 
@@ -794,6 +1054,85 @@ struct DebugTraceReducer {
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
         try syncTerminalModelObservation(toolCallID: toolCallID)
+    }
+
+    private mutating func attachModelVisibleCodeCellItem(itemID: String, normalized: NormalizedConversationItem) throws {
+        guard normalized.kind == "custom_tool_call_output",
+              let callID = normalized.callID
+        else {
+            return
+        }
+        let codeCellID = "code_cell:\(callID)"
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        guard var cell = codeCells[codeCellID] as? [String: Any] else {
+            return
+        }
+        var outputItemIDs = cell["output_item_ids"] as? [String] ?? []
+        if !outputItemIDs.contains(itemID) {
+            outputItemIDs.append(itemID)
+        }
+        cell["output_item_ids"] = outputItemIDs
+        codeCells[codeCellID] = cell
+        rollout["code_cells"] = codeCells
+        try appendProducer(["type": "code_cell", "code_cell_id": codeCellID], toConversationItem: itemID)
+    }
+
+    private func sourceItemIDForCodeCell(_ codeCellID: String, threadID: String, callID: String) throws -> String? {
+        let conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        let matches = conversationItems.compactMap { itemID, value -> String? in
+            guard let item = value as? [String: Any],
+                  item["thread_id"] as? String == threadID,
+                  item["call_id"] as? String == callID,
+                  item["kind"] as? String == "custom_tool_call"
+            else {
+                return nil
+            }
+            return itemID
+        }
+        if matches.count > 1 {
+            throw DebugTraceReducerError.duplicateCodeCellSource(codeCellID)
+        }
+        return matches.first
+    }
+
+    private func modelVisibleCodeCellOutputItemIDs(threadID: String, callID: String) -> [String] {
+        guard let conversationItems = rollout["conversation_items"] as? [String: Any] else {
+            return []
+        }
+        return conversationItems.compactMap { itemID, value -> String? in
+            guard let item = value as? [String: Any],
+                  item["thread_id"] as? String == threadID,
+                  item["call_id"] as? String == callID,
+                  item["kind"] as? String == "custom_tool_call_output"
+            else {
+                return nil
+            }
+            return itemID
+        }
+    }
+
+    private mutating func linkExistingOutputsToCodeCell(codeCellID: String) throws {
+        let codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        guard let cell = codeCells[codeCellID] as? [String: Any] else {
+            return
+        }
+        for itemID in cell["output_item_ids"] as? [String] ?? [] {
+            try appendProducer(["type": "code_cell", "code_cell_id": codeCellID], toConversationItem: itemID)
+        }
+    }
+
+    private mutating func appendProducer(_ producer: [String: Any], toConversationItem itemID: String) throws {
+        var conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
+        guard var item = conversationItems[itemID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("conversation item \(itemID)")
+        }
+        var producers = item["produced_by"] as? [[String: Any]] ?? []
+        if !producers.contains(where: { NSDictionary(dictionary: $0).isEqual(to: producer) }) {
+            producers.append(producer)
+        }
+        item["produced_by"] = producers
+        conversationItems[itemID] = item
+        rollout["conversation_items"] = conversationItems
     }
 
     private mutating func syncTerminalModelObservation(toolCallID: String) throws {
@@ -1377,6 +1716,159 @@ struct DebugTraceReducer {
         }
     }
 
+    private func toolCallRequester(from payload: [String: Any], threadID: String) throws -> [String: Any] {
+        let requester = try Self.requiredDictionary(payload, key: "requester")
+        guard requester["type"] as? String == "code_cell" else {
+            return requester
+        }
+        if requester["code_cell_id"] as? String != nil {
+            return requester
+        }
+        let runtimeCellID = try Self.requiredString(requester, key: "runtime_cell_id")
+        let codeCellID = try codeCellIDForRuntimeCellID(
+            threadID: threadID,
+            runtimeCellID: runtimeCellID,
+            eventName: "tool call start"
+        )
+        return [
+            "type": "code_cell",
+            "code_cell_id": codeCellID
+        ]
+    }
+
+    private mutating func linkToolCallToCodeCell(toolCallID: String, requester: [String: Any]) throws {
+        guard requester["type"] as? String == "code_cell",
+              let codeCellID = requester["code_cell_id"] as? String
+        else {
+            return
+        }
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        guard var cell = codeCells[codeCellID] as? [String: Any] else {
+            return
+        }
+        var nestedToolCallIDs = cell["nested_tool_call_ids"] as? [String] ?? []
+        if !nestedToolCallIDs.contains(toolCallID) {
+            nestedToolCallIDs.append(toolCallID)
+        }
+        cell["nested_tool_call_ids"] = nestedToolCallIDs
+        codeCells[codeCellID] = cell
+        rollout["code_cells"] = codeCells
+    }
+
+    private mutating func linkWaitToolCallFromRequestPayload(threadID: String, toolCallID: String, _ payloadRef: Any?) throws {
+        guard let payloadRef = payloadRef as? [String: Any] else {
+            return
+        }
+        let payload = try loadRawPayloadJSON(payloadRef)
+        guard payload["tool_name"] as? String == "wait" else {
+            return
+        }
+        let toolPayload = try Self.requiredDictionary(payload, key: "payload")
+        let arguments = try Self.requiredString(toolPayload, key: "arguments")
+        guard let data = arguments.data(using: .utf8),
+              let args = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            throw DebugTraceReducerError.invalidTraceObject("wait tool request arguments")
+        }
+        let runtimeCellID = try Self.requiredString(args, key: "cell_id")
+        guard let codeCellID = codeCellIDForRuntimeCellIDIfKnown(threadID: threadID, runtimeCellID: runtimeCellID) else {
+            return
+        }
+        var codeCells = try Self.dictionaryMap(rollout["code_cells"], key: "code_cells")
+        guard var cell = codeCells[codeCellID] as? [String: Any] else {
+            return
+        }
+        var waitToolCallIDs = cell["wait_tool_call_ids"] as? [String] ?? []
+        if !waitToolCallIDs.contains(toolCallID) {
+            waitToolCallIDs.append(toolCallID)
+        }
+        cell["wait_tool_call_ids"] = waitToolCallIDs
+        codeCells[codeCellID] = cell
+        rollout["code_cells"] = codeCells
+    }
+
+    private func isWaitToolKind(_ kind: [String: Any]) -> Bool {
+        guard kind["type"] as? String == "other" else {
+            return false
+        }
+        return kind["name"] as? String == "wait"
+    }
+
+    private func nestedToolCallIDsForCodeCell(_ codeCellID: String) -> [String] {
+        guard let toolCalls = rollout["tool_calls"] as? [String: Any] else {
+            return []
+        }
+        return toolCalls.compactMap { toolCallID, value -> String? in
+            guard let toolCall = value as? [String: Any],
+                  let requester = toolCall["requester"] as? [String: Any],
+                  requester["type"] as? String == "code_cell",
+                  requester["code_cell_id"] as? String == codeCellID
+            else {
+                return nil
+            }
+            return toolCallID
+        }
+    }
+
+    private func codeCellThreadID(event: [String: Any], runtimeCellID: String, eventName: String) throws -> String {
+        if let threadID = event["thread_id"] as? String {
+            return threadID
+        }
+        if let codexTurnID = event["codex_turn_id"] as? String {
+            let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+            guard let turn = turns[codexTurnID] as? [String: Any],
+                  let threadID = turn["thread_id"] as? String
+            else {
+                throw DebugTraceReducerError.unknownCodexTurnForCodeCellEvent(
+                    eventName: eventName,
+                    runtimeCellID: runtimeCellID,
+                    turnID: codexTurnID
+                )
+            }
+            return threadID
+        }
+        throw DebugTraceReducerError.missingCodeCellThreadContext(eventName: eventName, runtimeCellID: runtimeCellID)
+    }
+
+    private mutating func recordRuntimeCodeCellID(threadID: String, runtimeCellID: String, codeCellID: String) throws {
+        let key = codeCellRuntimeKey(threadID: threadID, runtimeCellID: runtimeCellID)
+        if let existing = codeCellIDsByRuntime[key] {
+            if existing == codeCellID {
+                return
+            }
+            throw DebugTraceReducerError.conflictingRuntimeCodeCellID(
+                threadID: threadID,
+                runtimeCellID: runtimeCellID,
+                existingCodeCellID: existing,
+                codeCellID: codeCellID
+            )
+        }
+        codeCellIDsByRuntime[key] = codeCellID
+    }
+
+    private func codeCellIDForRuntimeCellID(
+        threadID: String,
+        runtimeCellID: String,
+        eventName: String
+    ) throws -> String {
+        guard let codeCellID = codeCellIDForRuntimeCellIDIfKnown(threadID: threadID, runtimeCellID: runtimeCellID) else {
+            throw DebugTraceReducerError.unknownRuntimeCodeCellID(
+                eventName: eventName,
+                threadID: threadID,
+                runtimeCellID: runtimeCellID
+            )
+        }
+        return codeCellID
+    }
+
+    private func codeCellIDForRuntimeCellIDIfKnown(threadID: String, runtimeCellID: String) -> String? {
+        codeCellIDsByRuntime[codeCellRuntimeKey(threadID: threadID, runtimeCellID: runtimeCellID)]
+    }
+
+    private func codeCellRuntimeKey(threadID: String, runtimeCellID: String) -> String {
+        "\(threadID)\u{1F}\(runtimeCellID)"
+    }
+
     private func tokenUsage(from responsePayload: [String: Any]) throws -> Any? {
         guard let path = responsePayload["path"] as? String else {
             return nil
@@ -1470,6 +1962,19 @@ struct DebugTraceReducer {
             return "aborted"
         default:
             return "running"
+        }
+    }
+
+    private static func executionStatus(forCodeCellStatus status: String) -> String {
+        switch status {
+        case "completed":
+            return "completed"
+        case "failed":
+            return "failed"
+        case "terminated":
+            return "cancelled"
+        default:
+            return status
         }
     }
 
@@ -1836,6 +2341,28 @@ private extension Array {
     }
 }
 
+private struct PendingCodeCellStart {
+    let seq: Int
+    let wallTimeUnixMS: Int
+    let threadID: String
+    let codexTurnID: String?
+    let codeCellID: String
+    let runtimeCellID: String
+    let modelVisibleCallID: String
+    let sourceJS: String
+}
+
+private struct PendingCodeCellLifecycleEvent {
+    let seq: Int
+    let wallTimeUnixMS: Int
+    let kind: Kind
+
+    enum Kind {
+        case initialResponse(status: String)
+        case ended(status: String)
+    }
+}
+
 private enum DebugTraceReducerError: Error, CustomStringConvertible {
     case invalidJSONObject(String)
     case invalidTraceEvent(line: Int)
@@ -1893,6 +2420,26 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
     case unknownPreviousResponse(inferenceID: String, previousResponseID: String)
     case conversationMismatch(turnID: String, threadID: String, index: Int, existingItemID: String)
     case unsupportedModelItem(type: String, rawPayloadID: String)
+    case duplicateCodeCell(String)
+    case unknownCodeCell(String)
+    case duplicateCodeCellSource(String)
+    case missingCodeCellSource(codeCellID: String, callID: String)
+    case missingCodeCellThreadContext(eventName: String, runtimeCellID: String)
+    case unknownCodexTurnForCodeCellEvent(eventName: String, runtimeCellID: String, turnID: String)
+    case unknownCodexTurnForCodeCell(codeCellID: String, turnID: String)
+    case mismatchedCodeCellTurnThread(
+        codeCellID: String,
+        eventThreadID: String,
+        turnID: String,
+        turnThreadID: String
+    )
+    case conflictingRuntimeCodeCellID(
+        threadID: String,
+        runtimeCellID: String,
+        existingCodeCellID: String,
+        codeCellID: String
+    )
+    case unknownRuntimeCodeCellID(eventName: String, threadID: String, runtimeCellID: String)
 
     var description: String {
         switch self {
@@ -1964,6 +2511,26 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "model conversation mismatch while reducing turn \(turnID) for thread \(threadID) at item index \(index): existing item \(existingItemID) does not match the current model payload item"
         case let .unsupportedModelItem(type, rawPayloadID):
             return "unsupported model item type \(type) in payload \(rawPayloadID)"
+        case let .duplicateCodeCell(codeCellID):
+            return "duplicate code cell start for \(codeCellID)"
+        case let .unknownCodeCell(codeCellID):
+            return "code cell event referenced unknown cell \(codeCellID)"
+        case let .duplicateCodeCellSource(codeCellID):
+            return "multiple source items matched code cell \(codeCellID)"
+        case let .missingCodeCellSource(codeCellID, callID):
+            return "code cell \(codeCellID) referenced model-visible call \(callID), but no source item was observed"
+        case let .missingCodeCellThreadContext(eventName, runtimeCellID):
+            return "\(eventName) \(runtimeCellID) did not include a thread id"
+        case let .unknownCodexTurnForCodeCellEvent(eventName, runtimeCellID, turnID):
+            return "\(eventName) \(runtimeCellID) referenced unknown Codex turn \(turnID)"
+        case let .unknownCodexTurnForCodeCell(codeCellID, turnID):
+            return "code cell \(codeCellID) referenced unknown Codex turn \(turnID)"
+        case let .mismatchedCodeCellTurnThread(codeCellID, eventThreadID, turnID, turnThreadID):
+            return "code cell \(codeCellID) used thread \(eventThreadID), but Codex turn \(turnID) belongs to \(turnThreadID)"
+        case let .conflictingRuntimeCodeCellID(threadID, runtimeCellID, existingCodeCellID, codeCellID):
+            return "runtime code cell \(runtimeCellID) for thread \(threadID) mapped to both \(existingCodeCellID) and \(codeCellID)"
+        case let .unknownRuntimeCodeCellID(eventName, threadID, runtimeCellID):
+            return "\(eventName) referenced unknown runtime code cell \(runtimeCellID) for thread \(threadID)"
         }
     }
 }

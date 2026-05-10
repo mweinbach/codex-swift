@@ -1763,30 +1763,171 @@ final class DebugCommandRuntimeTests: XCTestCase {
         }
     }
 
-    func testTraceReduceRejectsUnsupportedSemanticEvents() async throws {
+    func testTraceReduceRecordsCodeCellLifecycleNestedToolsAndOutputs() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
-        try writeTraceBundle(
-            at: bundle,
-            events: [
-                traceEvent(seq: 1, wallTime: 101, payload: [
-                    "type": "code_cell_started",
-                    "runtime_cell_id": "cell-runtime-1",
-                    "model_visible_call_id": "call-1",
-                    "source_js": "return 1"
-                ])
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-1",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-1.json"
+        ]
+        let responsePayload: [String: Any] = [
+            "raw_payload_id": "payload-response-1",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/response-1.json"
+        ]
+        let followupPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-2",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-2.json"
+        ]
+        let waitPayload: [String: Any] = [
+            "raw_payload_id": "payload-wait-invocation",
+            "kind": ["type": "tool_invocation"],
+            "path": "payloads/wait-invocation.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "code_cell_started",
+                "runtime_cell_id": "1",
+                "model_visible_call_id": "call-code",
+                "source_js": "text('hi')"
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "inference-1",
+                "response_id": "resp-1",
+                "response_payload": responsePayload
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "code_cell_initial_response",
+                "runtime_cell_id": "1",
+                "status": "yielded"
+            ]),
+            traceEvent(seq: 7, wallTime: 107, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "nested-tool-1",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": "tool-1",
+                "requester": ["type": "code_cell", "runtime_cell_id": "1"],
+                "kind": ["type": "exec_command"],
+                "summary": ["type": "generic", "label": "exec_command", "input_preview": "pwd", "output_preview": NSNull()]
+            ]),
+            traceEvent(seq: 8, wallTime: 108, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "nested-tool-1",
+                "status": "completed"
+            ]),
+            traceEvent(seq: 9, wallTime: 109, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-2",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 10, wallTime: 110, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-2",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-2",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": followupPayload
+            ]),
+            traceEvent(seq: 11, wallTime: 111, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "wait-tool-1",
+                "model_visible_call_id": "wait-call",
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "other", "name": "wait"],
+                "summary": ["type": "generic", "label": "wait", "input_preview": #"{"cell_id":"1"}"#, "output_preview": NSNull()],
+                "invocation_payload": waitPayload
+            ]),
+            traceEvent(seq: 12, wallTime: 112, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "code_cell_ended",
+                "runtime_cell_id": "1",
+                "status": "completed"
+            ])
+        ])
+        try writeJSONObject(["input": [["type": "message", "role": "user", "content": [["type": "input_text", "text": "count files"]]]]], to: bundle.appendingPathComponent("payloads/request-1.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-1",
+            "output_items": [[
+                "type": "custom_tool_call",
+                "name": "exec",
+                "call_id": "call-code",
+                "input": "text('hi')"
+            ]]
+        ], to: bundle.appendingPathComponent("payloads/response-1.json", isDirectory: false))
+        try writeJSONObject([
+            "previous_response_id": "resp-1",
+            "input": [[
+                "type": "custom_tool_call_output",
+                "call_id": "call-code",
+                "output": "Script running with cell ID 1"
+            ]]
+        ], to: bundle.appendingPathComponent("payloads/request-2.json", isDirectory: false))
+        try writeJSONObject([
+            "tool_name": "wait",
+            "tool_namespace": NSNull(),
+            "payload": [
+                "type": "function",
+                "arguments": #"{"cell_id":"1"}"#
             ]
+        ], to: bundle.appendingPathComponent("payloads/wait-invocation.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
         )
 
-        do {
-            _ = try await DebugCommandRuntime.run(
-                CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
-                dependencies: testDependencies(codexHome: temp.url)
-            )
-            XCTFail("expected unsupported rich event to fail")
-        } catch {
-            XCTAssertEqual(String(describing: error), "unsupported trace event payload type code_cell_started")
-        }
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let codeCells = try XCTUnwrap(state["code_cells"] as? [String: Any])
+        let cell = try XCTUnwrap(codeCells["code_cell:call-code"] as? [String: Any])
+        XCTAssertEqual(cell["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(cell["codex_turn_id"] as? String, "turn-1")
+        XCTAssertEqual(cell["runtime_cell_id"] as? String, "1")
+        XCTAssertEqual(cell["model_visible_call_id"] as? String, "call-code")
+        XCTAssertEqual(cell["runtime_status"] as? String, "completed")
+        XCTAssertEqual(cell["source_js"] as? String, "text('hi')")
+        XCTAssertEqual(cell["source_item_id"] as? String, "conversation_item:2")
+        XCTAssertEqual(cell["output_item_ids"] as? [String], ["conversation_item:3"])
+        XCTAssertEqual(cell["nested_tool_call_ids"] as? [String], ["nested-tool-1"])
+        XCTAssertEqual(cell["wait_tool_call_ids"] as? [String], ["wait-tool-1"])
+        XCTAssertEqual(cell["initial_response_seq"] as? Int, 6)
+        XCTAssertEqual(cell["yielded_seq"] as? Int, 6)
+        let execution = try XCTUnwrap(cell["execution"] as? [String: Any])
+        XCTAssertEqual(execution["started_seq"] as? Int, 4)
+        XCTAssertEqual(execution["ended_seq"] as? Int, 12)
+        XCTAssertEqual(execution["status"] as? String, "completed")
+
+        let conversation = try XCTUnwrap(state["conversation_items"] as? [String: Any])
+        let output = try XCTUnwrap(conversation["conversation_item:3"] as? [String: Any])
+        let producers = try XCTUnwrap(output["produced_by"] as? [[String: String]])
+        XCTAssertTrue(producers.contains(["type": "code_cell", "code_cell_id": "code_cell:call-code"]))
+
+        let tools = try XCTUnwrap(state["tool_calls"] as? [String: Any])
+        let nestedTool = try XCTUnwrap(tools["nested-tool-1"] as? [String: Any])
+        XCTAssertEqual((nestedTool["requester"] as? [String: Any])?["code_cell_id"] as? String, "code_cell:call-code")
     }
 
     private func testDependencies(codexHome: URL) -> DebugCommandRuntime.Dependencies {
