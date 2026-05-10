@@ -75,6 +75,47 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(content, [.inputText(text: "ship it")])
     }
 
+    func testMakePromptIncludesDeveloperAndUserInstructionsInInitialContext() {
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            developerInstructions: "Follow developer notes.",
+            userInstructions: UserInstructions(directory: "/tmp/project", text: "Project notes.")
+        )
+
+        XCTAssertEqual(prompt.input.count, 3)
+        guard case let .message(_, developerRole, developerContent, _) = prompt.input[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(permissionsText) = developerContent[0],
+              case let .inputText(developerText) = developerContent[1]
+        else {
+            return XCTFail("expected permissions followed by developer instructions")
+        }
+        XCTAssertTrue(permissionsText.contains("<permissions instructions>"))
+        XCTAssertEqual(developerText, "Follow developer notes.")
+
+        guard case let .message(_, userRole, userContent, _) = prompt.input[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(userRole, "user")
+        XCTAssertEqual(userContent.count, 2)
+        guard case let .inputText(userInstructionsText) = userContent[0],
+              case let .inputText(environmentText) = userContent[1]
+        else {
+            return XCTFail("expected user instructions followed by environment context")
+        }
+        XCTAssertTrue(userInstructionsText.contains("Project notes."))
+        XCTAssertTrue(environmentText.contains("<environment_context>"))
+    }
+
     func testMakePromptPlacesResumeHistoryBeforeNewUserInput() {
         let history: [ResponseItem] = [
             .message(role: "user", content: [.inputText(text: "previous request")]),

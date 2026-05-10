@@ -103,7 +103,8 @@ final class DebugCommandRuntimeTests: XCTestCase {
                 config: CodexRuntimeConfig(
                     modelProvider: "test-provider",
                     includePermissionsInstructions: false,
-                    includeEnvironmentContext: false
+                    includeEnvironmentContext: false,
+                    projectDocMaxBytes: 0
                 )
             )
         )
@@ -111,6 +112,67 @@ final class DebugCommandRuntimeTests: XCTestCase {
         let output = try XCTUnwrap(result.stdoutMessage)
         let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
         XCTAssertEqual(decoded, [])
+    }
+
+    func testPromptInputIncludesDeveloperAndProjectInstructions() async throws {
+        let temp = try TemporaryDirectory()
+        let previousCWD = FileManager.default.currentDirectoryPath
+        try "Project-specific debug instructions".write(
+            to: temp.url.appendingPathComponent(ProjectDoc.defaultFilename, isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertTrue(FileManager.default.changeCurrentDirectoryPath(temp.url.path))
+        defer {
+            XCTAssertTrue(FileManager.default.changeCurrentDirectoryPath(previousCWD))
+        }
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "hello", imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    developerInstructions: "Debug developer instructions"
+                )
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        XCTAssertEqual(decoded.count, 3)
+
+        guard case let .message(_, developerRole, developerContent, _) = decoded[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(permissionsText) = developerContent[0],
+              case let .inputText(developerText) = developerContent[1]
+        else {
+            return XCTFail("expected permissions followed by developer instructions")
+        }
+        XCTAssertTrue(permissionsText.contains("<permissions instructions>"))
+        XCTAssertEqual(developerText, "Debug developer instructions")
+
+        guard case let .message(_, contextualRole, contextualContent, _) = decoded[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(contextualRole, "user")
+        XCTAssertEqual(contextualContent.count, 2)
+        guard case let .inputText(projectText) = contextualContent[0],
+              case let .inputText(environmentText) = contextualContent[1]
+        else {
+            return XCTFail("expected project instructions followed by environment context")
+        }
+        XCTAssertTrue(projectText.contains("Project-specific debug instructions"))
+        XCTAssertTrue(environmentText.contains("<environment_context>"))
+
+        guard case let .message(_, promptRole, promptContent, _) = decoded[2] else {
+            return XCTFail("expected prompt user message")
+        }
+        XCTAssertEqual(promptRole, "user")
+        XCTAssertEqual(promptContent, [.inputText(text: "hello")])
     }
 
     func testClearMemoriesClearsStateRowsAndMemoryRoots() async throws {
@@ -2442,7 +2504,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
 
     private func testDependencies(
         codexHome: URL,
-        config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider")
+        config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0)
     ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },

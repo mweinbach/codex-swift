@@ -123,13 +123,18 @@ public enum DebugCommandRuntime {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let approvalPolicy = config.approvalPolicy ?? .onRequest
         let sandboxPolicy = config.legacySandboxPolicy()
+        let projectInstructions = ProjectDoc.getUserInstructions(
+            config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
+        ).map { UserInstructions(directory: cwd.path, text: $0) }
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             shell: ShellResolver.defaultUserShell(),
             includeEnvironmentContext: config.includeEnvironmentContext,
-            includePermissionsInstructions: config.includePermissionsInstructions
+            includePermissionsInstructions: config.includePermissionsInstructions,
+            developerInstructions: config.developerInstructions,
+            userInstructions: projectInstructions
         )
 
         var userInputs = imagePaths.map(UserInput.localImage(path:))

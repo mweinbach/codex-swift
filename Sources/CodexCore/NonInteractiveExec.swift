@@ -48,7 +48,9 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
-        includePermissionsInstructions: Bool = true
+        includePermissionsInstructions: Bool = true,
+        developerInstructions: String? = nil,
+        userInstructions: UserInstructions? = nil
     ) -> [ResponseItem] {
         let context = TurnContext(
             cwd: cwd.path,
@@ -56,26 +58,34 @@ public enum NonInteractiveExec {
             sandboxPolicy: sandboxPolicy
         )
         var input: [ResponseItem] = []
+        var developerContent: [ContentItem] = []
         if includePermissionsInstructions {
-            input.append(
-                .message(
-                    role: "developer",
-                    content: [
-                        .inputText(text: PermissionsInstructions.fromPolicy(
-                            sandboxPolicy,
-                            config: PermissionsPromptConfig(approvalPolicy: approvalPolicy),
-                            cwd: cwd.path
-                        ).render())
-                    ]
-                )
+            developerContent.append(
+                .inputText(text: PermissionsInstructions.fromPolicy(
+                    sandboxPolicy,
+                    config: PermissionsPromptConfig(approvalPolicy: approvalPolicy),
+                    cwd: cwd.path
+                ).render())
             )
         }
+        if let developerInstructions, !developerInstructions.isEmpty {
+            developerContent.append(.inputText(text: developerInstructions))
+        }
+        if !developerContent.isEmpty {
+            input.append(.message(role: "developer", content: developerContent))
+        }
+
+        var contextualUserContent: [ContentItem] = []
+        if let userInstructions {
+            contextualUserContent.append(.inputText(text: userInstructions.intoText()))
+        }
         if includeEnvironmentContext {
-            input.append(
-                EnvironmentContext
-                    .fromTurnContext(context, shell: shell)
-                    .asResponseItem()
+            contextualUserContent.append(
+                .inputText(text: EnvironmentContext.fromTurnContext(context, shell: shell).serializeToXML())
             )
+        }
+        if !contextualUserContent.isEmpty {
+            input.append(.message(role: "user", content: contextualUserContent))
         }
         return input
     }
@@ -90,6 +100,8 @@ public enum NonInteractiveExec {
         shell: Shell,
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
+        developerInstructions: String? = nil,
+        userInstructions: UserInstructions? = nil,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
@@ -100,7 +112,9 @@ public enum NonInteractiveExec {
             sandboxPolicy: sandboxPolicy,
             shell: shell,
             includeEnvironmentContext: includeEnvironmentContext,
-            includePermissionsInstructions: includePermissionsInstructions
+            includePermissionsInstructions: includePermissionsInstructions,
+            developerInstructions: developerInstructions,
+            userInstructions: userInstructions
         )
         input.append(contentsOf: history)
 

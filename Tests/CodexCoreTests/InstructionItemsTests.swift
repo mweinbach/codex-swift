@@ -4,12 +4,12 @@ import XCTest
 final class InstructionItemsTests: XCTestCase {
     func testUserInstructionsResponseItem() {
         let userInstructions = UserInstructions(directory: "test_directory", text: "test_text")
+        let expectedText = "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
 
+        XCTAssertEqual(userInstructions.intoText(), expectedText)
         XCTAssertEqual(userInstructions.asResponseItem(), .message(
             role: "user",
-            content: [.inputText(
-                text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
-            )]
+            content: [.inputText(text: expectedText)]
         ))
     }
 

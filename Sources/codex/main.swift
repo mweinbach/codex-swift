@@ -771,6 +771,9 @@ private func runNonInteractiveExec(
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
     let shell = ShellResolver.defaultUserShell()
     let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
+    let projectInstructions = ProjectDoc.getUserInstructions(
+        config: ProjectDocConfig(runtimeConfig: settings, cwd: cwd)
+    ).map { UserInstructions(directory: cwd.path, text: $0) }
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
         imagePaths: options.imagePaths,
@@ -781,6 +784,8 @@ private func runNonInteractiveExec(
         shell: shell,
         includeEnvironmentContext: settings.includeEnvironmentContext,
         includePermissionsInstructions: settings.includePermissionsInstructions,
+        developerInstructions: settings.developerInstructions,
+        userInstructions: projectInstructions,
         history: history,
         tools: configuredTools.map(\.spec),
         parallelToolCalls: modelFamily.supportsParallelToolCalls

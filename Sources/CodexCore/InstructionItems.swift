@@ -19,11 +19,15 @@ public struct UserInstructions: Equatable, Codable, Sendable {
         return text.hasPrefix(prefix) || text.hasPrefix(legacyOpenTag)
     }
 
+    public func intoText() -> String {
+        "\(Self.prefix)\(directory)\n\n<INSTRUCTIONS>\n\(text)\n</INSTRUCTIONS>"
+    }
+
     public func asResponseItem() -> ResponseItem {
         .message(
             role: "user",
             content: [.inputText(
-                text: "\(Self.prefix)\(directory)\n\n<INSTRUCTIONS>\n\(text)\n</INSTRUCTIONS>"
+                text: intoText()
             )]
         )
     }
