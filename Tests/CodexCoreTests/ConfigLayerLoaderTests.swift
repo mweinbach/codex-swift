@@ -293,6 +293,84 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertEqual(stack.layersHighToLow().first?.name, .legacyManagedConfigTomlFromMdm)
     }
 
+    func testThreadConfigSourceTranslatesSessionToSessionFlagsLayerLikeRust() throws {
+        let provider = ModelProviderInfo(
+            name: "local",
+            baseURL: "http://127.0.0.1:8061/api/codex",
+            wireAPI: .responses,
+            streamMaxRetries: 7,
+            streamIdleTimeoutMilliseconds: 123,
+            requiresOpenAIAuth: false
+        )
+
+        let layer = try XCTUnwrap(ThreadConfigSource.session(SessionThreadConfig(
+            modelProvider: "local",
+            modelProviders: ["local": provider],
+            features: ["plugins": false]
+        )).configLayerEntry())
+
+        XCTAssertEqual(layer.name, .sessionFlags)
+        XCTAssertEqual(
+            layer.config,
+            .table([
+                "model_provider": .string("local"),
+                "model_providers": .table([
+                    "local": .table([
+                        "name": .string("local"),
+                        "base_url": .string("http://127.0.0.1:8061/api/codex"),
+                        "wire_api": .string("responses"),
+                        "stream_max_retries": .integer(7),
+                        "stream_idle_timeout_ms": .integer(123),
+                        "requires_openai_auth": .bool(false)
+                    ])
+                ]),
+                "features": .table(["plugins": .bool(false)])
+            ])
+        )
+        XCTAssertNil(try ThreadConfigSource.user(UserThreadConfig()).configLayerEntry())
+        XCTAssertNil(try ThreadConfigSource.session(SessionThreadConfig()).configLayerEntry())
+    }
+
+    func testLayerStackIncludesThreadConfigLayersAboveCLIOverridesLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let cwd = dir.url.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: cwd,
+            cliOverrides: CliConfigOverrides(rawOverrides: ["features.plugins=true"]),
+            threadConfigSources: [
+                .session(SessionThreadConfig(features: ["plugins": false])),
+                .user(UserThreadConfig())
+            ],
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(
+            stack.effectiveConfig(),
+            .table([
+                "features": .table(["plugins": .bool(false)])
+            ])
+        )
+        XCTAssertEqual(
+            stack.layersHighToLow().map(\.name),
+            [
+                .sessionFlags,
+                .sessionFlags,
+                .user(file: try AbsolutePath(absolutePath: home.appendingPathComponent("config.toml").path))
+            ]
+        )
+        XCTAssertEqual(stack.layersHighToLow().first?.config, .table([
+            "features": .table(["plugins": .bool(false)])
+        ]))
+    }
+
     func testRequirementsTomlConstrainLayerStackLikeRust() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

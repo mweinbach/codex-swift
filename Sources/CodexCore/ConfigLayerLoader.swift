@@ -117,6 +117,7 @@ public enum CodexConfigLayerLoader {
         codexHome: URL,
         cwd: URL? = nil,
         cliOverrides: CliConfigOverrides = CliConfigOverrides(),
+        threadConfigSources: [ThreadConfigSource] = [],
         overrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
@@ -181,6 +182,12 @@ public enum CodexConfigLayerLoader {
             ))
         }
 
+        for source in threadConfigSources {
+            if let layer = try source.configLayerEntry() {
+                insertLayerByPrecedence(layer, into: &layers)
+            }
+        }
+
         if let managedConfig = loadedConfigLayers.managedConfig {
             layers.append(ConfigLayerEntry(
                 name: .legacyManagedConfigTomlFromFile(file: managedConfig.file),
@@ -201,6 +208,14 @@ public enum CodexConfigLayerLoader {
             requirementsToml: requirementsToml,
             ignoreUserAndProjectExecPolicyRules: overrides.ignoreUserAndProjectExecPolicyRules
         )
+    }
+
+    private static func insertLayerByPrecedence(_ layer: ConfigLayerEntry, into layers: inout [ConfigLayerEntry]) {
+        if let index = layers.firstIndex(where: { $0.name.precedence > layer.name.precedence }) {
+            layers.insert(layer, at: index)
+        } else {
+            layers.append(layer)
+        }
     }
 
     public static func readConfig(
