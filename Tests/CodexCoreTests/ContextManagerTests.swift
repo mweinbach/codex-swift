@@ -62,6 +62,111 @@ final class ContextManagerTests: XCTestCase {
         XCTAssertEqual(history.forPrompt(), [item])
     }
 
+    func testDropLastUserTurnsPreservesPrefixLikeRust() {
+        var history = ContextManager(items: [
+            assistantMessage("session prefix item"),
+            userMessage("u1"),
+            assistantMessage("a1"),
+            userMessage("u2"),
+            assistantMessage("a2")
+        ])
+
+        history.dropLastUserTurns(count: 1)
+        XCTAssertEqual(history.forPrompt(), [
+            assistantMessage("session prefix item"),
+            userMessage("u1"),
+            assistantMessage("a1")
+        ])
+
+        history = ContextManager(items: [
+            assistantMessage("session prefix item"),
+            userMessage("u1"),
+            assistantMessage("a1"),
+            userMessage("u2"),
+            assistantMessage("a2")
+        ])
+
+        history.dropLastUserTurns(count: 99)
+        XCTAssertEqual(history.forPrompt(), [
+            assistantMessage("session prefix item")
+        ])
+    }
+
+    func testDropLastUserTurnsIgnoresContextualUserMessagesLikeRust() {
+        let prefixItems = [
+            userMessage("<environment_context>ctx</environment_context>"),
+            userMessage("# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"),
+            userMessage("<skill>\n<name>demo</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>"),
+            userMessage("<user_shell_command>echo 42</user_shell_command>"),
+            userMessage("<SUBAGENT_NOTIFICATION>{\"agent_id\":\"a\",\"status\":\"completed\"}</subagent_notification>"),
+            userMessage("<turn_aborted>interrupted</turn_aborted>")
+        ]
+        let firstTurn = [
+            userMessage("turn 1 user"),
+            assistantMessage("turn 1 assistant")
+        ]
+        let secondTurn = [
+            userMessage("turn 2 user"),
+            assistantMessage("turn 2 assistant")
+        ]
+
+        var history = ContextManager(items: prefixItems + firstTurn + secondTurn)
+        history.dropLastUserTurns(count: 1)
+        XCTAssertEqual(history.forPrompt(), prefixItems + firstTurn)
+
+        history = ContextManager(items: prefixItems + firstTurn + secondTurn)
+        history.dropLastUserTurns(count: 3)
+        XCTAssertEqual(history.forPrompt(), prefixItems)
+    }
+
+    func testDropLastUserTurnsTrimsContextUpdatesAboveRolledBackTurnLikeRust() {
+        let reference = referenceContextItem()
+        var history = ContextManager(items: [
+            assistantMessage("session prefix item"),
+            userMessage("turn 1 user"),
+            assistantMessage("turn 1 assistant"),
+            developerMessage("Generated images are saved to /tmp as /tmp/image-1.png by default."),
+            developerMessage("<collaboration_mode>ROLLED_BACK_DEV_INSTRUCTIONS</collaboration_mode>"),
+            userMessage("<environment_context><cwd>PRETURN_CONTEXT_DIFF_CWD</cwd></environment_context>"),
+            userMessage("turn 2 user"),
+            assistantMessage("turn 2 assistant")
+        ])
+        history.setReferenceContextItem(reference)
+
+        history.dropLastUserTurns(count: 1)
+
+        XCTAssertEqual(history.forPrompt(), [
+            assistantMessage("session prefix item"),
+            userMessage("turn 1 user"),
+            assistantMessage("turn 1 assistant"),
+            developerMessage("Generated images are saved to /tmp as /tmp/image-1.png by default.")
+        ])
+        XCTAssertEqual(history.currentReferenceContextItem(), reference)
+    }
+
+    func testDropLastUserTurnsClearsReferenceContextForMixedDeveloperContextBundlesLikeRust() {
+        var history = ContextManager(items: [
+            userMessage("turn 1 user"),
+            assistantMessage("turn 1 assistant"),
+            developerMessage([
+                "<permissions instructions>contextual permissions</permissions instructions>",
+                "persistent plugin instructions"
+            ]),
+            userMessage("<environment_context><cwd>PRETURN_CONTEXT_DIFF_CWD</cwd></environment_context>"),
+            userMessage("turn 2 user"),
+            assistantMessage("turn 2 assistant")
+        ])
+        history.setReferenceContextItem(referenceContextItem())
+
+        history.dropLastUserTurns(count: 1)
+
+        XCTAssertEqual(history.forPrompt(), [
+            userMessage("turn 1 user"),
+            assistantMessage("turn 1 assistant")
+        ])
+        XCTAssertNil(history.currentReferenceContextItem())
+    }
+
     func testTotalTokenUsageIncludesItemsAfterLastModelGeneratedItemLikeRust() {
         var history = ContextManager(items: [
             assistantMessage("already counted by API")
@@ -210,6 +315,14 @@ private func assistantMessage(_ text: String) -> ResponseItem {
     .message(role: "assistant", content: [.outputText(text: text)])
 }
 
+private func developerMessage(_ text: String) -> ResponseItem {
+    developerMessage([text])
+}
+
+private func developerMessage(_ texts: [String]) -> ResponseItem {
+    .message(role: "developer", content: texts.map { .inputText(text: $0) })
+}
+
 private func customToolCallOutput(callID: String, output: String) -> ResponseItem {
     .customToolCallOutput(callID: callID, output: output)
 }
@@ -221,4 +334,19 @@ private func interAgentAssistantMessage(_ text: String) throws -> ResponseItem {
         content: text,
         triggerTurn: true
     ).toResponseInputItem().responseItem()
+}
+
+private func referenceContextItem() -> TurnContextItem {
+    TurnContextItem(
+        turnID: "reference-turn",
+        cwd: "/tmp/reference-cwd",
+        currentDate: "2026-03-23",
+        timezone: "America/Los_Angeles",
+        approvalPolicy: .onRequest,
+        sandboxPolicy: .readOnly,
+        model: "gpt-test",
+        realtimeActive: false,
+        summary: .auto,
+        truncationPolicy: .tokens(10_000)
+    )
 }

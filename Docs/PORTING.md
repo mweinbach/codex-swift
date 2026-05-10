@@ -988,6 +988,8 @@ Source baseline inspected for this scaffold:
   - ported Rust's response-item byte estimator for encrypted reasoning, compaction, context compaction, ordinary serialized items, inline base64 image data URL discounting, and original-detail image patch sizing so future context accounting and remote compaction work share the same heuristic.
 - `codex-rs/core/src/context_manager/history.rs` context history token accounting
   - added Swift `ContextManager` coverage for API-message recording, tool-output truncation, prompt normalization with image stripping, last-model-generated tail accounting, non-last encrypted reasoning token estimates, total-token usage with server reasoning inclusion, token-usage breakdown fields, inter-agent assistant turn boundaries, and last-turn tool image replacement.
+- `codex-rs/core/src/context_manager/history.rs` rollback reference-context trimming
+  - ported `drop_last_n_user_turns` semantics for preserving pre-user prefixes, ignoring contextual user fragments as rollback boundaries, trimming contextual developer/user pre-turn updates above a rolled-back turn, preserving reference context for pure contextual updates, and clearing it when a mixed developer bundle is trimmed.
 
 ## Known Gaps
 
@@ -1013,7 +1015,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior
 - remaining `RolloutItem` serialization and structured payload models for future response-item variants
 - active turn runtime task handles, cancellation tokens, notifications, and async approval channels
-- remaining `ContextManager` lifecycle wiring around reference context snapshots, rollback trimming of contextual pre-turn updates, live session integration, and full compaction lifecycle
+- remaining `ContextManager` lifecycle wiring around live session integration and full compaction lifecycle
 - live hook command integration of event runtimes into session/tool execution
 - realtime conversation runtime session management, audio transport, SDP/WebRTC handoff, and live event bridging
 Every future slice should add parity tests that point back to the Rust file or behavior being ported.

@@ -24,6 +24,7 @@ public struct TotalTokenUsageBreakdown: Equatable, Sendable {
 public struct ContextManager: Equatable, Sendable {
     private var items: [ResponseItem]
     private var tokenInfo: TokenUsageInfo?
+    private var referenceContextItem: TurnContextItem?
     public private(set) var historyVersion: UInt64
 
     public init(
@@ -33,10 +34,12 @@ public struct ContextManager: Equatable, Sendable {
             last: nil,
             modelContextWindow: nil
         ),
+        referenceContextItem: TurnContextItem? = nil,
         historyVersion: UInt64 = 0
     ) {
         self.items = items
         self.tokenInfo = tokenInfo
+        self.referenceContextItem = referenceContextItem
         self.historyVersion = historyVersion
     }
 
@@ -48,8 +51,16 @@ public struct ContextManager: Equatable, Sendable {
         tokenInfo
     }
 
+    public func currentReferenceContextItem() -> TurnContextItem? {
+        referenceContextItem
+    }
+
     public mutating func setTokenInfo(_ info: TokenUsageInfo?) {
         tokenInfo = info
+    }
+
+    public mutating func setReferenceContextItem(_ item: TurnContextItem?) {
+        referenceContextItem = item
     }
 
     public mutating func setTokenUsageFull(contextWindow: Int64) {
@@ -97,6 +108,33 @@ public struct ContextManager: Equatable, Sendable {
     public mutating func replace(items newItems: [ResponseItem]) {
         items = newItems
         historyVersion = historyVersion.addingSaturating(1)
+    }
+
+    public mutating func dropLastUserTurns(count: UInt32) {
+        guard count > 0 else {
+            return
+        }
+
+        let snapshot = items
+        let userPositions = snapshot.indices.filter { Self.isUserTurnBoundary(snapshot[$0]) }
+        guard let firstInstructionTurnIndex = userPositions.first else {
+            replace(items: snapshot)
+            return
+        }
+
+        let nFromEnd = Int(clamping: count)
+        var cutIndex = if nFromEnd >= userPositions.count {
+            firstInstructionTurnIndex
+        } else {
+            userPositions[userPositions.count - nFromEnd]
+        }
+        cutIndex = trimPreTurnContextUpdates(
+            snapshot: snapshot,
+            firstInstructionTurnIndex: firstInstructionTurnIndex,
+            cutIndex: cutIndex
+        )
+
+        replace(items: Array(snapshot[..<cutIndex]))
     }
 
     @discardableResult
@@ -226,7 +264,7 @@ public struct ContextManager: Equatable, Sendable {
         guard role == "user" else {
             return false
         }
-        return EventMapping.parseTurnItem(item) != nil
+        return !isContextualUserMessageContent(content)
     }
 
     public static func isModelGeneratedItem(_ item: ResponseItem) -> Bool {
@@ -330,6 +368,73 @@ public struct ContextManager: Equatable, Sendable {
 
     private static func estimateItemModelVisibleBytes(_ item: ResponseItem) -> Int64 {
         Int64(clamping: ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item))
+    }
+
+    private mutating func trimPreTurnContextUpdates(
+        snapshot: [ResponseItem],
+        firstInstructionTurnIndex: Int,
+        cutIndex: Int
+    ) -> Int {
+        var index = cutIndex
+        while index > firstInstructionTurnIndex {
+            switch snapshot[index - 1] {
+            case let .message(_, "developer", content, _) where Self.isContextualDeveloperMessageContent(content):
+                if Self.hasNonContextualDeveloperMessageContent(content) {
+                    referenceContextItem = nil
+                }
+                index -= 1
+
+            case let .message(_, "user", content, _) where Self.isContextualUserMessageContent(content):
+                index -= 1
+
+            default:
+                return index
+            }
+        }
+        return index
+    }
+
+    private static func isContextualUserMessageContent(_ content: [ContentItem]) -> Bool {
+        content.contains(where: isContextualUserFragment)
+    }
+
+    private static func isContextualUserFragment(_ item: ContentItem) -> Bool {
+        guard case let .inputText(text) = item else {
+            return false
+        }
+        if HookPromptFragment.parseXML(text) != nil {
+            return true
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.hasPrefix(UserInstructions.prefix)
+            || text.hasPrefix(UserInstructions.legacyOpenTag)
+            || text.hasPrefix(SkillInstructions.prefix)
+            || UserShellCommand.isUserShellCommandText(text)
+            || trimmed.lowercased().hasPrefix("<environment_context>")
+            || trimmed.lowercased().hasPrefix("<turn_aborted>")
+            || trimmed.lowercased().hasPrefix("<subagent_notification>")
+    }
+
+    private static func isContextualDeveloperMessageContent(_ content: [ContentItem]) -> Bool {
+        content.contains(where: isContextualDeveloperFragment)
+    }
+
+    private static func hasNonContextualDeveloperMessageContent(_ content: [ContentItem]) -> Bool {
+        content.contains { !isContextualDeveloperFragment($0) }
+    }
+
+    private static func isContextualDeveloperFragment(_ item: ContentItem) -> Bool {
+        guard case let .inputText(text) = item else {
+            return false
+        }
+        let lowercased = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return [
+            "<permissions instructions>",
+            "<model_switch>",
+            "<collaboration_mode>",
+            "<realtime_conversation>",
+            "<personality_spec>"
+        ].contains { lowercased.hasPrefix($0) }
     }
 }
 
