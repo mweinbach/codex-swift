@@ -86,6 +86,12 @@ struct DebugTraceReducer {
             try endToolCallRuntime(payload: payload)
         case "tool_call_ended":
             try endToolCall(event: event, payload: payload)
+        case "compaction_request_started":
+            try startCompactionRequest(event: event, payload: payload)
+        case "compaction_request_completed":
+            try completeCompactionRequest(event: event, payload: payload, status: "completed")
+        case "compaction_request_failed":
+            try completeCompactionRequest(event: event, payload: payload, status: "failed")
         case "protocol_event_observed", "other":
             break
         default:
@@ -425,6 +431,93 @@ struct DebugTraceReducer {
         rollout["tool_calls"] = toolCalls
     }
 
+    private mutating func startCompactionRequest(event: [String: Any], payload: [String: Any]) throws {
+        let requestID = try Self.requiredString(payload, key: "compaction_request_id")
+        let compactionID = try Self.requiredString(payload, key: "compaction_id")
+        let threadID = try Self.requiredString(payload, key: "thread_id")
+        let codexTurnID = try Self.requiredString(payload, key: "codex_turn_id")
+        let requestPayload = try Self.requiredDictionary(payload, key: "request_payload")
+
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard threads[threadID] != nil else {
+            throw DebugTraceReducerError.unknownThread(threadID)
+        }
+        let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+        guard let turn = turns[codexTurnID] as? [String: Any],
+              let turnThreadID = turn["thread_id"] as? String
+        else {
+            throw DebugTraceReducerError.unknownCodexTurnForCompactionRequest(
+                requestID: requestID,
+                turnID: codexTurnID
+            )
+        }
+        if turnThreadID != threadID {
+            throw DebugTraceReducerError.mismatchedCompactionRequestTurnThread(
+                requestID: requestID,
+                eventThreadID: threadID,
+                turnID: codexTurnID,
+                turnThreadID: turnThreadID
+            )
+        }
+
+        var requests = try Self.dictionaryMap(rollout["compaction_requests"], key: "compaction_requests")
+        if requests[requestID] != nil {
+            throw DebugTraceReducerError.duplicateCompactionRequest(requestID)
+        }
+        requests[requestID] = [
+            "compaction_request_id": requestID,
+            "compaction_id": compactionID,
+            "thread_id": threadID,
+            "codex_turn_id": codexTurnID,
+            "execution": try executionWindow(
+                event: event,
+                status: "running",
+                endedAt: NSNull(),
+                endedSeq: NSNull()
+            ),
+            "model": try Self.requiredString(payload, key: "model"),
+            "provider_name": try Self.requiredString(payload, key: "provider_name"),
+            "raw_request_payload_id": try Self.requiredString(requestPayload, key: "raw_payload_id"),
+            "raw_response_payload_id": NSNull()
+        ]
+        rollout["compaction_requests"] = requests
+    }
+
+    private mutating func completeCompactionRequest(
+        event: [String: Any],
+        payload: [String: Any],
+        status: String
+    ) throws {
+        let requestID = try Self.requiredString(payload, key: "compaction_request_id")
+        let compactionID = try Self.requiredString(payload, key: "compaction_id")
+        var requests = try Self.dictionaryMap(rollout["compaction_requests"], key: "compaction_requests")
+        guard var request = requests[requestID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownCompactionRequestCompletion(requestID)
+        }
+        guard let startedCompactionID = request["compaction_id"] as? String,
+              startedCompactionID == compactionID
+        else {
+            throw DebugTraceReducerError.mismatchedCompactionRequestCompletion(
+                requestID: requestID,
+                eventCompactionID: compactionID,
+                startedCompactionID: request["compaction_id"] as? String ?? ""
+            )
+        }
+        guard var execution = request["execution"] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("compaction request execution for \(requestID)")
+        }
+        execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+        execution["status"] = status
+        request["execution"] = execution
+        if status == "completed" {
+            let responsePayload = try Self.requiredDictionary(payload, key: "response_payload")
+            request["raw_response_payload_id"] = try Self.requiredString(responsePayload, key: "raw_payload_id")
+        }
+        requests[requestID] = request
+        rollout["compaction_requests"] = requests
+    }
+
     private mutating func appendRawRuntimePayloadID(from payload: [String: Any], to toolCall: inout [String: Any]) throws {
         let runtimePayload = try Self.requiredDictionary(payload, key: "runtime_payload")
         let rawPayloadID = try Self.requiredString(runtimePayload, key: "raw_payload_id")
@@ -645,6 +738,20 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
     case missingToolThreadContext
     case unknownCodexTurnForToolCall(String)
     case mismatchedToolTurnThread(eventThreadID: String, turnID: String, turnThreadID: String)
+    case duplicateCompactionRequest(String)
+    case unknownCompactionRequestCompletion(String)
+    case unknownCodexTurnForCompactionRequest(requestID: String, turnID: String)
+    case mismatchedCompactionRequestTurnThread(
+        requestID: String,
+        eventThreadID: String,
+        turnID: String,
+        turnThreadID: String
+    )
+    case mismatchedCompactionRequestCompletion(
+        requestID: String,
+        eventCompactionID: String,
+        startedCompactionID: String
+    )
 
     var description: String {
         switch self {
@@ -692,6 +799,16 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "tool call start referenced unknown codex turn \(turnID)"
         case let .mismatchedToolTurnThread(eventThreadID, turnID, turnThreadID):
             return "tool call start used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
+        case let .duplicateCompactionRequest(requestID):
+            return "duplicate compaction request start for \(requestID)"
+        case let .unknownCompactionRequestCompletion(requestID):
+            return "compaction request completion referenced unknown request \(requestID)"
+        case let .unknownCodexTurnForCompactionRequest(requestID, turnID):
+            return "compaction request \(requestID) referenced unknown codex turn \(turnID)"
+        case let .mismatchedCompactionRequestTurnThread(requestID, eventThreadID, turnID, turnThreadID):
+            return "compaction request \(requestID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
+        case let .mismatchedCompactionRequestCompletion(requestID, eventCompactionID, startedCompactionID):
+            return "compaction request \(requestID) completion used compaction \(eventCompactionID), but start used \(startedCompactionID)"
         }
     }
 }

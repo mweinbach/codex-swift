@@ -548,6 +548,176 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(toolCall["started_by_codex_turn_id"] as? String, "turn-1")
     }
 
+    func testTraceReduceRecordsCompactionRequestCompletion() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-compaction-request",
+            "kind": ["type": "compaction_request"],
+            "path": "payloads/compaction-request.json"
+        ]
+        let responsePayload: [String: Any] = [
+            "raw_payload_id": "payload-compaction-response",
+            "kind": ["type": "compaction_response"],
+            "path": "payloads/compaction-response.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_started",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 108, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_completed",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "response_payload": responsePayload
+            ])
+        ])
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let requests = try XCTUnwrap(state["compaction_requests"] as? [String: Any])
+        let request = try XCTUnwrap(requests["compaction_request:1"] as? [String: Any])
+        XCTAssertEqual(request["compaction_id"] as? String, "compaction-1")
+        XCTAssertEqual(request["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(request["codex_turn_id"] as? String, "turn-1")
+        XCTAssertEqual(request["model"] as? String, "gpt-test")
+        XCTAssertEqual(request["provider_name"] as? String, "openai")
+        XCTAssertEqual(request["raw_request_payload_id"] as? String, "payload-compaction-request")
+        XCTAssertEqual(request["raw_response_payload_id"] as? String, "payload-compaction-response")
+        let execution = try XCTUnwrap(request["execution"] as? [String: Any])
+        XCTAssertEqual(execution["started_seq"] as? Int, 3)
+        XCTAssertEqual(execution["ended_seq"] as? Int, 4)
+        XCTAssertEqual(execution["status"] as? String, "completed")
+
+        let rawPayloads = try XCTUnwrap(state["raw_payloads"] as? [String: Any])
+        XCTAssertNotNil(rawPayloads["payload-compaction-request"])
+        XCTAssertNotNil(rawPayloads["payload-compaction-response"])
+    }
+
+    func testTraceReduceRecordsCompactionRequestFailureWithoutResponsePayload() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-compaction-request",
+            "kind": ["type": "compaction_request"],
+            "path": "payloads/compaction-request.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_started",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 108, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_failed",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "error": "compact endpoint failed"
+            ])
+        ])
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let requests = try XCTUnwrap(state["compaction_requests"] as? [String: Any])
+        let request = try XCTUnwrap(requests["compaction_request:1"] as? [String: Any])
+        XCTAssertEqual(request["raw_request_payload_id"] as? String, "payload-compaction-request")
+        XCTAssertNil(request["raw_response_payload_id"] as? String)
+        let execution = try XCTUnwrap(request["execution"] as? [String: Any])
+        XCTAssertEqual(execution["ended_seq"] as? Int, 4)
+        XCTAssertEqual(execution["status"] as? String, "failed")
+    }
+
+    func testTraceReduceRejectsCompactionRequestForMismatchedTurnThread() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-child",
+                "agent_path": "/root/child"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-child", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_started",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "thread_id": "thread-child",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": [
+                    "raw_payload_id": "payload-compaction-request",
+                    "kind": ["type": "compaction_request"],
+                    "path": "payloads/compaction-request.json"
+                ]
+            ])
+        ])
+
+        do {
+            _ = try await DebugCommandRuntime.run(
+                CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+                dependencies: testDependencies(codexHome: temp.url)
+            )
+            XCTFail("expected mismatched compaction request turn thread to fail")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "compaction request compaction_request:1 used thread thread-child, but codex turn turn-1 belongs to thread-root"
+            )
+        }
+    }
+
     func testTraceReduceRejectsUnsupportedSemanticEvents() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
