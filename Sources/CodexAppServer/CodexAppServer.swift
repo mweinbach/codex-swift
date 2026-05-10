@@ -7290,7 +7290,9 @@ public enum CodexAppServer {
             case "SUBAGENTS":
                 try importExternalAgentSubagents(cwd: cwd, configuration: configuration)
             default:
-                throw AppServerError.invalidRequest("external agent config import for \(itemType) is not implemented")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: unknown variant `\(itemType)`, expected one of `AGENTS_MD`, `CONFIG`, `SKILLS`, `PLUGINS`, `MCP_SERVER_CONFIG`, `SUBAGENTS`, `HOOKS`, `COMMANDS`, `SESSIONS`"
+                )
             }
         }
 

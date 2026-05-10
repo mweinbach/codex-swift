@@ -8696,7 +8696,10 @@ final class CodexAppServerTests: XCTestCase {
         )
         let unsupportedImportError = try XCTUnwrap(unsupportedImport["error"] as? [String: Any])
         XCTAssertEqual(unsupportedImportError["code"] as? Int, -32600)
-        XCTAssertEqual(unsupportedImportError["message"] as? String, "external agent config import for UNKNOWN is not implemented")
+        XCTAssertEqual(
+            unsupportedImportError["message"] as? String,
+            "Invalid request: unknown variant `UNKNOWN`, expected one of `AGENTS_MD`, `CONFIG`, `SKILLS`, `PLUGINS`, `MCP_SERVER_CONFIG`, `SUBAGENTS`, `HOOKS`, `COMMANDS`, `SESSIONS`"
+        )
     }
 
     func testExternalAgentConfigImportSessionsWithoutDetailsIsNoopLikeRust() throws {
