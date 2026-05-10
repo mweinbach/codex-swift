@@ -59,6 +59,50 @@ final class ExecServerTests: XCTestCase {
         XCTAssertTrue(binaryReason.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
     }
 
+    func testWebSocketTransportListensAndRoutesJSONRPCLikeRust() async throws {
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let transport = ExecServerWebSocketTransport(processor: ExecServerConnectionProcessor(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"]))
+        ))
+        let serverTask = Task.detached {
+            try await transport.run(host: "127.0.0.1", port: 0) { url in
+                continuation.yield(url.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        defer {
+            serverTask.cancel()
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let nextURL = await iterator.next()
+        let urlString = try XCTUnwrap(nextURL)
+        XCTAssertTrue(urlString.hasPrefix("ws://127.0.0.1:"))
+
+        let webSocket = URLSession.shared.webSocketTask(with: try XCTUnwrap(URL(string: urlString)))
+        webSocket.resume()
+        defer {
+            webSocket.cancel(with: .goingAway, reason: nil)
+        }
+
+        try await webSocket.send(.string(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#))
+        let received = try await webSocket.receive()
+        let text: String
+        switch received {
+        case let .string(value):
+            text = value
+        case let .data(data):
+            text = String(decoding: data, as: UTF8.self)
+        @unknown default:
+            return XCTFail("Unexpected websocket message")
+        }
+
+        let message = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(text.utf8))
+        XCTAssertEqual(message, .response(ExecServerJSONRPCResponse(
+            id: .integer(1),
+            result: try ExecServerRPC.jsonValue(from: ExecServerInitializeResponse(sessionId: "session-1"))
+        )))
+    }
+
     func testJSONRPCCodecEncodesOutboundStdioLinesLikeRust() throws {
         let message = ExecServerRPC.response(
             id: .integer(1),

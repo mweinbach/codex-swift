@@ -1276,13 +1276,13 @@ private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) 
                 FileHandle.standardOutput.write(line)
             }
             return CodexCLI.CommandExecutionResult(exitCode: 0)
-        case .webSocket:
-            break
+        case let .webSocket(host, port):
+            let transport = ExecServerWebSocketTransport()
+            try await transport.run(host: host, port: port) { line in
+                FileHandle.standardOutput.write(Data(line.utf8))
+            }
+            return CodexCLI.CommandExecutionResult(exitCode: 0)
         }
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: exec-server \(url) transport runtime is not complete yet."
-        )
     case let .remote(baseURL, executorID, name):
         _ = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: baseURL,
