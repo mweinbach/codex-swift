@@ -134,6 +134,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartWithWorkspaceWritePersistsTrustedProjectLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"cwd":"\#(cwd.url.path)","sandbox":"workspace-write"}}"#.utf8)))
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains("[projects.\"\(cwd.url.resolvingSymlinksInPath().standardizedFileURL.path)\"]"))
+        XCTAssertTrue(config.contains(#"trust_level = "trusted""#))
+    }
+
+    func testThreadStartWithNestedGitCwdTrustsRepoRootLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let repoRoot = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(repoRoot)
+        try runGit(["init"], cwd: repoRoot.url)
+        let nested = repoRoot.url.appendingPathComponent("nested/project", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"cwd":"\#(nested.path)","sandbox":"workspace-write"}}"#.utf8)))
+
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        let trustedRoot = repoRoot.url.resolvingSymlinksInPath().standardizedFileURL.path
+        XCTAssertTrue(config.contains("[projects.\"\(trustedRoot)\"]"))
+        XCTAssertFalse(config.contains("[projects.\"\(nested.resolvingSymlinksInPath().standardizedFileURL.path)\"]"))
+        XCTAssertTrue(config.contains(#"trust_level = "trusted""#))
+    }
+
+    func testThreadStartWithReadOnlySandboxDoesNotPersistProjectTrustLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"cwd":"\#(cwd.url.path)","sandbox":"read-only"}}"#.utf8)))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("config.toml").path))
+    }
+
     func testThreadStartFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
         try writeRequiredBrokenMCPConfig(codexHome: temp.url)

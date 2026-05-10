@@ -882,6 +882,12 @@ public enum CodexAppServer {
             ?? runtimeConfig.legacySandboxPolicy()
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        try persistTrustedProjectForThreadStartIfNeeded(
+            params: params,
+            cwd: cwd,
+            sandbox: sandbox,
+            configuration: configuration
+        )
         let conversationID = ConversationId()
         let recorder = try RolloutRecorder.create(
             codexHome: configuration.codexHome,
@@ -920,6 +926,66 @@ public enum CodexAppServer {
             throw AppServerError.internalError(message)
         }
         return runtimeConfig
+    }
+
+    private static func persistTrustedProjectForThreadStartIfNeeded(
+        params: [String: Any]?,
+        cwd: URL,
+        sandbox: SandboxPolicy,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard stringParam(params?["cwd"]) != nil,
+              threadStartPermissionsTrustProject(sandbox: sandbox)
+        else {
+            return
+        }
+
+        let trustTarget = GitInfoCollector.resolveRootGitProjectForTrust(cwd: cwd) ??
+            GitInfoCollector.gitRepoRoot(baseDir: cwd) ??
+            cwd
+        let projectKey = projectTrustKey(for: trustTarget)
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        var nextConfig = stack.getUserLayer()?.config ?? .table([:])
+        let originalConfig = nextConfig
+        setConfigValue(
+            .table(["trust_level": .string(TrustLevel.trusted.rawValue)]),
+            at: ["projects", projectKey],
+            mergeStrategy: .upsert,
+            in: &nextConfig
+        )
+        guard nextConfig != originalConfig else {
+            return
+        }
+
+        try CodexConfigLoader.validateForConfigWrite(
+            nextConfig,
+            environment: configuration.environment
+        )
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
+        try renderConfigToml(nextConfig).write(to: configFile, atomically: true, encoding: .utf8)
+    }
+
+    private static func threadStartPermissionsTrustProject(sandbox: SandboxPolicy) -> Bool {
+        switch sandbox {
+        case .dangerFullAccess, .externalSandbox, .workspaceWrite:
+            return true
+        case .readOnly, .readOnlyWithNetworkAccess:
+            return false
+        }
+    }
+
+    private static func projectTrustKey(for url: URL) -> String {
+        let standardized = url.standardizedFileURL
+        if FileManager.default.fileExists(atPath: standardized.path) {
+            return standardized.resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        return standardized.path
     }
 
     fileprivate static func threadResumeResult(
