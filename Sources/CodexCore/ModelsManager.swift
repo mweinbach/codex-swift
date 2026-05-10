@@ -3,17 +3,20 @@ import Foundation
 public struct ModelsCache: Equatable, Sendable {
     public let fetchedAt: Date
     public let etag: String?
+    public let clientVersion: String?
     public let models: [ModelInfo]
 
     private enum CodingKeys: String, CodingKey {
         case fetchedAt = "fetched_at"
         case etag
+        case clientVersion = "client_version"
         case models
     }
 
-    public init(fetchedAt: Date, etag: String? = nil, models: [ModelInfo]) {
+    public init(fetchedAt: Date, etag: String? = nil, clientVersion: String? = nil, models: [ModelInfo]) {
         self.fetchedAt = fetchedAt
         self.etag = etag
+        self.clientVersion = clientVersion
         self.models = models
     }
 
@@ -71,6 +74,7 @@ extension ModelsCache: Codable {
 
         self.fetchedAt = fetchedAt
         self.etag = try container.decodeIfPresent(String.self, forKey: .etag)
+        self.clientVersion = try container.decodeIfPresent(String.self, forKey: .clientVersion)
         self.models = try container.decode([ModelInfo].self, forKey: .models)
     }
 
@@ -78,6 +82,7 @@ extension ModelsCache: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(Self.formatDate(fetchedAt), forKey: .fetchedAt)
         try container.encodeIfPresent(etag, forKey: .etag)
+        try container.encodeIfPresent(clientVersion, forKey: .clientVersion)
         try container.encode(models, forKey: .models)
     }
 
@@ -222,6 +227,57 @@ public enum ModelsManager {
         return try decoder.decode(ModelsResponse.self, from: Data(contentsOf: url))
     }
 
+    public static func rawModelCatalogOnlineIfUncached<Transport: APITransport>(
+        codexHome: URL,
+        config: CodexRuntimeConfig,
+        auth: AuthDotJSON?,
+        transport: Transport,
+        clientVersion: String,
+        now: Date = Date(),
+        cacheTTL: TimeInterval = defaultModelCacheTTL
+    ) async throws -> ModelsResponse {
+        let providerInfo = config.selectedModelProvider ?? ModelProviderInfo.createOpenAIProvider()
+        let apiProvider = providerInfo.toAPIProvider(authMode: auth?.authMode)
+        let authProvider = try APIAuthResolver.authProvider(auth: auth, provider: providerInfo)
+        let cacheURL = cachePath(codexHome: codexHome)
+        let fallbackModels = bundledModels
+
+        if let cached = try ModelsCache.load(from: cacheURL),
+           cached.clientVersion == clientVersion,
+           cached.isFresh(ttl: cacheTTL, now: now) {
+            return ModelsResponse(
+                models: mergedRawModels(remoteModels: cached.models, existingModels: fallbackModels),
+                etag: cached.etag ?? ""
+            )
+        }
+
+        guard shouldRefreshRawModels(provider: apiProvider, auth: authProvider) else {
+            return ModelsResponse(models: fallbackModels)
+        }
+
+        let client = ModelsClient(
+            transport: transport,
+            provider: apiProvider,
+            auth: authProvider
+        )
+        switch await client.listModels(clientVersion: clientVersion) {
+        case let .success(response):
+            let cache = ModelsCache(
+                fetchedAt: now,
+                etag: response.etag.isEmpty ? nil : response.etag,
+                clientVersion: clientVersion,
+                models: response.models
+            )
+            try cache.save(to: cacheURL)
+            return ModelsResponse(
+                models: mergedRawModels(remoteModels: response.models, existingModels: fallbackModels),
+                etag: response.etag
+            )
+        case .failure:
+            return ModelsResponse(models: fallbackModels)
+        }
+    }
+
     public static func markDefaultByPickerVisibility(_ models: inout [ModelPreset]) {
         for index in models.indices {
             models[index] = models[index].withIsDefault(false)
@@ -229,6 +285,28 @@ public enum ModelsManager {
         if let defaultIndex = models.firstIndex(where: \.showInPicker) ?? models.indices.first {
             models[defaultIndex] = models[defaultIndex].withIsDefault(true)
         }
+    }
+
+    private static func shouldRefreshRawModels<Auth: APIAuthProvider>(
+        provider: APIProvider,
+        auth: Auth
+    ) -> Bool {
+        provider.baseURL.contains("/backend-api/codex") || auth.bearerToken != nil
+    }
+
+    private static func mergedRawModels(
+        remoteModels: [ModelInfo],
+        existingModels: [ModelInfo]
+    ) -> [ModelInfo] {
+        var models = existingModels
+        for remoteModel in remoteModels {
+            if let index = models.firstIndex(where: { $0.slug == remoteModel.slug }) {
+                models[index] = remoteModel
+            } else {
+                models.append(remoteModel)
+            }
+        }
+        return models
     }
 }
 

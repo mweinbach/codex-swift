@@ -6,12 +6,14 @@ final class ModelsManagerTests: XCTestCase {
         let cache = ModelsCache(
             fetchedAt: try parseDate("2026-05-08T12:34:56.789Z"),
             etag: nil,
+            clientVersion: "1.2.3",
             models: [minimalModelInfo(slug: "codex-mini")]
         )
 
         let object = try JSONObject(cache)
         XCTAssertEqual(object["fetched_at"] as? String, "2026-05-08T12:34:56.789Z")
         XCTAssertNil(object["etag"])
+        XCTAssertEqual(object["client_version"] as? String, "1.2.3")
         XCTAssertEqual((object["models"] as? [[String: Any]])?.first?["slug"] as? String, "codex-mini")
 
         let decoded = try JSONDecoder().decode(ModelsCache.self, from: Data("""
@@ -21,6 +23,7 @@ final class ModelsManagerTests: XCTestCase {
         }
         """.utf8))
         XCTAssertNil(decoded.etag)
+        XCTAssertNil(decoded.clientVersion)
         XCTAssertEqual(decoded.models, [])
         XCTAssertEqual(decoded.fetchedAt, try parseDate("2026-05-08T12:34:56Z"))
     }
@@ -46,6 +49,7 @@ final class ModelsManagerTests: XCTestCase {
         let cache = ModelsCache(
             fetchedAt: try parseDate("2026-05-08T12:34:56.789Z"),
             etag: "W/etag",
+            clientVersion: "1.2.3",
             models: [minimalModelInfo(slug: "cached")]
         )
 
@@ -75,6 +79,91 @@ final class ModelsManagerTests: XCTestCase {
             "1.2.3"
         )
         XCTAssertEqual(ModelsManager.formatClientVersion(ClientVersion(0, 62, 0)), "0.62.0")
+    }
+
+    func testRawModelCatalogOnlineIfUncachedUsesFreshMatchingCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cachedModel = minimalModelInfo(slug: "cached-remote", priority: 0)
+        try ModelsCache(
+            fetchedAt: try parseDate("2026-05-08T12:00:00Z"),
+            etag: "cache-etag",
+            clientVersion: "1.2.3",
+            models: [cachedModel]
+        ).save(to: ModelsManager.cachePath(codexHome: root))
+
+        let transport = RecordingAPITransport { _ in
+            XCTFail("fresh cache should avoid network")
+            return URLSessionTransportResponse(statusCode: 500)
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: nil,
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:04:59Z")
+        )
+
+        XCTAssertEqual(response.etag, "cache-etag")
+        XCTAssertTrue(response.models.contains { $0.slug == "cached-remote" })
+    }
+
+    func testRawModelCatalogOnlineIfUncachedFetchesAndPersistsWhenAuthorized() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remoteModel = minimalModelInfo(slug: "remote-model", priority: 0)
+        let responseBody = try JSONEncoder().encode(ModelsResponse(models: [remoteModel], etag: "body-etag"))
+        let capture = APIRequestCapture()
+        let transport = RecordingAPITransport { request in
+            await capture.append(request)
+            return URLSessionTransportResponse(
+                statusCode: 200,
+                headers: ["etag": "header-etag"],
+                body: responseBody
+            )
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:00:00Z")
+        )
+
+        XCTAssertEqual(response.etag, "header-etag")
+        XCTAssertTrue(response.models.contains { $0.slug == "remote-model" })
+        let capturedRequest = await capture.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.url, "https://api.openai.com/v1/models?client_version=1.2.3")
+        XCTAssertEqual(request.headers["authorization"], "Bearer sk-test")
+
+        let cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
+        XCTAssertEqual(cache.etag, "header-etag")
+        XCTAssertEqual(cache.clientVersion, "1.2.3")
+        XCTAssertEqual(cache.models.map(\.slug), ["remote-model"])
+    }
+
+    func testRawModelCatalogOnlineIfUncachedFallsBackToBundledOnFetchFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let transport = RecordingAPITransport { _ in
+            URLSessionTransportResponse(statusCode: 500, body: Data("nope".utf8))
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3"
+        )
+
+        XCTAssertEqual(response.models, try ModelsManager.bundledModelsResponse().models)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ModelsManager.cachePath(codexHome: root).path))
     }
 
     func testMergePresetsKeepsExistingOnlyWhenRemoteDoesNotShadowIt() {
@@ -348,5 +437,46 @@ final class ModelsManagerTests: XCTestCase {
             showInPicker: showInPicker,
             supportedInAPI: supportedInAPI
         )
+    }
+}
+
+private actor APIRequestCapture {
+    private var requests: [APIRequest] = []
+
+    func append(_ request: APIRequest) {
+        requests.append(request)
+    }
+
+    func firstRequest() -> APIRequest? {
+        requests.first
+    }
+}
+
+private struct RecordingAPITransport: APITransport {
+    let handler: @Sendable (APIRequest) async -> URLSessionTransportResponse
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        let response = await handler(request)
+        if (200..<300).contains(response.statusCode) {
+            return .success(APIResponse(
+                statusCode: response.statusCode,
+                headers: response.headers,
+                body: response.body
+            ))
+        }
+        return .failure(.http(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: String(data: response.body, encoding: .utf8)
+        ))
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        let response = await handler(request)
+        return .success(APIStreamResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            sseText: String(decoding: response.body, as: UTF8.self)
+        ))
     }
 }

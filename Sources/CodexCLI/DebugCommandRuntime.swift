@@ -6,6 +6,7 @@ public enum DebugCommandRuntime {
         public var findCodexHome: () throws -> URL
         public var loadConfig: (URL, CliConfigOverrides) throws -> CodexRuntimeConfig
         public var makeStateStore: (URL, String) throws -> SQLiteAgentGraphStore
+        public var loadRawModelCatalog: (URL, CodexRuntimeConfig) async throws -> ModelsResponse
 
         public init(
             findCodexHome: @escaping () throws -> URL = { try CodexHome.find() },
@@ -18,11 +19,25 @@ public enum DebugCommandRuntime {
             },
             makeStateStore: @escaping (URL, String) throws -> SQLiteAgentGraphStore = { databaseURL, modelProvider in
                 try SQLiteAgentGraphStore(databaseURL: databaseURL, defaultProvider: modelProvider)
+            },
+            loadRawModelCatalog: @escaping (URL, CodexRuntimeConfig) async throws -> ModelsResponse = { codexHome, config in
+                let auth = try CodexAuthStorage.loadEffectiveAuthDotJSON(
+                    codexHome: codexHome,
+                    mode: config.cliAuthCredentialsStoreMode
+                )
+                return try await ModelsManager.rawModelCatalogOnlineIfUncached(
+                    codexHome: codexHome,
+                    config: config,
+                    auth: auth,
+                    transport: URLSessionAPITransport(),
+                    clientVersion: ModelsManager.formatClientVersion(major: "0", minor: "0", patch: "0")
+                )
             }
         ) {
             self.findCodexHome = findCodexHome
             self.loadConfig = loadConfig
             self.makeStateStore = makeStateStore
+            self.loadRawModelCatalog = loadRawModelCatalog
         }
     }
 
@@ -32,7 +47,7 @@ public enum DebugCommandRuntime {
     ) async throws -> CodexCLI.CommandExecutionResult {
         switch request.action {
         case let .models(bundled):
-            return try runModels(bundled: bundled)
+            return try await runModels(bundled: bundled, request: request, dependencies: dependencies)
         case .appServerSendMessageV2:
             return pendingRuntime("debug app-server send-message-v2")
         case let .promptInput(prompt, imagePaths):
@@ -44,19 +59,28 @@ public enum DebugCommandRuntime {
         }
     }
 
-    private static func runModels(bundled: Bool) throws -> CodexCLI.CommandExecutionResult {
-        guard bundled else {
-            return pendingRuntime("debug models")
+    private static func runModels(
+        bundled: Bool,
+        request: CodexCLI.DebugCommandRequest,
+        dependencies: Dependencies
+    ) async throws -> CodexCLI.CommandExecutionResult {
+        let response: ModelsResponse
+        if bundled {
+            response = try ModelsManager.bundledModelsResponse()
+        } else {
+            let codexHome = try dependencies.findCodexHome()
+            let config = try dependencies.loadConfig(codexHome, request.configOverrides)
+            response = try await dependencies.loadRawModelCatalog(codexHome, config)
         }
 
         let encoder = JSONEncoder()
-        let data = try encoder.encode(try ModelsManager.bundledModelsResponse())
+        let data = try encoder.encode(response)
         guard let output = String(data: data, encoding: .utf8) else {
             throw EncodingError.invalidValue(
-                ModelsManager.bundledModels,
+                response,
                 EncodingError.Context(
                     codingPath: [],
-                    debugDescription: "Unable to encode bundled model catalog as UTF-8"
+                    debugDescription: "Unable to encode model catalog as UTF-8"
                 )
             )
         }
