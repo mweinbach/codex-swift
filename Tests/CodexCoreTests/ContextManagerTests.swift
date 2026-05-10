@@ -248,6 +248,78 @@ final class ContextManagerTests: XCTestCase {
         )
     }
 
+    func testEstimateTokenCountWithBaseInstructionsUsesProvidedTextLikeRust() {
+        let history = ContextManager(items: [
+            assistantMessage("hello from history")
+        ])
+        let shortBase = "short"
+        let longBase = String(repeating: "x", count: 1_000)
+
+        let shortEstimate = history.estimateTokenCount(baseInstructionsText: shortBase)
+        let longEstimate = history.estimateTokenCount(baseInstructionsText: longBase)
+        let expectedDelta = Int64(Truncation.approxTokenCount(longBase))
+            - Int64(Truncation.approxTokenCount(shortBase))
+
+        XCTAssertEqual(longEstimate - shortEstimate, expectedDelta)
+    }
+
+    func testRemoveFirstItemRemovesMatchingFunctionOutputLikeRust() {
+        var history = ContextManager(items: [
+            functionCall(callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))
+        ])
+
+        history.removeFirstItem()
+
+        XCTAssertEqual(history.rawItems, [])
+        XCTAssertEqual(history.historyVersion, 0)
+    }
+
+    func testRemoveFirstItemRemovesMatchingFunctionCallForOutputLikeRust() {
+        var history = ContextManager(items: [
+            .functionCallOutput(callID: "call-2", output: FunctionCallOutputPayload(content: "ok")),
+            functionCall(callID: "call-2")
+        ])
+
+        history.removeFirstItem()
+
+        XCTAssertEqual(history.rawItems, [])
+    }
+
+    func testRemoveFirstItemHandlesLocalShellPairLikeRust() {
+        var history = ContextManager(items: [
+            localShellCall(callID: "call-3"),
+            .functionCallOutput(callID: "call-3", output: FunctionCallOutputPayload(content: "ok"))
+        ])
+
+        history.removeFirstItem()
+
+        XCTAssertEqual(history.rawItems, [])
+    }
+
+    func testRemoveFirstItemHandlesCustomToolPairLikeRust() {
+        var history = ContextManager(items: [
+            customToolCall(callID: "tool-1"),
+            .customToolCallOutput(callID: "tool-1", output: "ok")
+        ])
+
+        history.removeFirstItem()
+
+        XCTAssertEqual(history.rawItems, [])
+    }
+
+    func testRemoveLastItemRemovesMatchingFunctionCallForOutputLikeRust() {
+        var history = ContextManager(items: [
+            userMessage("before tool call"),
+            functionCall(callID: "call-delete-last"),
+            .functionCallOutput(callID: "call-delete-last", output: FunctionCallOutputPayload(content: "ok"))
+        ])
+
+        XCTAssertTrue(history.removeLastItem())
+        XCTAssertEqual(history.rawItems, [userMessage("before tool call")])
+        XCTAssertEqual(history.historyVersion, 1)
+    }
+
     func testRecordItemsDropsSystemAndOtherItemsAndTruncatesToolOutputsLikeRust() {
         var history = ContextManager()
         let longOutput = String(repeating: "tokenized content repeated many times ", count: 200)
@@ -264,6 +336,22 @@ final class ContextManagerTests: XCTestCase {
         }
         XCTAssertTrue(output.content.contains("tokens truncated"))
         XCTAssertLessThan(output.content.count, longOutput.count)
+    }
+
+    func testRecordItemsTruncatesCustomToolCallOutputContentLikeRust() {
+        var history = ContextManager()
+        let longOutput = String(repeating: "custom output that is very long\n", count: 2_500)
+
+        history.recordItems([
+            .customToolCallOutput(callID: "tool-200", output: longOutput)
+        ], policy: .tokens(1_000))
+
+        XCTAssertEqual(history.rawItems.count, 1)
+        guard case let .customToolCallOutput(_, _, output) = history.rawItems[0] else {
+            return XCTFail("expected custom tool call output")
+        }
+        XCTAssertNotEqual(output.content, longOutput)
+        XCTAssertTrue(output.content.contains("tokens truncated"))
     }
 
     func testReplaceLastTurnImagesOnlyRewritesLatestToolOutputLikeRust() {
@@ -297,6 +385,32 @@ final class ContextManagerTests: XCTestCase {
             )
         )
     }
+
+    func testReplaceLastTurnImagesDoesNotTouchUserImagesLikeRust() {
+        let items = [
+            ResponseItem.message(role: "user", content: [
+                .inputImage(imageURL: "data:image/png;base64,AAAA")
+            ])
+        ]
+        var history = ContextManager(items: items)
+
+        XCTAssertFalse(history.replaceLastTurnImages(placeholder: "Invalid image"))
+        XCTAssertEqual(history.rawItems, items)
+        XCTAssertEqual(history.historyVersion, 0)
+    }
+
+    func testForPromptRetainsLocalShellOutputsLikeRust() {
+        let items: [ResponseItem] = [
+            localShellCall(callID: "shell-1"),
+            .functionCallOutput(
+                callID: "shell-1",
+                output: FunctionCallOutputPayload(content: "Total output lines: 1\n\nok")
+            )
+        ]
+        let history = ContextManager(items: items)
+
+        XCTAssertEqual(history.forPrompt(), items)
+    }
 }
 
 private func reasoningWithEncryptedContent(length: Int) -> ResponseItem {
@@ -325,6 +439,22 @@ private func developerMessage(_ texts: [String]) -> ResponseItem {
 
 private func customToolCallOutput(callID: String, output: String) -> ResponseItem {
     .customToolCallOutput(callID: callID, output: output)
+}
+
+private func functionCall(callID: String) -> ResponseItem {
+    .functionCall(name: "do_it", arguments: "{}", callID: callID)
+}
+
+private func customToolCall(callID: String) -> ResponseItem {
+    .customToolCall(callID: callID, name: "my_tool", input: "{}")
+}
+
+private func localShellCall(callID: String) -> ResponseItem {
+    .localShellCall(
+        callID: callID,
+        status: .completed,
+        action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
+    )
 }
 
 private func interAgentAssistantMessage(_ text: String) throws -> ResponseItem {

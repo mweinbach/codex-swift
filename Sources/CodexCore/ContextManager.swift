@@ -247,6 +247,14 @@ public struct ContextManager: Equatable, Sendable {
         )
     }
 
+    public func estimateTokenCount(baseInstructionsText: String) -> Int64 {
+        let baseTokens = Int64(clamping: Truncation.approxTokenCount(baseInstructionsText))
+        let itemTokens = items.reduce(Int64(0)) { total, item in
+            total.addingSaturating(Self.estimateItemTokenCount(item))
+        }
+        return baseTokens.addingSaturating(itemTokens)
+    }
+
     public static func estimateItemTokenCount(_ item: ResponseItem) -> Int64 {
         let bytes = ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item)
         return Int64(clamping: Truncation.approxTokensFromByteCount(bytes))

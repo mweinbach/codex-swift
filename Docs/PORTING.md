@@ -990,6 +990,8 @@ Source baseline inspected for this scaffold:
   - added Swift `ContextManager` coverage for API-message recording, tool-output truncation, prompt normalization with image stripping, last-model-generated tail accounting, non-last encrypted reasoning token estimates, total-token usage with server reasoning inclusion, token-usage breakdown fields, inter-agent assistant turn boundaries, and last-turn tool image replacement.
 - `codex-rs/core/src/context_manager/history.rs` rollback reference-context trimming
   - ported `drop_last_n_user_turns` semantics for preserving pre-user prefixes, ignoring contextual user fragments as rollback boundaries, trimming contextual developer/user pre-turn updates above a rolled-back turn, preserving reference context for pure contextual updates, and clearing it when a mixed developer bundle is trimmed.
+- `codex-rs/core/src/context_manager/history.rs` history mutation and base-token estimates
+  - added Swift parity for base-instruction token estimates, first/last item removal preserving function/local-shell/custom-tool call-output invariants, local-shell output prompt normalization, user-image replacement no-ops, and custom-tool output truncation.
 
 ## Known Gaps
 
