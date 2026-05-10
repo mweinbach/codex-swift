@@ -8141,17 +8141,115 @@ public enum CodexAppServer {
     }
 
     fileprivate static func turnCompletedNotification(threadID: String, turnID: String, status: String) -> [String: Any] {
+        turnCompletedNotification(
+            threadID: threadID,
+            turnID: turnID,
+            status: status,
+            error: nil,
+            startedAt: nil,
+            completedAt: nil,
+            durationMilliseconds: nil
+        )
+    }
+
+    fileprivate static func turnStartedNotification(
+        threadID: String,
+        event: TaskStartedEvent,
+        fallbackTurnID: String
+    ) -> [String: Any] {
+        [
+            "method": "turn/started",
+            "params": [
+                "threadId": threadID,
+                "turn": turnObject(
+                    id: event.turnID ?? fallbackTurnID,
+                    status: "inProgress",
+                    error: nil,
+                    startedAt: event.startedAt,
+                    completedAt: nil,
+                    durationMilliseconds: nil
+                )
+            ]
+        ]
+    }
+
+    fileprivate static func turnCompletedNotification(
+        threadID: String,
+        event: TaskCompleteEvent,
+        fallbackTurnID: String,
+        startedAt: Int64?,
+        error: [String: Any]?
+    ) -> [String: Any] {
+        turnCompletedNotification(
+            threadID: threadID,
+            turnID: event.turnID ?? fallbackTurnID,
+            status: error == nil ? "completed" : "failed",
+            error: error,
+            startedAt: startedAt,
+            completedAt: event.completedAt,
+            durationMilliseconds: event.durationMilliseconds
+        )
+    }
+
+    fileprivate static func turnAbortedNotification(
+        threadID: String,
+        event: TurnAbortedEvent,
+        fallbackTurnID: String,
+        startedAt: Int64?
+    ) -> [String: Any] {
+        turnCompletedNotification(
+            threadID: threadID,
+            turnID: event.turnID ?? fallbackTurnID,
+            status: "interrupted",
+            error: nil,
+            startedAt: startedAt,
+            completedAt: event.completedAt,
+            durationMilliseconds: event.durationMilliseconds
+        )
+    }
+
+    private static func turnCompletedNotification(
+        threadID: String,
+        turnID: String,
+        status: String,
+        error: [String: Any]?,
+        startedAt: Int64?,
+        completedAt: Int64?,
+        durationMilliseconds: Int64?
+    ) -> [String: Any] {
         [
             "method": "turn/completed",
             "params": [
                 "threadId": threadID,
-                "turn": [
-                    "id": turnID,
-                    "items": [],
-                    "status": status,
-                    "error": NSNull()
-                ]
+                "turn": turnObject(
+                    id: turnID,
+                    status: status,
+                    error: error,
+                    startedAt: startedAt,
+                    completedAt: completedAt,
+                    durationMilliseconds: durationMilliseconds
+                )
             ]
+        ]
+    }
+
+    private static func turnObject(
+        id: String,
+        status: String,
+        error: [String: Any]?,
+        startedAt: Int64?,
+        completedAt: Int64?,
+        durationMilliseconds: Int64?
+    ) -> [String: Any] {
+        [
+            "id": id,
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": status,
+            "error": error as Any? ?? NSNull(),
+            "startedAt": startedAt as Any? ?? NSNull(),
+            "completedAt": completedAt as Any? ?? NSNull(),
+            "durationMs": durationMilliseconds as Any? ?? NSNull()
         ]
     }
 
@@ -8175,6 +8273,12 @@ public enum CodexAppServer {
     fileprivate static func idleThreadStatus() -> [String: Any] {
         [
             "type": "idle"
+        ]
+    }
+
+    fileprivate static func systemErrorThreadStatus() -> [String: Any] {
+        [
+            "type": "systemError"
         ]
     }
 
@@ -8844,12 +8948,24 @@ public enum CodexAppServer {
                 "threadId": threadID,
                 "turnId": turnID,
                 "willRetry": willRetry,
-                "error": [
-                    "message": message,
-                    "codexErrorInfo": codexErrorInfo.map(codexErrorInfoObject) ?? NSNull(),
-                    "additionalDetails": additionalDetails as Any? ?? NSNull()
-                ]
+                "error": turnErrorObject(
+                    message: message,
+                    codexErrorInfo: codexErrorInfo,
+                    additionalDetails: additionalDetails
+                )
             ]
+        ]
+    }
+
+    fileprivate static func turnErrorObject(
+        message: String,
+        codexErrorInfo: CodexErrorInfo?,
+        additionalDetails: String?
+    ) -> [String: Any] {
+        [
+            "message": message,
+            "codexErrorInfo": codexErrorInfo.map(codexErrorInfoObject) ?? NSNull(),
+            "additionalDetails": additionalDetails as Any? ?? NSNull()
         ]
     }
 
@@ -15153,6 +15269,8 @@ final class CodexAppServerMessageProcessor {
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
+    private var runtimeTurnStartedAt: [String: [String: Int64]] = [:]
+    private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
@@ -15279,11 +15397,97 @@ final class CodexAppServerMessageProcessor {
     }
 
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
-        let notifications = CodexAppServer.runtimeEventNotifications(
-            threadID: threadID,
-            turnID: turnID,
-            event: event
-        )
+        let notifications: [[String: Any]]
+        switch event {
+        case let .taskStarted(event):
+            let runtimeTurnID = event.turnID ?? turnID
+            activeTurnIDs[threadID] = runtimeTurnID
+            if let startedAt = event.startedAt {
+                runtimeTurnStartedAt[threadID, default: [:]][runtimeTurnID] = startedAt
+            }
+            runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            notifications = [
+                threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.activeThreadStatus()
+                ),
+                CodexAppServer.turnStartedNotification(
+                    threadID: threadID,
+                    event: event,
+                    fallbackTurnID: turnID
+                )
+            ].compactMap(\.self)
+        case let .taskComplete(event):
+            let runtimeTurnID = event.turnID ?? turnID
+            let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
+            let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
+            runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
+            runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            if activeTurnIDs[threadID] == runtimeTurnID {
+                activeTurnIDs[threadID] = nil
+            }
+            notifications = [
+                threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.idleThreadStatus()
+                ),
+                CodexAppServer.turnCompletedNotification(
+                    threadID: threadID,
+                    event: event,
+                    fallbackTurnID: turnID,
+                    startedAt: startedAt,
+                    error: error
+                )
+            ].compactMap(\.self)
+            trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
+        case let .turnAborted(event):
+            let runtimeTurnID = event.turnID ?? turnID
+            let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
+            runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
+            runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            if activeTurnIDs[threadID] == runtimeTurnID {
+                activeTurnIDs[threadID] = nil
+            }
+            notifications = [
+                threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.idleThreadStatus()
+                ),
+                CodexAppServer.turnAbortedNotification(
+                    threadID: threadID,
+                    event: event,
+                    fallbackTurnID: turnID,
+                    startedAt: startedAt
+                )
+            ].compactMap(\.self)
+            trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
+        case let .error(event):
+            var projected = CodexAppServer.runtimeEventNotifications(
+                threadID: threadID,
+                turnID: turnID,
+                event: .error(event)
+            )
+            if event.affectsTurnStatus {
+                runtimeTurnErrors[threadID, default: [:]][turnID] = CodexAppServer.turnErrorObject(
+                    message: event.message,
+                    codexErrorInfo: event.codexErrorInfo,
+                    additionalDetails: nil
+                )
+                if let notification = threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.systemErrorThreadStatus()
+                ) {
+                    projected.insert(notification, at: 0)
+                }
+            }
+            notifications = projected
+        default:
+            notifications = CodexAppServer.runtimeEventNotifications(
+                threadID: threadID,
+                turnID: turnID,
+                event: event
+            )
+        }
         guard !notifications.isEmpty else {
             return
         }

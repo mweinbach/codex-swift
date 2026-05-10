@@ -1385,6 +1385,13 @@ final class CodexAppServerTests: XCTestCase {
             event: .warning(WarningEvent(message: "after suppressed error"))
         )
 
+        let systemError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(systemError[0]["method"] as? String, "thread/status/changed")
+        let systemErrorParams = try XCTUnwrap(systemError[0]["params"] as? [String: Any])
+        XCTAssertEqual(systemErrorParams["threadId"] as? String, "thread-1")
+        let systemErrorStatus = try XCTUnwrap(systemErrorParams["status"] as? [String: Any])
+        XCTAssertEqual(systemErrorStatus["type"] as? String, "systemError")
+
         let error = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(error[0]["method"] as? String, "error")
         let errorParams = try XCTUnwrap(error[0]["params"] as? [String: Any])
@@ -1413,6 +1420,137 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(warning[0]["method"] as? String, "warning")
         let warningParams = try XCTUnwrap(warning[0]["params"] as? [String: Any])
         XCTAssertEqual(warningParams["message"] as? String, "after suppressed error")
+    }
+
+    func testRuntimeTurnLifecycleEmitsRustNotificationsAndFailureError() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "fallback-turn",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                startedAt: 1_778_320_000,
+                modelContextWindow: 128_000,
+                collaborationModeKind: .defaultMode
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .error(ErrorEvent(message: "boom", codexErrorInfo: .badRequest))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "fallback-turn",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-1",
+                lastAgentMessage: nil,
+                completedAt: 1_778_320_010,
+                durationMilliseconds: 10_000
+            ))
+        )
+
+        let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
+        let activeParams = try XCTUnwrap(active[0]["params"] as? [String: Any])
+        let activeStatus = try XCTUnwrap(activeParams["status"] as? [String: Any])
+        XCTAssertEqual(activeStatus["type"] as? String, "active")
+
+        let started = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(started[0]["method"] as? String, "turn/started")
+        let startedParams = try XCTUnwrap(started[0]["params"] as? [String: Any])
+        let startedTurn = try XCTUnwrap(startedParams["turn"] as? [String: Any])
+        XCTAssertEqual(startedTurn["id"] as? String, "turn-1")
+        XCTAssertEqual(startedTurn["itemsView"] as? String, "notLoaded")
+        XCTAssertEqual(startedTurn["status"] as? String, "inProgress")
+        XCTAssertEqual(startedTurn["startedAt"] as? Int, 1_778_320_000)
+        XCTAssertTrue(startedTurn["completedAt"] is NSNull)
+        XCTAssertTrue(startedTurn["durationMs"] is NSNull)
+
+        let systemError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(systemError[0]["method"] as? String, "thread/status/changed")
+        let systemErrorParams = try XCTUnwrap(systemError[0]["params"] as? [String: Any])
+        let systemErrorStatus = try XCTUnwrap(systemErrorParams["status"] as? [String: Any])
+        XCTAssertEqual(systemErrorStatus["type"] as? String, "systemError")
+
+        let error = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(error[0]["method"] as? String, "error")
+
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
+        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, "turn-1")
+        XCTAssertEqual(completedTurn["itemsView"] as? String, "notLoaded")
+        XCTAssertEqual(completedTurn["status"] as? String, "failed")
+        XCTAssertEqual(completedTurn["startedAt"] as? Int, 1_778_320_000)
+        XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_320_010)
+        XCTAssertEqual(completedTurn["durationMs"] as? Int, 10_000)
+        let completedError = try XCTUnwrap(completedTurn["error"] as? [String: Any])
+        XCTAssertEqual(completedError["message"] as? String, "boom")
+        XCTAssertEqual(completedError["codexErrorInfo"] as? String, "badRequest")
+        XCTAssertTrue(completedError["additionalDetails"] is NSNull)
+    }
+
+    func testRuntimeTurnAbortedEmitsInterruptedCompletionWithTiming() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                startedAt: 1_778_320_000,
+                modelContextWindow: nil
+            ))
+        )
+        _ = try await nextNotificationPayload(notificationCapture)
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "fallback-turn",
+            event: .turnAborted(TurnAbortedEvent(
+                turnID: "turn-1",
+                reason: .interrupted,
+                completedAt: 1_778_320_005,
+                durationMilliseconds: 5_000
+            ))
+        )
+
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
+        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, "turn-1")
+        XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
+        XCTAssertTrue(completedTurn["error"] is NSNull)
+        XCTAssertEqual(completedTurn["startedAt"] as? Int, 1_778_320_000)
+        XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_320_005)
+        XCTAssertEqual(completedTurn["durationMs"] as? Int, 5_000)
     }
 
     func testRuntimeNoticeAndModelEventsEmitRustNotifications() async throws {

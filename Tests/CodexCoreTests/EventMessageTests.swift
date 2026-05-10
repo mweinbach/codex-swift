@@ -66,6 +66,35 @@ final class EventMessageTests: XCTestCase {
         XCTAssertEqual(decodedComplete, complete)
     }
 
+    func testTurnAbortedTimingFieldsMatchRust() throws {
+        let aborted = EventMessage.turnAborted(TurnAbortedEvent(
+            turnID: "turn-1",
+            reason: .interrupted,
+            completedAt: 1_778_320_020,
+            durationMilliseconds: 12_500
+        ))
+
+        try XCTAssertJSONObjectEqual(aborted, [
+            "type": "turn_aborted",
+            "turn_id": "turn-1",
+            "reason": "interrupted",
+            "completed_at": 1_778_320_020,
+            "duration_ms": 12_500
+        ])
+
+        let decoded = try JSONDecoder().decode(EventMessage.self, from: Data("""
+        {
+          "type": "turn_aborted",
+          "turn_id": "turn-1",
+          "reason": "interrupted",
+          "completed_at": 1778320020,
+          "duration_ms": 12500
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded, aborted)
+    }
+
     func testEventMessageFlattensPayloadFieldsBesideType() throws {
         let msg = EventMessage.error(ErrorEvent(
             message: "stream disconnected",

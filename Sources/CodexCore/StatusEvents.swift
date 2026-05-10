@@ -463,10 +463,44 @@ public struct StreamInfoEvent: Equatable, Codable, Sendable {
 }
 
 public struct TurnAbortedEvent: Equatable, Codable, Sendable {
+    public let turnID: String?
     public let reason: TurnAbortReason
+    public let completedAt: Int64?
+    public let durationMilliseconds: Int64?
 
-    public init(reason: TurnAbortReason) {
+    private enum CodingKeys: String, CodingKey {
+        case turnID = "turn_id"
+        case reason
+        case completedAt = "completed_at"
+        case durationMilliseconds = "duration_ms"
+    }
+
+    public init(
+        turnID: String? = nil,
+        reason: TurnAbortReason,
+        completedAt: Int64? = nil,
+        durationMilliseconds: Int64? = nil
+    ) {
+        self.turnID = turnID
         self.reason = reason
+        self.completedAt = completedAt
+        self.durationMilliseconds = durationMilliseconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        reason = try container.decode(TurnAbortReason.self, forKey: .reason)
+        completedAt = try container.decodeIfPresent(Int64.self, forKey: .completedAt)
+        durationMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .durationMilliseconds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(turnID, forKey: .turnID)
+        try container.encode(reason, forKey: .reason)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        try container.encodeIfPresent(durationMilliseconds, forKey: .durationMilliseconds)
     }
 }
 
