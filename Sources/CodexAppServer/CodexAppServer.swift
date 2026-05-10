@@ -15467,18 +15467,18 @@ final class CodexAppServerMessageProcessor {
                 turnID: turnID,
                 event: .error(event)
             )
+            if let notification = threadStatusChangedNotification(
+                threadID: threadID,
+                status: CodexAppServer.systemErrorThreadStatus()
+            ) {
+                projected.insert(notification, at: 0)
+            }
             if event.affectsTurnStatus {
                 runtimeTurnErrors[threadID, default: [:]][turnID] = CodexAppServer.turnErrorObject(
                     message: event.message,
                     codexErrorInfo: event.codexErrorInfo,
                     additionalDetails: nil
                 )
-                if let notification = threadStatusChangedNotification(
-                    threadID: threadID,
-                    status: CodexAppServer.systemErrorThreadStatus()
-                ) {
-                    projected.insert(notification, at: 0)
-                }
             }
             notifications = projected
         default:

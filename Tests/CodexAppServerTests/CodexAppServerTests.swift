@@ -1416,6 +1416,13 @@ final class CodexAppServerTests: XCTestCase {
         let disconnected = try XCTUnwrap(streamErrorInfo["responseStreamDisconnected"] as? [String: Any])
         XCTAssertTrue(disconnected["httpStatusCode"] is NSNull)
 
+        let suppressedSystemError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(suppressedSystemError[0]["method"] as? String, "thread/status/changed")
+        let suppressedSystemErrorParams = try XCTUnwrap(suppressedSystemError[0]["params"] as? [String: Any])
+        XCTAssertEqual(suppressedSystemErrorParams["threadId"] as? String, "thread-1")
+        let suppressedSystemErrorStatus = try XCTUnwrap(suppressedSystemErrorParams["status"] as? [String: Any])
+        XCTAssertEqual(suppressedSystemErrorStatus["type"] as? String, "systemError")
+
         let warning = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(warning[0]["method"] as? String, "warning")
         let warningParams = try XCTUnwrap(warning[0]["params"] as? [String: Any])
