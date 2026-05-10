@@ -195,6 +195,11 @@ final class CommandSafetyTests: XCTestCase {
             "Remove-Item test -Force"
         ]))
         XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Remove-Item test -Recurse -Force"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
             "pwsh",
             "-Command",
             "ri test -Force"
@@ -202,7 +207,32 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.commandMightBeDangerous([
             "powershell",
             "-Command",
+            "Remove-Item -Path 'test' -Recurse -Force"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "Remove-Item test -Force; Write-Host done"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "if ($true) { Remove-Item test -Force}"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "[void]( Remove-Item test -Force)]"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
             "Write-Host hi;Remove-Item -Force C:\\tmp"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "powershell",
+            "-Command",
+            "del,-Force,C:\\foo"
         ]))
         XCTAssertFalse(CommandSafety.commandMightBeDangerous([
             "powershell",
