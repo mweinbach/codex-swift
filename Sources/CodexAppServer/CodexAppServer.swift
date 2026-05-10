@@ -5111,9 +5111,6 @@ public enum CodexAppServer {
         let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"]) ?? ""
         let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
         let skillName = stringParam(params?["skillName"]) ?? ""
-        guard remotePluginScope(forMarketplaceName: remoteMarketplaceName) != nil else {
-            throw AppServerError.invalidRequest("remote marketplace `\(remoteMarketplaceName)` is not supported")
-        }
         let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
         guard runtimeConfig.features.isEnabled(.plugins) else {
             throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
@@ -5129,7 +5126,10 @@ public enum CodexAppServer {
         guard let auth = try? currentAuth(configuration: configuration),
               case .chatGPT = auth.kind
         else {
-            throw AppServerError.invalidRequest("read remote plugin skill: chatgpt authentication required for remote plugin catalog")
+            throw AppServerError.invalidRequest("read remote plugin skill details: chatgpt authentication required for remote plugin catalog")
+        }
+        guard remotePluginScope(forMarketplaceName: remoteMarketplaceName) != nil else {
+            throw AppServerError.invalidRequest("read remote plugin skill details: remote marketplace `\(remoteMarketplaceName)` is not supported")
         }
         let object = try remotePluginObject(
             path: "/ps/plugins/\(remotePluginID)/skills/\(remotePluginPathSegment(skillName))",
@@ -5137,16 +5137,16 @@ public enum CodexAppServer {
             runtimeConfig: runtimeConfig,
             configuration: configuration,
             auth: auth,
-            failurePrefix: "read remote plugin skill"
+            failurePrefix: "read remote plugin skill details"
         )
         if let pluginID = object["plugin_id"] as? String, pluginID != remotePluginID {
             throw AppServerError.invalidRequest(
-                "read remote plugin skill: remote plugin mutation returned unexpected plugin id: expected `\(remotePluginID)`, got `\(pluginID)`"
+                "read remote plugin skill details: remote plugin mutation returned unexpected plugin id: expected `\(remotePluginID)`, got `\(pluginID)`"
             )
         }
         if let responseSkillName = object["name"] as? String, responseSkillName != skillName {
             throw AppServerError.invalidRequest(
-                "read remote plugin skill: remote plugin skill response returned unexpected skill name: expected `\(skillName)`, got `\(responseSkillName)`"
+                "read remote plugin skill details: remote plugin skill response returned unexpected skill name: expected `\(skillName)`, got `\(responseSkillName)`"
             )
         }
         return ["contents": nullable(object["skill_md_contents"] as? String)].nullStripped(keepNulls: true)

@@ -5987,6 +5987,72 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginSkillReadPreservesRustFeatureAndMarketplaceValidationOrder() throws {
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+        let disabledHome = try TemporaryDirectory()
+        try """
+        [features]
+        plugins = false
+        """.write(to: disabledHome.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let disabled = try appServerResponse(
+            #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"unknown-market","remotePluginId":"\#(pluginID)","skillName":"plan-work"}}"#,
+            codexHome: disabledHome.url
+        )
+        let disabledError = try XCTUnwrap(disabled["error"] as? [String: Any])
+        XCTAssertEqual(disabledError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            disabledError["message"] as? String,
+            "remote plugin skill read is not enabled for marketplace unknown-market"
+        )
+
+        let noAuthHome = try TemporaryDirectory()
+        try """
+        [features]
+        plugins = true
+        """.write(to: noAuthHome.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let noAuth = try appServerResponse(
+            #"{"id":2,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"unknown-market","remotePluginId":"\#(pluginID)","skillName":"plan-work"}}"#,
+            codexHome: noAuthHome.url
+        )
+        let noAuthError = try XCTUnwrap(noAuth["error"] as? [String: Any])
+        XCTAssertEqual(noAuthError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            noAuthError["message"] as? String,
+            "read remote plugin skill details: chatgpt authentication required for remote plugin catalog"
+        )
+
+        let enabledHome = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: enabledHome.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: enabledHome.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let unknown = try appServerResponse(
+            #"{"id":3,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"unknown-market","remotePluginId":"\#(pluginID)","skillName":"plan-work"}}"#,
+            codexHome: enabledHome.url
+        )
+        let unknownError = try XCTUnwrap(unknown["error"] as? [String: Any])
+        XCTAssertEqual(unknownError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            unknownError["message"] as? String,
+            "read remote plugin skill details: remote marketplace `unknown-market` is not supported"
+        )
+    }
+
     func testPluginShareRoutesReportDisabledWhenFeatureUnavailable() throws {
         let temp = try TemporaryDirectory()
         let pluginPath = temp.url.appendingPathComponent("plugin").path
