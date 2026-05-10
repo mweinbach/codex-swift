@@ -393,6 +393,161 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(inference["raw_response_payload_id"] as? String, "payload-partial-response")
     }
 
+    func testTraceReduceRecordsToolCallLifecycleAndRawPayloads() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let invocationPayload: [String: Any] = [
+            "raw_payload_id": "payload-tool-invocation",
+            "kind": ["type": "tool_invocation"],
+            "path": "payloads/tool-invocation.json"
+        ]
+        let runtimeStartPayload: [String: Any] = [
+            "raw_payload_id": "payload-tool-runtime-start",
+            "kind": ["type": "tool_runtime_event"],
+            "path": "payloads/tool-runtime-start.json"
+        ]
+        let runtimeEndPayload: [String: Any] = [
+            "raw_payload_id": "payload-tool-runtime-end",
+            "kind": ["type": "tool_runtime_event"],
+            "path": "payloads/tool-runtime-end.json"
+        ]
+        let resultPayload: [String: Any] = [
+            "raw_payload_id": "payload-tool-result",
+            "kind": ["type": "tool_result"],
+            "path": "payloads/tool-result.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "tool-1",
+                "model_visible_call_id": "call-1",
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "other", "name": "lookup"],
+                "summary": [
+                    "type": "generic",
+                    "label": "lookup",
+                    "input_preview": "find",
+                    "output_preview": NSNull()
+                ],
+                "invocation_payload": invocationPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_runtime_started",
+                "tool_call_id": "tool-1",
+                "runtime_payload": runtimeStartPayload
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_runtime_ended",
+                "tool_call_id": "tool-1",
+                "status": "completed",
+                "runtime_payload": runtimeEndPayload
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_ended",
+                "tool_call_id": "tool-1",
+                "status": "completed",
+                "result_payload": resultPayload
+            ])
+        ])
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let toolCalls = try XCTUnwrap(state["tool_calls"] as? [String: Any])
+        let toolCall = try XCTUnwrap(toolCalls["tool-1"] as? [String: Any])
+        XCTAssertEqual(toolCall["model_visible_call_id"] as? String, "call-1")
+        XCTAssertEqual(toolCall["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(toolCall["started_by_codex_turn_id"] as? String, "turn-1")
+        XCTAssertEqual(toolCall["raw_invocation_payload_id"] as? String, "payload-tool-invocation")
+        XCTAssertEqual(toolCall["raw_result_payload_id"] as? String, "payload-tool-result")
+        XCTAssertEqual(
+            toolCall["raw_runtime_payload_ids"] as? [String],
+            ["payload-tool-runtime-start", "payload-tool-runtime-end"]
+        )
+        XCTAssertEqual(toolCall["model_visible_call_item_ids"] as? [String], [])
+        XCTAssertEqual(toolCall["model_visible_output_item_ids"] as? [String], [])
+        XCTAssertNil(toolCall["terminal_operation_id"] as? String)
+
+        let requester = try XCTUnwrap(toolCall["requester"] as? [String: Any])
+        XCTAssertEqual(requester["type"] as? String, "model")
+        let kind = try XCTUnwrap(toolCall["kind"] as? [String: Any])
+        XCTAssertEqual(kind["type"] as? String, "other")
+        XCTAssertEqual(kind["name"] as? String, "lookup")
+        let summary = try XCTUnwrap(toolCall["summary"] as? [String: Any])
+        XCTAssertEqual(summary["type"] as? String, "generic")
+        XCTAssertEqual(summary["label"] as? String, "lookup")
+
+        let execution = try XCTUnwrap(toolCall["execution"] as? [String: Any])
+        XCTAssertEqual(execution["started_seq"] as? Int, 3)
+        XCTAssertEqual(execution["ended_seq"] as? Int, 6)
+        XCTAssertEqual(execution["status"] as? String, "completed")
+
+        let rawPayloads = try XCTUnwrap(state["raw_payloads"] as? [String: Any])
+        XCTAssertNotNil(rawPayloads["payload-tool-invocation"])
+        XCTAssertNotNil(rawPayloads["payload-tool-runtime-start"])
+        XCTAssertNotNil(rawPayloads["payload-tool-runtime-end"])
+        XCTAssertNotNil(rawPayloads["payload-tool-result"])
+    }
+
+    func testTraceReduceDerivesToolCallThreadFromTurnContext() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "tool-1",
+                "model_visible_call_id": NSNull(),
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": ["type": "other", "name": "lookup"],
+                "summary": [
+                    "type": "generic",
+                    "label": "lookup",
+                    "input_preview": NSNull(),
+                    "output_preview": NSNull()
+                ],
+                "invocation_payload": NSNull()
+            ])
+        ])
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let toolCalls = try XCTUnwrap(state["tool_calls"] as? [String: Any])
+        let toolCall = try XCTUnwrap(toolCalls["tool-1"] as? [String: Any])
+        XCTAssertEqual(toolCall["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(toolCall["started_by_codex_turn_id"] as? String, "turn-1")
+    }
+
     func testTraceReduceRejectsUnsupportedSemanticEvents() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
@@ -400,8 +555,10 @@ final class DebugCommandRuntimeTests: XCTestCase {
             at: bundle,
             events: [
                 traceEvent(seq: 1, wallTime: 101, payload: [
-                    "type": "tool_call_started",
-                    "tool_call_id": "tool-1"
+                    "type": "code_cell_started",
+                    "runtime_cell_id": "cell-runtime-1",
+                    "model_visible_call_id": "call-1",
+                    "source_js": "return 1"
                 ])
             ]
         )
@@ -413,7 +570,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
             )
             XCTFail("expected unsupported rich event to fail")
         } catch {
-            XCTAssertEqual(String(describing: error), "unsupported trace event payload type tool_call_started")
+            XCTAssertEqual(String(describing: error), "unsupported trace event payload type code_cell_started")
         }
     }
 

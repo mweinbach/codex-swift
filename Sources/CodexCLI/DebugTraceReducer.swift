@@ -78,6 +78,14 @@ struct DebugTraceReducer {
             try startInference(event: event, payload: payload)
         case "inference_completed", "inference_failed", "inference_cancelled":
             try endInference(event: event, payload: payload, type: type)
+        case "tool_call_started":
+            try startToolCall(event: event, payload: payload)
+        case "tool_call_runtime_started":
+            try startToolCallRuntime(payload: payload)
+        case "tool_call_runtime_ended":
+            try endToolCallRuntime(payload: payload)
+        case "tool_call_ended":
+            try endToolCall(event: event, payload: payload)
         case "protocol_event_observed", "other":
             break
         default:
@@ -339,6 +347,126 @@ struct DebugTraceReducer {
         rollout["inference_calls"] = inferenceCalls
     }
 
+    private mutating func startToolCall(event: [String: Any], payload: [String: Any]) throws {
+        let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
+        let threadID = try toolThreadID(event: event)
+        let codexTurnID = event["codex_turn_id"] as? String
+        if let codexTurnID {
+            try validateToolTurn(threadID: threadID, codexTurnID: codexTurnID)
+        }
+
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        if toolCalls[toolCallID] != nil {
+            throw DebugTraceReducerError.duplicateToolCall(toolCallID)
+        }
+
+        toolCalls[toolCallID] = [
+            "tool_call_id": toolCallID,
+            "model_visible_call_id": Self.nullableString(payload["model_visible_call_id"]),
+            "code_mode_runtime_tool_id": Self.nullableString(payload["code_mode_runtime_tool_id"]),
+            "thread_id": threadID,
+            "started_by_codex_turn_id": codexTurnID.map { $0 as Any } ?? NSNull(),
+            "execution": try executionWindow(
+                event: event,
+                status: "running",
+                endedAt: NSNull(),
+                endedSeq: NSNull()
+            ),
+            "requester": try Self.requiredDictionary(payload, key: "requester"),
+            "kind": try Self.requiredDictionary(payload, key: "kind"),
+            "model_visible_call_item_ids": [],
+            "model_visible_output_item_ids": [],
+            "terminal_operation_id": NSNull(),
+            "summary": try Self.requiredDictionary(payload, key: "summary"),
+            "raw_invocation_payload_id": try Self.optionalRawPayloadID(payload["invocation_payload"]),
+            "raw_result_payload_id": NSNull(),
+            "raw_runtime_payload_ids": []
+        ]
+        rollout["tool_calls"] = toolCalls
+    }
+
+    private mutating func startToolCallRuntime(payload: [String: Any]) throws {
+        let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownToolCallRuntimeStart(toolCallID)
+        }
+        try appendRawRuntimePayloadID(from: payload, to: &toolCall)
+        toolCalls[toolCallID] = toolCall
+        rollout["tool_calls"] = toolCalls
+    }
+
+    private mutating func endToolCallRuntime(payload: [String: Any]) throws {
+        let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownToolCallRuntimeEnd(toolCallID)
+        }
+        try appendRawRuntimePayloadID(from: payload, to: &toolCall)
+        toolCalls[toolCallID] = toolCall
+        rollout["tool_calls"] = toolCalls
+    }
+
+    private mutating func endToolCall(event: [String: Any], payload: [String: Any]) throws {
+        let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownToolCallEnd(toolCallID)
+        }
+        guard var execution = toolCall["execution"] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("tool call execution for \(toolCallID)")
+        }
+        execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+        execution["status"] = try Self.requiredString(payload, key: "status")
+        toolCall["execution"] = execution
+        toolCall["raw_result_payload_id"] = try Self.optionalRawPayloadID(payload["result_payload"])
+        toolCalls[toolCallID] = toolCall
+        rollout["tool_calls"] = toolCalls
+    }
+
+    private mutating func appendRawRuntimePayloadID(from payload: [String: Any], to toolCall: inout [String: Any]) throws {
+        let runtimePayload = try Self.requiredDictionary(payload, key: "runtime_payload")
+        let rawPayloadID = try Self.requiredString(runtimePayload, key: "raw_payload_id")
+        var rawRuntimePayloadIDs = toolCall["raw_runtime_payload_ids"] as? [String] ?? []
+        if !rawRuntimePayloadIDs.contains(rawPayloadID) {
+            rawRuntimePayloadIDs.append(rawPayloadID)
+        }
+        toolCall["raw_runtime_payload_ids"] = rawRuntimePayloadIDs
+    }
+
+    private func toolThreadID(event: [String: Any]) throws -> String {
+        if let threadID = event["thread_id"] as? String {
+            return threadID
+        }
+        if let codexTurnID = event["codex_turn_id"] as? String {
+            let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+            guard let turn = turns[codexTurnID] as? [String: Any],
+                  let threadID = turn["thread_id"] as? String
+            else {
+                throw DebugTraceReducerError.unknownCodexTurnForToolCall(codexTurnID)
+            }
+            return threadID
+        }
+        throw DebugTraceReducerError.missingToolThreadContext
+    }
+
+    private func validateToolTurn(threadID: String, codexTurnID: String) throws {
+        let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+        guard let turn = turns[codexTurnID] as? [String: Any],
+              let turnThreadID = turn["thread_id"] as? String
+        else {
+            throw DebugTraceReducerError.unknownCodexTurnForToolCall(codexTurnID)
+        }
+        if threadID != turnThreadID {
+            throw DebugTraceReducerError.mismatchedToolTurnThread(
+                eventThreadID: threadID,
+                turnID: codexTurnID,
+                turnThreadID: turnThreadID
+            )
+        }
+    }
+
     private func tokenUsage(from responsePayload: [String: Any]) throws -> Any? {
         guard let path = responsePayload["path"] as? String else {
             return nil
@@ -449,6 +577,13 @@ struct DebugTraceReducer {
         return value
     }
 
+    private static func optionalRawPayloadID(_ value: Any?) throws -> Any {
+        guard let dictionary = value as? [String: Any] else {
+            return NSNull()
+        }
+        return try requiredString(dictionary, key: "raw_payload_id")
+    }
+
     private static func loadJSONObject(at url: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: url)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -503,6 +638,13 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         turnID: String,
         turnThreadID: String
     )
+    case duplicateToolCall(String)
+    case unknownToolCallEnd(String)
+    case unknownToolCallRuntimeStart(String)
+    case unknownToolCallRuntimeEnd(String)
+    case missingToolThreadContext
+    case unknownCodexTurnForToolCall(String)
+    case mismatchedToolTurnThread(eventThreadID: String, turnID: String, turnThreadID: String)
 
     var description: String {
         switch self {
@@ -536,6 +678,20 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "inference start \(inferenceID) referenced unknown codex turn \(turnID)"
         case let .mismatchedInferenceTurnThread(inferenceID, eventThreadID, turnID, turnThreadID):
             return "inference start \(inferenceID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
+        case let .duplicateToolCall(toolCallID):
+            return "duplicate tool call start for \(toolCallID)"
+        case let .unknownToolCallEnd(toolCallID):
+            return "tool call end referenced unknown call \(toolCallID)"
+        case let .unknownToolCallRuntimeStart(toolCallID):
+            return "tool runtime start referenced unknown call \(toolCallID)"
+        case let .unknownToolCallRuntimeEnd(toolCallID):
+            return "tool runtime end referenced unknown call \(toolCallID)"
+        case .missingToolThreadContext:
+            return "tool call start is missing thread or codex turn context"
+        case let .unknownCodexTurnForToolCall(turnID):
+            return "tool call start referenced unknown codex turn \(turnID)"
+        case let .mismatchedToolTurnThread(eventThreadID, turnID, turnThreadID):
+            return "tool call start used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         }
     }
 }
