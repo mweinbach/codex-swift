@@ -307,6 +307,8 @@ Source baseline inspected for this scaffold:
   - OSS provider IDs, default model mapping for `lmstudio`/`ollama`, unknown-provider skip behavior, readiness dispatch/error-wrapping seam, explicit `--local-provider` over `oss_provider` resolution, CLI-model precedence over provider defaults, and non-interactive `--oss` startup readiness wiring
 - `codex-rs/core/src/model_provider_info.rs` plus provider URL/Azure helpers from `codex-rs/codex-api/src/provider.rs`
   - model provider wire shape/defaults, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, Azure Responses endpoint detection, and OpenAI/Azure remote-compaction support detection
+- `codex-rs/model-provider/src/provider.rs`
+  - runtime model-provider abstraction for configured providers and Amazon Bedrock, provider-owned capability dispatch, runtime base-URL lookup, provider auth precedence reuse, ChatGPT-only attestation support detection, Rust-shaped provider account states for unauthenticated/OpenAI API-key/ChatGPT/custom non-OpenAI/Bedrock providers, missing ChatGPT account-detail error text, and Bedrock bypass of OpenAI auth
 - `codex-rs/core/src/exec_env.rs` and shell-environment policy types from `codex-rs/core/src/config/types.rs`
   - shell environment inheritance modes, case-insensitive wildcard include/exclude patterns, default sensitive-name filtering, set overrides, include-only post-filtering, and profile-use flag conversion
 - `codex-rs/common/src/config_summary.rs`
@@ -1019,7 +1021,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - Rust-complete non-interactive live tool orchestration
 - full interactive resume continuation after rollout target resolution
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
-- model-provider parity beyond the initial Responses/OpenAI provider/auth path
+- remaining model-provider parity beyond account/capability/auth helpers, including command-auth managers, model-manager dispatch, and provider-specific runtime clients
 - LM Studio local-provider runtime wiring
 - runtime Responses API tool orchestration
 - Linux Landlock/Windows debug sandbox helper execution and Rust-complete config-layer fidelity for sandbox runtime setup
