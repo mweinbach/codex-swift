@@ -9693,7 +9693,7 @@ public enum CodexAppServer {
             return nil
         }
 
-        if let command = server["command"] as? String,
+        if let command = externalAgentMcpString(server["command"]),
            !containsEnvPlaceholder(command) {
             let type = server["type"] as? String
             guard type == nil || type == "stdio" else {
@@ -9733,7 +9733,7 @@ public enum CodexAppServer {
             return .table(table)
         }
 
-        if let url = server["url"] as? String,
+        if let url = externalAgentMcpString(server["url"]),
            !containsEnvPlaceholder(url) {
             let type = server["type"] as? String
             guard type == nil || type == "http" || type == "streamable_http" else {
@@ -9776,6 +9776,11 @@ public enum CodexAppServer {
         switch value {
         case let value as String:
             return value
+        case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                return value.boolValue ? "true" : "false"
+            }
+            return value.stringValue
         default:
             return nil
         }
@@ -9785,17 +9790,10 @@ public enum CodexAppServer {
         switch value {
         case let string as String:
             return [string]
-        case let array as [String]:
-            return array
         case let array as [Any]:
-            var strings: [String] = []
-            for item in array {
-                guard let string = item as? String else {
-                    return nil
-                }
-                strings.append(string)
-            }
-            return strings
+            return array.compactMap { externalAgentMcpString($0) }
+        case let value?:
+            return externalAgentMcpString(value).map { [$0] }
         default:
             return nil
         }
@@ -9838,13 +9836,7 @@ public enum CodexAppServer {
     }
 
     private static func stringSet(_ value: Any?) -> Set<String> {
-        if let strings = value as? [String] {
-            return Set(strings)
-        }
-        if let values = value as? [Any] {
-            return Set(values.compactMap { $0 as? String })
-        }
-        return []
+        Set(externalAgentMcpStringArray(value) ?? [])
     }
 
     private static func externalAgentProjectPath(_ path: String, matches sourceRoot: URL) -> Bool {

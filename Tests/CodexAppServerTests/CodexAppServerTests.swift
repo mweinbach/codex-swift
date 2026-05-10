@@ -8951,7 +8951,7 @@ final class CodexAppServerTests: XCTestCase {
         try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
         try """
         {
-          "enabledMcpjsonServers": ["api", "docs", "bad-env", "disabled"],
+          "enabledMcpjsonServers": ["api", "docs", "coerced", "bad-env", "disabled"],
           "disabledMcpjsonServers": ["disabled"]
         }
         """.write(
@@ -8976,7 +8976,19 @@ final class CodexAppServerTests: XCTestCase {
               "headers": {
                 "Authorization": "Bearer ${API_TOKEN}",
                 "X-Env": "${HEADER_ENV}",
-                "X-Static": "abc"
+                "X-Static": "abc",
+                "X-Retry": 3,
+                "X-Enabled": true
+              }
+            },
+            "coerced": {
+              "command": true,
+              "args": [1, false, "ok", null, {"skip": true}],
+              "env": {
+                "COUNT": 7,
+                "FLAG": true,
+                "OBJECT": {},
+                "TOKEN": "${TOKEN}"
               }
             },
             "bad-env": {
@@ -9006,7 +9018,10 @@ final class CodexAppServerTests: XCTestCase {
             "Migrate MCP servers from \(repo.url.path) into \(repo.url.path)/.codex/config.toml"
         )
         let details = try XCTUnwrap(items[0]["details"] as? [String: Any])
-        XCTAssertEqual(details["mcp_servers"] as? [[String: String]], [["name": "api"], ["name": "docs"]])
+        XCTAssertEqual(
+            details["mcp_servers"] as? [[String: String]],
+            [["name": "api"], ["name": "coerced"], ["name": "docs"]]
+        )
 
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
         let messages = try decodeMessages(processor.processLine(Data(
@@ -9027,6 +9042,15 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(migrated.contains(#"X-Env = "HEADER_ENV""#))
         XCTAssertTrue(migrated.contains("[mcp_servers.api.http_headers]"))
         XCTAssertTrue(migrated.contains(#"X-Static = "abc""#))
+        XCTAssertTrue(migrated.contains(#"X-Retry = "3""#))
+        XCTAssertTrue(migrated.contains(#"X-Enabled = "true""#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.coerced]"))
+        XCTAssertTrue(migrated.contains(#"command = "true""#))
+        XCTAssertTrue(migrated.contains(#"args = ["1", "false", "ok"]"#))
+        XCTAssertTrue(migrated.contains(#"env_vars = ["TOKEN"]"#))
+        XCTAssertTrue(migrated.contains("[mcp_servers.coerced.env]"))
+        XCTAssertTrue(migrated.contains(#"COUNT = "7""#))
+        XCTAssertTrue(migrated.contains(#"FLAG = "true""#))
         XCTAssertTrue(migrated.contains("[mcp_servers.docs]"))
         XCTAssertTrue(migrated.contains(#"command = "npx""#))
         XCTAssertTrue(migrated.contains(#"args = ["-y", "docs"]"#))
