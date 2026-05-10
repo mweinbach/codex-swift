@@ -342,7 +342,6 @@ final class CommandSafetyTests: XCTestCase {
         ]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "powershell.exe",
-            "-Command",
             "Get-Content",
             "Cargo.toml"
         ]))
@@ -421,7 +420,8 @@ final class CommandSafetyTests: XCTestCase {
             ["powershell.exe", "-Command", "git cat-file --filters HEAD:a.txt"],
             ["powershell.exe", "-Command", "-git cat-file -p HEAD:foo.rs"],
             ["powershell.exe", "-EncodedCommand", "RwBlAHQALQBMAG8AYwBhAHQAaQBvAG4A"],
-            ["powershell.exe", "-UnknownFlag", "Get-Location"]
+            ["powershell.exe", "-UnknownFlag", "Get-Location"],
+            ["powershell.exe", "-Command", "Get-Content", "Cargo.toml"]
         ] {
             XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
         }

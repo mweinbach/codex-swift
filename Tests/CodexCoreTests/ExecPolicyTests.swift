@@ -4113,6 +4113,7 @@ final class ExecPolicyTests: XCTestCase {
 
     func testPowerShellExecPolicyMatchesInnerCommandWordsLikeRust() throws {
         let command = tokens("powershell.exe", "-Command", "Get-Content Cargo.toml")
+        let commandWithTrailingWrapperArg = tokens("powershell.exe", "-Command", "Get-Content", "Cargo.toml")
 
         XCTAssertEqual(
             ExecPolicyManager(policy: try parsePolicy(#"prefix_rule(pattern=["Get-Content"], decision="forbidden")"#))
@@ -4150,6 +4151,21 @@ final class ExecPolicyTests: XCTestCase {
             .skip(
                 bypassSandbox: false,
                 proposedExecPolicyAmendment: ExecPolicyAmendment(command: tokens("Get-Content", "Cargo.toml"))
+            )
+        )
+
+        XCTAssertEqual(
+            ExecPolicyManager()
+                .createExecApprovalRequirementForCommand(
+                    features: .withDefaults(),
+                    command: commandWithTrailingWrapperArg,
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .readOnly,
+                    sandboxPermissions: .useDefault
+                ),
+            .skip(
+                bypassSandbox: false,
+                proposedExecPolicyAmendment: ExecPolicyAmendment(command: tokens("Get-Content"))
             )
         )
     }

@@ -12128,9 +12128,10 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func realtimeUnsupportedResult(
+    fileprivate static func realtimeControlResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
@@ -12142,7 +12143,33 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         _ = try rolloutPathForConversation(conversationID, configuration: configuration)
-        throw AppServerError.invalidRequest("thread \(threadID) does not support realtime conversation")
+
+        var runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        applyRuntimeFeatureEnablement(
+            runtimeFeatureEnablement,
+            to: &runtimeConfig.features,
+            protectedFeatureKeys: protectedFeatureKeys(in: stack.effectiveConfig())
+        )
+
+        guard runtimeConfig.features.isEnabled(.realtimeConversation) else {
+            throw AppServerError.invalidRequest("thread \(threadID) does not support realtime conversation")
+        }
+        return [:]
     }
 
     fileprivate static func mockExperimentalMethodResult(params: [String: Any]?) -> [String: Any] {
@@ -19945,9 +19972,10 @@ final class CodexAppServerMessageProcessor {
                     )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.realtimeUnsupportedResult(
+                        result: try CodexAppServer.realtimeControlResult(
                             params: params,
-                            configuration: configuration
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
                         )
                     )
                 case "mock/experimentalMethod":

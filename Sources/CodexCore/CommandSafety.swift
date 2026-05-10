@@ -140,10 +140,8 @@ public enum CommandSafety {
     static func parsePowerShellCommandIntoPlainCommands(_ command: [String]) -> [[String]]? {
         guard let executable = command.first,
               isPowerShellExecutable(executable),
-              let commands = parseSafePowerShellInvocation(
-                executable: executable,
-                arguments: Array(command.dropFirst())
-              ),
+              let script = extractPowerShellCommandScript(Array(command.dropFirst())),
+              let commands = parseSafePowerShellScript(script, executable: executable),
               !commands.isEmpty
         else {
             return nil
@@ -243,7 +241,7 @@ public enum CommandSafety {
 
             switch lower {
             case "-command", "/command", "-c":
-                guard arguments.indices.contains(index + 1) else {
+                guard arguments.indices.contains(index + 1), index + 2 == arguments.count else {
                     return nil
                 }
                 return parseSafePowerShellScript(arguments[index + 1], executable: executable)
@@ -271,6 +269,34 @@ public enum CommandSafety {
                 let script = joinPowerShellArgumentsAsScript(Array(arguments[index...]))
                 return parseSafePowerShellScript(script, executable: executable)
             }
+        }
+
+        return nil
+    }
+
+    private static func extractPowerShellCommandScript(_ arguments: [String]) -> String? {
+        guard arguments.count >= 2 else {
+            return nil
+        }
+
+        var index = 0
+        while index + 1 < arguments.count {
+            let argument = arguments[index]
+            let lower = argument.lowercased()
+
+            guard lower == "-nologo"
+                || lower == "-noprofile"
+                || lower == "-command"
+                || lower == "-c"
+            else {
+                return nil
+            }
+
+            if lower == "-command" || lower == "-c" {
+                return arguments[index + 1]
+            }
+
+            index += 1
         }
 
         return nil

@@ -12189,20 +12189,59 @@ final class CodexAppServerTests: XCTestCase {
         let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
-        for (index, method) in [
-            "thread/realtime/start",
-            "thread/realtime/appendAudio",
-            "thread/realtime/appendText",
-            "thread/realtime/stop"
-        ].enumerated() {
+        let requests = [
+            #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"text"}}"#,
+            #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1}}}"#,
+            #"{"method":"thread/realtime/appendText","params":{"threadId":"\#(threadID)","text":"hello"}}"#,
+            #"{"method":"thread/realtime/stop","params":{"threadId":"\#(threadID)"}}"#
+        ]
+
+        for (index, request) in requests.enumerated() {
             let response = try appServerResponse(
-                #"{"id":\#(index + 2),"method":"\#(method)","params":{"threadId":"\#(threadID)"}}"#,
+                #"{"id":\#(index + 2),\#(request.dropFirst())"#,
                 codexHome: temp.url,
                 experimentalAPIEnabled: true
             )
             let error = try XCTUnwrap(response["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32600)
             XCTAssertEqual(error["message"] as? String, "thread \(threadID) does not support realtime conversation")
+        }
+    }
+
+    func testRealtimeConversationRoutesSucceedWhenFeatureEnabled() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        realtime_conversation = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let requests = [
+            #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"text"}}"#,
+            #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1}}}"#,
+            #"{"method":"thread/realtime/appendText","params":{"threadId":"\#(threadID)","text":"hello"}}"#,
+            #"{"method":"thread/realtime/stop","params":{"threadId":"\#(threadID)"}}"#
+        ]
+
+        for (index, request) in requests.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 2),\#(request.dropFirst())"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let result = try XCTUnwrap(response["result"] as? [String: Any])
+            XCTAssertEqual(result.isEmpty, true)
         }
     }
 
