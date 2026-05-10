@@ -59,9 +59,8 @@ public struct ExecServerRouter: Sendable {
             let params = try decodeRequest(request.params, as: ExecServerInitializeParams.self)
             return try ExecServerRPC.jsonValue(from: try await handler.initialize(params))
         case execServerHttpRequestMethod:
-            _ = try decodeRequest(request.params, as: ExecServerHttpRequestParams.self)
-            _ = try await handler.requireInitialized(for: "http")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerHttpRequestParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.httpRequest(params))
         case execServerProcessStartMethod:
             let params = try decodeRequest(request.params, as: ExecServerExecParams.self)
             return try ExecServerRPC.jsonValue(from: try await handler.startProcess(params))

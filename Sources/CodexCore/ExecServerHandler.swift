@@ -4,6 +4,7 @@ public actor ExecServerHandler {
     private let sessionRegistry: ExecServerSessionRegistry
     private let fileSystem: ExecServerFileSystem
     private let processStore: ExecServerProcessStore
+    private let httpClient: ExecServerHTTPClient
     private var session: ExecServerSessionHandle?
     private var initializeRequested = false
     private var initialized = false
@@ -11,11 +12,13 @@ public actor ExecServerHandler {
     public init(
         sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
         fileSystem: ExecServerFileSystem = ExecServerFileSystem(),
-        processStore: ExecServerProcessStore = ExecServerProcessStore()
+        processStore: ExecServerProcessStore = ExecServerProcessStore(),
+        httpClient: ExecServerHTTPClient = ExecServerHTTPClient()
     ) {
         self.sessionRegistry = sessionRegistry
         self.fileSystem = fileSystem
         self.processStore = processStore
+        self.httpClient = httpClient
     }
 
     public func initialize(_ params: ExecServerInitializeParams) async throws -> ExecServerInitializeResponse {
@@ -139,6 +142,11 @@ public actor ExecServerHandler {
     public func terminateProcess(_ params: ExecServerTerminateParams) async throws -> ExecServerTerminateResponse {
         _ = try await requireInitialized(for: "exec")
         return try await processStore.terminate(params)
+    }
+
+    public func httpRequest(_ params: ExecServerHttpRequestParams) async throws -> ExecServerHttpRequestResponse {
+        _ = try await requireInitialized(for: "http")
+        return try await httpClient.run(params)
     }
 }
 

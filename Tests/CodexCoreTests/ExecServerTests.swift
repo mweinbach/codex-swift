@@ -741,19 +741,67 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
-    func testRouterReportsPendingHttpAndUnknownMethodsWithRustStubMessage() async throws {
+    func testRouterRoutesBufferedHttpRequestLikeRust() async throws {
+        let router = ExecServerRouter()
+        let recorder = HTTPRequestRecorder(response: URLSessionTransportResponse(
+            statusCode: 201,
+            headers: ["x-mcp-test": "buffered"],
+            body: Data("response-body".utf8)
+        ))
+        let handler = ExecServerHandler(
+            sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])),
+            httpClient: ExecServerHTTPClient { request in
+                await recorder.send(request)
+            }
+        )
+        _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
+        try await handler.markInitialized()
+
+        let outbound = await router.handleRequest(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerHttpRequestMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
+                method: "POST",
+                url: "https://example.test/mcp?case=buffered",
+                headers: [ExecServerHttpHeader(name: "x-codex-test", value: "buffered")],
+                body: ExecServerByteChunk(Array("request-body".utf8)),
+                timeoutMs: 5_000,
+                requestId: "buffered-request"
+            ))
+        ), using: handler)
+
+        guard case let .response(.integer(1), result) = outbound else {
+            return XCTFail("Expected buffered http/request response")
+        }
+        XCTAssertEqual(try decodeJSONValue(result, as: ExecServerHttpRequestResponse.self), ExecServerHttpRequestResponse(
+            status: 201,
+            headers: [ExecServerHttpHeader(name: "x-mcp-test", value: "buffered")],
+            body: ExecServerByteChunk(Array("response-body".utf8))
+        ))
+
+        let recordedRequest = await recorder.firstRequest()
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.absoluteString, "https://example.test/mcp?case=buffered")
+        XCTAssertEqual(request.allHTTPHeaderFields?["x-codex-test"], "buffered")
+        XCTAssertEqual(request.httpBody, Data("request-body".utf8))
+        XCTAssertEqual(request.timeoutInterval, 5.0, accuracy: 0.001)
+    }
+
+    func testRouterReportsPendingStreamingHttpAndUnknownMethodsWithRustStubMessage() async throws {
         let router = ExecServerRouter()
         let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
         _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
         try await handler.markInitialized()
 
-        let pending = await router.handleRequest(ExecServerJSONRPCRequest(
+        let streaming = await router.handleRequest(ExecServerJSONRPCRequest(
             id: .integer(1),
             method: execServerHttpRequestMethod,
             params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
                 method: "GET",
                 url: "https://example.test",
-                requestId: "request-1"
+                requestId: "request-1",
+                streamResponse: true
             ))
         ), using: handler)
         let unknown = await router.handleRequest(ExecServerJSONRPCRequest(
@@ -762,14 +810,40 @@ final class ExecServerTests: XCTestCase {
             params: .object([:])
         ), using: handler)
 
-        XCTAssertEqual(pending, .error(
+        XCTAssertEqual(streaming, .error(
             requestID: .integer(1),
-            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `http/request` yet")
+            error: ExecServerRPC.internalError("http/request streamResponse is not implemented")
         ))
         XCTAssertEqual(unknown, .error(
             requestID: .integer(2),
             error: ExecServerRPC.methodNotFound("exec-server stub does not implement `made/up` yet")
         ))
+    }
+
+    func testHttpRequestRejectsInvalidMethodAndSchemeLikeRust() async throws {
+        let client = ExecServerHTTPClient { _ in
+            XCTFail("Invalid http/request params should fail before transport")
+            return URLSessionTransportResponse(statusCode: 200)
+        }
+
+        await XCTAssertThrowsExecServerError(
+            try await client.run(ExecServerHttpRequestParams(
+                method: "GET POST",
+                url: "https://example.test",
+                requestId: "bad-method"
+            )),
+            code: -32602,
+            message: "http/request method is invalid: invalid HTTP method"
+        )
+        await XCTAssertThrowsExecServerError(
+            try await client.run(ExecServerHttpRequestParams(
+                method: "GET",
+                url: "file:///tmp/not-http",
+                requestId: "bad-scheme"
+            )),
+            code: -32602,
+            message: "http/request only supports http and https URLs, got file"
+        )
     }
 
     func testRouterRejectsUnexpectedNotificationsLikeRustProcessor() async {
@@ -1487,6 +1561,24 @@ final class ExecServerTests: XCTestCase {
             params: .object([:])
         ))))
         return connection
+    }
+
+    private actor HTTPRequestRecorder {
+        private let response: URLSessionTransportResponse
+        private var requests: [URLRequest] = []
+
+        init(response: URLSessionTransportResponse) {
+            self.response = response
+        }
+
+        func send(_ request: URLRequest) -> URLSessionTransportResponse {
+            requests.append(request)
+            return response
+        }
+
+        func firstRequest() -> URLRequest? {
+            requests.first
+        }
     }
 
     private func readProcessUntilClosed(
