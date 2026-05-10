@@ -7696,6 +7696,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
     }
 
+    func testThreadArchiveMarksSQLiteThreadArchivedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let id = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "archive state",
+            provider: "openai"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: id
+        ))
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let threadID = try ThreadId(string: id)
+        try await upsertAppServerStateThread(
+            stateStore,
+            threadID: threadID,
+            rolloutPath: rolloutPath,
+            codexHome: temp.url,
+            title: "archive state"
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
+
+        let archivedPath = try await stateStore.findRolloutPath(
+            threadID: threadID,
+            archiveFilter: .archivedOnly
+        )
+        let activePath = try await stateStore.findRolloutPath(
+            threadID: threadID,
+            archiveFilter: .unarchivedOnly
+        )
+        XCTAssertNil(activePath)
+        XCTAssertEqual(
+            archivedPath.map(canonicalPath),
+            try archivedRolloutPath(codexHome: temp.url, threadID: id).map(canonicalPath)
+        )
+    }
+
     func testThreadArchiveArchivesSpawnedDescendantsLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentID = try writeRollout(
@@ -7860,6 +7906,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["threadId"] as? String, id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: rolloutPath))
         XCTAssertNotNil(try RolloutListing.findConversationPathByIDString(codexHome: temp.url, idString: id))
+    }
+
+    func testThreadUnarchiveMarksSQLiteThreadUnarchivedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let id = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-05",
+            timestamp: "2025-01-02T03:04:05Z",
+            preview: "restore state",
+            provider: "openai"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: id
+        ))
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let threadID = try ThreadId(string: id)
+        try await upsertAppServerStateThread(
+            stateStore,
+            threadID: threadID,
+            rolloutPath: rolloutPath,
+            codexHome: temp.url,
+            title: "restore state"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/archive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
+
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(id)"}}"#.utf8)
+        ))
+
+        let activePath = try await stateStore.findRolloutPath(
+            threadID: threadID,
+            archiveFilter: .unarchivedOnly
+        )
+        let archivedPath = try await stateStore.findRolloutPath(
+            threadID: threadID,
+            archiveFilter: .archivedOnly
+        )
+        XCTAssertEqual(activePath.map(canonicalPath), canonicalPath(rolloutPath))
+        XCTAssertNil(archivedPath)
     }
 
     func testThreadUnarchiveRejectsInvalidOrMissingArchivedThread() throws {
@@ -12486,10 +12578,41 @@ final class CodexAppServerTests: XCTestCase {
         .path
     }
 
+    private func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: false)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
+    }
+
     private func createAppServerStateStore(codexHome: URL) throws -> SQLiteAgentGraphStore {
         let stateDatabaseURL = codexHome.appendingPathComponent("state.sqlite3", isDirectory: false)
         try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
         return try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+    }
+
+    private func upsertAppServerStateThread(
+        _ stateStore: SQLiteAgentGraphStore,
+        threadID: ThreadId,
+        rolloutPath: String,
+        codexHome: URL,
+        title: String
+    ) async throws {
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: threadID,
+            rolloutPath: rolloutPath,
+            createdAt: try appServerDate("2025-01-02T03:04:05Z"),
+            updatedAt: try appServerDate("2025-01-02T03:04:05Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: codexHome.path,
+            cliVersion: "0.0.0",
+            title: title,
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: title
+        ))
     }
 
     private func assertPersistExtendedHistoryDeprecationNotice(

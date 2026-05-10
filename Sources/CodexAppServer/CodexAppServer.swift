@@ -1708,7 +1708,16 @@ public enum CodexAppServer {
             throw error
         }
 
-        try archiveConversation(conversationID: conversationID, rolloutPath: rolloutPath, configuration: configuration)
+        let archivedPath = try archiveConversation(
+            conversationID: conversationID,
+            rolloutPath: rolloutPath,
+            configuration: configuration
+        )
+        markStateThreadArchived(
+            conversationID: conversationID,
+            rolloutPath: archivedPath,
+            configuration: configuration
+        )
         var archivedThreadIDs = [conversationID.description]
         let descendantIDs = try spawnedDescendantThreadIDs(rootThreadID: conversationID, configuration: configuration)
         for descendantID in descendantIDs.reversed() {
@@ -1721,9 +1730,14 @@ public enum CodexAppServer {
                 continue
             }
             do {
-                try archiveConversation(
+                let archivedDescendantPath = try archiveConversation(
                     conversationID: descendantConversationID,
                     rolloutPath: descendantRolloutPath,
+                    configuration: configuration
+                )
+                markStateThreadArchived(
+                    conversationID: descendantConversationID,
+                    rolloutPath: archivedDescendantPath,
                     configuration: configuration
                 )
                 archivedThreadIDs.append(descendantConversationID.description)
@@ -1749,6 +1763,11 @@ public enum CodexAppServer {
         }
 
         let rolloutPath = try unarchiveConversation(conversationID: conversationID, configuration: configuration)
+        markStateThreadUnarchived(
+            conversationID: conversationID,
+            rolloutPath: URL(fileURLWithPath: rolloutPath, isDirectory: false),
+            configuration: configuration
+        )
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
         return [
             "thread": try threadObject(for: item, defaultProvider: configuration.defaultModelProvider)
@@ -1820,7 +1839,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("missing rollout_path")
         }
 
-        try archiveConversation(conversationID: conversationID, rolloutPath: rawPath, configuration: configuration)
+        _ = try archiveConversation(conversationID: conversationID, rolloutPath: rawPath, configuration: configuration)
         return [:]
     }
 
@@ -13128,7 +13147,7 @@ public enum CodexAppServer {
         conversationID: ConversationId,
         rolloutPath rawRolloutPath: String,
         configuration: CodexAppServerConfiguration
-    ) throws {
+    ) throws -> URL {
         let fileManager = FileManager.default
         let sessionsDirectory = configuration.codexHome
             .appendingPathComponent(RolloutListing.sessionsSubdirectory, isDirectory: true)
@@ -13173,6 +13192,7 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to archive conversation: \(error)")
         }
+        return archivedPath
     }
 
     private static func unarchiveConversation(
@@ -13198,6 +13218,40 @@ public enum CodexAppServer {
             throw AppServerError.internalError("failed to unarchive thread: \(error)")
         }
         return destinationPath.path
+    }
+
+    private static func markStateThreadArchived(
+        conversationID: ConversationId,
+        rolloutPath: URL,
+        configuration: CodexAppServerConfiguration
+    ) {
+        guard let stateStore = configuration.stateStore,
+              let threadID = try? ThreadId(string: conversationID.description)
+        else {
+            return
+        }
+        try? runAsyncBlocking {
+            _ = try await stateStore.markThreadArchived(
+                threadID: threadID,
+                rolloutPath: rolloutPath,
+                archivedAt: Date()
+            )
+        }
+    }
+
+    private static func markStateThreadUnarchived(
+        conversationID: ConversationId,
+        rolloutPath: URL,
+        configuration: CodexAppServerConfiguration
+    ) {
+        guard let stateStore = configuration.stateStore,
+              let threadID = try? ThreadId(string: conversationID.description)
+        else {
+            return
+        }
+        try? runAsyncBlocking {
+            _ = try await stateStore.markThreadUnarchived(threadID: threadID, rolloutPath: rolloutPath)
+        }
     }
 
     private static func archivedRolloutPathForConversation(
