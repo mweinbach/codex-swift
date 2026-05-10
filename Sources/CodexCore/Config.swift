@@ -36,6 +36,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
+    public var experimentalRealtimeWSBaseURL: String?
+    public var experimentalRealtimeWSModel: String?
+    public var experimentalRealtimeWSBackendPrompt: String?
+    public var experimentalRealtimeWSStartupContext: String?
+    public var experimentalRealtimeStartInstructions: String?
+    public var experimentalThreadConfigEndpoint: String?
     public var webSearchMode: WebSearchMode?
     public var webSearchConfig: WebSearchConfig?
     public var toolsWebSearch: Bool?
@@ -75,6 +81,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
+        experimentalRealtimeWSBaseURL: String? = nil,
+        experimentalRealtimeWSModel: String? = nil,
+        experimentalRealtimeWSBackendPrompt: String? = nil,
+        experimentalRealtimeWSStartupContext: String? = nil,
+        experimentalRealtimeStartInstructions: String? = nil,
+        experimentalThreadConfigEndpoint: String? = nil,
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
@@ -113,6 +125,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
+        self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
+        self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
+        self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
+        self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
+        self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
         self.webSearchMode = webSearchMode
         self.webSearchConfig = webSearchConfig
         self.toolsWebSearch = toolsWebSearch
@@ -128,6 +146,92 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
         self.toolOutputTokenLimit = toolOutputTokenLimit
         self.ossProvider = ossProvider
+    }
+
+    public init(
+        model: String?,
+        modelProvider: String?,
+        modelProviders: [String: ModelProviderInfo],
+        approvalPolicy: AskForApproval?,
+        sandboxMode: SandboxMode?,
+        sandboxPolicy: SandboxPolicy?,
+        modelReasoningEffort: ReasoningEffort?,
+        modelReasoningSummary: ReasoningSummary?,
+        modelVerbosity: Verbosity?,
+        serviceTier: String?,
+        chatgptBaseURL: String,
+        cliAuthCredentialsStoreMode: AuthCredentialsStoreMode,
+        forcedLoginMethod: ForcedLoginMethod?,
+        forcedChatGPTWorkspaceID: String?,
+        experimentalInstructionsFile: String?,
+        experimentalCompactPromptFile: String?,
+        baseInstructions: String?,
+        developerInstructions: String?,
+        compactPrompt: String?,
+        includeApplyPatchTool: Bool?,
+        experimentalUseUnifiedExecTool: Bool?,
+        experimentalUseFreeformApplyPatch: Bool?,
+        webSearchMode: WebSearchMode?,
+        webSearchConfig: WebSearchConfig?,
+        toolsWebSearch: Bool?,
+        toolsViewImage: Bool?,
+        features: FeatureStates,
+        mcpServers: [String: McpServerConfig],
+        mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode,
+        mcpOAuthCallbackPort: UInt16?,
+        mcpOAuthCallbackURL: String?,
+        activeProfile: String?,
+        projectRootMarkers: [String],
+        projectDocMaxBytes: Int,
+        projectDocFallbackFilenames: [String],
+        toolOutputTokenLimit: Int?,
+        ossProvider: String?
+    ) {
+        self.init(
+            model: model,
+            modelProvider: modelProvider,
+            modelProviders: modelProviders,
+            approvalPolicy: approvalPolicy,
+            sandboxMode: sandboxMode,
+            sandboxPolicy: sandboxPolicy,
+            modelReasoningEffort: modelReasoningEffort,
+            modelReasoningSummary: modelReasoningSummary,
+            modelVerbosity: modelVerbosity,
+            serviceTier: serviceTier,
+            chatgptBaseURL: chatgptBaseURL,
+            cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
+            forcedLoginMethod: forcedLoginMethod,
+            forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
+            experimentalInstructionsFile: experimentalInstructionsFile,
+            experimentalCompactPromptFile: experimentalCompactPromptFile,
+            baseInstructions: baseInstructions,
+            developerInstructions: developerInstructions,
+            compactPrompt: compactPrompt,
+            includeApplyPatchTool: includeApplyPatchTool,
+            experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
+            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
+            experimentalRealtimeWSBaseURL: nil,
+            experimentalRealtimeWSModel: nil,
+            experimentalRealtimeWSBackendPrompt: nil,
+            experimentalRealtimeWSStartupContext: nil,
+            experimentalRealtimeStartInstructions: nil,
+            experimentalThreadConfigEndpoint: nil,
+            webSearchMode: webSearchMode,
+            webSearchConfig: webSearchConfig,
+            toolsWebSearch: toolsWebSearch,
+            toolsViewImage: toolsViewImage,
+            features: features,
+            mcpServers: mcpServers,
+            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
+            mcpOAuthCallbackPort: mcpOAuthCallbackPort,
+            mcpOAuthCallbackURL: mcpOAuthCallbackURL,
+            activeProfile: activeProfile,
+            projectRootMarkers: projectRootMarkers,
+            projectDocMaxBytes: projectDocMaxBytes,
+            projectDocFallbackFilenames: projectDocFallbackFilenames,
+            toolOutputTokenLimit: toolOutputTokenLimit,
+            ossProvider: ossProvider
+        )
     }
 
     public var selectedModelProviderID: String {
@@ -155,6 +259,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidConfigLine(String)
     case invalidTableHeader(String)
     case profileNotFound(String)
+    case unsupportedExperimentalThreadStoreEndpoint
 
     public var description: String {
         switch self {
@@ -181,6 +286,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "Invalid TOML table header: \(header)"
         case let .profileNotFound(profile):
             return "config profile `\(profile)` not found"
+        case .unsupportedExperimentalThreadStoreEndpoint:
+            return "`experimental_thread_store_endpoint` is no longer supported; remove it from config.toml"
         }
     }
 }
@@ -1014,6 +1121,45 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)experimental_use_freeform_apply_patch"
             )
         }
+        if values["experimental_thread_store_endpoint"] != nil {
+            throw CodexConfigLoadError.unsupportedExperimentalThreadStoreEndpoint
+        }
+        if let baseURL = values["experimental_realtime_ws_base_url"] {
+            config.experimentalRealtimeWSBaseURL = try stringValue(
+                baseURL,
+                key: "\(keyPrefix)experimental_realtime_ws_base_url"
+            )
+        }
+        if let model = values["experimental_realtime_ws_model"] {
+            config.experimentalRealtimeWSModel = try stringValue(
+                model,
+                key: "\(keyPrefix)experimental_realtime_ws_model"
+            )
+        }
+        if let backendPrompt = values["experimental_realtime_ws_backend_prompt"] {
+            config.experimentalRealtimeWSBackendPrompt = try stringValue(
+                backendPrompt,
+                key: "\(keyPrefix)experimental_realtime_ws_backend_prompt"
+            )
+        }
+        if let startupContext = values["experimental_realtime_ws_startup_context"] {
+            config.experimentalRealtimeWSStartupContext = try stringValue(
+                startupContext,
+                key: "\(keyPrefix)experimental_realtime_ws_startup_context"
+            )
+        }
+        if let startInstructions = values["experimental_realtime_start_instructions"] {
+            config.experimentalRealtimeStartInstructions = try stringValue(
+                startInstructions,
+                key: "\(keyPrefix)experimental_realtime_start_instructions"
+            )
+        }
+        if let endpoint = values["experimental_thread_config_endpoint"] {
+            config.experimentalThreadConfigEndpoint = try stringValue(
+                endpoint,
+                key: "\(keyPrefix)experimental_thread_config_endpoint"
+            )
+        }
         if let webSearch = values["web_search"] {
             config.webSearchMode = try stringEnumValue(
                 WebSearchMode.self,
@@ -1059,6 +1205,13 @@ private struct ParsedCodexConfigToml {
             || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_use_freeform_apply_patch"
+            || key == "experimental_realtime_ws_base_url"
+            || key == "experimental_realtime_ws_model"
+            || key == "experimental_realtime_ws_backend_prompt"
+            || key == "experimental_realtime_ws_startup_context"
+            || key == "experimental_realtime_start_instructions"
+            || key == "experimental_thread_config_endpoint"
+            || key == "experimental_thread_store_endpoint"
             || key == "web_search"
             || key == "tools_web_search"
             || key == "tools_view_image"

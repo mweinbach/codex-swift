@@ -934,6 +934,8 @@ Source baseline inspected for this scaffold:
   - threaded injected CLI config overrides through app-server config-layer loads so `config/read`, config writes, skills/hooks filtering, marketplace reads, requirements reads, and auth restriction checks see the same session flag layer ordering as Rust; added Rust-shaped coverage for managed config overriding both user config and session flags, plus writes that match the managed effective value returning `ok` without override metadata.
 - `codex-rs/config/src/thread_config.rs` thread-scoped config sources
   - added Swift typed `SessionThreadConfig`, `UserThreadConfig`, and `ThreadConfigSource` conversion into config-layer entries, preserving Rust's rule that non-empty session thread config becomes a `sessionFlags` layer above CLI overrides while user thread config and empty session config produce no layer yet.
+- `codex-rs/core/src/config/mod.rs` experimental runtime config fields
+  - loaded Rust's top-level realtime websocket override strings, realtime start instructions, and `experimental_thread_config_endpoint` into Swift runtime config from config files and CLI overrides; preserved Rust's load-time rejection for the removed `experimental_thread_store_endpoint`.
 - `codex-rs/utils/absolute-path/src/lib.rs` home-directory path expansion
   - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
 - `codex-rs/protocol/src/models.rs` persisted web-search response-item actions

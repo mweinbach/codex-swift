@@ -31,6 +31,12 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.includeApplyPatchTool)
         XCTAssertNil(config.experimentalUseUnifiedExecTool)
         XCTAssertNil(config.experimentalUseFreeformApplyPatch)
+        XCTAssertNil(config.experimentalRealtimeWSBaseURL)
+        XCTAssertNil(config.experimentalRealtimeWSModel)
+        XCTAssertNil(config.experimentalRealtimeWSBackendPrompt)
+        XCTAssertNil(config.experimentalRealtimeWSStartupContext)
+        XCTAssertNil(config.experimentalRealtimeStartInstructions)
+        XCTAssertNil(config.experimentalThreadConfigEndpoint)
         XCTAssertNil(config.toolsWebSearch)
         XCTAssertNil(config.toolsViewImage)
         XCTAssertTrue(config.features.isEnabled(.shellTool))
@@ -73,6 +79,12 @@ final class ConfigLoaderTests: XCTestCase {
         include_apply_patch_tool = true
         experimental_use_unified_exec_tool = true
         experimental_use_freeform_apply_patch = false
+        experimental_realtime_ws_base_url = "http://127.0.0.1:8011"
+        experimental_realtime_ws_model = "realtime-test-model"
+        experimental_realtime_ws_backend_prompt = "prompt from config"
+        experimental_realtime_ws_startup_context = "startup context from config"
+        experimental_realtime_start_instructions = "start instructions from config"
+        experimental_thread_config_endpoint = "http://127.0.0.1:8061"
         web_search = "cached"
         tools_web_search = true
         tools_view_image = false
@@ -106,6 +118,12 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.includeApplyPatchTool, true)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
+        XCTAssertEqual(config.experimentalRealtimeWSBaseURL, "http://127.0.0.1:8011")
+        XCTAssertEqual(config.experimentalRealtimeWSModel, "realtime-test-model")
+        XCTAssertEqual(config.experimentalRealtimeWSBackendPrompt, "prompt from config")
+        XCTAssertEqual(config.experimentalRealtimeWSStartupContext, "startup context from config")
+        XCTAssertEqual(config.experimentalRealtimeStartInstructions, "start instructions from config")
+        XCTAssertEqual(config.experimentalThreadConfigEndpoint, "http://127.0.0.1:8061")
         XCTAssertEqual(config.webSearchMode, .cached)
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, false)
@@ -114,6 +132,43 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
+    }
+
+    func testCLIOverridesLoadExperimentalRuntimeFieldsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"experimental_realtime_ws_base_url="http://localhost:8011""#,
+                #"experimental_realtime_ws_model="realtime-cli-model""#,
+                #"experimental_realtime_ws_backend_prompt="cli backend prompt""#,
+                #"experimental_realtime_ws_startup_context="cli startup context""#,
+                #"experimental_realtime_start_instructions="cli start instructions""#,
+                #"experimental_thread_config_endpoint="http://localhost:8061""#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.experimentalRealtimeWSBaseURL, "http://localhost:8011")
+        XCTAssertEqual(config.experimentalRealtimeWSModel, "realtime-cli-model")
+        XCTAssertEqual(config.experimentalRealtimeWSBackendPrompt, "cli backend prompt")
+        XCTAssertEqual(config.experimentalRealtimeWSStartupContext, "cli startup context")
+        XCTAssertEqual(config.experimentalRealtimeStartInstructions, "cli start instructions")
+        XCTAssertEqual(config.experimentalThreadConfigEndpoint, "http://localhost:8061")
+    }
+
+    func testLegacyRemoteThreadStoreEndpointIsRejectedLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"experimental_thread_store_endpoint = "https://example.com""#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "`experimental_thread_store_endpoint` is no longer supported; remove it from config.toml"
+            )
+        }
     }
 
     func testWorkspaceWriteIncludesMemoriesRootOnceLikeRust() throws {
