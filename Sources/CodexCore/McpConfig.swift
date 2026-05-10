@@ -48,31 +48,63 @@ public enum McpServerTransportConfig: Equatable, Sendable {
     )
 }
 
+public enum AppToolApproval: String, Equatable, Sendable {
+    case auto
+    case prompt
+    case approve
+}
+
+public struct McpServerToolConfig: Equatable, Sendable {
+    public var approvalMode: AppToolApproval?
+
+    public init(approvalMode: AppToolApproval? = nil) {
+        self.approvalMode = approvalMode
+    }
+}
+
 public struct McpServerConfig: Equatable, Sendable {
     public var transport: McpServerTransportConfig
     public var enabled: Bool
     public var disabledReason: String?
+    public var required: Bool
+    public var supportsParallelToolCalls: Bool
     public var startupTimeoutSec: Double?
     public var toolTimeoutSec: Double?
+    public var defaultToolsApprovalMode: AppToolApproval?
     public var enabledTools: [String]?
     public var disabledTools: [String]?
+    public var scopes: [String]?
+    public var oauthResource: String?
+    public var tools: [String: McpServerToolConfig]
 
     public init(
         transport: McpServerTransportConfig,
         enabled: Bool = true,
         disabledReason: String? = nil,
+        required: Bool = false,
+        supportsParallelToolCalls: Bool = false,
         startupTimeoutSec: Double? = nil,
         toolTimeoutSec: Double? = nil,
+        defaultToolsApprovalMode: AppToolApproval? = nil,
         enabledTools: [String]? = nil,
-        disabledTools: [String]? = nil
+        disabledTools: [String]? = nil,
+        scopes: [String]? = nil,
+        oauthResource: String? = nil,
+        tools: [String: McpServerToolConfig] = [:]
     ) {
         self.transport = transport
         self.enabled = enabled
         self.disabledReason = disabledReason
+        self.required = required
+        self.supportsParallelToolCalls = supportsParallelToolCalls
         self.startupTimeoutSec = startupTimeoutSec
         self.toolTimeoutSec = toolTimeoutSec
+        self.defaultToolsApprovalMode = defaultToolsApprovalMode
         self.enabledTools = enabledTools
         self.disabledTools = disabledTools
+        self.scopes = scopes
+        self.oauthResource = oauthResource
+        self.tools = tools
     }
 }
 
@@ -134,6 +166,11 @@ public enum McpConfigStore {
                         builders[name] = McpServerBuilder()
                     }
                 }
+                if case let .serverTool(name, _) = section {
+                    if builders[name] == nil {
+                        builders[name] = McpServerBuilder()
+                    }
+                }
                 continue
             }
 
@@ -155,6 +192,8 @@ public enum McpConfigStore {
                 try builders[name, default: McpServerBuilder()].set(key: key, value: value, serverName: name)
             case let .serverTable(name, table):
                 try builders[name, default: McpServerBuilder()].set(table: table, key: key, value: value)
+            case let .serverTool(name, tool):
+                try builders[name, default: McpServerBuilder()].set(tool: tool, key: key, value: value, serverName: name)
             }
         }
 
@@ -180,6 +219,15 @@ public enum McpConfigStore {
                 if case let .table(nestedTable) = value, ["env", "http_headers", "env_http_headers"].contains(key) {
                     for (nestedKey, nestedValue) in nestedTable {
                         try builder.set(table: key, key: nestedKey, value: nestedValue)
+                    }
+                } else if case let .table(toolTable) = value, key == "tools" {
+                    for (toolName, rawToolConfig) in toolTable {
+                        guard case let .table(toolConfig) = rawToolConfig else {
+                            throw McpConfigError.invalidConfigLine("tools.\(toolName)")
+                        }
+                        for (toolKey, toolValue) in toolConfig {
+                            try builder.set(tool: toolName, key: toolKey, value: toolValue, serverName: name)
+                        }
                     }
                 } else {
                     try builder.set(key: key, value: value, serverName: name)
@@ -247,6 +295,7 @@ public enum McpConfigStore {
                     lines.append("cwd = \(tomlString(cwd))")
                 }
                 appendCommonServerFields(server, to: &lines)
+                appendToolConfigFields(server, serverKey: serverKey, to: &lines)
                 if let env, !env.isEmpty {
                     lines.append("")
                     lines.append("[mcp_servers.\(serverKey).env]")
@@ -260,6 +309,7 @@ public enum McpConfigStore {
                     lines.append("bearer_token_env_var = \(tomlString(bearerTokenEnvVar))")
                 }
                 appendCommonServerFields(server, to: &lines)
+                appendToolConfigFields(server, serverKey: serverKey, to: &lines)
                 if let httpHeaders, !httpHeaders.isEmpty {
                     lines.append("")
                     lines.append("[mcp_servers.\(serverKey).http_headers]")
@@ -285,17 +335,50 @@ public enum McpConfigStore {
         if !server.enabled {
             lines.append("enabled = false")
         }
+        if server.required {
+            lines.append("required = true")
+        }
+        if server.supportsParallelToolCalls {
+            lines.append("supports_parallel_tool_calls = true")
+        }
         if let startupTimeoutSec = server.startupTimeoutSec {
             lines.append("startup_timeout_sec = \(tomlNumber(startupTimeoutSec))")
         }
         if let toolTimeoutSec = server.toolTimeoutSec {
             lines.append("tool_timeout_sec = \(tomlNumber(toolTimeoutSec))")
         }
+        if let defaultToolsApprovalMode = server.defaultToolsApprovalMode {
+            lines.append("default_tools_approval_mode = \(tomlString(defaultToolsApprovalMode.rawValue))")
+        }
         if let enabledTools = server.enabledTools {
             lines.append("enabled_tools = \(tomlStringArray(enabledTools))")
         }
         if let disabledTools = server.disabledTools {
             lines.append("disabled_tools = \(tomlStringArray(disabledTools))")
+        }
+        if let scopes = server.scopes {
+            lines.append("scopes = \(tomlStringArray(scopes))")
+        }
+        if let oauthResource = server.oauthResource {
+            lines.append("oauth_resource = \(tomlString(oauthResource))")
+        }
+    }
+
+    private static func appendToolConfigFields(_ server: McpServerConfig, serverKey: String, to lines: inout [String]) {
+        guard !server.tools.isEmpty else {
+            return
+        }
+        lines.append("")
+        lines.append("[mcp_servers.\(serverKey).tools]")
+        for toolName in server.tools.keys.sorted() {
+            guard let tool = server.tools[toolName] else {
+                continue
+            }
+            lines.append("")
+            lines.append("[mcp_servers.\(serverKey).tools.\(tomlKey(toolName))]")
+            if let approvalMode = tool.approvalMode {
+                lines.append("approval_mode = \(tomlString(approvalMode.rawValue))")
+            }
         }
     }
 }
@@ -411,6 +494,9 @@ public enum McpCommandFormatter {
         }
         if let toolTimeoutSec = server.toolTimeoutSec {
             lines.append("  tool_timeout_sec: \(tomlNumber(toolTimeoutSec))")
+        }
+        if let approvalMode = server.defaultToolsApprovalMode {
+            lines.append("  default_tools_approval_mode: \(approvalMode.rawValue)")
         }
         lines.append("  remove: codex mcp remove \(name)")
         return lines.joined(separator: "\n")
@@ -703,6 +789,7 @@ private enum McpConfigSection: Equatable {
     case root
     case server(String)
     case serverTable(String, String)
+    case serverTool(String, String)
     case other
 }
 
@@ -718,11 +805,17 @@ private struct McpServerBuilder {
     var httpHeaders: [String: String]?
     var envHttpHeaders: [String: String]?
     var enabled = true
+    var required = false
+    var supportsParallelToolCalls = false
     var startupTimeoutSec: Double?
     var startupTimeoutMs: Double?
     var toolTimeoutSec: Double?
+    var defaultToolsApprovalMode: AppToolApproval?
     var enabledTools: [String]?
     var disabledTools: [String]?
+    var scopes: [String]?
+    var oauthResource: String?
+    var tools: [String: McpServerToolConfig] = [:]
 
     mutating func set(key: String, value: ConfigValue, serverName: String) throws {
         switch key {
@@ -742,22 +835,44 @@ private struct McpServerBuilder {
             bearerToken = try stringValue(value, key: "mcp_servers.\(serverName).bearer_token")
         case "enabled":
             enabled = try boolValue(value, key: "mcp_servers.\(serverName).enabled")
+        case "required":
+            required = try boolValue(value, key: "mcp_servers.\(serverName).required")
+        case "supports_parallel_tool_calls":
+            supportsParallelToolCalls = try boolValue(value, key: "mcp_servers.\(serverName).supports_parallel_tool_calls")
         case "startup_timeout_sec":
             startupTimeoutSec = try doubleValue(value, key: "mcp_servers.\(serverName).startup_timeout_sec")
         case "startup_timeout_ms":
             startupTimeoutMs = try doubleValue(value, key: "mcp_servers.\(serverName).startup_timeout_ms") / 1000
         case "tool_timeout_sec":
             toolTimeoutSec = try doubleValue(value, key: "mcp_servers.\(serverName).tool_timeout_sec")
+        case "default_tools_approval_mode":
+            defaultToolsApprovalMode = try appToolApprovalValue(value, key: "mcp_servers.\(serverName).default_tools_approval_mode")
         case "enabled_tools":
             enabledTools = try stringArrayValue(value, key: "mcp_servers.\(serverName).enabled_tools")
         case "disabled_tools":
             disabledTools = try stringArrayValue(value, key: "mcp_servers.\(serverName).disabled_tools")
+        case "scopes":
+            scopes = try stringArrayValue(value, key: "mcp_servers.\(serverName).scopes")
+        case "oauth_resource":
+            oauthResource = try stringValue(value, key: "mcp_servers.\(serverName).oauth_resource")
         case "env", "http_headers", "env_http_headers":
             guard case let .table(table) = value else {
                 throw McpConfigError.invalidConfigLine(key)
             }
             for (nestedKey, nestedValue) in table {
                 try set(table: key, key: nestedKey, value: nestedValue)
+            }
+        case "tools":
+            guard case let .table(table) = value else {
+                throw McpConfigError.invalidConfigLine(key)
+            }
+            for (toolName, rawToolConfig) in table {
+                guard case let .table(toolConfig) = rawToolConfig else {
+                    throw McpConfigError.invalidConfigLine("tools.\(toolName)")
+                }
+                for (toolKey, toolValue) in toolConfig {
+                    try set(tool: toolName, key: toolKey, value: toolValue, serverName: serverName)
+                }
             }
         default:
             break
@@ -781,6 +896,18 @@ private struct McpServerBuilder {
         }
     }
 
+    mutating func set(tool: String, key: String, value: ConfigValue, serverName: String) throws {
+        switch key {
+        case "approval_mode":
+            tools[tool, default: McpServerToolConfig()].approvalMode = try appToolApprovalValue(
+                value,
+                key: "mcp_servers.\(serverName).tools.\(tool).approval_mode"
+            )
+        default:
+            break
+        }
+    }
+
     func build(serverName: String) throws -> McpServerConfig {
         if bearerToken != nil {
             throw McpConfigError.unsupportedBearerToken(serverName)
@@ -788,7 +915,7 @@ private struct McpServerBuilder {
 
         let transport: McpServerTransportConfig
         if let command {
-            guard url == nil, bearerTokenEnvVar == nil, httpHeaders == nil, envHttpHeaders == nil else {
+            guard url == nil, bearerTokenEnvVar == nil, httpHeaders == nil, envHttpHeaders == nil, oauthResource == nil else {
                 throw McpConfigError.invalidTransport(serverName)
             }
             transport = .stdio(command: command, args: args, env: env, envVars: envVars, cwd: cwd)
@@ -809,10 +936,16 @@ private struct McpServerBuilder {
         return McpServerConfig(
             transport: transport,
             enabled: enabled,
+            required: required,
+            supportsParallelToolCalls: supportsParallelToolCalls,
             startupTimeoutSec: startupTimeoutSec ?? startupTimeoutMs,
             toolTimeoutSec: toolTimeoutSec,
+            defaultToolsApprovalMode: defaultToolsApprovalMode,
             enabledTools: enabledTools,
-            disabledTools: disabledTools
+            disabledTools: disabledTools,
+            scopes: scopes,
+            oauthResource: oauthResource,
+            tools: tools
         )
     }
 }
@@ -831,6 +964,9 @@ private func parseSectionHeader(_ line: String) throws -> McpConfigSection {
     }
     if parts.count == 3, parts[0] == "mcp_servers" {
         return .serverTable(parts[1], parts[2])
+    }
+    if parts.count == 4, parts[0] == "mcp_servers", parts[2] == "tools" {
+        return .serverTool(parts[1], parts[3])
     }
     return .other
 }
@@ -966,6 +1102,14 @@ private func stringArrayValue(_ value: ConfigValue, key: String) throws -> [Stri
         }
         return string
     }
+}
+
+private func appToolApprovalValue(_ value: ConfigValue, key: String) throws -> AppToolApproval {
+    let rawValue = try stringValue(value, key: key)
+    guard let approval = AppToolApproval(rawValue: rawValue) else {
+        throw McpConfigError.invalidStringValue(key)
+    }
+    return approval
 }
 
 private func trimTrailingBlankLines(_ text: String) -> String {

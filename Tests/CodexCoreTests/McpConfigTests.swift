@@ -149,6 +149,74 @@ final class McpConfigTests: XCTestCase {
         ))
     }
 
+    func testReplaceGlobalMcpServersSerializesRustToolApprovalFields() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+        let servers = [
+            "docs": McpServerConfig(
+                transport: .stdio(command: "docs-server", args: [], env: nil, envVars: [], cwd: nil),
+                supportsParallelToolCalls: true,
+                defaultToolsApprovalMode: .auto,
+                tools: [
+                    "search": McpServerToolConfig(approvalMode: .approve),
+                    "read": McpServerToolConfig(approvalMode: .prompt)
+                ]
+            )
+        ]
+
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: servers)
+
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), """
+        [mcp_servers.docs]
+        command = "docs-server"
+        supports_parallel_tool_calls = true
+        default_tools_approval_mode = "auto"
+
+        [mcp_servers.docs.tools]
+
+        [mcp_servers.docs.tools.read]
+        approval_mode = "prompt"
+
+        [mcp_servers.docs.tools.search]
+        approval_mode = "approve"
+
+        """)
+        XCTAssertEqual(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url), servers)
+    }
+
+    func testParseGlobalMcpServersSupportsRustSharedFields() throws {
+        let servers = try McpConfigStore.parseMcpServers(from: """
+        [mcp_servers.github]
+        url = "https://example.com/mcp"
+        required = true
+        supports_parallel_tool_calls = true
+        default_tools_approval_mode = "approve"
+        scopes = ["repo", "user"]
+        oauth_resource = "https://api.example.com"
+
+        [mcp_servers.github.tools.search]
+        approval_mode = "prompt"
+        """)
+
+        XCTAssertEqual(
+            servers["github"],
+            McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                required: true,
+                supportsParallelToolCalls: true,
+                defaultToolsApprovalMode: .approve,
+                scopes: ["repo", "user"],
+                oauthResource: "https://api.example.com",
+                tools: ["search": McpServerToolConfig(approvalMode: .prompt)]
+            )
+        )
+    }
+
     func testReplaceGlobalMcpServersPreservesUnrelatedConfigAndSerializesSorted() throws {
         let temp = try McpConfigTemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml")
