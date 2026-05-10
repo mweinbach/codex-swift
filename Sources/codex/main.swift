@@ -787,6 +787,19 @@ private func runNonInteractiveExec(
     let projectInstructions = ProjectDoc.getUserInstructions(
         config: ProjectDocConfig(runtimeConfig: settings, cwd: cwd)
     ).map { UserInstructions(directory: cwd.path, text: $0) }
+    let loadedSkills = settings.includeSkillInstructions
+        ? SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            configLayerStack: configStack
+        )
+        : nil
+    let availableSkills = loadedSkills.flatMap {
+        Skills.buildAvailableSkills(
+            outcome: $0,
+            budget: Skills.defaultSkillMetadataBudget(contextWindow: modelFamily.contextWindow.map(Int.init))
+        )
+    }
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
         imagePaths: options.imagePaths,
@@ -798,6 +811,7 @@ private func runNonInteractiveExec(
         includeEnvironmentContext: settings.includeEnvironmentContext,
         includePermissionsInstructions: settings.includePermissionsInstructions,
         developerInstructions: settings.developerInstructions,
+        availableSkills: availableSkills,
         userInstructions: projectInstructions,
         history: history,
         tools: configuredTools.map(\.spec),
