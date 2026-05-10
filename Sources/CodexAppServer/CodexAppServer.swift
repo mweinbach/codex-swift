@@ -1567,15 +1567,26 @@ public enum CodexAppServer {
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
-        if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+        let turnID = UUID().uuidString.lowercased()
+        let turnContext = try turnStartContextOverrideItem(
+            params: params,
+            rolloutPath: rolloutPath,
+            configuration: configuration
+        )
+        if turnContext != nil || !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
-            try recorder.recordItems([
-                .eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images)))
-            ])
+            var items: [RolloutRecordItem] = []
+            if let turnContext {
+                items.append(.turnContext(turnContext.withTurnID(turnID)))
+            }
+            if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+                items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
+            }
+            try recorder.recordItems(items)
             try recorder.shutdown()
         }
         let turn: [String: Any] = [
-            "id": UUID().uuidString.lowercased(),
+            "id": turnID,
             "items": [],
             "status": "inProgress",
             "error": NSNull()
@@ -1583,6 +1594,39 @@ public enum CodexAppServer {
         return [
             "turn": turn
         ]
+    }
+
+    private static func turnStartContextOverrideItem(
+        params: [String: Any]?,
+        rolloutPath: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> TurnContextItem? {
+        let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+        let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
+        let model = stringParam(params?["model"])
+        let effort = stringParam(params?["effort"]).flatMap(ReasoningEffort.init(rawValue:))
+        let summary = stringParam(params?["summary"]).flatMap(ReasoningSummary.init(rawValue:))
+        guard cwd != nil
+            || approvalPolicy != nil
+            || sandboxPolicy != nil
+            || model != nil
+            || effort != nil
+            || summary != nil
+        else {
+            return nil
+        }
+
+        let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
+        return TurnContextItem(
+            cwd: cwd ?? existing.cwd,
+            approvalPolicy: approvalPolicy ?? runtimeConfig.approvalPolicy ?? .unlessTrusted,
+            sandboxPolicy: sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
+            model: model ?? runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil),
+            effort: effort ?? runtimeConfig.modelReasoningEffort,
+            summary: summary ?? runtimeConfig.modelReasoningSummary ?? .auto
+        )
     }
 
     fileprivate static func validateTurnEnvironmentSelections(
@@ -21362,6 +21406,33 @@ private extension Dictionary where Key == String, Value == Any {
             }
             return value
         }
+    }
+}
+
+private extension TurnContextItem {
+    func withTurnID(_ turnID: String) -> TurnContextItem {
+        TurnContextItem(
+            turnID: turnID,
+            traceID: traceID,
+            cwd: cwd,
+            currentDate: currentDate,
+            timezone: timezone,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile,
+            network: network,
+            fileSystemSandboxPolicy: fileSystemSandboxPolicy,
+            model: model,
+            personality: personality,
+            collaborationMode: collaborationMode,
+            realtimeActive: realtimeActive,
+            effort: effort,
+            summary: summary,
+            userInstructions: userInstructions,
+            developerInstructions: developerInstructions,
+            finalOutputJSONSchema: finalOutputJSONSchema,
+            truncationPolicy: truncationPolicy
+        )
     }
 }
 

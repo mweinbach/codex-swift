@@ -940,6 +940,8 @@ Source baseline inspected for this scaffold:
   - added Rust's required `thread/start` response fields for service tier, instruction sources, permission profile, and active permission profile.
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
+- `codex-rs/app-server` turn-start cwd context overrides
+  - `turn/start` now records a rollout `turn_context` item for supported context overrides and preserves Rust's visible cwd behavior: later `thread/resume` and `thread/read` report the turn cwd rather than the session-start cwd. Full live runtime override dispatch for approvals reviewer, permissions, service tier, collaboration mode, and personality remains pending.
 - `codex-rs/app-server` thread-start override compatibility
   - matched Rust's `thread/start` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread resume/fork experimental gating

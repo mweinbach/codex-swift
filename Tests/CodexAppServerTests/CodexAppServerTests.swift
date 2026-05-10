@@ -757,6 +757,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
     }
 
+    func testTurnStartCwdOverrideUpdatesLatestTurnContextLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let initialCwd = temp.url.appendingPathComponent("initial", isDirectory: true)
+        let turnCwd = temp.url.appendingPathComponent("turn", isDirectory: true)
+        try FileManager.default.createDirectory(at: initialCwd, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: turnCwd, withIntermediateDirectories: true)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(initialCwd.path)"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let startTurnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","cwd":"\#(turnCwd.path)","input":[{"type":"text","text":"Use the turn cwd"}]}}"#.utf8)))
+        let startedTurn = try XCTUnwrap((try XCTUnwrap(startTurnMessages[0]["result"] as? [String: Any]))["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(startedTurn["id"] as? String)
+
+        let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        XCTAssertEqual(resumeResult["cwd"] as? String, turnCwd.path)
+        XCTAssertEqual(resumedThread["cwd"] as? String, turnCwd.path)
+
+        let read = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let readThread = try XCTUnwrap((try XCTUnwrap(read["result"] as? [String: Any]))["thread"] as? [String: Any])
+        XCTAssertEqual(readThread["cwd"] as? String, turnCwd.path)
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""type":"turn_context""#))
+        XCTAssertTrue(rollout.contains(#""turn_id":"\#(turnID)""#))
+        XCTAssertTrue(rollout.contains(#""cwd":"\#(turnCwd.path.replacingOccurrences(of: "/", with: "\\/"))""#))
+    }
+
     func testTurnStartRejectsUnknownEnvironmentBeforeStartingTurnLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(
