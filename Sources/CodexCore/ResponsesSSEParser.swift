@@ -8,7 +8,7 @@ public enum ResponseEvent: Equatable, Sendable {
     case modelVerifications([ModelVerification])
     case serverReasoningIncluded(Bool)
     case modelsETag(String)
-    case completed(responseID: String, tokenUsage: TokenUsage?)
+    case completed(responseID: String, tokenUsage: TokenUsage?, endTurn: Bool? = nil)
     case toolCallInputDelta(itemID: String, callID: String?, delta: String)
     case outputTextDelta(String)
     case reasoningSummaryDelta(delta: String, summaryIndex: Int64)
@@ -100,7 +100,8 @@ public struct ResponsesSSEParser: Sendable {
         if let responseCompleted {
             return .success(.completed(
                 responseID: responseCompleted.id,
-                tokenUsage: responseCompleted.usage?.tokenUsage
+                tokenUsage: responseCompleted.usage?.tokenUsage,
+                endTurn: responseCompleted.endTurn
             ))
         }
 
@@ -274,6 +275,13 @@ private struct ResponseFailedError: Decodable {
 private struct ResponseCompleted: Decodable, Sendable {
     let id: String
     let usage: ResponseCompletedUsage?
+    let endTurn: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case usage
+        case endTurn = "end_turn"
+    }
 }
 
 private struct ResponseCompletedUsage: Decodable, Sendable {

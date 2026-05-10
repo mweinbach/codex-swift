@@ -42,6 +42,34 @@ final class ResponsesSSEParserTests: XCTestCase {
         ])
     }
 
+    func testCompletedEndTurnMapsRustOptionalBool() {
+        let falseEvents = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.completed","response":{"id":"resp_end_false","end_turn":false}}"#
+        ]))
+        let trueEvents = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.completed","response":{"id":"resp_end_true","end_turn":true}}"#
+        ]))
+        let nullEvents = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.completed","response":{"id":"resp_end_null","end_turn":null}}"#
+        ]))
+        let omittedEvents = ResponsesSSEParser.collectEvents(fromSSEText: sse([
+            #"{"type":"response.completed","response":{"id":"resp_end_omitted"}}"#
+        ]))
+
+        XCTAssertEqual(falseEvents, [
+            .success(.completed(responseID: "resp_end_false", tokenUsage: nil, endTurn: false))
+        ])
+        XCTAssertEqual(trueEvents, [
+            .success(.completed(responseID: "resp_end_true", tokenUsage: nil, endTurn: true))
+        ])
+        XCTAssertEqual(nullEvents, [
+            .success(.completed(responseID: "resp_end_null", tokenUsage: nil, endTurn: nil))
+        ])
+        XCTAssertEqual(omittedEvents, [
+            .success(.completed(responseID: "resp_end_omitted", tokenUsage: nil, endTurn: nil))
+        ])
+    }
+
     func testMetadataEventEmitsDedupedModelVerificationsLikeRust() {
         let text = sse([
             #"{"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber","unknown","trusted_access_for_cyber"]}}"#,

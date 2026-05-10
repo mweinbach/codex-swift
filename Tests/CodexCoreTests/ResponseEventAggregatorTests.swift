@@ -20,7 +20,7 @@ final class ResponseEventAggregatorTests: XCTestCase {
             .success(.reasoningContentDelta(delta: "bec", contentIndex: 0)),
             .success(.reasoningContentDelta(delta: "ause", contentIndex: 1)),
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "ignored final")]))),
-            .success(.completed(responseID: "resp_1", tokenUsage: TokenUsage(totalTokens: 12)))
+            .success(.completed(responseID: "resp_1", tokenUsage: TokenUsage(totalTokens: 12), endTurn: false))
         ]
 
         XCTAssertEqual(ResponseEventAggregator.aggregate(events), [
@@ -33,7 +33,7 @@ final class ResponseEventAggregatorTests: XCTestCase {
                 encryptedContent: nil
             ))),
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "hello")]))),
-            .success(.completed(responseID: "resp_1", tokenUsage: TokenUsage(totalTokens: 12)))
+            .success(.completed(responseID: "resp_1", tokenUsage: TokenUsage(totalTokens: 12), endTurn: false))
         ])
     }
 

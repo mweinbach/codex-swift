@@ -63,7 +63,7 @@ public struct ResponseEventAggregator: Sendable {
         case let .toolCallInputDelta(itemID, callID, delta):
             return [.success(.toolCallInputDelta(itemID: itemID, callID: callID, delta: delta))]
 
-        case let .completed(responseID, tokenUsage):
+        case let .completed(responseID, tokenUsage, endTurn):
             var events: [Result<ResponseEvent, APIError>] = []
             if !cumulativeReasoning.isEmpty {
                 events.append(.success(.outputItemDone(.reasoning(
@@ -83,7 +83,7 @@ public struct ResponseEventAggregator: Sendable {
                 cumulative.removeAll(keepingCapacity: true)
             }
 
-            events.append(.success(.completed(responseID: responseID, tokenUsage: tokenUsage)))
+            events.append(.success(.completed(responseID: responseID, tokenUsage: tokenUsage, endTurn: endTurn)))
             return events
 
         case .created,

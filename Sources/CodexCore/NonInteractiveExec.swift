@@ -650,7 +650,7 @@ public enum NonInteractiveExec {
                         itemIndex += 1
                     }
 
-                case let .completed(_, usage):
+                case let .completed(_, usage, _):
                     sawCompletion = true
                     tokenUsage = usage
 
