@@ -120,7 +120,34 @@ final class SkillsTests: XCTestCase {
         XCTAssertEqual(mentions, [first, second])
     }
 
-    func testCollectExplicitSkillMentionsMarksNameSeenBeforePathMatch() {
+    func testCollectExplicitSkillMentionsFromPlainTextPreservesSkillOrderLikeRust() {
+        let alpha = skill(name: "alpha-skill", path: "/skills/alpha/SKILL.md")
+        let beta = skill(name: "beta-skill", path: "/skills/beta/SKILL.md")
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [.text("first $alpha-skill then $beta-skill")],
+            skills: [beta, alpha]
+        )
+
+        XCTAssertEqual(mentions, [beta, alpha])
+    }
+
+    func testCollectExplicitSkillMentionsPrioritizesStructuredInputsLikeRust() {
+        let alpha = skill(name: "alpha-skill", path: "/skills/alpha/SKILL.md")
+        let beta = skill(name: "beta-skill", path: "/skills/beta/SKILL.md")
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [
+                .text("please run $alpha-skill"),
+                .skill(name: "beta-skill", path: beta.path)
+            ],
+            skills: [alpha, beta]
+        )
+
+        XCTAssertEqual(mentions, [beta, alpha])
+    }
+
+    func testCollectExplicitSkillMentionsAllowsLaterStructuredPathMatchLikeRust() {
         let matched = skill(name: "demo", path: "/skills/demo/SKILL.md")
 
         let mentions = Skills.collectExplicitSkillMentions(
@@ -129,6 +156,70 @@ final class SkillsTests: XCTestCase {
                 .skill(name: "demo", path: matched.path)
             ],
             skills: [matched]
+        )
+
+        XCTAssertEqual(mentions, [matched])
+    }
+
+    func testCollectExplicitSkillMentionsBlocksPlainFallbackForInvalidStructuredInputLikeRust() {
+        let alpha = skill(name: "alpha-skill", path: "/skills/alpha/SKILL.md")
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [
+                .text("please run $alpha-skill"),
+                .skill(name: "alpha-skill", path: "/skills/missing/SKILL.md")
+            ],
+            skills: [alpha]
+        )
+
+        XCTAssertEqual(mentions, [])
+    }
+
+    func testCollectExplicitSkillMentionsUsesLinkedPathForAmbiguousNamesLikeRust() {
+        let alpha = skill(name: "demo-skill", path: "/skills/alpha/SKILL.md")
+        let beta = skill(name: "demo-skill", path: "/skills/beta/SKILL.md")
+        let windows = skill(name: "demo-skill", path: #"C:\skills\demo\SKILL.md"#)
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [
+                .text(#"use [$demo-skill]( /skills/beta/SKILL.md ) and [$demo-skill](C:\skills\demo\SKILL.md)"#)
+            ],
+            skills: [alpha, beta, windows]
+        )
+
+        XCTAssertEqual(mentions, [beta, windows])
+    }
+
+    func testCollectExplicitSkillMentionsSkipsAmbiguousPlainNamesAndConnectorCollisionsLikeRust() {
+        let first = skill(name: "demo-skill", path: "/skills/one/SKILL.md")
+        let second = skill(name: "demo-skill", path: "/skills/two/SKILL.md")
+        let connector = skill(name: "drive", path: "/skills/drive/SKILL.md")
+
+        XCTAssertEqual(
+            Skills.collectExplicitSkillMentions(
+                inputs: [.text("use $demo-skill")],
+                skills: [first, second]
+            ),
+            []
+        )
+        XCTAssertEqual(
+            Skills.collectExplicitSkillMentions(
+                inputs: [.text("use $drive")],
+                skills: [connector],
+                connectorSlugCounts: ["drive": 1]
+            ),
+            []
+        )
+    }
+
+    func testCollectExplicitSkillMentionsSkipsAppPluginAndCommonEnvironmentMentionsLikeRust() {
+        let pathSkill = skill(name: "path", path: "/skills/path/SKILL.md")
+        let plugin = skill(name: "sample", path: "/skills/sample/SKILL.md")
+        let app = skill(name: "drive", path: "/skills/drive/SKILL.md")
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [.text("use $PATH and [$sample](plugin://sample@test) and [$drive](app://drive)")],
+            skills: [pathSkill, plugin, app]
         )
 
         XCTAssertEqual(mentions, [])

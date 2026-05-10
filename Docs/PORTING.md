@@ -304,7 +304,7 @@ Source baseline inspected for this scaffold:
   - added an injectable Swift accepted-line analytics uploader, isolated upload request batching, and app-server turn metadata/diff/completion routing for accepted-line fingerprint events
   - added the default ChatGPT/Codex-backend analytics transport with Rust-matching empty/API-key no-op behavior, bearer/account auth headers, singleton accepted-line request uploads, and the `/codex/analytics-events/events` endpoint
 - `codex-rs/protocol/src/protocol.rs` skill list models plus `codex-rs/core/src/skills/model.rs`, `codex-rs/core/src/skills/render.rs`, and `codex-rs/core/src/skills/injection.rs`
-  - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
+  - skill metadata/error/list wire shapes, skill scope wire values, runtime Skills section rendering, structured, plain-text, and linked-path explicit skill mention selection, skill instruction response-item injection, and load-warning formatting
 - `codex-rs/core/src/util.rs`
   - retry backoff math with jitter seam, server error-message extraction, debug panic/log helper, and relative path resolution
 - `codex-rs/common/src/oss.rs`, plus default model constants from `codex-rs/lmstudio` and `codex-rs/ollama`
