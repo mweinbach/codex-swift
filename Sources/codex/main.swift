@@ -61,6 +61,7 @@ let exitCode = await cli.runAsync(
     debugRunner: { request in try await DebugCommandRuntime.run(request) },
     mcpRunner: runMcpCommand,
     stdioToUDSRunner: runStdioToUDSCommand,
+    pluginRunner: runPluginCommand,
     cloudRunner: runCloudCommand,
     responsesAPIProxyRunner: runResponsesAPIProxyCommand
 )
@@ -1448,6 +1449,81 @@ private func runMcpOAuthLogin(
 private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     try StdioToUDS.run(socketPath: request.socketPath)
     return CodexCLI.CommandExecutionResult(exitCode: 0)
+}
+
+private func runPluginCommand(_ request: CodexCLI.PluginCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let codexHome = try CodexHome.find()
+    let configuration = CodexAppServerConfiguration(
+        codexHome: codexHome,
+        cliConfigOverrides: request.configOverrides
+    )
+
+    switch request.action {
+    case let .marketplaceAdd(source, refName, sparsePaths):
+        let result = try CodexAppServer.marketplaceAddCommandResult(
+            source: source,
+            refName: refName,
+            sparsePaths: sparsePaths,
+            configuration: configuration
+        )
+        let marketplaceName = result["marketplaceName"] as? String ?? ""
+        let installedRoot = result["installedRoot"] as? String ?? ""
+        let alreadyAdded = result["alreadyAdded"] as? Bool ?? false
+        let firstLine = alreadyAdded
+            ? "Marketplace `\(marketplaceName)` is already added from \(source)."
+            : "Added marketplace `\(marketplaceName)` from \(source)."
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "\(firstLine)\nInstalled marketplace root: \(installedRoot)"
+        )
+
+    case let .marketplaceUpgrade(name):
+        let result = try CodexAppServer.marketplaceUpgradeCommandResult(
+            marketplaceName: name,
+            configuration: configuration
+        )
+        let errors = result["errors"] as? [[String: String]] ?? []
+        if !errors.isEmpty {
+            let errorLines = errors.map { error in
+                let marketplaceName = error["marketplaceName"] ?? ""
+                let message = error["message"] ?? ""
+                return "Failed to upgrade marketplace `\(marketplaceName)`: \(message)"
+            }
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: (errorLines + ["\(errors.count) upgrade failure(s) occurred."]).joined(separator: "\n")
+            )
+        }
+        let selectedMarketplaces = result["selectedMarketplaces"] as? [String] ?? []
+        let upgradedRoots = result["upgradedRoots"] as? [String] ?? []
+        let selectionLabel = name ?? "all configured Git marketplaces"
+        var lines: [String]
+        if selectedMarketplaces.isEmpty {
+            lines = ["No configured Git marketplaces to upgrade."]
+        } else if upgradedRoots.isEmpty {
+            lines = [name == nil
+                ? "All configured Git marketplaces are already up to date."
+                : "Marketplace `\(selectionLabel)` is already up to date."]
+        } else if name != nil {
+            lines = ["Upgraded marketplace `\(selectionLabel)` to the latest configured revision."]
+        } else {
+            lines = ["Upgraded \(upgradedRoots.count) marketplace(s)."]
+        }
+        lines.append(contentsOf: upgradedRoots.map { "Installed marketplace root: \($0)" })
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
+
+    case let .marketplaceRemove(name):
+        let result = try CodexAppServer.marketplaceRemoveCommandResult(
+            marketplaceName: name,
+            configuration: configuration
+        )
+        let marketplaceName = result["marketplaceName"] as? String ?? name
+        var lines = ["Removed marketplace `\(marketplaceName)`."]
+        if let installedRoot = result["installedRoot"] as? String {
+            lines.append("Removed installed marketplace root: \(installedRoot)")
+        }
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
+    }
 }
 
 private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

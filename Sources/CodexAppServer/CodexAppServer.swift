@@ -4233,6 +4233,17 @@ public enum CodexAppServer {
         ]
     }
 
+    public static func marketplaceUpgradeCommandResult(
+        marketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        var params: [String: Any] = [:]
+        if let marketplaceName {
+            params["marketplaceName"] = marketplaceName
+        }
+        return try marketplaceUpgradeResult(params: params, configuration: configuration)
+    }
+
     private static func marketplaceUpgradeGitResult(
         marketplaces: [ConfiguredGitMarketplace],
         configuration: CodexAppServerConfiguration
@@ -4297,6 +4308,13 @@ public enum CodexAppServer {
             "marketplaceName": marketplaceName,
             "installedRoot": nullable(removedInstalledRoot)
         ]
+    }
+
+    public static func marketplaceRemoveCommandResult(
+        marketplaceName: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        try marketplaceRemoveResult(params: ["marketplaceName": marketplaceName], configuration: configuration)
     }
 
     fileprivate static func marketplaceAddResult(
@@ -4382,6 +4400,22 @@ public enum CodexAppServer {
             "installedRoot": sourcePath.path,
             "alreadyAdded": false
         ]
+    }
+
+    public static func marketplaceAddCommandResult(
+        source: String,
+        refName: String?,
+        sparsePaths: [String],
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        var params: [String: Any] = [
+            "source": source,
+            "sparsePaths": sparsePaths
+        ]
+        if let refName {
+            params["refName"] = refName
+        }
+        return try marketplaceAddResult(params: params, configuration: configuration)
     }
 
     private static func marketplaceAddGitResult(

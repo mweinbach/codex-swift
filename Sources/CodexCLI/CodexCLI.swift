@@ -404,6 +404,22 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum PluginCommandAction: Equatable, Sendable {
+        case marketplaceAdd(source: String, refName: String?, sparsePaths: [String])
+        case marketplaceUpgrade(name: String?)
+        case marketplaceRemove(name: String)
+    }
+
+    public struct PluginCommandRequest: Equatable, Sendable {
+        public let action: PluginCommandAction
+        public let configOverrides: CliConfigOverrides
+
+        public init(action: PluginCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+            self.action = action
+            self.configOverrides = configOverrides
+        }
+    }
+
     public enum CloudCommandAction: Equatable, Sendable {
         case status(taskID: String)
         case list(environment: String?, limit: Int, cursor: String?, json: Bool)
@@ -468,6 +484,7 @@ public struct CodexCLI: Sendable {
     public typealias DebugCommandRunner = (DebugCommandRequest) async throws -> CommandExecutionResult
     public typealias McpCommandRunner = (McpCommandRequest) async throws -> CommandExecutionResult
     public typealias StdioToUDSCommandRunner = (StdioToUDSCommandRequest) async throws -> CommandExecutionResult
+    public typealias PluginCommandRunner = (PluginCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
     public typealias ResponsesAPIProxyCommandRunner = (ResponsesAPIProxyCommandRequest) async throws -> CommandExecutionResult
 
@@ -592,6 +609,7 @@ public struct CodexCLI: Sendable {
         debugRunner: DebugCommandRunner? = nil,
         mcpRunner: McpCommandRunner? = nil,
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
+        pluginRunner: PluginCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil,
         responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil
     ) async -> Int32 {
@@ -879,6 +897,29 @@ public struct CodexCLI: Sendable {
                 stderr(message)
                 return exitCode
             }
+        case let .command(spec, _) where spec.name == "plugin":
+            guard let pluginRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parsePluginCommandAction(rawArguments) {
+            case let .success(action):
+                do {
+                    let result = try await pluginRunner(PluginCommandRequest(
+                        action: action,
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
         case let .command(spec, commandArguments) where spec.name == "stdio-to-uds":
             guard let stdioToUDSRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
@@ -1041,7 +1082,9 @@ public struct CodexCLI: Sendable {
             "--bearer-token-env-var",
             "--scopes",
             "--rules",
-            "-r"
+            "-r",
+            "--ref",
+            "--sparse"
         ].contains(argument)
     }
 
@@ -2848,6 +2891,108 @@ public struct CodexCLI: Sendable {
             return .failure("limit must be between 1 and 20", 64)
         }
         return .success(limit)
+    }
+
+    private func parsePluginCommandAction(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        guard let namespace = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'plugin': marketplace", 64)
+        }
+        guard namespace == "marketplace" else {
+            return .failure("codex-swift: unsupported plugin subcommand: \(namespace)", 64)
+        }
+        return parsePluginMarketplaceCommand(Array(arguments.dropFirst()))
+    }
+
+    private func parsePluginMarketplaceCommand(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'plugin marketplace': add|upgrade|remove", 64)
+        }
+        let rest = Array(arguments.dropFirst())
+        switch subcommand {
+        case "add":
+            return parsePluginMarketplaceAdd(rest)
+        case "upgrade":
+            return parsePluginMarketplaceUpgrade(rest)
+        case "remove":
+            return parsePluginMarketplaceRemove(rest)
+        default:
+            return .failure("codex-swift: unsupported plugin marketplace subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private func parsePluginMarketplaceAdd(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        var source: String?
+        var refName: String?
+        var sparsePaths: [String] = []
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            if argument == "--ref" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --ref", 64)
+                }
+                refName = value
+                continue
+            }
+            if argument.hasPrefix("--ref=") {
+                refName = String(argument.dropFirst("--ref=".count))
+                continue
+            }
+            if argument == "--sparse" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --sparse", 64)
+                }
+                sparsePaths.append(value)
+                continue
+            }
+            if argument.hasPrefix("--sparse=") {
+                sparsePaths.append(String(argument.dropFirst("--sparse=".count)))
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'plugin marketplace add': \(argument)", 64)
+            }
+            if source != nil {
+                return .failure("codex-swift: unexpected argument for command 'plugin marketplace add': \(argument)", 64)
+            }
+            source = argument
+        }
+
+        guard let source else {
+            return .failure("codex-swift: missing required argument for command 'plugin marketplace add': <SOURCE>", 64)
+        }
+        return .success(.marketplaceAdd(source: source, refName: refName, sparsePaths: sparsePaths))
+    }
+
+    private func parsePluginMarketplaceUpgrade(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        var name: String?
+        for argument in arguments {
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'plugin marketplace upgrade': \(argument)", 64)
+            }
+            if name != nil {
+                return .failure("codex-swift: unexpected argument for command 'plugin marketplace upgrade': \(argument)", 64)
+            }
+            name = argument
+        }
+        return .success(.marketplaceUpgrade(name: name))
+    }
+
+    private func parsePluginMarketplaceRemove(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        var name: String?
+        for argument in arguments {
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'plugin marketplace remove': \(argument)", 64)
+            }
+            if name != nil {
+                return .failure("codex-swift: unexpected argument for command 'plugin marketplace remove': \(argument)", 64)
+            }
+            name = argument
+        }
+        guard let name else {
+            return .failure("codex-swift: missing required argument for command 'plugin marketplace remove': <NAME>", 64)
+        }
+        return .success(.marketplaceRemove(name: name))
     }
 
     private func parseResponsesAPIProxyCommand(_ arguments: [String]) -> ParseResult<ResponsesAPIProxyCommandRequest> {
