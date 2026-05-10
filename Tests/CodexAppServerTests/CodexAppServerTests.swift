@@ -5535,6 +5535,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(scannedData.isEmpty)
     }
 
+    func testThreadListRepairsStateDbForLaterStateDbOnlyListing() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T14-00-00",
+            timestamp: "2025-01-03T14:00:00Z",
+            preview: "Hello from user",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let stateOnlyBeforeRepairResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":10,"cwd":"\#(temp.url.path)","useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let stateOnlyBeforeRepairResult = try XCTUnwrap(stateOnlyBeforeRepairResponse["result"] as? [String: Any])
+        let stateOnlyBeforeRepairData = try XCTUnwrap(stateOnlyBeforeRepairResult["data"] as? [[String: Any]])
+        XCTAssertTrue(stateOnlyBeforeRepairData.isEmpty)
+
+        let repairedResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"limit":10,"cwd":"\#(temp.url.path)","useStateDbOnly":false}}"#,
+            configuration: configuration
+        )
+        let repairedResult = try XCTUnwrap(repairedResponse["result"] as? [String: Any])
+        let repairedData = try XCTUnwrap(repairedResult["data"] as? [[String: Any]])
+        XCTAssertEqual(repairedData.map { $0["id"] as? String }, [threadID])
+
+        let stateOnlyAfterRepairResponse = try appServerResponse(
+            #"{"id":3,"method":"thread/list","params":{"limit":10,"cwd":"\#(temp.url.path)","useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let stateOnlyAfterRepairResult = try XCTUnwrap(stateOnlyAfterRepairResponse["result"] as? [String: Any])
+        let stateOnlyAfterRepairData = try XCTUnwrap(stateOnlyAfterRepairResult["data"] as? [[String: Any]])
+        XCTAssertEqual(stateOnlyAfterRepairData.map { $0["id"] as? String }, [threadID])
+        XCTAssertEqual(stateOnlyAfterRepairData.map { $0["preview"] as? String }, ["Hello from user"])
+        XCTAssertEqual(stateOnlyAfterRepairData.map { $0["modelProvider"] as? String }, ["openai"])
+    }
+
     func testThreadListStateDbOnlyDropsMissingRolloutPaths() async throws {
         let temp = try TemporaryDirectory()
         let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)

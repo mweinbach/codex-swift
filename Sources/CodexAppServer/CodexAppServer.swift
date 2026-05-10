@@ -758,6 +758,11 @@ public enum CodexAppServer {
             sortDirection: sortDirection,
             defaultProvider: configuration.defaultModelProvider
         )
+        try repairStateStoreFromThreadListPage(
+            page,
+            configuration: configuration,
+            archivedOnly: boolParam(params?["archived"], defaultValue: false)
+        )
         return [
             "data": try page.items.map { try threadObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
             "nextCursor": (page.nextCursor?.token as Any?) ?? NSNull(),
@@ -9621,6 +9626,62 @@ public enum CodexAppServer {
             "name": NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func repairStateStoreFromThreadListPage(
+        _ page: ConversationsPage,
+        configuration: CodexAppServerConfiguration,
+        archivedOnly: Bool
+    ) throws {
+        guard let stateStore = configuration.stateStore, !page.items.isEmpty else {
+            return
+        }
+        try runAsyncBlocking {
+            for item in page.items {
+                guard let metadata = try? threadMetadata(
+                    for: item,
+                    defaultProvider: configuration.defaultModelProvider,
+                    archivedOnly: archivedOnly
+                ) else {
+                    continue
+                }
+                try? await stateStore.upsertThread(metadata)
+            }
+        }
+    }
+
+    private static func threadMetadata(
+        for item: ConversationItem,
+        defaultProvider: String,
+        archivedOnly: Bool
+    ) throws -> ThreadMetadata {
+        let summary = try RolloutSummary(path: item.path, defaultProvider: defaultProvider)
+        let threadID = try ThreadId(string: summary.id)
+        let createdAt = Date(timeIntervalSince1970: TimeInterval(summary.createdAtUnixSeconds))
+        let modifiedAt = try? FileManager.default.attributesOfItem(atPath: item.path)[.modificationDate] as? Date
+        let updatedAt = modifiedAt
+            ?? item.updatedAt.map { Date(timeIntervalSince1970: TimeInterval(unixSeconds($0))) }
+            ?? createdAt
+        let gitInfo = summary.gitInfo
+        return ThreadMetadata(
+            id: threadID,
+            rolloutPath: item.path,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            source: summary.source.description,
+            modelProvider: summary.modelProvider,
+            cwd: summary.cwd,
+            cliVersion: summary.cliVersion,
+            title: summary.preview,
+            sandboxPolicy: "read-only",
+            approvalMode: "on-request",
+            tokensUsed: 0,
+            firstUserMessage: summary.preview.isEmpty ? nil : summary.preview,
+            archivedAt: archivedOnly ? updatedAt : nil,
+            gitSHA: gitInfo?["sha"] as? String,
+            gitBranch: gitInfo?["branch"] as? String,
+            gitOriginURL: gitInfo?["originUrl"] as? String
+        )
     }
 
     private static func threadListSessionSource(from persistedSource: String) -> SessionSource {
