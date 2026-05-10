@@ -2793,7 +2793,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["model"] as? String, "gpt-5.5")
-        XCTAssertEqual(result["modelProvider"] as? String, "openai")
+        XCTAssertEqual(result["modelProvider"] as? String, "mock_provider")
         XCTAssertEqual(result["serviceTier"] as? NSNull, NSNull())
         XCTAssertEqual(result["instructionSources"] as? [String], [])
         XCTAssertEqual(result["approvalPolicy"] as? String, "untrusted")
@@ -2831,6 +2831,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondContent[0]["text"] as? String, "Second turn")
         XCTAssertEqual(secondContent[1]["type"] as? String, "image")
         XCTAssertEqual(secondContent[1]["url"] as? String, "https://example.test/image.png")
+    }
+
+    func testThreadResumeAndForkUsePersistedModelMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-30-00",
+            timestamp: "2025-01-05T12:30:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutItems(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:30:01Z",
+            items: [
+                .turnContext(TurnContextItem(
+                    cwd: "/",
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .readOnly,
+                    model: "persisted-model",
+                    effort: .high,
+                    summary: .auto
+                ))
+            ]
+        )
+
+        let resume = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        XCTAssertEqual(resumeResult["model"] as? String, "persisted-model")
+        XCTAssertEqual(resumeResult["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(resumeResult["reasoningEffort"] as? String, "high")
+
+        let overriddenResume = try appServerResponse(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","model":"explicit-model","modelProvider":"explicit_provider"}}"#,
+            codexHome: temp.url
+        )
+        let overriddenResumeResult = try XCTUnwrap(overriddenResume["result"] as? [String: Any])
+        XCTAssertEqual(overriddenResumeResult["model"] as? String, "explicit-model")
+        XCTAssertEqual(overriddenResumeResult["modelProvider"] as? String, "explicit_provider")
+        XCTAssertTrue(overriddenResumeResult["reasoningEffort"] is NSNull)
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(forkResult["model"] as? String, "persisted-model")
+        XCTAssertEqual(forkResult["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(forkResult["reasoningEffort"] as? String, "high")
     }
 
     func testThreadResumeExperimentalFieldsRequireExperimentalAPI() throws {

@@ -1158,8 +1158,20 @@ public enum CodexAppServer {
             turns: buildTurnsFromRolloutEvents(at: rolloutPath)
         )
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
-        let model = runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil)
-        let modelProvider = runtimeConfig.selectedModelProviderID
+        let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let requestedModel = stringParam(params?["model"])
+        let requestedModelProvider = stringParam(params?["modelProvider"])
+            ?? stringParam(params?["model_provider"])
+        let hasModelResumeOverride = requestedModel != nil || requestedModelProvider != nil
+        let model = requestedModel
+            ?? (hasModelResumeOverride ? nil : summary.model)
+            ?? runtimeConfig.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let modelProvider = requestedModelProvider
+            ?? (hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : summary.modelProvider)
+        let reasoningEffort = hasModelResumeOverride
+            ? runtimeConfig.modelReasoningEffort
+            : summary.reasoningEffort ?? runtimeConfig.modelReasoningEffort
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
@@ -1181,7 +1193,7 @@ public enum CodexAppServer {
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
-            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
+            "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
 
@@ -1234,11 +1246,19 @@ public enum CodexAppServer {
         }
         let sourceSummary = try RolloutSummary(path: sourceRolloutPath, defaultProvider: configuration.defaultModelProvider)
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
-        let model = stringParam(params?["model"])
+        let requestedModel = stringParam(params?["model"])
+        let requestedModelProvider = stringParam(params?["modelProvider"])
+            ?? stringParam(params?["model_provider"])
+        let hasModelResumeOverride = requestedModel != nil || requestedModelProvider != nil
+        let model = requestedModel
+            ?? (hasModelResumeOverride ? nil : sourceSummary.model)
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
-        let modelProvider = stringParam(params?["modelProvider"])
-            ?? sourceSummary.modelProvider
+        let modelProvider = requestedModelProvider
+            ?? (hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : sourceSummary.modelProvider)
+        let reasoningEffort = hasModelResumeOverride
+            ? runtimeConfig.modelReasoningEffort
+            : sourceSummary.reasoningEffort ?? runtimeConfig.modelReasoningEffort
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
@@ -1299,7 +1319,7 @@ public enum CodexAppServer {
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
-            "reasoningEffort": runtimeConfig.modelReasoningEffort?.rawValue ?? NSNull()
+            "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
 
@@ -21419,6 +21439,8 @@ private struct RolloutSummary {
     let id: String
     let forkedFromID: String?
     let preview: String
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
     let modelProvider: String
     let createdAtUnixSeconds: Int
     let cwd: String
@@ -21436,6 +21458,8 @@ private struct RolloutSummary {
         var meta: SessionMetaLine?
         var preview = ""
         var latestTurnContextCwd: String?
+        var latestTurnContextModel: String?
+        var latestTurnContextReasoningEffort: ReasoningEffort?
 
         for rawLine in text.split(whereSeparator: \.isNewline) {
             guard let data = rawLine.data(using: .utf8),
@@ -21458,6 +21482,8 @@ private struct RolloutSummary {
                 }
             case let .turnContext(turnContext):
                 latestTurnContextCwd = turnContext.cwd
+                latestTurnContextModel = turnContext.model
+                latestTurnContextReasoningEffort = turnContext.effort
             case .compacted,
                  .eventMsg:
                 continue
@@ -21471,6 +21497,8 @@ private struct RolloutSummary {
         self.id = meta.meta.id.description
         self.forkedFromID = meta.meta.forkedFromID?.description
         self.preview = preview
+        self.model = latestTurnContextModel
+        self.reasoningEffort = latestTurnContextReasoningEffort
         self.modelProvider = meta.meta.modelProvider ?? defaultProvider
         self.createdAtUnixSeconds = Self.unixSeconds(meta.meta.timestamp)
         self.cwd = latestTurnContextCwd ?? meta.meta.cwd
