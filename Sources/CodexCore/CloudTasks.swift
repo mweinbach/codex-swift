@@ -233,6 +233,16 @@ public struct CloudEnvironmentRow: Equatable, Codable, Sendable {
     }
 }
 
+public struct CloudEnvironmentSelection: Equatable, Codable, Sendable {
+    public let id: String
+    public let label: String?
+
+    public init(id: String, label: String? = nil) {
+        self.id = id
+        self.label = label
+    }
+}
+
 public struct CloudDiffSummary: Equatable, Codable, Sendable {
     public let filesChanged: Int
     public let linesAdded: Int

@@ -346,6 +346,104 @@ final class CloudTasksTests: XCTestCase {
         ])
     }
 
+    func testHTTPClientAutodetectEnvironmentPrefersRepoLabelBeforeGlobalLikeRust() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            [
+              { "id": "env-repo", "label": "Repo Env", "is_pinned": false, "task_count": 1 }
+            ]
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: { ["git@github.com:owner/repo.git"] },
+            errorLog: { _ in }
+        )
+
+        let selection = try await client.autodetectEnvironmentID(desiredLabel: "repo env").get()
+
+        XCTAssertEqual(selection, CloudEnvironmentSelection(id: "env-repo", label: "Repo Env"))
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments/by-repo/github/owner/repo"
+        ])
+    }
+
+    func testHTTPClientAutodetectEnvironmentUsesPinnedThenTaskCountFallbackLikeRust() async throws {
+        let pinnedTransport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            [
+              { "id": "env-low", "label": "Low", "is_pinned": false, "task_count": 99 },
+              { "id": "env-pinned", "label": "Pinned", "is_pinned": true, "task_count": 1 }
+            ]
+            """))
+        ])
+        let pinnedClient = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: pinnedTransport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: { ["git@github.com:owner/repo.git"] },
+            errorLog: { _ in }
+        )
+
+        let pinnedSelection = try await pinnedClient.autodetectEnvironmentID().get()
+
+        XCTAssertEqual(pinnedSelection, CloudEnvironmentSelection(id: "env-pinned", label: "Pinned"))
+
+        let taskCountTransport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            []
+            """)),
+            .success(cloudResponse("""
+            [
+              { "id": "env-small", "label": "Small", "task_count": 3 },
+              { "id": "env-large", "label": "Large", "task_count": 12 }
+            ]
+            """))
+        ])
+        let taskCountClient = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: taskCountTransport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: { ["git@github.com:owner/repo.git"] },
+            errorLog: { _ in }
+        )
+
+        let taskCountSelection = try await taskCountClient.autodetectEnvironmentID().get()
+
+        XCTAssertEqual(taskCountSelection, CloudEnvironmentSelection(id: "env-large", label: "Large"))
+        XCTAssertEqual(taskCountTransport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments/by-repo/github/owner/repo",
+            "https://chatgpt.com/backend-api/wham/environments"
+        ])
+    }
+
+    func testHTTPClientAutodetectEnvironmentReportsNoEnvironmentsLikeRust() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            []
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: { [] },
+            errorLog: { _ in }
+        )
+
+        let result = await client.autodetectEnvironmentID()
+
+        guard case let .failure(error) = result else {
+            return XCTFail("expected no environments failure")
+        }
+        XCTAssertEqual(error, .message("no environments available"))
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments"
+        ])
+    }
+
     func testHTTPClientTaskDetailsMapsSummaryDiffMessagesAndText() async throws {
         let body = cloudDetailsBody()
         let transport = CloudCapturingTransport(executeResults: [

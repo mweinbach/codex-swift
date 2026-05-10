@@ -185,6 +185,43 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
         return .success(rowsByID.values.sorted(by: Self.compareEnvironmentRows))
     }
 
+    public func autodetectEnvironmentID(desiredLabel: String? = nil) async -> CloudTaskResult<CloudEnvironmentSelection> {
+        var byRepoEnvironments: [CloudCodeEnvironment] = []
+
+        for origin in gitOriginURLs() {
+            guard let (owner, repo) = Self.parseGitHubOwnerRepo(from: origin) else {
+                continue
+            }
+            let repoHint = "\(owner)/\(repo)"
+            let repoPath = path(
+                codex: "api/codex/environments/by-repo/github/\(owner)/\(repo)",
+                chatGPT: "wham/environments/by-repo/github/\(owner)/\(repo)"
+            )
+            switch await fetchEnvironments(path: repoPath, operation: "autodetect_environment by-repo \(repoHint)") {
+            case let .success(environments):
+                errorLog("env: by-repo returned \(environments.count) env(s) for \(repoHint)")
+                byRepoEnvironments.append(contentsOf: environments)
+            case let .failure(error):
+                errorLog("env: by-repo fetch failed for \(repoHint): \(Self.message(from: error))")
+            }
+        }
+
+        if let environment = Self.pickEnvironmentRow(byRepoEnvironments, desiredLabel: desiredLabel) {
+            return .success(CloudEnvironmentSelection(id: environment.id, label: environment.label))
+        }
+
+        let globalPath = path(codex: "api/codex/environments", chatGPT: "wham/environments")
+        switch await fetchEnvironments(path: globalPath, operation: "autodetect_environment") {
+        case let .success(environments):
+            if let environment = Self.pickEnvironmentRow(environments, desiredLabel: desiredLabel) {
+                return .success(CloudEnvironmentSelection(id: environment.id, label: environment.label))
+            }
+            return .failure(.message("no environments available"))
+        case let .failure(error):
+            return .failure(error)
+        }
+    }
+
     public func getTaskSummary(id: CloudTaskID) async -> CloudTaskResult<CloudTaskSummary> {
         switch await detailsWithBody(id: id.rawValue) {
         case let .success(details):
@@ -1020,6 +1057,30 @@ private extension CloudHTTPClient {
             return leftLabel < rightLabel
         }
         return lhs.id < rhs.id
+    }
+
+    private static func pickEnvironmentRow(
+        _ environments: [CloudCodeEnvironment],
+        desiredLabel: String?
+    ) -> CloudCodeEnvironment? {
+        guard !environments.isEmpty else {
+            return nil
+        }
+        if let desiredLabel {
+            let lowercasedLabel = desiredLabel.lowercased()
+            if let match = environments.first(where: { ($0.label ?? "").lowercased() == lowercasedLabel }) {
+                return match
+            }
+        }
+        if environments.count == 1 {
+            return environments[0]
+        }
+        if let pinned = environments.first(where: { $0.isPinned ?? false }) {
+            return pinned
+        }
+        return environments.max { lhs, rhs in
+            (lhs.taskCount ?? 0) < (rhs.taskCount ?? 0)
+        } ?? environments.first
     }
 
     static func parseGitHubOwnerRepo(from rawURL: String) -> (owner: String, repo: String)? {
