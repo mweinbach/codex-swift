@@ -1763,6 +1763,128 @@ final class DebugCommandRuntimeTests: XCTestCase {
         }
     }
 
+    func testTraceReduceRecordsCompactionInstallAndPostCompactionSnapshot() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        let requestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-1",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-1.json"
+        ]
+        let compactionRequestPayload: [String: Any] = [
+            "raw_payload_id": "payload-compaction-request",
+            "kind": ["type": "compaction_request"],
+            "path": "payloads/compaction-request.json"
+        ]
+        let checkpointPayload: [String: Any] = [
+            "raw_payload_id": "payload-compaction-checkpoint",
+            "kind": ["type": "compaction_checkpoint"],
+            "path": "payloads/compaction-checkpoint.json"
+        ]
+        let postCompactionPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-2",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-2.json"
+        ]
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": requestPayload
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_request_started",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "compaction_request:1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": compactionRequestPayload
+            ]),
+            traceEvent(seq: 5, wallTime: 105, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "compaction_installed",
+                "compaction_id": "compaction-1",
+                "checkpoint_payload": checkpointPayload
+            ]),
+            traceEvent(seq: 6, wallTime: 106, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-2",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 7, wallTime: 107, threadID: "thread-root", codexTurnID: "turn-2", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-2",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-2",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": postCompactionPayload
+            ])
+        ])
+        let developer: [String: Any] = ["type": "message", "role": "developer", "content": [["type": "input_text", "text": "follow repo rules"]]]
+        let user: [String: Any] = ["type": "message", "role": "user", "content": [["type": "input_text", "text": "count files"]]]
+        let summary: [String: Any] = ["type": "message", "role": "user", "content": [["type": "input_text", "text": "summary from compacted history"]]]
+        let compactionSummary: [String: Any] = ["type": "compaction", "encrypted_content": "encrypted-summary"]
+        try writeJSONObject(["input": [developer, user]], to: bundle.appendingPathComponent("payloads/request-1.json", isDirectory: false))
+        try writeJSONObject(["input": []], to: bundle.appendingPathComponent("payloads/compaction-request.json", isDirectory: false))
+        try writeJSONObject([
+            "input_history": [developer, user],
+            "replacement_history": [user, summary, compactionSummary]
+        ], to: bundle.appendingPathComponent("payloads/compaction-checkpoint.json", isDirectory: false))
+        try writeJSONObject(["input": [developer, user, summary, compactionSummary]], to: bundle.appendingPathComponent("payloads/request-2.json", isDirectory: false))
+
+        _ = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let inferences = try XCTUnwrap(state["inference_calls"] as? [String: Any])
+        let firstInference = try XCTUnwrap(inferences["inference-1"] as? [String: Any])
+        let secondInference = try XCTUnwrap(inferences["inference-2"] as? [String: Any])
+        let compactions = try XCTUnwrap(state["compactions"] as? [String: Any])
+        let compaction = try XCTUnwrap(compactions["compaction-1"] as? [String: Any])
+
+        XCTAssertEqual(compaction["thread_id"] as? String, "thread-root")
+        XCTAssertEqual(compaction["codex_turn_id"] as? String, "turn-1")
+        XCTAssertEqual(compaction["installed_at_unix_ms"] as? Int, 105)
+        XCTAssertEqual(compaction["request_ids"] as? [String], ["compaction_request:1"])
+        XCTAssertEqual(compaction["input_item_ids"] as? [String], firstInference["request_item_ids"] as? [String])
+        XCTAssertEqual(compaction["replacement_item_ids"] as? [String], ["conversation_item:4", "conversation_item:5", "conversation_item:6"])
+        XCTAssertEqual(secondInference["request_item_ids"] as? [String], ["conversation_item:7", "conversation_item:4", "conversation_item:5", "conversation_item:6"])
+
+        let conversation = try XCTUnwrap(state["conversation_items"] as? [String: Any])
+        let markerID = try XCTUnwrap(compaction["marker_item_id"] as? String)
+        let marker = try XCTUnwrap(conversation[markerID] as? [String: Any])
+        XCTAssertEqual(marker["kind"] as? String, "compaction_marker")
+        XCTAssertEqual(((marker["body"] as? [String: Any])?["parts"] as? [Any])?.count, 0)
+        XCTAssertEqual(marker["produced_by"] as? [[String: String]], [["type": "compaction", "compaction_id": "compaction-1"]])
+
+        let replacementUser = try XCTUnwrap(conversation["conversation_item:4"] as? [String: Any])
+        XCTAssertEqual(replacementUser["produced_by"] as? [[String: String]], [["type": "compaction", "compaction_id": "compaction-1"]])
+        let summaryItem = try XCTUnwrap(conversation["conversation_item:6"] as? [String: Any])
+        XCTAssertEqual(summaryItem["channel"] as? String, "summary")
+        XCTAssertEqual(summaryItem["kind"] as? String, "message")
+        let parts = try XCTUnwrap((summaryItem["body"] as? [String: Any])?["parts"] as? [[String: String]])
+        XCTAssertEqual(parts, [["type": "encoded", "label": "encrypted_content", "value": "encrypted-summary"]])
+    }
+
     func testTraceReduceRecordsCodeCellLifecycleNestedToolsAndOutputs() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)

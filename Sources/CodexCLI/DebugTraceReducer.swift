@@ -5,6 +5,7 @@ struct DebugTraceReducer {
     private var rollout: [String: Any]
     private var rawPayloads: [String: [String: Any]] = [:]
     private var threadConversationSnapshots: [String: [String]] = [:]
+    private var pendingCompactionReplacementItemIDs: [String: [String]] = [:]
     private var nextConversationItemOrdinal = 1
     private var nextTerminalOperationOrdinal = 1
     private var codeCellIDsByRuntime: [String: String] = [:]
@@ -104,6 +105,8 @@ struct DebugTraceReducer {
             try completeCompactionRequest(event: event, payload: payload, status: "completed")
         case "compaction_request_failed":
             try completeCompactionRequest(event: event, payload: payload, status: "failed")
+        case "compaction_installed":
+            try installCompaction(event: event, payload: payload)
         case "protocol_event_observed", "other":
             break
         default:
@@ -807,6 +810,116 @@ struct DebugTraceReducer {
         rollout["compaction_requests"] = requests
     }
 
+    private mutating func installCompaction(event: [String: Any], payload: [String: Any]) throws {
+        let compactionID = try Self.requiredString(payload, key: "compaction_id")
+        guard let threadID = event["thread_id"] as? String else {
+            throw DebugTraceReducerError.missingCompactionInstallThread(compactionID)
+        }
+        guard let codexTurnID = event["codex_turn_id"] as? String else {
+            throw DebugTraceReducerError.missingCompactionInstallTurn(compactionID)
+        }
+        var compactions = try Self.dictionaryMap(rollout["compactions"], key: "compactions")
+        if compactions[compactionID] != nil {
+            throw DebugTraceReducerError.duplicateCompactionInstall(compactionID)
+        }
+        let threads = try Self.dictionaryMap(rollout["threads"], key: "threads")
+        guard threads[threadID] != nil else {
+            throw DebugTraceReducerError.unknownThread(threadID)
+        }
+        let turns = try Self.dictionaryMap(rollout["codex_turns"], key: "codex_turns")
+        guard let turn = turns[codexTurnID] as? [String: Any],
+              let turnThreadID = turn["thread_id"] as? String
+        else {
+            throw DebugTraceReducerError.unknownCodexTurnForCompactionInstall(
+                compactionID: compactionID,
+                turnID: codexTurnID
+            )
+        }
+        if turnThreadID != threadID {
+            throw DebugTraceReducerError.mismatchedCompactionInstallTurnThread(
+                compactionID: compactionID,
+                eventThreadID: threadID,
+                turnID: codexTurnID,
+                turnThreadID: turnThreadID
+            )
+        }
+
+        let checkpointPayload = try Self.requiredDictionary(payload, key: "checkpoint_payload")
+        let checkpointPayloadID = try Self.requiredString(checkpointPayload, key: "raw_payload_id")
+        let checkpoint = try loadRawPayloadJSON(checkpointPayload)
+        let inputHistory = try Self.requiredArray(
+            checkpoint,
+            key: "input_history",
+            objectName: "compaction checkpoint payload \(checkpointPayloadID)"
+        )
+        let replacementHistory = try Self.requiredArray(
+            checkpoint,
+            key: "replacement_history",
+            objectName: "compaction checkpoint payload \(checkpointPayloadID)"
+        )
+        let inputItems = try inputHistory.map { try normalizeConversationItem($0, rawPayloadID: checkpointPayloadID) }
+        let replacementItems = try replacementHistory.map { try normalizeConversationItem($0, rawPayloadID: checkpointPayloadID) }
+        let wallTimeUnixMS = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        let inputItemIDs = try reconcileDetachedConversationItems(
+            inputItems,
+            wallTimeUnixMS: wallTimeUnixMS,
+            threadID: threadID,
+            codexTurnID: codexTurnID,
+            candidates: threadConversationSnapshots[threadID] ?? [],
+            producedBy: []
+        )
+        let producer = [["type": "compaction", "compaction_id": compactionID]]
+        let markerItemID = createConversationItem(
+            NormalizedConversationItem(
+                role: "assistant",
+                channel: nil,
+                kind: "compaction_marker",
+                parts: [],
+                callID: nil
+            ),
+            wallTimeUnixMS: wallTimeUnixMS,
+            threadID: threadID,
+            codexTurnID: codexTurnID,
+            producedBy: producer
+        )
+        let replacementItemIDs = try reconcileDetachedConversationItems(
+            replacementItems,
+            wallTimeUnixMS: wallTimeUnixMS,
+            threadID: threadID,
+            codexTurnID: codexTurnID,
+            candidates: [],
+            producedBy: producer
+        )
+        try appendThreadConversationItems(threadID: threadID, itemIDs: inputItemIDs)
+        try appendThreadConversationItems(threadID: threadID, itemIDs: [markerItemID])
+        try appendThreadConversationItems(threadID: threadID, itemIDs: replacementItemIDs)
+
+        let requests = try Self.dictionaryMap(rollout["compaction_requests"], key: "compaction_requests")
+        let requestIDs = requests
+            .keys
+            .sorted()
+            .compactMap { requestID -> String? in
+                guard let request = requests[requestID] as? [String: Any],
+                      request["compaction_id"] as? String == compactionID
+                else {
+                    return nil
+                }
+                return requestID
+            }
+        pendingCompactionReplacementItemIDs[threadID] = replacementItemIDs
+        compactions[compactionID] = [
+            "compaction_id": compactionID,
+            "thread_id": threadID,
+            "codex_turn_id": codexTurnID,
+            "installed_at_unix_ms": wallTimeUnixMS,
+            "marker_item_id": markerItemID,
+            "request_ids": requestIDs,
+            "input_item_ids": inputItemIDs,
+            "replacement_item_ids": replacementItemIDs
+        ]
+        rollout["compactions"] = compactions
+    }
+
     private mutating func reduceInferenceRequest(
         event: [String: Any],
         inferenceID: String,
@@ -849,6 +962,7 @@ struct DebugTraceReducer {
             )
             requestItemIDs = previousItemIDs
         } else {
+            let snapshotOverride = pendingCompactionReplacementItemIDs[threadID]
             requestItemIDs = try reconcileConversationItems(
                 normalized,
                 event: event,
@@ -856,8 +970,12 @@ struct DebugTraceReducer {
                 codexTurnID: codexTurnID,
                 startIndex: 0,
                 mode: .fullSnapshot,
+                snapshotOverride: snapshotOverride,
                 producedBy: []
             )
+            if snapshotOverride != nil {
+                pendingCompactionReplacementItemIDs.removeValue(forKey: threadID)
+            }
         }
         try appendThreadConversationItems(threadID: threadID, itemIDs: requestItemIDs)
         threadConversationSnapshots[threadID] = requestItemIDs
@@ -898,9 +1016,10 @@ struct DebugTraceReducer {
         codexTurnID: String,
         startIndex: Int,
         mode: ConversationReconcileMode,
+        snapshotOverride: [String]? = nil,
         producedBy: [[String: Any]]
     ) throws -> [String] {
-        let previousSnapshot = threadConversationSnapshots[threadID] ?? []
+        let previousSnapshot = snapshotOverride ?? threadConversationSnapshots[threadID] ?? []
         var itemIDs: [String] = []
         for (offset, item) in items.enumerated() {
             let index = startIndex + offset
@@ -956,6 +1075,36 @@ struct DebugTraceReducer {
         return itemIDs
     }
 
+    private mutating func reconcileDetachedConversationItems(
+        _ items: [NormalizedConversationItem],
+        wallTimeUnixMS: Int,
+        threadID: String,
+        codexTurnID: String,
+        candidates: [String],
+        producedBy: [[String: Any]]
+    ) throws -> [String] {
+        var itemIDs: [String] = []
+        for item in items {
+            let itemID = findMatchingSnapshotItem(
+                previousSnapshot: candidates,
+                usedItemIDs: itemIDs,
+                normalized: item
+            ) ?? createConversationItem(
+                item,
+                wallTimeUnixMS: wallTimeUnixMS,
+                threadID: threadID,
+                codexTurnID: codexTurnID,
+                producedBy: producedBy
+            )
+            try updateConversationItem(itemID, normalized: item, producedBy: producedBy)
+            try attachModelVisibleToolItem(itemID: itemID, normalized: item)
+            try attachModelVisibleCodeCellItem(itemID: itemID, normalized: item)
+            itemIDs.append(itemID)
+        }
+        try flushPendingCodeCellStarts()
+        return itemIDs
+    }
+
     private mutating func createConversationItem(
         _ item: NormalizedConversationItem,
         event: [String: Any],
@@ -970,6 +1119,31 @@ struct DebugTraceReducer {
             "thread_id": threadID,
             "codex_turn_id": codexTurnID,
             "first_seen_at_unix_ms": try Self.requiredInt(event, key: "wall_time_unix_ms"),
+            "role": item.role,
+            "channel": item.channel.map { $0 as Any } ?? NSNull(),
+            "kind": item.kind,
+            "body": ["parts": item.parts],
+            "call_id": item.callID.map { $0 as Any } ?? NSNull(),
+            "produced_by": producedBy
+        ]
+        rollout["conversation_items"] = conversationItems
+        return itemID
+    }
+
+    private mutating func createConversationItem(
+        _ item: NormalizedConversationItem,
+        wallTimeUnixMS: Int,
+        threadID: String,
+        codexTurnID: String,
+        producedBy: [[String: Any]]
+    ) -> String {
+        let itemID = nextConversationItemID()
+        var conversationItems = rollout["conversation_items"] as? [String: Any] ?? [:]
+        conversationItems[itemID] = [
+            "item_id": itemID,
+            "thread_id": threadID,
+            "codex_turn_id": codexTurnID,
+            "first_seen_at_unix_ms": wallTimeUnixMS,
             "role": item.role,
             "channel": item.channel.map { $0 as Any } ?? NSNull(),
             "kind": item.kind,
@@ -1674,6 +1848,19 @@ struct DebugTraceReducer {
                 parts: [Self.jsonPart(item, rawPayloadID: rawPayloadID)],
                 callID: item["call_id"] as? String
             )
+        case "compaction", "compaction_summary", "context_compaction":
+            guard let encryptedContent = item["encrypted_content"] as? String else {
+                throw DebugTraceReducerError.invalidTraceObject(
+                    "compaction item in payload \(rawPayloadID) encrypted_content"
+                )
+            }
+            return NormalizedConversationItem(
+                role: "assistant",
+                channel: "summary",
+                kind: "message",
+                parts: [["type": "encoded", "label": "encrypted_content", "value": encryptedContent]],
+                callID: nil
+            )
         default:
             throw DebugTraceReducerError.unsupportedModelItem(type: type, rawPayloadID: rawPayloadID)
         }
@@ -2027,6 +2214,13 @@ struct DebugTraceReducer {
     private static func requiredStringArray(_ dictionary: [String: Any], key: String) throws -> [String] {
         guard let value = dictionary[key] as? [String] else {
             throw DebugTraceReducerError.missingField(key)
+        }
+        return value
+    }
+
+    private static func requiredArray(_ dictionary: [String: Any], key: String, objectName: String) throws -> [Any] {
+        guard let value = dictionary[key] as? [Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("\(objectName) \(key)")
         }
         return value
     }
@@ -2405,6 +2599,16 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         eventCompactionID: String,
         startedCompactionID: String
     )
+    case duplicateCompactionInstall(String)
+    case missingCompactionInstallThread(String)
+    case missingCompactionInstallTurn(String)
+    case unknownCodexTurnForCompactionInstall(compactionID: String, turnID: String)
+    case mismatchedCompactionInstallTurnThread(
+        compactionID: String,
+        eventThreadID: String,
+        turnID: String,
+        turnThreadID: String
+    )
     case duplicateTerminalOperation(String)
     case unknownTerminalOperation(String)
     case mismatchedTerminalProcess(
@@ -2497,6 +2701,16 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "compaction request \(requestID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         case let .mismatchedCompactionRequestCompletion(requestID, eventCompactionID, startedCompactionID):
             return "compaction request \(requestID) completion used compaction \(eventCompactionID), but start used \(startedCompactionID)"
+        case let .duplicateCompactionInstall(compactionID):
+            return "duplicate compaction install for \(compactionID)"
+        case let .missingCompactionInstallThread(compactionID):
+            return "compaction installed event \(compactionID) did not include a thread id"
+        case let .missingCompactionInstallTurn(compactionID):
+            return "compaction installed event \(compactionID) did not include a codex turn id"
+        case let .unknownCodexTurnForCompactionInstall(compactionID, turnID):
+            return "compaction install \(compactionID) referenced unknown codex turn \(turnID)"
+        case let .mismatchedCompactionInstallTurnThread(compactionID, eventThreadID, turnID, turnThreadID):
+            return "compaction install \(compactionID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         case let .duplicateTerminalOperation(toolCallID):
             return "tool runtime start would create a second terminal operation for \(toolCallID)"
         case let .unknownTerminalOperation(operationID):
