@@ -1,0 +1,216 @@
+import XCTest
+@testable import CodexCore
+
+final class ToolDiscoveryTests: XCTestCase {
+    func testDiscoverableToolEnumsUseExpectedWireNames() throws {
+        try XCTAssertJSONObjectEqual(
+            ToolDiscoveryEnumProbe(toolType: .connector, actionType: .install),
+            [
+                "tool_type": "connector",
+                "action_type": "install"
+            ]
+        )
+    }
+
+    func testFilterRequestPluginInstallDiscoverableToolsForCodexTUIOmitsPlugins() {
+        let connector = DiscoverableTool.connector(DiscoverableConnectorInfo(
+            id: "connector_google_calendar",
+            name: "Google Calendar",
+            description: "Plan events and schedules.",
+            installURL: "https://example.test/google-calendar",
+            isAccessible: false,
+            isEnabled: true
+        ))
+        let plugin = DiscoverableTool.plugin(DiscoverablePluginInfo(
+            id: "slack@openai-curated",
+            name: "Slack",
+            description: "Search Slack messages",
+            hasSkills: true,
+            mcpServerNames: ["slack"],
+            appConnectorIDs: ["connector_slack"]
+        ))
+
+        XCTAssertEqual(
+            filterRequestPluginInstallDiscoverableToolsForClient(
+                [connector, plugin],
+                appServerClientName: "codex-tui"
+            ),
+            [connector]
+        )
+        XCTAssertEqual(
+            filterRequestPluginInstallDiscoverableToolsForClient(
+                [connector, plugin],
+                appServerClientName: "codex-vscode"
+            ),
+            [connector, plugin]
+        )
+    }
+
+    func testCollectRequestPluginInstallEntriesMatchesRustMapping() {
+        let connector = DiscoverableTool.connector(DiscoverableConnectorInfo(
+            id: "connector_google_calendar",
+            name: "Google Calendar",
+            description: "Plan events and schedules.",
+            installURL: "https://example.test/google-calendar",
+            isAccessible: false,
+            isEnabled: true,
+            pluginDisplayNames: ["Calendar Plugin"]
+        ))
+        let plugin = DiscoverableTool.plugin(DiscoverablePluginInfo(
+            id: "slack@openai-curated",
+            name: "Slack",
+            description: "Search Slack messages",
+            hasSkills: true,
+            mcpServerNames: ["slack"],
+            appConnectorIDs: ["connector_slack"]
+        ))
+
+        XCTAssertEqual(
+            collectRequestPluginInstallEntries([connector, plugin]),
+            [
+                RequestPluginInstallEntry(
+                    id: "connector_google_calendar",
+                    name: "Google Calendar",
+                    description: "Plan events and schedules.",
+                    toolType: .connector,
+                    hasSkills: false,
+                    mcpServerNames: [],
+                    appConnectorIDs: []
+                ),
+                RequestPluginInstallEntry(
+                    id: "slack@openai-curated",
+                    name: "Slack",
+                    description: "Search Slack messages",
+                    toolType: .plugin,
+                    hasSkills: true,
+                    mcpServerNames: ["slack"],
+                    appConnectorIDs: ["connector_slack"]
+                )
+            ]
+        )
+    }
+
+    func testBuildRequestPluginInstallElicitationRequestUsesExpectedShape() throws {
+        let args = RequestPluginInstallArgs(
+            toolType: .connector,
+            actionType: .install,
+            toolID: "connector_2128aebfecb84f64a069897515042a44",
+            suggestReason: "Plan and reference events from your calendar"
+        )
+        let connector = DiscoverableTool.connector(DiscoverableConnectorInfo(
+            id: "connector_2128aebfecb84f64a069897515042a44",
+            name: "Google Calendar",
+            description: "Plan events and schedules.",
+            installURL: "https://chatgpt.com/apps/google-calendar/connector_2128aebfecb84f64a069897515042a44",
+            isAccessible: false,
+            isEnabled: true
+        ))
+
+        let request = try buildRequestPluginInstallElicitationRequest(
+            serverName: "codex-apps",
+            threadID: "thread-1",
+            turnID: "turn-1",
+            args: args,
+            suggestReason: "Plan and reference events from your calendar",
+            tool: connector
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "codex-apps",
+            "mode": "form",
+            "_meta": [
+                "codex_approval_kind": "tool_suggestion",
+                "persist": "always",
+                "tool_type": "connector",
+                "suggest_type": "install",
+                "suggest_reason": "Plan and reference events from your calendar",
+                "tool_id": "connector_2128aebfecb84f64a069897515042a44",
+                "tool_name": "Google Calendar",
+                "install_url": "https://chatgpt.com/apps/google-calendar/connector_2128aebfecb84f64a069897515042a44"
+            ],
+            "message": "Plan and reference events from your calendar",
+            "requestedSchema": [
+                "type": "object",
+                "properties": [:]
+            ]
+        ])
+    }
+
+    func testBuildRequestPluginInstallElicitationRequestForPluginOmitsInstallURL() throws {
+        let args = RequestPluginInstallArgs(
+            toolType: .plugin,
+            actionType: .install,
+            toolID: "sample@openai-curated",
+            suggestReason: "Use the sample plugin's skills and MCP server"
+        )
+        let plugin = DiscoverableTool.plugin(DiscoverablePluginInfo(
+            id: "sample@openai-curated",
+            name: "Sample Plugin",
+            description: "Includes skills, MCP servers, and apps.",
+            hasSkills: true,
+            mcpServerNames: ["sample-docs"],
+            appConnectorIDs: ["connector_calendar"]
+        ))
+
+        let request = try buildRequestPluginInstallElicitationRequest(
+            serverName: "codex-apps",
+            threadID: "thread-1",
+            turnID: "turn-1",
+            args: args,
+            suggestReason: "Use the sample plugin's skills and MCP server",
+            tool: plugin
+        )
+
+        guard case let .form(meta, message, requestedSchema) = request.request else {
+            return XCTFail("expected form request")
+        }
+        XCTAssertEqual(message, "Use the sample plugin's skills and MCP server")
+        XCTAssertEqual(requestedSchema, AppServerProtocol.McpElicitationSchema(properties: [:]))
+        guard case let .object(metaObject)? = meta else {
+            return XCTFail("expected metadata object")
+        }
+        XCTAssertNil(metaObject["install_url"])
+        XCTAssertEqual(metaObject["tool_type"], .string("plugin"))
+        XCTAssertEqual(metaObject["tool_name"], .string("Sample Plugin"))
+    }
+
+    func testConnectorCompletionRequiresAccessibleConnector() {
+        let accessibleConnectors = [
+            DiscoverableConnectorInfo(
+                id: "calendar",
+                name: "Google Calendar",
+                isAccessible: true,
+                isEnabled: false
+            )
+        ]
+
+        XCTAssertTrue(verifiedConnectorInstallCompleted(
+            toolID: "calendar",
+            accessibleConnectors: accessibleConnectors
+        ))
+        XCTAssertFalse(verifiedConnectorInstallCompleted(
+            toolID: "gmail",
+            accessibleConnectors: accessibleConnectors
+        ))
+        XCTAssertTrue(allRequestedConnectorsPickedUp(
+            expectedConnectorIDs: ["calendar"],
+            accessibleConnectors: accessibleConnectors
+        ))
+        XCTAssertFalse(allRequestedConnectorsPickedUp(
+            expectedConnectorIDs: ["calendar", "gmail"],
+            accessibleConnectors: accessibleConnectors
+        ))
+    }
+}
+
+private struct ToolDiscoveryEnumProbe: Encodable {
+    let toolType: DiscoverableToolType
+    let actionType: DiscoverableToolAction
+
+    private enum CodingKeys: String, CodingKey {
+        case toolType = "tool_type"
+        case actionType = "action_type"
+    }
+}
