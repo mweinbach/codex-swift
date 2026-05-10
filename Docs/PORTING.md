@@ -166,6 +166,8 @@ Source baseline inspected for this scaffold:
   - executable `codex debug clear-memories` now resolves the effective config, clears Rust-compatible `state_5.sqlite` memory rows when present, preserves the no-state-db message path, and removes contents under both memory roots while preserving the root directories.
 - `codex-rs/cli/src/main.rs` debug prompt-input runtime
   - executable `codex debug prompt-input` now emits a pretty-printed JSON model input list with environment context, local image conversion, optional prompt text, and Rust's CRLF/CR prompt normalization. Full Rust session startup side effects, tool router construction, skills injection, and configured environment expansion remain pending.
+- `codex-rs/cli/src/main.rs` debug trace-reduce runtime and `codex-rs/rollout-trace`
+  - executable `codex debug trace-reduce <TRACE_BUNDLE>` now replays Rust trace-bundle manifests plus rollout/thread/Codex-turn lifecycle events, preserves raw payload references, writes the default `<TRACE_BUNDLE>/state.json` or `--output` path, and prints the written path with Rust's newline behavior. Rich reducer arms for inference calls, conversation snapshots, tools, code cells, terminal operations, compactions, and interaction edges remain pending and currently fail explicitly instead of emitting a misleading partial graph.
 - `codex-rs/stdio-to-uds`
   - standalone `codex-stdio-to-uds <socket-path>` executable and hidden `codex stdio-to-uds <socket-path>` command that relay stdin/stdout through a Unix domain socket
 - `codex-rs/ansi-escape`

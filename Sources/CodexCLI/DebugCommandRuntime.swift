@@ -37,8 +37,8 @@ public enum DebugCommandRuntime {
             return pendingRuntime("debug app-server send-message-v2")
         case let .promptInput(prompt, imagePaths):
             return try runPromptInput(prompt: prompt, imagePaths: imagePaths, request: request, dependencies: dependencies)
-        case .traceReduce:
-            return pendingRuntime("debug trace-reduce")
+        case let .traceReduce(traceBundle, output):
+            return try runTraceReduce(traceBundle: traceBundle, output: output)
         case .clearMemories:
             return try await runClearMemories(request: request, dependencies: dependencies)
         }
@@ -128,6 +128,23 @@ public enum DebugCommandRuntime {
             exitCode: 78,
             stderrMessage: "codex-swift: command '\(command)' runtime port is not complete yet."
         )
+    }
+
+    private static func runTraceReduce(
+        traceBundle: String,
+        output: String?
+    ) throws -> CodexCLI.CommandExecutionResult {
+        let bundleURL = URL(fileURLWithPath: traceBundle, isDirectory: true)
+        let outputURL = output.map { URL(fileURLWithPath: $0, isDirectory: false) }
+            ?? bundleURL.appendingPathComponent("state.json", isDirectory: false)
+        var reducer = try DebugTraceReducer(bundleURL: bundleURL)
+        let reduced = try reducer.replay()
+        let data = try JSONSerialization.data(
+            withJSONObject: reduced,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: outputURL, options: Data.WritingOptions.atomic)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "\(outputURL.path)\n")
     }
 
     private static func runClearMemories(

@@ -152,6 +152,102 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionRoot.path), [])
     }
 
+    func testTraceReduceWritesRustShapedLifecycleStateToDefaultOutput() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        try writeLifecycleTraceBundle(at: bundle)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        let stateURL = bundle.appendingPathComponent("state.json", isDirectory: false)
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.stdoutMessage, "\(stateURL.path)\n")
+
+        let state = try loadJSONObject(at: stateURL)
+        XCTAssertEqual(state["schema_version"] as? Int, 1)
+        XCTAssertEqual(state["trace_id"] as? String, "trace-1")
+        XCTAssertEqual(state["rollout_id"] as? String, "rollout-1")
+        XCTAssertEqual(state["root_thread_id"] as? String, "thread-root")
+        XCTAssertEqual(state["started_at_unix_ms"] as? Int, 100)
+        XCTAssertEqual(state["ended_at_unix_ms"] as? Int, 106)
+        XCTAssertEqual(state["status"] as? String, "completed")
+
+        let threads = try XCTUnwrap(state["threads"] as? [String: Any])
+        let rootThread = try XCTUnwrap(threads["thread-root"] as? [String: Any])
+        XCTAssertEqual(rootThread["agent_path"] as? String, "/root")
+        XCTAssertEqual(rootThread["nickname"] as? String, "Main")
+        XCTAssertEqual(rootThread["default_model"] as? String, "gpt-test")
+        XCTAssertEqual((rootThread["origin"] as? [String: Any])?["type"] as? String, "root")
+        let threadExecution = try XCTUnwrap(rootThread["execution"] as? [String: Any])
+        XCTAssertEqual(threadExecution["started_seq"] as? Int, 2)
+        XCTAssertEqual(threadExecution["ended_seq"] as? Int, 5)
+        XCTAssertEqual(threadExecution["status"] as? String, "completed")
+
+        let turns = try XCTUnwrap(state["codex_turns"] as? [String: Any])
+        let turn = try XCTUnwrap(turns["turn-1"] as? [String: Any])
+        XCTAssertEqual(turn["thread_id"] as? String, "thread-root")
+        let turnExecution = try XCTUnwrap(turn["execution"] as? [String: Any])
+        XCTAssertEqual(turnExecution["started_at_unix_ms"] as? Int, 103)
+        XCTAssertEqual(turnExecution["ended_at_unix_ms"] as? Int, 105)
+        XCTAssertEqual(turnExecution["status"] as? String, "completed")
+
+        let rawPayloads = try XCTUnwrap(state["raw_payloads"] as? [String: Any])
+        let metadataPayload = try XCTUnwrap(rawPayloads["payload-session"] as? [String: Any])
+        XCTAssertEqual(metadataPayload["path"] as? String, "payloads/session.json")
+    }
+
+    func testTraceReduceUsesCustomOutputAndSpawnMetadata() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        try writeLifecycleTraceBundle(at: bundle, includeSpawnedThread: true)
+        let output = temp.url.appendingPathComponent("custom-state.json", isDirectory: false)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: output.path)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.stdoutMessage, "\(output.path)\n")
+        let state = try loadJSONObject(at: output)
+        let threads = try XCTUnwrap(state["threads"] as? [String: Any])
+        let childThread = try XCTUnwrap(threads["thread-child"] as? [String: Any])
+        XCTAssertEqual(childThread["agent_path"] as? String, "/root/repo_file_counter")
+        XCTAssertEqual(childThread["nickname"] as? String, "Kepler")
+        let origin = try XCTUnwrap(childThread["origin"] as? [String: Any])
+        XCTAssertEqual(origin["type"] as? String, "spawned")
+        XCTAssertEqual(origin["parent_thread_id"] as? String, "thread-root")
+        XCTAssertEqual(origin["spawn_edge_id"] as? String, "edge:spawn:thread-root:thread-child")
+        XCTAssertEqual(origin["task_name"] as? String, "repo_file_counter")
+        XCTAssertEqual(origin["agent_role"] as? String, "worker")
+    }
+
+    func testTraceReduceRejectsUnsupportedSemanticEvents() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+        try writeTraceBundle(
+            at: bundle,
+            events: [
+                traceEvent(seq: 1, wallTime: 101, payload: [
+                    "type": "tool_call_started",
+                    "tool_call_id": "tool-1"
+                ])
+            ]
+        )
+
+        do {
+            _ = try await DebugCommandRuntime.run(
+                CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+                dependencies: testDependencies(codexHome: temp.url)
+            )
+            XCTFail("expected unsupported rich event to fail")
+        } catch {
+            XCTAssertEqual(String(describing: error), "unsupported trace event payload type tool_call_started")
+        }
+    }
+
     private func testDependencies(codexHome: URL) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
@@ -268,6 +364,143 @@ final class DebugCommandRuntimeTests: XCTestCase {
         let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         let data = try XCTUnwrap(Data(base64Encoded: encoded))
         try data.write(to: path)
+    }
+
+    private func writeLifecycleTraceBundle(
+        at bundle: URL,
+        includeSpawnedThread: Bool = false
+    ) throws {
+        let sessionPayload: [String: Any] = [
+            "raw_payload_id": "payload-session",
+            "kind": ["type": "session_metadata"],
+            "path": "payloads/session.json"
+        ]
+        var events: [[String: Any]] = [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "rollout_started",
+                "trace_id": "trace-1",
+                "root_thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root-from-event",
+                "metadata_payload": sessionPayload
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 4, wallTime: 105, threadID: "thread-root", payload: [
+                "type": "codex_turn_ended",
+                "codex_turn_id": "turn-1",
+                "status": "completed"
+            ])
+        ]
+        if includeSpawnedThread {
+            let childPayload: [String: Any] = [
+                "raw_payload_id": "payload-child-session",
+                "kind": ["type": "session_metadata"],
+                "path": "payloads/child-session.json"
+            ]
+            events.append(traceEvent(seq: 5, wallTime: 105, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-child",
+                "agent_path": "/event-child",
+                "metadata_payload": childPayload
+            ]))
+        }
+        events.append(contentsOf: [
+            traceEvent(seq: includeSpawnedThread ? 6 : 5, wallTime: 105, payload: [
+                "type": "thread_ended",
+                "thread_id": "thread-root",
+                "status": "completed"
+            ]),
+            traceEvent(seq: includeSpawnedThread ? 7 : 6, wallTime: 106, payload: [
+                "type": "rollout_ended",
+                "status": "completed"
+            ])
+        ])
+        try writeTraceBundle(at: bundle, events: events)
+
+        let payloads = bundle.appendingPathComponent("payloads", isDirectory: true)
+        try writeJSONObject([
+            "agent_path": "/root",
+            "nickname": "Main",
+            "model": "gpt-test",
+            "session_source": ["exec": [:]]
+        ], to: payloads.appendingPathComponent("session.json", isDirectory: false))
+        if includeSpawnedThread {
+            try writeJSONObject([
+                "agent_path": "/root/repo_file_counter",
+                "nickname": "Kepler",
+                "agent_role": "worker",
+                "session_source": [
+                    "subagent": [
+                        "thread_spawn": [
+                            "parent_thread_id": "thread-root",
+                            "agent_path": "/root/repo_file_counter",
+                            "task_name": "repo_file_counter",
+                            "agent_role": "worker"
+                        ]
+                    ]
+                ]
+            ], to: payloads.appendingPathComponent("child-session.json", isDirectory: false))
+        }
+    }
+
+    private func writeTraceBundle(at bundle: URL, events: [[String: Any]]) throws {
+        try FileManager.default.createDirectory(
+            at: bundle.appendingPathComponent("payloads", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try writeJSONObject([
+            "schema_version": 1,
+            "trace_id": "trace-1",
+            "rollout_id": "rollout-1",
+            "root_thread_id": "thread-root",
+            "started_at_unix_ms": 100,
+            "raw_event_log": "trace.jsonl",
+            "payloads_dir": "payloads"
+        ], to: bundle.appendingPathComponent("manifest.json", isDirectory: false))
+        let lines = try events.map { event -> String in
+            let data = try JSONSerialization.data(withJSONObject: event, options: [.sortedKeys])
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+        try lines.joined(separator: "\n").write(
+            to: bundle.appendingPathComponent("trace.jsonl", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private func traceEvent(
+        seq: Int,
+        wallTime: Int,
+        threadID: String? = nil,
+        codexTurnID: String? = nil,
+        payload: [String: Any]
+    ) -> [String: Any] {
+        [
+            "schema_version": 1,
+            "seq": seq,
+            "wall_time_unix_ms": wallTime,
+            "rollout_id": "rollout-1",
+            "thread_id": threadID ?? NSNull(),
+            "codex_turn_id": codexTurnID ?? NSNull(),
+            "payload": payload
+        ]
+    }
+
+    private func writeJSONObject(_ object: [String: Any], to url: URL) throws {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+    }
+
+    private func loadJSONObject(at url: URL) throws -> [String: Any] {
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 }
 
