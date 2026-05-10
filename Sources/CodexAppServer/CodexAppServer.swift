@@ -4968,7 +4968,6 @@ public enum CodexAppServer {
             )
             let pluginRoot = try extractedRemotePluginRoot(
                 extractionRoot: extractionRoot,
-                archivePath: archivePath,
                 failurePrefix: failurePrefix
             )
             let installedPath = try installLocalPluginCacheEntry(
@@ -5003,6 +5002,11 @@ public enum CodexAppServer {
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        try validateRemotePluginBundleArchive(
+            archivePath: archivePath,
+            environment: environment,
+            failurePrefix: failurePrefix
+        )
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
@@ -5018,28 +5022,127 @@ public enum CodexAppServer {
         }
     }
 
+    private static func validateRemotePluginBundleArchive(
+        archivePath: URL,
+        environment: [String: String],
+        failurePrefix: String
+    ) throws {
+        let listing = try remotePluginBundleArchiveListing(
+            archivePath: archivePath,
+            environment: environment,
+            failurePrefix: failurePrefix
+        )
+        var extractedBytes = 0
+        let maxExtractedBytes = 250 * 1024 * 1024
+        for line in listing.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
+            try validateRemotePluginBundleArchiveEntry(
+                line,
+                extractedBytes: &extractedBytes,
+                maxExtractedBytes: maxExtractedBytes,
+                failurePrefix: failurePrefix
+            )
+        }
+    }
+
+    private static func remotePluginBundleArchiveListing(
+        archivePath: URL,
+        environment: [String: String],
+        failurePrefix: String
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-tvzf", archivePath.path]
+        process.environment = environment
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let message = [stderr, stdout]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            throw AppServerError.internalError(
+                "\(failurePrefix): failed to read remote plugin bundle tar: \(message)"
+            )
+        }
+        return stdout
+    }
+
+    private static func validateRemotePluginBundleArchiveEntry(
+        _ line: String,
+        extractedBytes: inout Int,
+        maxExtractedBytes: Int,
+        failurePrefix: String
+    ) throws {
+        let fields = line.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true).map(String.init)
+        guard fields.count >= 9,
+              let mode = fields.first,
+              let entryType = mode.first,
+              let entrySize = Int(fields[4])
+        else {
+            throw AppServerError.internalError(
+                "\(failurePrefix): failed to read remote plugin bundle tar entry"
+            )
+        }
+        let entryPath = fields[8].components(separatedBy: " -> ").first ?? fields[8]
+        if entryType == "l" || entryType == "h" {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle tar entry `\(entryPath)` is a link"
+            )
+        }
+        guard entryType == "d" || entryType == "-" else {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle tar entry `\(entryPath)` has unsupported type \(entryType)"
+            )
+        }
+        try validateRemotePluginBundleEntryPath(entryPath, failurePrefix: failurePrefix)
+        if entryType == "-" {
+            let nextTotal = extractedBytes + entrySize
+            if nextTotal > maxExtractedBytes {
+                throw AppServerError.internalError(
+                    "\(failurePrefix): remote plugin bundle extracted size would be \(nextTotal) bytes, exceeding the maximum total size of \(maxExtractedBytes) bytes"
+                )
+            }
+            extractedBytes = nextTotal
+        }
+    }
+
+    private static func validateRemotePluginBundleEntryPath(
+        _ entryPath: String,
+        failurePrefix: String
+    ) throws {
+        let normalized = entryPath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let components = normalized
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { $0 != "." }
+        if components.isEmpty {
+            return
+        }
+        if entryPath.hasPrefix("/") || components.contains("..") || components.contains("") {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle tar entry `\(entryPath)` escapes extraction root"
+            )
+        }
+    }
+
     private static func extractedRemotePluginRoot(
         extractionRoot: URL,
-        archivePath: URL,
         failurePrefix: String
     ) throws -> URL {
         if localPluginManifest(root: extractionRoot).name != nil {
             return extractionRoot
         }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: extractionRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
+        throw AppServerError.internalError(
+            "\(failurePrefix): remote plugin bundle did not contain a standard plugin root with plugin.json"
         )
-        let pluginRoots = entries.filter { entry in
-            entry.path != archivePath.path && localPluginManifest(root: entry).name != nil
-        }
-        guard pluginRoots.count == 1, let pluginRoot = pluginRoots.first else {
-            throw AppServerError.internalError(
-                "\(failurePrefix): remote plugin bundle did not contain a standard plugin root with plugin.json"
-            )
-        }
-        return pluginRoot
     }
 
     private static func localPluginInstallResult(
