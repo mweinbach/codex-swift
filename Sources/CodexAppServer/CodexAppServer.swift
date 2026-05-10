@@ -1690,7 +1690,7 @@ public enum CodexAppServer {
     fileprivate static func threadArchiveResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> [String: Any] {
+    ) throws -> (result: [String: Any], archivedThreadIDs: [String]) {
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -1709,7 +1709,29 @@ public enum CodexAppServer {
         }
 
         try archiveConversation(conversationID: conversationID, rolloutPath: rolloutPath, configuration: configuration)
-        return [:]
+        var archivedThreadIDs = [conversationID.description]
+        let descendantIDs = try spawnedDescendantThreadIDs(rootThreadID: conversationID, configuration: configuration)
+        for descendantID in descendantIDs.reversed() {
+            guard let descendantConversationID = try? ConversationId(string: descendantID.description),
+                  let descendantRolloutPath = try? rolloutPathForConversation(
+                    descendantConversationID,
+                    configuration: configuration
+                  )
+            else {
+                continue
+            }
+            do {
+                try archiveConversation(
+                    conversationID: descendantConversationID,
+                    rolloutPath: descendantRolloutPath,
+                    configuration: configuration
+                )
+                archivedThreadIDs.append(descendantConversationID.description)
+            } catch {
+                continue
+            }
+        }
+        return ([:], archivedThreadIDs)
     }
 
     fileprivate static func threadUnarchiveResult(
@@ -2129,6 +2151,31 @@ public enum CodexAppServer {
             throw AppServerError.internalError("sqlite state db unavailable for thread goals")
         }
         return stateStore
+    }
+
+    private static func spawnedDescendantThreadIDs(
+        rootThreadID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [ThreadId] {
+        guard let stateStore = configuration.stateStore else {
+            return []
+        }
+        let root = try ThreadId(string: rootThreadID.description)
+        do {
+            let descendants = try runAsyncBlocking {
+                try await stateStore.listThreadSpawnDescendants(rootThreadID: root, statusFilter: nil)
+            }
+            var seen = Set([root])
+            var uniqueDescendants: [ThreadId] = []
+            for descendant in descendants where seen.insert(descendant).inserted {
+                uniqueDescendants.append(descendant)
+            }
+            return uniqueDescendants
+        } catch {
+            throw AppServerError.internalError(
+                "failed to list spawned descendants for thread id \(rootThreadID): \(error)"
+            )
+        }
     }
 
     private static func threadGoalObject(_ goal: ThreadGoal) -> [String: Any] {
@@ -16408,14 +16455,13 @@ final class CodexAppServerMessageProcessor {
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: reviewThreadID, turn: turn))
                     }
                 case "thread/archive":
-                    let archivedThreadID = CodexAppServer.stringParam(params?["threadId"])
+                    let archive = try CodexAppServer.threadArchiveResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadArchiveResult(params: params, configuration: configuration)
+                        result: archive.result
                     )
-                    if let archivedThreadID,
-                       let normalizedThreadID = (try? ConversationId(string: archivedThreadID))?.description {
-                        notifications.append(CodexAppServer.threadArchivedNotification(threadID: normalizedThreadID))
+                    for archivedThreadID in archive.archivedThreadIDs {
+                        notifications.append(CodexAppServer.threadArchivedNotification(threadID: archivedThreadID))
                     }
                 case "thread/unarchive":
                     let result = try CodexAppServer.threadUnarchiveResult(params: params, configuration: configuration)

@@ -7696,6 +7696,142 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
     }
 
+    func testThreadArchiveArchivesSpawnedDescendantsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let parentID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-00-00",
+            timestamp: "2025-01-01T00:00:00Z",
+            preview: "parent",
+            provider: "openai"
+        )
+        let childID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-01-00",
+            timestamp: "2025-01-01T00:01:00Z",
+            preview: "child",
+            provider: "openai"
+        )
+        let grandchildID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-02-00",
+            timestamp: "2025-01-01T00:02:00Z",
+            preview: "grandchild",
+            provider: "openai"
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let parentThreadID = try ThreadId(string: parentID)
+        let childThreadID = try ThreadId(string: childID)
+        let grandchildThreadID = try ThreadId(string: grandchildID)
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: parentThreadID,
+            childThreadID: childThreadID,
+            status: .closed
+        )
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: childThreadID,
+            childThreadID: grandchildThreadID,
+            status: .open
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(parentID)"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 4)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(try archivedThreadIDs(from: Array(messages.dropFirst())), [
+            parentID,
+            grandchildID,
+            childID
+        ])
+        for threadID in [parentID, childID, grandchildID] {
+            XCTAssertNil(try RolloutListing.findConversationPathByIDString(
+                codexHome: temp.url,
+                idString: threadID
+            ))
+            XCTAssertNotNil(try archivedRolloutPath(codexHome: temp.url, threadID: threadID))
+        }
+    }
+
+    func testThreadArchiveSkipsFailedSpawnedDescendantLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let parentID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-00-00",
+            timestamp: "2025-01-01T00:00:00Z",
+            preview: "parent",
+            provider: "openai"
+        )
+        let childID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-01-00",
+            timestamp: "2025-01-01T00:01:00Z",
+            preview: "child",
+            provider: "openai"
+        )
+        let grandchildID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T00-02-00",
+            timestamp: "2025-01-01T00:02:00Z",
+            preview: "grandchild",
+            provider: "openai"
+        )
+        let childRolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: childID
+        ))
+        let childArchiveConflict = temp.url
+            .appendingPathComponent("archived_sessions", isDirectory: true)
+            .appendingPathComponent(URL(fileURLWithPath: childRolloutPath).lastPathComponent, isDirectory: true)
+        try FileManager.default.createDirectory(at: childArchiveConflict, withIntermediateDirectories: true)
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let parentThreadID = try ThreadId(string: parentID)
+        let childThreadID = try ThreadId(string: childID)
+        let grandchildThreadID = try ThreadId(string: grandchildID)
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: parentThreadID,
+            childThreadID: childThreadID,
+            status: .closed
+        )
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: childThreadID,
+            childThreadID: grandchildThreadID,
+            status: .open
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/archive","params":{"threadId":"\#(parentID)"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 3)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(try archivedThreadIDs(from: Array(messages.dropFirst())), [
+            parentID,
+            grandchildID
+        ])
+        XCTAssertNotNil(try RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: childID
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: childArchiveConflict.path))
+        for threadID in [parentID, grandchildID] {
+            XCTAssertNil(try RolloutListing.findConversationPathByIDString(
+                codexHome: temp.url,
+                idString: threadID
+            ))
+            XCTAssertNotNil(try archivedRolloutPath(codexHome: temp.url, threadID: threadID))
+        }
+    }
+
     func testThreadUnarchiveRestoresRolloutAndEmitsNotification() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
@@ -12328,6 +12464,32 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func archivedThreadIDs(from messages: [[String: Any]]) throws -> [String] {
+        try messages.map { message in
+            XCTAssertEqual(message["method"] as? String, "thread/archived")
+            let params = try XCTUnwrap(message["params"] as? [String: Any])
+            return try XCTUnwrap(params["threadId"] as? String)
+        }
+    }
+
+    private func archivedRolloutPath(codexHome: URL, threadID: String) throws -> String? {
+        try RolloutListing.getConversations(
+            codexHome: codexHome,
+            pageSize: 100,
+            archivedOnly: true,
+            defaultProvider: "openai"
+        )
+        .items
+        .first(where: { $0.path.hasSuffix("\(threadID).jsonl") })?
+        .path
+    }
+
+    private func createAppServerStateStore(codexHome: URL) throws -> SQLiteAgentGraphStore {
+        let stateDatabaseURL = codexHome.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        return try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
     }
 
     private func assertPersistExtendedHistoryDeprecationNotice(
