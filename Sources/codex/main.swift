@@ -779,7 +779,10 @@ private func runNonInteractiveExec(
         ?? (authResolution.authMode?.isChatGPT == true
             ? ModelsManager.openAIDefaultChatGPTModel
             : ModelsManager.openAIDefaultAPIModel)
-    let modelFamily = ModelsManager.constructModelFamilyOffline(model: resolvedModel)
+    let modelFamily = ModelsManager.constructModelFamilyOffline(
+        model: resolvedModel,
+        configOverrides: settings.modelFamilyConfigOverrides
+    )
     let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: arguments)
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
     let shell = ShellResolver.defaultUserShell()

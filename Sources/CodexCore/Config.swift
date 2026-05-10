@@ -110,6 +110,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var ossProvider: String?
     public var toolSuggest: ToolSuggestConfig
     public var checkForUpdateOnStartup: Bool
+    public var modelContextWindow: Int64?
+    public var modelAutoCompactTokenLimit: Int64?
 
     public init(
         model: String? = nil,
@@ -215,6 +217,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.ossProvider = ossProvider
         self.toolSuggest = ToolSuggestConfig()
         self.checkForUpdateOnStartup = true
+        self.modelContextWindow = nil
+        self.modelAutoCompactTokenLimit = nil
     }
 
     public init(
@@ -509,6 +513,13 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public func legacySandboxPolicy(defaultMode: SandboxMode = .readOnly) -> SandboxPolicy {
         sandboxPolicy ?? SandboxPolicy.fromSandboxMode(sandboxMode ?? defaultMode)
+    }
+
+    public var modelFamilyConfigOverrides: ModelFamilyConfigOverrides {
+        ModelFamilyConfigOverrides(
+            contextWindow: modelContextWindow,
+            autoCompactTokenLimit: modelAutoCompactTokenLimit
+        )
     }
 }
 
@@ -1645,6 +1656,18 @@ private struct ParsedCodexConfigToml {
         if let model = values["model"] {
             config.model = try stringValue(model, key: "\(keyPrefix)model")
         }
+        if let contextWindow = values["model_context_window"] {
+            config.modelContextWindow = try int64Value(
+                contextWindow,
+                key: "\(keyPrefix)model_context_window"
+            )
+        }
+        if let autoCompactTokenLimit = values["model_auto_compact_token_limit"] {
+            config.modelAutoCompactTokenLimit = try int64Value(
+                autoCompactTokenLimit,
+                key: "\(keyPrefix)model_auto_compact_token_limit"
+            )
+        }
         if let provider = values["model_provider"] {
             config.modelProvider = try stringValue(provider, key: "\(keyPrefix)model_provider")
         }
@@ -1815,6 +1838,8 @@ private struct ParsedCodexConfigToml {
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
         key == "model"
+            || key == "model_context_window"
+            || key == "model_auto_compact_token_limit"
             || key == "model_provider"
             || key == "approval_policy"
             || key == "sandbox_mode"
@@ -2033,6 +2058,13 @@ private struct ParsedCodexConfigToml {
             throw CodexConfigLoadError.invalidStringValue(key)
         }
         return Int(integer)
+    }
+
+    private static func int64Value(_ value: ConfigValue, key: String) throws -> Int64 {
+        guard case let .integer(integer) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return integer
     }
 
     private static func uint16Value(_ value: ConfigValue, key: String) throws -> UInt16 {

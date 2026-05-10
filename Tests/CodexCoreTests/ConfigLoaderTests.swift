@@ -19,6 +19,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
         XCTAssertNil(config.modelVerbosity)
+        XCTAssertNil(config.modelContextWindow)
+        XCTAssertNil(config.modelAutoCompactTokenLimit)
         XCTAssertNil(config.serviceTier)
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig())
@@ -77,6 +79,8 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
         model_verbosity = "low"
+        model_context_window = 123456
+        model_auto_compact_token_limit = 120000
         service_tier = "fast"
         chatgpt_base_url = "https://example.test/backend-api/"
         cli_auth_credentials_store = "auto"
@@ -132,6 +136,12 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
         XCTAssertEqual(config.modelVerbosity, .low)
+        XCTAssertEqual(config.modelContextWindow, 123_456)
+        XCTAssertEqual(config.modelAutoCompactTokenLimit, 120_000)
+        XCTAssertEqual(config.modelFamilyConfigOverrides, ModelFamilyConfigOverrides(
+            contextWindow: 123_456,
+            autoCompactTokenLimit: 120_000
+        ))
         XCTAssertEqual(config.serviceTier, "priority")
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")
         XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig(

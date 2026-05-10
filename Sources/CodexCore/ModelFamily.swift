@@ -37,6 +37,7 @@ public struct ModelFamily: Equatable, Sendable {
     public var shellType: ConfigShellToolType
     public var truncationPolicy: TruncationPolicy
     public var inputModalities: [InputModality]
+    public var maxContextWindow: Int64?
 
     private var configuredAutoCompactTokenLimit: Int64?
 
@@ -58,7 +59,8 @@ public struct ModelFamily: Equatable, Sendable {
         defaultReasoningSummary: ReasoningSummary = .auto,
         shellType: ConfigShellToolType = .default,
         truncationPolicy: TruncationPolicy = .bytes(10_000),
-        inputModalities: [InputModality] = InputModality.defaultInputModalities
+        inputModalities: [InputModality] = InputModality.defaultInputModalities,
+        maxContextWindow: Int64? = nil
     ) {
         self.slug = slug
         self.family = family
@@ -78,6 +80,7 @@ public struct ModelFamily: Equatable, Sendable {
         self.shellType = shellType
         self.truncationPolicy = truncationPolicy
         self.inputModalities = inputModalities
+        self.maxContextWindow = maxContextWindow
     }
 
     public func withConfigOverrides(_ overrides: ModelFamilyConfigOverrides) -> ModelFamily {
@@ -86,7 +89,7 @@ public struct ModelFamily: Equatable, Sendable {
             family.supportsReasoningSummaries = supportsReasoningSummaries
         }
         if let contextWindow = overrides.contextWindow {
-            family.contextWindow = contextWindow
+            family.contextWindow = family.maxContextWindow.map { min(contextWindow, $0) } ?? contextWindow
         }
         if let autoCompactTokenLimit = overrides.autoCompactTokenLimit {
             family.configuredAutoCompactTokenLimit = autoCompactTokenLimit
@@ -125,6 +128,7 @@ public struct ModelFamily: Equatable, Sendable {
         inputModalities = model.inputModalities
         supportsParallelToolCalls = model.supportsParallelToolCalls
         contextWindow = model.resolvedContextWindow
+        maxContextWindow = model.maxContextWindow
         configuredAutoCompactTokenLimit = model.autoCompactTokenLimitValue()
         effectiveContextWindowPercent = model.effectiveContextWindowPercent
         experimentalSupportedTools = model.experimentalSupportedTools

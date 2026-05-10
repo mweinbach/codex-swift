@@ -206,6 +206,34 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertEqual(updated.truncationPolicy, .tokens(4_000))
     }
 
+    func testConfigContextWindowOverrideClampsToRemoteMaximumLikeRust() {
+        let updated = ModelsManager.constructModelFamily(
+            model: "gpt-5.1",
+            remoteModels: [
+                ModelInfo(
+                    slug: "gpt-5.1",
+                    displayName: "gpt-5.1",
+                    supportedReasoningLevels: [],
+                    shellType: .default,
+                    visibility: .list,
+                    supportedInAPI: true,
+                    priority: 1,
+                    supportsReasoningSummaries: false,
+                    supportVerbosity: false,
+                    truncationPolicy: .tokens(4_000),
+                    supportsParallelToolCalls: false,
+                    contextWindow: 273_000,
+                    maxContextWindow: 400_000,
+                    experimentalSupportedTools: []
+                )
+            ],
+            configOverrides: ModelFamilyConfigOverrides(contextWindow: 500_000)
+        )
+
+        XCTAssertEqual(updated.contextWindow, 400_000)
+        XCTAssertEqual(updated.maxContextWindow, 400_000)
+    }
+
     func testTruncationPolicyConfigConvertsToRuntimePolicy() {
         XCTAssertEqual(TruncationPolicyConfig.bytes(1_024).runtimePolicy, .bytes(1_024))
         XCTAssertEqual(TruncationPolicyConfig.tokens(2_048).runtimePolicy, .tokens(2_048))
