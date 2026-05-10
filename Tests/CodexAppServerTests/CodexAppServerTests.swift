@@ -11027,6 +11027,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "user""#)
     }
 
+    func testConfigValueWriteRejectsManagedFeatureRequirementConflictLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+        try """
+        [features]
+        personality = true
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"features.personality","value":false,"mergeStrategy":"replace"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("Invalid configuration: invalid value for `features`: `features.personality=false`") == true)
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+    }
+
+    func testConfigValueWriteRejectsManagedProfileFeatureRequirementConflictLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+        try """
+        [features]
+        personality = true
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"profiles.enterprise.features.personality","value":false,"mergeStrategy":"replace"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("Invalid configuration: invalid value for `features`: `profiles.enterprise.features.personality=false`") == true)
+        let data = try XCTUnwrap(error["data"] as? [String: Any])
+        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+    }
+
+    func testConfigValueWriteReportsManagedOverrideLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+        try #"approval_policy = "never""#.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"approval_policy","value":"on-request","mergeStrategy":"replace"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "okOverridden")
+        let overridden = try XCTUnwrap(result["overriddenMetadata"] as? [String: Any])
+        XCTAssertEqual(
+            overridden["message"] as? String,
+            "Overridden by legacy managed_config.toml: \(managedConfigFile.standardizedFileURL.path)"
+        )
+        XCTAssertEqual(overridden["effectiveValue"] as? String, "never")
+        let layer = try XCTUnwrap(overridden["overridingLayer"] as? [String: Any])
+        let layerName = try XCTUnwrap(layer["name"] as? [String: Any])
+        XCTAssertEqual(layerName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual(layerName["file"] as? String, managedConfigFile.standardizedFileURL.path)
+    }
+
     func testConfigValueWriteUpsertsNestedTableLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

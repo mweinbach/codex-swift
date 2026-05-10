@@ -13696,16 +13696,22 @@ public enum CodexAppServer {
         }
 
         var nextConfig = userConfig
+        var editedPaths: [[String]] = []
         for edit in edits {
-            try applyConfigWriteEdit(edit, to: &nextConfig)
+            editedPaths.append(try applyConfigWriteEdit(edit, to: &nextConfig))
         }
 
+        let updatedStack: ConfigLayerStack
         do {
             try CodexConfigLoader.validateForConfigWrite(
                 nextConfig,
                 environment: configuration.environment
             )
-            let updatedStack = stack.withUserConfig(
+            try validateFeatureRequirementsForConfigWrite(
+                nextConfig,
+                featureRequirements: stack.requirementsToml.featureRequirements
+            )
+            updatedStack = stack.withUserConfig(
                 configToml: try AbsolutePath(absolutePath: allowedPath),
                 userConfig: nextConfig
             )
@@ -13720,14 +13726,19 @@ public enum CodexAppServer {
             )
         }
 
+        let overridden = firstOverriddenConfigWrite(
+            layers: updatedStack,
+            effectiveConfig: updatedStack.effectiveConfig(),
+            editedPaths: editedPaths
+        )
         try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
         try renderConfigToml(nextConfig).write(to: configFile, atomically: true, encoding: .utf8)
 
         return [
-            "status": "ok",
+            "status": overridden == nil ? "ok" : "okOverridden",
             "version": ConfigFingerprint.version(for: nextConfig),
             "filePath": allowedPath,
-            "overriddenMetadata": NSNull()
+            "overriddenMetadata": overridden.map(overriddenMetadataObject) ?? NSNull()
         ]
     }
 
@@ -13868,20 +13879,25 @@ public enum CodexAppServer {
         }
     }
 
-    private static func applyConfigWriteEdit(_ edit: ConfigWriteEdit, to config: inout ConfigValue) throws {
-        let path = edit.keyPath.split(separator: ".").map(String.init)
-        guard !path.isEmpty else {
-            throw AppServerError.invalidRequestWithData(
-                "keyPath must not be empty",
-                data: ["config_write_error_code": "configValidationError"]
-            )
-        }
+    private static func applyConfigWriteEdit(_ edit: ConfigWriteEdit, to config: inout ConfigValue) throws -> [String] {
+        let path = try configWriteKeyPath(edit.keyPath)
 
         if let value = edit.value {
             setConfigValue(value, at: path, mergeStrategy: edit.mergeStrategy, in: &config)
         } else {
             _ = removeConfigValue(at: path, in: &config)
         }
+        return path
+    }
+
+    private static func configWriteKeyPath(_ keyPath: String) throws -> [String] {
+        guard !keyPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppServerError.invalidRequestWithData(
+                "keyPath must not be empty",
+                data: ["config_write_error_code": "configValidationError"]
+            )
+        }
+        return keyPath.components(separatedBy: ".")
     }
 
     private static func setConfigValue(
@@ -13938,6 +13954,158 @@ public enum CodexAppServer {
             target = .table(table)
         }
         return removed
+    }
+
+    private static func validateFeatureRequirementsForConfigWrite(
+        _ config: ConfigValue,
+        featureRequirements: [String: Bool]?
+    ) throws {
+        guard let featureRequirements, !featureRequirements.isEmpty else {
+            return
+        }
+        let root = configTable(config) ?? [:]
+        try validateFeatureTable(
+            root["features"],
+            pathPrefix: "features",
+            featureRequirements: featureRequirements
+        )
+        guard let profiles = root["profiles"].flatMap(configTable) else {
+            return
+        }
+        for profileName in profiles.keys.sorted() {
+            guard let profile = profiles[profileName].flatMap(configTable) else {
+                continue
+            }
+            try validateFeatureTable(
+                profile["features"],
+                pathPrefix: "profiles.\(profileName).features",
+                featureRequirements: featureRequirements
+            )
+        }
+    }
+
+    private static func validateFeatureTable(
+        _ value: ConfigValue?,
+        pathPrefix: String,
+        featureRequirements: [String: Bool]
+    ) throws {
+        guard let features = value.flatMap(configTable) else {
+            return
+        }
+        for feature in features.keys.sorted() {
+            guard let required = featureRequirements[feature],
+                  case let .bool(enabled)? = features[feature],
+                  required != enabled
+            else {
+                continue
+            }
+            throw AppServerError.invalidRequest(
+                "invalid value for `features`: `\(pathPrefix).\(feature)=\(enabled)`"
+            )
+        }
+    }
+
+    private struct OverriddenConfigWrite {
+        var message: String
+        var overridingLayer: ConfigLayerMetadata
+        var effectiveValue: ConfigValue?
+    }
+
+    private static func firstOverriddenConfigWrite(
+        layers: ConfigLayerStack,
+        effectiveConfig: ConfigValue,
+        editedPaths: [[String]]
+    ) -> OverriddenConfigWrite? {
+        for path in editedPaths {
+            if let overridden = overriddenConfigWrite(layers: layers, effectiveConfig: effectiveConfig, path: path) {
+                return overridden
+            }
+        }
+        return nil
+    }
+
+    private static func overriddenConfigWrite(
+        layers: ConfigLayerStack,
+        effectiveConfig: ConfigValue,
+        path: [String]
+    ) -> OverriddenConfigWrite? {
+        guard let userLayer = layers.getUserLayer() else {
+            return nil
+        }
+        let userValue = configValue(at: path, in: userLayer.config)
+        let effectiveValue = configValue(at: path, in: effectiveConfig)
+        if userValue != nil, userValue == effectiveValue {
+            return nil
+        }
+        if userValue == nil, effectiveValue == nil {
+            return nil
+        }
+        guard let overridingLayer = effectiveConfigLayer(layers: layers, path: path) else {
+            return nil
+        }
+        return OverriddenConfigWrite(
+            message: overrideMessage(for: overridingLayer.name),
+            overridingLayer: overridingLayer,
+            effectiveValue: effectiveValue
+        )
+    }
+
+    private static func effectiveConfigLayer(layers: ConfigLayerStack, path: [String]) -> ConfigLayerMetadata? {
+        for layer in layers.layersHighToLow() where configValue(at: path, in: layer.config) != nil {
+            return layer.metadata()
+        }
+        return nil
+    }
+
+    private static func configValue(at path: [String], in root: ConfigValue) -> ConfigValue? {
+        var current = root
+        for segment in path {
+            switch current {
+            case let .table(table):
+                guard let next = table[segment] else {
+                    return nil
+                }
+                current = next
+            case let .array(items):
+                guard let index = Int(segment), items.indices.contains(index) else {
+                    return nil
+                }
+                current = items[index]
+            case .none, .string, .integer, .double, .bool:
+                return nil
+            }
+        }
+        return current
+    }
+
+    private static func overriddenMetadataObject(_ overridden: OverriddenConfigWrite) -> [String: Any] {
+        [
+            "message": overridden.message,
+            "overridingLayer": [
+                "name": sourceObject(overridden.overridingLayer.name),
+                "version": overridden.overridingLayer.version
+            ],
+            "effectiveValue": overridden.effectiveValue.map(configValueObject) ?? NSNull()
+        ]
+    }
+
+    private static func overrideMessage(for layer: ConfigLayerSource) -> String {
+        switch layer {
+        case let .mdm(domain, _):
+            return "Overridden by managed policy (MDM): \(domain)"
+        case let .system(file):
+            return "Overridden by managed config (system): \(file.path)"
+        case let .project(dotCodexFolder):
+            return "Overridden by project config: \(dotCodexFolder.path)/config.toml"
+        case .sessionFlags:
+            return "Overridden by session flags"
+        case let .user(file):
+            return "Overridden by user config: \(file.path)"
+        case let .legacyManagedConfigTomlFromFile(file):
+            return "Overridden by legacy managed_config.toml: \(file.path)"
+        case .legacyManagedConfigTomlFromMdm:
+            return "Overridden by legacy managed configuration from MDM"
+        }
     }
 
     private static func renderConfigToml(_ value: ConfigValue) -> String {

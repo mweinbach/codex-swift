@@ -926,6 +926,8 @@ Source baseline inspected for this scaffold:
   - ported Rust's `strip_images_when_unsupported` behavior for text-only model contexts: message `input_image` blocks and structured function/custom tool output images are replaced with the exact Rust placeholder text, image-generation result payloads are cleared, and image-capable model contexts are left unchanged.
 - `codex-rs/core/src/context_manager/history.rs` prompt input normalization
   - wired Responses prompt streaming through Rust's `History::for_prompt` normalization path for Swift model requests: request input now gets missing tool outputs inserted, orphan outputs removed, and image payloads stripped according to the selected model family's input modalities before the Responses API body is built.
+- `codex-rs/app-server/src/config_manager_service.rs` config write managed constraints
+  - matched Rust config write validation for managed feature requirements on user/profile `features` paths and Rust's `okOverridden` response metadata when a higher-precedence config layer masks a written user value.
 
 ## Known Gaps
 
