@@ -444,7 +444,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/turn_processor.rs` thread response-item injection
   - `thread/inject_items` now validates non-empty raw Responses API items, rejects invalid item payloads, rejects missing rollouts, returns `{}`, and appends Rust-compatible `response_item` rollout records so injected context is visible to later rollout reconstruction.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` memory reset
-  - `memory/reset` now returns `{}`, creates and empties `memories` and `memories_extensions`, rejects symlinked memory roots, and preserves the root directories. Rust sqlite memory-row clearing is still pending with the broader Swift state DB port.
+  - `memory/reset` now requires a configured Swift SQLite state store, clears `stage1_outputs` plus memory stage-1/global-consolidation job rows while preserving thread rows and `memory_mode`, returns `{}`, creates and empties `memories` and `memories_extensions`, rejects symlinked memory roots, and preserves the root directories.
 - `codex-rs/app-server/src/request_processors/fs_processor.rs` filesystem methods
   - `fs/readFile`, `fs/writeFile`, `fs/createDirectory`, `fs/getMetadata`, `fs/readDirectory`, `fs/remove`, and `fs/copy` now validate absolute paths, preserve Rust response shapes and default recursive/force behavior, base64 encode/decode file bytes, report symlink-aware metadata, reject directory copies without `recursive: true`, prevent recursive self/descendant copies, and preserve symlinks in recursive copies.
 - `codex-rs/app-server/src/fs_watch.rs` filesystem watch routes

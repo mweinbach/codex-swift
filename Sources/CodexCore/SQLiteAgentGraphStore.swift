@@ -691,6 +691,26 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return Int(sqlite3_changes(database))
     }
 
+    public func clearMemoryData() async throws {
+        let database = handle.database
+        try Self.execute("BEGIN IMMEDIATE TRANSACTION", bindings: [SQLiteBinding](), database: database)
+        do {
+            try Self.execute("DELETE FROM stage1_outputs", bindings: [SQLiteBinding](), database: database)
+            try Self.execute(
+                "DELETE FROM jobs WHERE kind = ? OR kind = ?",
+                bindings: [
+                    .text("memory_stage1"),
+                    .text("memory_consolidate_global")
+                ],
+                database: database
+            )
+            try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+        } catch {
+            try? Self.execute("ROLLBACK", bindings: [SQLiteBinding](), database: database)
+            throw error
+        }
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus

@@ -1804,6 +1804,9 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMemoryResetClearsMemoryRootsAndPreservesDirectories() throws {
         let temp = try TemporaryDirectory()
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerMemoryTables(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
         let memoryRoot = temp.url.appendingPathComponent("memories", isDirectory: true)
         let memoryExtensionsRoot = temp.url.appendingPathComponent("memories_extensions", isDirectory: true)
         let summaries = memoryRoot.appendingPathComponent("rollout_summaries", isDirectory: true)
@@ -1830,7 +1833,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let response = try appServerResponse(
             #"{"id":1,"method":"memory/reset","params":{}}"#,
-            codexHome: temp.url,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -1854,11 +1857,74 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "memory/reset requires experimentalApi capability")
     }
 
-    func testMemoryResetCreatesMissingRootsAndRejectsSymlinkedRoot() throws {
+    func testMemoryResetRequiresStateDbWhenExperimentalAPIEnabled() throws {
         let temp = try TemporaryDirectory()
-        let missingRoots = try appServerResponse(
+
+        let response = try appServerResponse(
             #"{"id":1,"method":"memory/reset","params":{}}"#,
             codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "sqlite state db unavailable for memory reset")
+    }
+
+    func testMemoryResetClearsStateRowsAndPreservesThreadMemoryModes() async throws {
+        let temp = try TemporaryDirectory()
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        try createAppServerMemoryTables(databaseURL: stateDatabaseURL)
+        try insertAppServerMemoryRows(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let threadID = try ThreadId(string: "00000000-0000-0000-0000-000000009020")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: threadID,
+            rolloutPath: temp.url.appendingPathComponent("sessions/test.jsonl", isDirectory: false).path,
+            createdAt: try appServerDate("2025-01-05T13:00:00Z"),
+            updatedAt: try appServerDate("2025-01-05T13:00:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "memory thread",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "memory thread"
+        ))
+        _ = try await stateStore.setThreadMemoryMode(threadID: threadID, memoryMode: "disabled")
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+
+        XCTAssertEqual(try sqliteCount(databaseURL: stateDatabaseURL, query: "SELECT COUNT(*) FROM stage1_outputs"), 0)
+        XCTAssertEqual(try sqliteCount(databaseURL: stateDatabaseURL, query: "SELECT COUNT(*) FROM jobs"), 1)
+        XCTAssertEqual(
+            try sqliteCount(
+                databaseURL: stateDatabaseURL,
+                query: "SELECT COUNT(*) FROM jobs WHERE kind = 'not_memory'"
+            ),
+            1
+        )
+        let memoryMode = try await stateStore.getThreadMemoryMode(threadID: threadID)
+        XCTAssertEqual(memoryMode, "disabled")
+    }
+
+    func testMemoryResetCreatesMissingRootsAndRejectsSymlinkedRoot() throws {
+        let temp = try TemporaryDirectory()
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerMemoryTables(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        let missingRoots = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
         XCTAssertNotNil(missingRoots["result"] as? [String: Any])
@@ -1879,7 +1945,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let rejected = try appServerResponse(
             #"{"id":2,"method":"memory/reset","params":{}}"#,
-            codexHome: symlink.deletingLastPathComponent(),
+            configuration: testConfiguration(codexHome: symlink.deletingLastPathComponent(), stateStore: stateStore),
             experimentalAPIEnabled: true
         )
         let error = try XCTUnwrap(rejected["error"] as? [String: Any])
@@ -10613,6 +10679,74 @@ final class CodexAppServerTests: XCTestCase {
             )
             """
         XCTAssertEqual(sqlite3_exec(openedDatabase, query, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func createAppServerMemoryTables(databaseURL: URL) throws {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        let query =
+            """
+            CREATE TABLE IF NOT EXISTS stage1_outputs (
+                thread_id TEXT NOT NULL PRIMARY KEY,
+                source_updated_at INTEGER NOT NULL,
+                raw_memory TEXT NOT NULL,
+                rollout_summary TEXT NOT NULL,
+                generated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS jobs (
+                kind TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                PRIMARY KEY(kind, job_key)
+            );
+            """
+        XCTAssertEqual(sqlite3_exec(openedDatabase, query, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func insertAppServerMemoryRows(databaseURL: URL) throws {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        let query =
+            """
+            INSERT INTO stage1_outputs (
+                thread_id,
+                source_updated_at,
+                raw_memory,
+                rollout_summary,
+                generated_at
+            ) VALUES
+                ('00000000-0000-0000-0000-000000009020', 1, 'raw', 'summary', 2);
+            INSERT INTO jobs (kind, job_key, status) VALUES
+                ('memory_stage1', 'stage1', 'running'),
+                ('memory_consolidate_global', 'global', 'running'),
+                ('not_memory', 'other', 'running');
+            """
+        XCTAssertEqual(sqlite3_exec(openedDatabase, query, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func sqliteCount(databaseURL: URL, query: String) throws -> Int {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(openedDatabase, query, -1, &statement, nil), SQLITE_OK)
+        let preparedStatement = try XCTUnwrap(statement)
+        defer {
+            sqlite3_finalize(preparedStatement)
+        }
+        XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_ROW)
+        return Int(sqlite3_column_int64(preparedStatement, 0))
     }
 
     private func fakeJWT(email: String, plan: String, accountID: String = "acct-test") throws -> String {

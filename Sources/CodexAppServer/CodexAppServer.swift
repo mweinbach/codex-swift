@@ -2294,6 +2294,16 @@ public enum CodexAppServer {
         experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "memory/reset", experimentalAPIEnabled: experimentalAPIEnabled)
+        guard let stateStore = configuration.stateStore else {
+            throw AppServerError.internalError("sqlite state db unavailable for memory reset")
+        }
+        do {
+            try runAsyncBlocking {
+                try await stateStore.clearMemoryData()
+            }
+        } catch {
+            throw AppServerError.internalError("failed to clear memory rows in state db: \(error)")
+        }
         do {
             try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories", isDirectory: true))
             try clearMemoryRootContents(configuration.codexHome.appendingPathComponent("memories_extensions", isDirectory: true))
