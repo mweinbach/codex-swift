@@ -1020,6 +1020,64 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testThreadLifecycleServiceTierNormalizesLegacyFastLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","serviceTier":"fast"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        XCTAssertEqual(startResult["serviceTier"] as? String, "priority")
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let resume = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","serviceTier":"fast"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resume[0]["result"] as? [String: Any])
+        XCTAssertEqual(resumeResult["serviceTier"] as? String, "priority")
+
+        let fork = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)","serviceTier":"fast"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(fork[0]["result"] as? [String: Any])
+        XCTAssertEqual(forkResult["serviceTier"] as? String, "priority")
+
+        let cleared = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)","serviceTier":null}}"#.utf8
+        )))
+        let clearedResult = try XCTUnwrap(cleared[0]["result"] as? [String: Any])
+        XCTAssertTrue(clearedResult["serviceTier"] is NSNull)
+    }
+
+    func testThreadAndTurnServiceTierRejectMalformedValuesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases = [
+            #"{"id":2,"method":"thread/start","params":{"serviceTier":3}}"#,
+            #"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)","serviceTier":3}}"#,
+            #"{"id":4,"method":"thread/fork","params":{"threadId":"\#(threadID)","serviceTier":3}}"#,
+            #"{"id":5,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"serviceTier":3}}"#
+        ]
+
+        for rawRequest in cases {
+            let messages = try decodeMessages(processor.processLine(Data(rawRequest.utf8)))
+            XCTAssertEqual(messages.count, 1)
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "invalid value for field `serviceTier`")
+        }
+    }
+
     func testTurnStartRejectsPermissionsWithSandboxPolicy() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

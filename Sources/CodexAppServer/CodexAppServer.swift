@@ -907,7 +907,7 @@ public enum CodexAppServer {
             "thread": thread,
             "model": started.model,
             "modelProvider": started.modelProvider,
-            "serviceTier": nullable(stringParam(params?["serviceTier"])),
+            "serviceTier": nullable(started.serviceTier),
             "cwd": started.cwd.path,
             "instructionSources": [],
             "approvalPolicy": started.approvalPolicy.rawValue,
@@ -947,6 +947,10 @@ public enum CodexAppServer {
             ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
+        let serviceTier = try resolvedServiceTier(
+            serviceTierParam(params?["serviceTier"]),
+            fallback: runtimeConfig.serviceTier
+        )
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
@@ -968,6 +972,7 @@ public enum CodexAppServer {
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
                 approvalsReviewer: approvalsReviewer,
+                serviceTier: serviceTier,
                 sandbox: sandbox,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
                 ephemeral: true
@@ -995,6 +1000,7 @@ public enum CodexAppServer {
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             approvalsReviewer: approvalsReviewer,
+            serviceTier: serviceTier,
             sandbox: sandbox,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             ephemeral: false
@@ -1157,13 +1163,17 @@ public enum CodexAppServer {
         let approvalPolicy = runtimeConfig.approvalPolicy ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
+        let serviceTier = try resolvedServiceTier(
+            serviceTierParam(params?["serviceTier"]),
+            fallback: runtimeConfig.serviceTier
+        )
         let sandbox = runtimeConfig.legacySandboxPolicy()
 
         return [
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,
-            "serviceTier": nullable(stringParam(params?["serviceTier"])),
+            "serviceTier": nullable(serviceTier),
             "cwd": thread["cwd"] ?? "/",
             "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
@@ -1234,6 +1244,10 @@ public enum CodexAppServer {
             ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
+        let serviceTier = try resolvedServiceTier(
+            serviceTierParam(params?["serviceTier"]),
+            fallback: runtimeConfig.serviceTier
+        )
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
@@ -1277,7 +1291,7 @@ public enum CodexAppServer {
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,
-            "serviceTier": nullable(stringParam(params?["serviceTier"])),
+            "serviceTier": nullable(serviceTier),
             "cwd": cwd.path,
             "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
@@ -1556,6 +1570,7 @@ public enum CodexAppServer {
         let input = v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
+        _ = try serviceTierParam(params?["serviceTier"])
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
         }
@@ -1709,6 +1724,34 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid value for field `\(fieldName)`")
         }
         return rawValue
+    }
+
+    private static func serviceTierParam(_ value: Any?) throws -> NullableStringPatch {
+        guard let value else {
+            return .absent
+        }
+        if value is NSNull {
+            return .clear
+        }
+        guard let rawValue = value as? String else {
+            throw AppServerError.invalidRequest("invalid value for field `serviceTier`")
+        }
+        return .set(normalizedServiceTier(rawValue))
+    }
+
+    private static func resolvedServiceTier(_ patch: NullableStringPatch, fallback: String?) -> String? {
+        switch patch {
+        case .absent:
+            return fallback
+        case .clear:
+            return nil
+        case let .set(value):
+            return value
+        }
+    }
+
+    private static func normalizedServiceTier(_ value: String) -> String {
+        ServiceTier.fromRequestValue(value)?.requestValue ?? value
     }
 
     private static func unknownVariant(_ rawValue: String, expected: [String]) -> AppServerError {
@@ -18181,6 +18224,7 @@ private struct AppServerStartedConversation {
     let cwd: URL
     let approvalPolicy: AskForApproval
     let approvalsReviewer: ApprovalsReviewer
+    let serviceTier: String?
     let sandbox: SandboxPolicy
     let reasoningEffort: String?
     let ephemeral: Bool
