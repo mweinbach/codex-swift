@@ -1203,6 +1203,93 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(mcpItem["durationMs"] as? Int, 1250)
     }
 
+    func testRuntimeRawResponseItemEmitsRustNotification() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .rawResponseItem(RawResponseItemEvent(item: .message(
+                id: "response-item-1",
+                role: "assistant",
+                content: [.outputText(text: "done")],
+                phase: .finalAnswer
+            )))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["method"] as? String, "rawResponseItem/completed")
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, "thread-1")
+        XCTAssertEqual(params["turnId"] as? String, "turn-1")
+        let item = try XCTUnwrap(params["item"] as? [String: Any])
+        XCTAssertEqual(item["type"] as? String, "message")
+        XCTAssertNil(item["id"])
+        XCTAssertEqual(item["role"] as? String, "assistant")
+        XCTAssertEqual(item["phase"] as? String, "final_answer")
+        let content = try XCTUnwrap(item["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["type"] as? String, "output_text")
+        XCTAssertEqual(content[0]["text"] as? String, "done")
+    }
+
+    func testRuntimeRawHookPromptAlsoEmitsHookPromptItemCompleted() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let before = Int(Date().timeIntervalSince1970 * 1000)
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .rawResponseItem(RawResponseItemEvent(item: .message(
+                id: "hook-1",
+                role: "user",
+                content: [.inputText(text: #"<hook_prompt hook_run_id="run-1">Continue</hook_prompt>"#)]
+            )))
+        )
+        let after = Int(Date().timeIntervalSince1970 * 1000)
+
+        let itemMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(itemMessages.count, 1)
+        let itemMessage = try XCTUnwrap(itemMessages.first)
+        XCTAssertEqual(itemMessage["method"] as? String, "item/completed")
+        let itemParams = try XCTUnwrap(itemMessage["params"] as? [String: Any])
+        XCTAssertEqual(itemParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(itemParams["turnId"] as? String, "turn-1")
+        let completedAtMilliseconds = try XCTUnwrap(itemParams["completedAtMs"] as? Int)
+        XCTAssertGreaterThanOrEqual(completedAtMilliseconds, before)
+        XCTAssertLessThanOrEqual(completedAtMilliseconds, after)
+        let hookItem = try XCTUnwrap(itemParams["item"] as? [String: Any])
+        XCTAssertEqual(hookItem["type"] as? String, "hookPrompt")
+        XCTAssertEqual(hookItem["id"] as? String, "hook-1")
+        let fragments = try XCTUnwrap(hookItem["fragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        XCTAssertEqual(fragment["text"] as? String, "Continue")
+        XCTAssertEqual(fragment["hookRunId"] as? String, "run-1")
+
+        let rawMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(rawMessages.count, 1)
+        let rawMessage = try XCTUnwrap(rawMessages.first)
+        XCTAssertEqual(rawMessage["method"] as? String, "rawResponseItem/completed")
+        let rawParams = try XCTUnwrap(rawMessage["params"] as? [String: Any])
+        let rawItem = try XCTUnwrap(rawParams["item"] as? [String: Any])
+        XCTAssertEqual(rawItem["type"] as? String, "message")
+        XCTAssertEqual(rawItem["role"] as? String, "user")
+        let rawContent = try XCTUnwrap(rawItem["content"] as? [[String: Any]])
+        let rawText = try XCTUnwrap(rawContent.first)
+        XCTAssertEqual(rawText["type"] as? String, "input_text")
+        XCTAssertEqual(rawText["text"] as? String, #"<hook_prompt hook_run_id="run-1">Continue</hook_prompt>"#)
+    }
+
     func testRuntimeMcpStartupUpdateEmitsStatusNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

@@ -8425,6 +8425,34 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func rawResponseItemNotifications(
+        threadID: String,
+        turnID: String,
+        event: RawResponseItemEvent
+    ) -> [[String: Any]] {
+        var notifications: [[String: Any]] = []
+        if case let .hookPrompt(hookPrompt) = EventMapping.parseTurnItem(event.item) {
+            notifications.append([
+                "method": "item/completed",
+                "params": [
+                    "threadId": threadID,
+                    "turnId": turnID,
+                    "item": threadItemObject(.hookPrompt(hookPrompt)),
+                    "completedAtMs": currentUnixTimestampMilliseconds()
+                ]
+            ])
+        }
+        notifications.append([
+            "method": "rawResponseItem/completed",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "item": encodableJSONObject(event.item)
+            ]
+        ])
+        return notifications
+    }
+
     private static func threadItemObject(_ item: TurnItem) -> [String: Any] {
         switch item {
         case let .userMessage(item):
@@ -8604,6 +8632,10 @@ public enum CodexAppServer {
 
     private static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64 {
         Int64((duration.timeInterval * 1000).rounded(.towardZero))
+    }
+
+    private static func currentUnixTimestampMilliseconds() -> Int64 {
+        Int64((Date().timeIntervalSince1970 * 1000).rounded(.towardZero))
     }
 
     private static func encodableJSONObject<T: Encodable>(_ value: T) -> Any {
@@ -9047,6 +9079,8 @@ public enum CodexAppServer {
         switch event {
         case let .tokenCount(event):
             return tokenCountNotifications(threadID: threadID, turnID: turnID, event: event)
+        case let .rawResponseItem(event):
+            return rawResponseItemNotifications(threadID: threadID, turnID: turnID, event: event)
         default:
             guard let notification = runtimeEventNotification(threadID: threadID, turnID: turnID, event: event) else {
                 return []
