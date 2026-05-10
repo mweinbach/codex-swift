@@ -7218,8 +7218,21 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        var cwdFallback = configuration.cwd.path
         if params?["threadId"] != nil {
-            _ = try materializedThreadID(params: params, configuration: configuration)
+            let threadID = try materializedThreadID(params: params, configuration: configuration)
+            if let rolloutPath = try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: threadID
+            ) {
+                let summary = try RolloutSummary(
+                    path: rolloutPath,
+                    defaultProvider: configuration.defaultModelProvider
+                )
+                if !summary.cwd.isEmpty {
+                    cwdFallback = summary.cwd
+                }
+            }
         }
         guard let server = stringParam(params?["server"]), !server.isEmpty else {
             throw AppServerError.invalidRequest("missing server")
@@ -7252,6 +7265,7 @@ public enum CodexAppServer {
                 env: env,
                 envVars: envVars,
                 cwd: cwd,
+                cwdFallback: cwdFallback,
                 uri: uri,
                 timeoutSeconds: serverConfig.toolTimeoutSec ?? serverConfig.startupTimeoutSec,
                 configuration: configuration
@@ -7278,6 +7292,7 @@ public enum CodexAppServer {
         env: [String: String]?,
         envVars: [String],
         cwd: String?,
+        cwdFallback: String,
         uri: String,
         timeoutSeconds: Double?,
         configuration: CodexAppServerConfiguration
@@ -7290,8 +7305,9 @@ public enum CodexAppServer {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [command] + args
         }
-        if let cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        let effectiveCWD = cwd ?? cwdFallback
+        if !effectiveCWD.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: effectiveCWD, isDirectory: true)
         }
         var environment = configuration.environment
         for name in envVars {
