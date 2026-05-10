@@ -73,6 +73,7 @@ final class ConfigLoaderTests: XCTestCase {
         include_apply_patch_tool = true
         experimental_use_unified_exec_tool = true
         experimental_use_freeform_apply_patch = false
+        web_search = "cached"
         tools_web_search = true
         tools_view_image = false
         mcp_oauth_credentials_store = "file"
@@ -105,6 +106,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.includeApplyPatchTool, true)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
+        XCTAssertEqual(config.webSearchMode, .cached)
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, false)
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
@@ -627,6 +629,27 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertTrue(config.features.isEnabled(.shellTool))
         XCTAssertFalse(config.features.isEnabled(.memoryTool))
+    }
+
+    func testWebSearchModePrefersProfileOverLegacyFlags() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+        web_search = "disabled"
+
+        [features]
+        web_search_cached = true
+
+        [profiles.work]
+        web_search = "live"
+        tools_web_search = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.webSearchMode, .live)
+        XCTAssertEqual(config.toolsWebSearch, false)
+        XCTAssertTrue(config.features.isEnabled(.webSearchCached))
     }
 
     func testMissingProfileMatchesRustError() throws {

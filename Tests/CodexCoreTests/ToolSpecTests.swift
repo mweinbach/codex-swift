@@ -306,6 +306,25 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
+    func testWebSearchModeControlsExternalWebAccessLikeRust() throws {
+        let live = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: .disabled, webSearchMode: .live))
+        XCTAssertEqual(webSearchSpecs(in: live), [.webSearch(externalWebAccess: true)])
+
+        let cached = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: .disabled, webSearchMode: .cached))
+        XCTAssertEqual(webSearchSpecs(in: cached), [.webSearch(externalWebAccess: false)])
+
+        let disabled = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            webSearchMode: .disabled,
+            webSearchRequest: true
+        ))
+        XCTAssertEqual(webSearchSpecs(in: disabled), [])
+    }
+
+    private func webSearchSpecs(in specs: [ConfiguredToolSpec]) -> [ToolSpec] {
+        specs.map(\.spec).filter { $0.name == "web_search" }
+    }
+
     func testBuildSpecsAppendsMCPToolsAsSortedNamespaceLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(

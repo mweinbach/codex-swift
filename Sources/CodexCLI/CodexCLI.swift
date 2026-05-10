@@ -1126,6 +1126,7 @@ public struct CodexCLI: Sendable {
     private func configOverrideTokens(_ arguments: [String]) throws -> [String] {
         var overrides: [String] = []
         var featureToggles = FeatureToggles()
+        var searchEnabled = false
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -1163,12 +1164,19 @@ public struct CodexCLI: Sendable {
                 featureToggles.disable.append(String(argument.dropFirst("--disable=".count)))
                 continue
             }
+            if argument == "--search" {
+                searchEnabled = true
+                continue
+            }
         }
 
         if let profile = configProfileToken(arguments) {
             overrides.append("profile=\(tomlString(profile))")
         }
         overrides.append(contentsOf: try featureToggles.toOverrides())
+        if searchEnabled {
+            overrides.append(#"web_search="live""#)
+        }
         return overrides
     }
 

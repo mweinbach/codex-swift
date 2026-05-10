@@ -7,6 +7,12 @@ public enum CodexConfigDefaults {
     public static let projectDocMaxBytes = 32 * 1024
 }
 
+public enum WebSearchMode: String, Codable, Equatable, Sendable {
+    case disabled
+    case cached
+    case live
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -30,6 +36,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
+    public var webSearchMode: WebSearchMode?
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
     public var features: FeatureStates
@@ -67,6 +74,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
+        webSearchMode: WebSearchMode? = nil,
         toolsWebSearch: Bool? = nil,
         toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
@@ -103,6 +111,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.webSearchMode = webSearchMode
         self.toolsWebSearch = toolsWebSearch
         self.toolsViewImage = toolsViewImage
         self.features = features
@@ -924,6 +933,13 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)experimental_use_freeform_apply_patch"
             )
         }
+        if let webSearch = values["web_search"] {
+            config.webSearchMode = try stringEnumValue(
+                WebSearchMode.self,
+                webSearch,
+                key: "\(keyPrefix)web_search"
+            )
+        }
         if let webSearch = values["tools_web_search"] {
             config.toolsWebSearch = try boolValue(webSearch, key: "\(keyPrefix)tools_web_search")
         }
@@ -955,6 +971,7 @@ private struct ParsedCodexConfigToml {
             || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_use_freeform_apply_patch"
+            || key == "web_search"
             || key == "tools_web_search"
             || key == "tools_view_image"
             || key == "mcp_oauth_credentials_store"
@@ -983,6 +1000,7 @@ private struct ParsedCodexConfigToml {
             || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_use_freeform_apply_patch"
+            || key == "web_search"
             || key == "tools_web_search"
             || key == "tools_view_image"
             || key == "oss_provider"

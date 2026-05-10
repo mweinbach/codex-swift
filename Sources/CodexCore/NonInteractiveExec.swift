@@ -100,7 +100,7 @@ public enum NonInteractiveExec {
         return ToolsConfig(
             shellType: shellType,
             applyPatchToolType: applyPatchToolType,
-            webSearchRequest: config.toolsWebSearch ?? config.features.isEnabled(.webSearchRequest),
+            webSearchMode: webSearchMode(for: config),
             includeViewImageTool: config.toolsViewImage ?? true,
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
@@ -113,6 +113,22 @@ public enum NonInteractiveExec {
         config: CodexRuntimeConfig
     ) -> [ConfiguredToolSpec] {
         ToolSpecFactory.buildSpecs(config: toolsConfig(modelFamily: modelFamily, config: config))
+    }
+
+    private static func webSearchMode(for config: CodexRuntimeConfig) -> WebSearchMode? {
+        if let mode = config.webSearchMode {
+            return mode
+        }
+        if config.features.isEnabled(.webSearchCached) {
+            return .cached
+        }
+        if let legacyEnabled = config.toolsWebSearch {
+            return legacyEnabled ? .live : .disabled
+        }
+        if config.features.isEnabled(.webSearchRequest) {
+            return .live
+        }
+        return nil
     }
 
     public static func responsesOptions(

@@ -599,7 +599,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         var receivedRequest: CodexCLI.DebugCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["-c", "model=\"gpt-5\"", "debug", "models", "--bundled"],
+            arguments: ["--search", "-c", "model=\"gpt-5\"", "debug", "models", "--bundled"],
             stdout: { stdout.append($0) },
             stderr: { _ in XCTFail("stderr should not be written") },
             debugRunner: { request in
@@ -612,7 +612,10 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(stdout, ["models"])
         XCTAssertEqual(receivedRequest, CodexCLI.DebugCommandRequest(
             action: .models(bundled: true),
-            configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5\""])
+            configOverrides: CliConfigOverrides(rawOverrides: [
+                "model=\"gpt-5\"",
+                "web_search=\"live\""
+            ])
         ))
     }
 

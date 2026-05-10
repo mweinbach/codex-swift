@@ -33,6 +33,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
+    public var webSearchMode: WebSearchMode?
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
     public var features: FeaturesToml?
@@ -53,6 +54,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case includeApplyPatchTool = "include_apply_patch_tool"
         case experimentalUseUnifiedExecTool = "experimental_use_unified_exec_tool"
         case experimentalUseFreeformApplyPatch = "experimental_use_freeform_apply_patch"
+        case webSearchMode = "web_search"
         case toolsWebSearch = "tools_web_search"
         case toolsViewImage = "tools_view_image"
         case features
@@ -74,6 +76,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
+        webSearchMode: WebSearchMode? = nil,
         toolsWebSearch: Bool? = nil,
         toolsViewImage: Bool? = nil,
         features: FeaturesToml? = nil,
@@ -93,6 +96,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.webSearchMode = webSearchMode
         self.toolsWebSearch = toolsWebSearch
         self.toolsViewImage = toolsViewImage
         self.features = features
@@ -115,6 +119,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.includeApplyPatchTool = try container.decodeIfPresent(Bool.self, forKey: .includeApplyPatchTool)
         self.experimentalUseUnifiedExecTool = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseUnifiedExecTool)
         self.experimentalUseFreeformApplyPatch = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseFreeformApplyPatch)
+        self.webSearchMode = try container.decodeIfPresent(WebSearchMode.self, forKey: .webSearchMode)
         self.toolsWebSearch = try container.decodeIfPresent(Bool.self, forKey: .toolsWebSearch)
         self.toolsViewImage = try container.decodeIfPresent(Bool.self, forKey: .toolsViewImage)
         self.features = try container.decodeIfPresent(FeaturesToml.self, forKey: .features)
@@ -137,6 +142,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(includeApplyPatchTool, into: &container, forKey: .includeApplyPatchTool)
         try encodeOptional(experimentalUseUnifiedExecTool, into: &container, forKey: .experimentalUseUnifiedExecTool)
         try encodeOptional(experimentalUseFreeformApplyPatch, into: &container, forKey: .experimentalUseFreeformApplyPatch)
+        try encodeOptional(webSearchMode, into: &container, forKey: .webSearchMode)
         try encodeOptional(toolsWebSearch, into: &container, forKey: .toolsWebSearch)
         try encodeOptional(toolsViewImage, into: &container, forKey: .toolsViewImage)
         try encodeOptional(features, into: &container, forKey: .features)

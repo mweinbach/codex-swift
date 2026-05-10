@@ -536,6 +536,7 @@ public struct ConfiguredToolSpec: Equatable, Sendable {
 public struct ToolsConfig: Equatable, Sendable {
     public let shellType: ConfigShellToolType
     public let applyPatchToolType: ApplyPatchToolType?
+    public let webSearchMode: WebSearchMode?
     public let webSearchRequest: Bool
     public let includeViewImageTool: Bool
     public let includeComputerUseTools: Bool
@@ -546,6 +547,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public init(
         shellType: ConfigShellToolType,
         applyPatchToolType: ApplyPatchToolType? = nil,
+        webSearchMode: WebSearchMode? = nil,
         webSearchRequest: Bool = false,
         includeViewImageTool: Bool = true,
         includeComputerUseTools: Bool = false,
@@ -555,6 +557,7 @@ public struct ToolsConfig: Equatable, Sendable {
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
+        self.webSearchMode = webSearchMode
         self.webSearchRequest = webSearchRequest
         self.includeViewImageTool = includeViewImageTool
         self.includeComputerUseTools = includeComputerUseTools
@@ -616,8 +619,20 @@ public enum ToolSpecFactory {
             specs.append(ConfiguredToolSpec(spec: createTestSyncTool(), supportsParallelToolCalls: true))
         }
 
-        if config.webSearchRequest {
-            specs.append(ConfiguredToolSpec(spec: .webSearch(), supportsParallelToolCalls: false))
+        let webSearchMode = config.webSearchMode ?? (config.webSearchRequest ? .live : nil)
+        switch webSearchMode {
+        case .cached:
+            specs.append(ConfiguredToolSpec(
+                spec: .webSearch(externalWebAccess: false),
+                supportsParallelToolCalls: false
+            ))
+        case .live:
+            specs.append(ConfiguredToolSpec(
+                spec: .webSearch(externalWebAccess: true),
+                supportsParallelToolCalls: false
+            ))
+        case .disabled, nil:
+            break
         }
 
         if config.includeViewImageTool {
