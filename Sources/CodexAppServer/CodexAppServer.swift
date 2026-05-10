@@ -783,6 +783,21 @@ public enum CodexAppServer {
             sortDirection: sortDirection,
             hasExplicitMetadataFilter: hasExplicitMetadataFilter
         )
+        if configuration.stateStore != nil, !hasExplicitMetadataFilter {
+            return try threadListStateDbOnlyResult(
+                configuration: configuration,
+                pageSize: pageSize,
+                cursor: cursor,
+                allowedSources: sourceFilter.allowedSources,
+                sourceMatcher: sourceFilter.matcher,
+                modelProviders: modelProviders,
+                archivedOnly: archivedOnly,
+                cwdFilters: cwdFilters,
+                searchTerm: searchTerm,
+                sortKey: sortKey,
+                sortDirection: sortDirection
+            )
+        }
         return [
             "data": try threadObjects(for: page.items, configuration: configuration),
             "nextCursor": (page.nextCursor?.token as Any?) ?? NSNull(),

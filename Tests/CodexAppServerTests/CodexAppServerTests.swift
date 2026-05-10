@@ -5882,6 +5882,61 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(stateOnlyAfterRepairData.map { $0["modelProvider"] as? String }, ["openai"])
     }
 
+    func testThreadListReturnsStateDbPageAfterUnfilteredRepair() async throws {
+        let temp = try TemporaryDirectory()
+        let sqliteFirstThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T15-00-00",
+            timestamp: "2025-01-03T15:00:00Z",
+            preview: "SQLite updated first",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let filesystemFirstThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T16-00-00",
+            timestamp: "2025-01-03T16:00:00Z",
+            preview: "Filesystem updated first",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        try setModificationDate("2025-01-03T15:00:00Z", for: sqliteFirstThreadID, codexHome: temp.url)
+        try setModificationDate("2025-01-03T16:00:00Z", for: filesystemFirstThreadID, codexHome: temp.url)
+        let sqliteFirstPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: sqliteFirstThreadID
+        ))
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: ThreadId(string: sqliteFirstThreadID),
+            rolloutPath: sqliteFirstPath,
+            createdAt: try appServerDate("2025-01-03T15:00:00Z"),
+            updatedAt: try appServerDate("2025-01-04T15:00:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "SQLite updated first",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "SQLite updated first"
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":1,"sortKey":"updated_at"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+
+        XCTAssertEqual(data.map { $0["id"] as? String }, [sqliteFirstThreadID])
+        XCTAssertNotEqual(data.map { $0["id"] as? String }, [filesystemFirstThreadID])
+    }
+
     func testThreadListOverlaysStateDbGitMetadataForFilteredListing() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
