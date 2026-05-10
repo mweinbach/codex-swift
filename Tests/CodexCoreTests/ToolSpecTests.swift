@@ -481,6 +481,12 @@ final class ToolSpecTests: XCTestCase {
         let parameters = try XCTUnwrap(object["parameters"] as? [String: Any])
         XCTAssertEqual(parameters["type"] as? String, "object")
         XCTAssertEqual((parameters["properties"] as? [String: Any])?.isEmpty, true)
+
+        guard case let .function(tool) = spec else {
+            return XCTFail("expected function tool")
+        }
+        XCTAssertEqual(tool.outputSchema, ToolSpecFactory.mcpCallToolResultOutputSchema())
+        XCTAssertNil(object["output_schema"], "Rust keeps MCP tool output_schema internal to ResponsesApiTool")
     }
 
     func testMCPToolConversionSanitizesSchemaLikeRust() throws {
@@ -516,10 +522,50 @@ final class ToolSpecTests: XCTestCase {
                         ],
                         required: ["count"],
                         additionalProperties: nil
-                    )
+                    ),
+                    outputSchema: ToolSpecFactory.mcpCallToolResultOutputSchema()
                 )
             )
         )
+    }
+
+    func testMCPToolConversionWrapsStructuredContentOutputSchemaLikeRust() throws {
+        let spec = ToolSpecFactory.createMCPTool(
+            fullyQualifiedName: "mcp__docs__lookup",
+            tool: McpTool(
+                name: "lookup",
+                inputSchema: McpToolInputSchema(),
+                outputSchema: McpToolOutputSchema(
+                    properties: .object([
+                        "result": .object([
+                            "type": .string("string")
+                        ])
+                    ]),
+                    required: ["result"]
+                )
+            )
+        )
+
+        guard case let .function(tool) = spec else {
+            return XCTFail("expected function tool")
+        }
+        XCTAssertEqual(
+            tool.outputSchema,
+            ToolSpecFactory.mcpCallToolResultOutputSchema(
+                structuredContentSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "result": .object([
+                            "type": .string("string")
+                        ])
+                    ]),
+                    "required": .array([.string("result")])
+                ])
+            )
+        )
+
+        let object = try JSONObject(spec)
+        XCTAssertNil(object["output_schema"], "Rust skips serializing ResponsesApiTool.output_schema")
     }
 
     private func encode<T: Encodable>(_ value: T) throws -> String {

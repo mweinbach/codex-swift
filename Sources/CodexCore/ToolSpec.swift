@@ -213,6 +213,7 @@ public struct ResponsesAPITool: Equatable, Codable, Sendable {
     public let strict: Bool
     public let deferLoading: Bool?
     public let parameters: JSONSchema
+    public let outputSchema: JSONValue?
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -227,13 +228,34 @@ public struct ResponsesAPITool: Equatable, Codable, Sendable {
         description: String,
         strict: Bool = false,
         deferLoading: Bool? = nil,
-        parameters: JSONSchema
+        parameters: JSONSchema,
+        outputSchema: JSONValue? = nil
     ) {
         self.name = name
         self.description = description
         self.strict = strict
         self.deferLoading = deferLoading
         self.parameters = parameters
+        self.outputSchema = outputSchema
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.description = try container.decode(String.self, forKey: .description)
+        self.strict = try container.decode(Bool.self, forKey: .strict)
+        self.deferLoading = try container.decodeIfPresent(Bool.self, forKey: .deferLoading)
+        self.parameters = try container.decode(JSONSchema.self, forKey: .parameters)
+        self.outputSchema = nil
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(strict, forKey: .strict)
+        try container.encodeIfPresent(deferLoading, forKey: .deferLoading)
+        try container.encode(parameters, forKey: .parameters)
     }
 }
 
@@ -794,8 +816,32 @@ public enum ToolSpecFactory {
             description: tool.description ?? "",
             strict: false,
             deferLoading: deferLoading,
-            parameters: JSONSchema.sanitized(from: inputSchema)
+            parameters: JSONSchema.sanitized(from: inputSchema),
+            outputSchema: mcpCallToolResultOutputSchema(structuredContentSchema: tool.outputSchema?.jsonSchema ?? .object([:]))
         )
+    }
+
+    public static func mcpCallToolResultOutputSchema(structuredContentSchema: JSONValue = .object([:])) -> JSONValue {
+        .object([
+            "type": .string("object"),
+            "properties": .object([
+                "content": .object([
+                    "type": .string("array"),
+                    "items": .object([
+                        "type": .string("object")
+                    ])
+                ]),
+                "structuredContent": structuredContentSchema,
+                "isError": .object([
+                    "type": .string("boolean")
+                ]),
+                "_meta": .object([
+                    "type": .string("object")
+                ])
+            ]),
+            "required": .array([.string("content")]),
+            "additionalProperties": .bool(false)
+        ])
     }
 
     public static func createExecCommandTool() -> ToolSpec {

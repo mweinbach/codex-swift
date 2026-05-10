@@ -383,6 +383,19 @@ public struct McpToolOutputSchema: Equatable, Codable, Sendable {
         try container.encodeIfPresent(required, forKey: .required)
         try container.encode(type, forKey: .type)
     }
+
+    var jsonSchema: JSONValue {
+        var object: [String: JSONValue] = [
+            "type": .string(type)
+        ]
+        if let properties {
+            object["properties"] = properties
+        }
+        if let required {
+            object["required"] = .array(required.map(JSONValue.string))
+        }
+        return .object(object)
+    }
 }
 
 public struct McpToolAnnotations: Equatable, Codable, Sendable {
