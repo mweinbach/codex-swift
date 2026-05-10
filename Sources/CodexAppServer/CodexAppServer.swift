@@ -1337,6 +1337,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             try recorder.recordItems([
@@ -1353,6 +1354,32 @@ public enum CodexAppServer {
         return [
             "turn": turn
         ]
+    }
+
+    fileprivate static func validateTurnEnvironmentSelections(
+        _ rawEnvironments: Any?,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let rawEnvironments, !(rawEnvironments is NSNull),
+              let environments = rawEnvironments as? [[String: Any]]
+        else {
+            return
+        }
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+        var seenEnvironmentIDs = Set<String>()
+        for environment in environments {
+            let environmentID = stringParam(environment["environment_id"]) ?? ""
+            guard seenEnvironmentIDs.insert(environmentID).inserted else {
+                throw AppServerError.invalidRequest("duplicate turn environment id `\(environmentID)`")
+            }
+            guard snapshot.environment(id: environmentID) != nil else {
+                throw AppServerError.invalidRequest("unknown turn environment id `\(environmentID)`")
+            }
+        }
     }
 
     fileprivate static func requireThreadStartExperimentalFieldsAPI(

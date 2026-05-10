@@ -835,6 +835,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.permissions`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
 - `codex-rs/app-server-protocol` turn-start experimental field gating
   - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.
+- `codex-rs/app-server` turn-start environment selection validation
+  - matched Rust's `turn/start` rejection of duplicate and unknown explicit turn environment ids before emitting `turn/started`, using the configured-environment snapshot and Rust error strings.
 - `codex-rs/app-server-protocol` thread-start response reviewer
   - added Rust's required `approvalsReviewer` field to the `thread/start` response with the default `user` reviewer.
 - `codex-rs/app-server-protocol` thread-start response shape
