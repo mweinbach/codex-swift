@@ -636,23 +636,104 @@ final class ResponseModelsTests: XCTestCase {
     }
 
     func testRoundTripsWebSearchCallActions() throws {
-        let json = #"""
-        {
-            "type": "web_search_call",
-            "id": "ws_1",
-            "status": "completed",
-            "action": {
-                "type": "search",
-                "query": "weather seattle"
-            }
+        let cases: [(String, ResponseItem, [String: Any])] = [
+            (
+                #"""
+                {
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "query": "weather seattle",
+                        "queries": ["weather seattle", "seattle weather now"]
+                    }
+                }
+                """#,
+                .webSearchCall(
+                    status: "completed",
+                    action: .search(
+                        query: "weather seattle",
+                        queries: ["weather seattle", "seattle weather now"]
+                    )
+                ),
+                [
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": [
+                        "type": "search",
+                        "query": "weather seattle",
+                        "queries": ["weather seattle", "seattle weather now"]
+                    ]
+                ]
+            ),
+            (
+                #"""
+                {
+                    "type": "web_search_call",
+                    "status": "open",
+                    "action": {
+                        "type": "open_page",
+                        "url": "https://example.com"
+                    }
+                }
+                """#,
+                .webSearchCall(status: "open", action: .openPage(url: "https://example.com")),
+                [
+                    "type": "web_search_call",
+                    "status": "open",
+                    "action": [
+                        "type": "open_page",
+                        "url": "https://example.com"
+                    ]
+                ]
+            ),
+            (
+                #"""
+                {
+                    "type": "web_search_call",
+                    "status": "in_progress",
+                    "action": {
+                        "type": "find_in_page",
+                        "url": "https://example.com/docs",
+                        "pattern": "installation"
+                    }
+                }
+                """#,
+                .webSearchCall(
+                    status: "in_progress",
+                    action: .findInPage(url: "https://example.com/docs", pattern: "installation")
+                ),
+                [
+                    "type": "web_search_call",
+                    "status": "in_progress",
+                    "action": [
+                        "type": "find_in_page",
+                        "url": "https://example.com/docs",
+                        "pattern": "installation"
+                    ]
+                ]
+            ),
+            (
+                #"""
+                {
+                    "type": "web_search_call",
+                    "status": "in_progress",
+                    "id": "ws_partial"
+                }
+                """#,
+                .webSearchCall(id: "ws_partial", status: "in_progress", action: nil),
+                [
+                    "type": "web_search_call",
+                    "status": "in_progress"
+                ]
+            )
+        ]
+
+        for (json, expectedItem, expectedSerialized) in cases {
+            let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+            XCTAssertEqual(item, expectedItem)
+            try XCTAssertJSONObjectEqual(item, expectedSerialized)
         }
-        """#
-        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
-        XCTAssertEqual(item, .webSearchCall(id: "ws_1", status: "completed", action: .search(query: "weather seattle")))
-        let object = try JSONObject(item)
-        XCTAssertEqual(object["type"] as? String, "web_search_call")
-        XCTAssertNil(object["id"])
-        XCTAssertEqual(object["status"] as? String, "completed")
     }
 
     func testRoundTripsWebSearchSearchQueriesLikeRust() throws {

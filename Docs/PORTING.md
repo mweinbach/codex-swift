@@ -934,6 +934,8 @@ Source baseline inspected for this scaffold:
   - threaded injected CLI config overrides through app-server config-layer loads so `config/read`, config writes, skills/hooks filtering, marketplace reads, requirements reads, and auth restriction checks see the same session flag layer ordering as Rust; added Rust-shaped coverage for managed config overriding both user config and session flags, plus writes that match the managed effective value returning `ok` without override metadata.
 - `codex-rs/utils/absolute-path/src/lib.rs` home-directory path expansion
   - matched Rust `AbsolutePathBuf::from_absolute_path` handling for leading `~` and `~/...` paths, allowing managed preferences such as `sandbox_workspace_write.writable_roots = ["~/code"]` to resolve before sandbox-policy validation; added config-loader and config-manager write coverage for the Rust managed-preferences regression.
+- `codex-rs/protocol/src/models.rs` persisted web-search response-item actions
+  - locked Swift `ResponseItem.webSearchCall` serialization to Rust's persisted `web_search_call` shapes for search queries, open-page actions, find-in-page actions, and partial status-only calls while preserving Rust's runtime `id` skip behavior.
 
 ## Known Gaps
 
