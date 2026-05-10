@@ -283,6 +283,7 @@ final class CommandSafetyTests: XCTestCase {
             ["cmd", "/c", "echo hi&del /f file.txt"],
             ["cmd", "/c", "echo hi&&del /f file.txt"],
             ["cmd", "/c", "echo hi||del /f file.txt"],
+            ["cmd", "/c", "start https://example.com"],
             ["cmd", "/c", "echo hi&rmdir /s /q testdir"],
             ["cmd.exe", "/r", "DEL", "/F", "file.txt"],
             ["cmd", "/c", #"start "https://example.com""#],

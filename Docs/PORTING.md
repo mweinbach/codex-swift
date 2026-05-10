@@ -874,7 +874,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's detection of `Remove-Item`/alias commands paired with `-Force`, including chained or punctuation-adjacent forms, so Windows PowerShell delete operations are classified as dangerous while non-force deletes remain unflagged.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` Cmd delete/removal heuristics
   - matched Rust's `cmd.exe` command-body tokenization for `cmd /c` and `/r`, including single-string command bodies and embedded `&`/`&&`/`|`/`||` operators, so `del`/`erase` with `/f` and `rd`/`rmdir` with `/s /q` are classified as dangerous while non-force/non-quiet examples remain unflagged.
-- `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` remaining Windows dangerous edge cases
+- `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` Windows dangerous edge cases
+  - pinned Swift coverage for the remaining Rust Windows dangerous-command cases, including single-string `cmd /c "start https://example.com"` URL launches alongside PowerShell force-delete segmentation and CMD delete/rmdir heuristics.
   - added parity coverage for quoted `cmd /c start` URL launches, empty-title `start "" https://...` launches, PowerShell `rm` alias force deletes, `Remove-Item -Recurse -Force`/`-Path` issue-8567 forms, punctuation-adjacent block/bracket/comma forms, and the Rust-safe case where `-Force` appears in a separate PowerShell segment from `Remove-Item`.
 - `codex-rs/shell-command/src/parse_command.rs` shell wrapper parser edge cases
   - added Swift parity coverage for Rust's `bash -c` pipeline parsing plus `/bin/zsh -lc` and `sh -c` read-command extraction, keeping shell wrapper detection aligned with Rust's `extract_bash_command` behavior for bash/zsh/sh executables.
