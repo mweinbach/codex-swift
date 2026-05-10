@@ -4,6 +4,7 @@ struct DebugTraceReducer {
     private let bundleURL: URL
     private var rollout: [String: Any]
     private var rawPayloads: [String: [String: Any]] = [:]
+    private var nextTerminalOperationOrdinal = 1
 
     init(bundleURL: URL) throws {
         self.bundleURL = bundleURL
@@ -81,9 +82,9 @@ struct DebugTraceReducer {
         case "tool_call_started":
             try startToolCall(event: event, payload: payload)
         case "tool_call_runtime_started":
-            try startToolCallRuntime(payload: payload)
+            try startToolCallRuntime(event: event, payload: payload)
         case "tool_call_runtime_ended":
-            try endToolCallRuntime(payload: payload)
+            try endToolCallRuntime(event: event, payload: payload)
         case "tool_call_ended":
             try endToolCall(event: event, payload: payload)
         case "compaction_request_started":
@@ -391,24 +392,52 @@ struct DebugTraceReducer {
         rollout["tool_calls"] = toolCalls
     }
 
-    private mutating func startToolCallRuntime(payload: [String: Any]) throws {
+    private mutating func startToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
         let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
         var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
         guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
             throw DebugTraceReducerError.unknownToolCallRuntimeStart(toolCallID)
         }
-        try appendRawRuntimePayloadID(from: payload, to: &toolCall)
+        let runtimePayload = try Self.requiredDictionary(payload, key: "runtime_payload")
+        try appendRawRuntimePayloadID(runtimePayload, to: &toolCall)
+        if let operationKind = terminalOperationKind(for: toolCall) {
+            if toolCall["terminal_operation_id"] as? String != nil {
+                throw DebugTraceReducerError.duplicateTerminalOperation(toolCallID)
+            }
+            let operationID = try startTerminalOperation(
+                event: event,
+                toolCall: toolCall,
+                operationKind: operationKind,
+                runtimePayload: runtimePayload
+            )
+            toolCall["terminal_operation_id"] = operationID
+            toolCall["summary"] = [
+                "type": "terminal",
+                "operation_id": operationID
+            ]
+        }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
     }
 
-    private mutating func endToolCallRuntime(payload: [String: Any]) throws {
+    private mutating func endToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
         let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
         var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
         guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
             throw DebugTraceReducerError.unknownToolCallRuntimeEnd(toolCallID)
         }
-        try appendRawRuntimePayloadID(from: payload, to: &toolCall)
+        let runtimePayload = try Self.requiredDictionary(payload, key: "runtime_payload")
+        try appendRawRuntimePayloadID(runtimePayload, to: &toolCall)
+        if let operationID = toolCall["terminal_operation_id"] as? String {
+            let status = try Self.requiredString(payload, key: "status")
+            try endTerminalOperation(
+                event: event,
+                operationID: operationID,
+                threadID: try Self.requiredString(toolCall, key: "thread_id"),
+                status: status,
+                runtimePayload: runtimePayload
+            )
+        }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
     }
@@ -518,14 +547,216 @@ struct DebugTraceReducer {
         rollout["compaction_requests"] = requests
     }
 
-    private mutating func appendRawRuntimePayloadID(from payload: [String: Any], to toolCall: inout [String: Any]) throws {
-        let runtimePayload = try Self.requiredDictionary(payload, key: "runtime_payload")
+    private mutating func appendRawRuntimePayloadID(_ runtimePayload: [String: Any], to toolCall: inout [String: Any]) throws {
         let rawPayloadID = try Self.requiredString(runtimePayload, key: "raw_payload_id")
         var rawRuntimePayloadIDs = toolCall["raw_runtime_payload_ids"] as? [String] ?? []
         if !rawRuntimePayloadIDs.contains(rawPayloadID) {
             rawRuntimePayloadIDs.append(rawPayloadID)
         }
         toolCall["raw_runtime_payload_ids"] = rawRuntimePayloadIDs
+    }
+
+    private mutating func startTerminalOperation(
+        event: [String: Any],
+        toolCall: [String: Any],
+        operationKind: String,
+        runtimePayload: [String: Any]
+    ) throws -> String {
+        let rawPayloadID = try Self.requiredString(runtimePayload, key: "raw_payload_id")
+        let runtimeJSON = try loadRawPayloadJSON(runtimePayload)
+        let request = try terminalRequest(fromBeginPayload: runtimeJSON, operationKind: operationKind)
+        let terminalID = runtimeJSON["process_id"] as? String
+        let operationID = nextTerminalOperationID()
+        let toolCallID = try Self.requiredString(toolCall, key: "tool_call_id")
+        let threadID = try Self.requiredString(toolCall, key: "thread_id")
+
+        var terminalOperations = try Self.dictionaryMap(rollout["terminal_operations"], key: "terminal_operations")
+        terminalOperations[operationID] = [
+            "operation_id": operationID,
+            "terminal_id": terminalID.map { $0 as Any } ?? NSNull(),
+            "tool_call_id": toolCallID,
+            "kind": operationKind,
+            "execution": try executionWindow(
+                event: event,
+                status: "running",
+                endedAt: NSNull(),
+                endedSeq: NSNull()
+            ),
+            "request": request,
+            "result": NSNull(),
+            "model_observations": [],
+            "raw_payload_ids": [rawPayloadID]
+        ]
+        rollout["terminal_operations"] = terminalOperations
+
+        if let terminalID {
+            try ensureTerminalSession(
+                threadID: threadID,
+                terminalID: terminalID,
+                operationID: operationID,
+                startedAt: try Self.requiredInt(event, key: "wall_time_unix_ms"),
+                startedSeq: try Self.requiredInt(event, key: "seq")
+            )
+        }
+        return operationID
+    }
+
+    private mutating func endTerminalOperation(
+        event: [String: Any],
+        operationID: String,
+        threadID: String,
+        status: String,
+        runtimePayload: [String: Any]
+    ) throws {
+        let rawPayloadID = try Self.requiredString(runtimePayload, key: "raw_payload_id")
+        let runtimeJSON = try loadRawPayloadJSON(runtimePayload)
+        var terminalOperations = try Self.dictionaryMap(rollout["terminal_operations"], key: "terminal_operations")
+        guard var operation = terminalOperations[operationID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownTerminalOperation(operationID)
+        }
+        let response = try terminalResult(fromEndPayload: runtimeJSON)
+        if let responseTerminalID = response.terminalID {
+            if let existingTerminalID = operation["terminal_id"] as? String,
+               existingTerminalID != responseTerminalID {
+                throw DebugTraceReducerError.mismatchedTerminalProcess(
+                    operationID: operationID,
+                    existingTerminalID: existingTerminalID,
+                    responseTerminalID: responseTerminalID
+                )
+            }
+            operation["terminal_id"] = responseTerminalID
+        }
+        guard var execution = operation["execution"] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("terminal operation execution for \(operationID)")
+        }
+        execution["ended_at_unix_ms"] = try Self.requiredInt(event, key: "wall_time_unix_ms")
+        execution["ended_seq"] = try Self.requiredInt(event, key: "seq")
+        execution["status"] = status
+        operation["execution"] = execution
+        operation["result"] = response.result
+        var rawPayloadIDs = operation["raw_payload_ids"] as? [String] ?? []
+        if !rawPayloadIDs.contains(rawPayloadID) {
+            rawPayloadIDs.append(rawPayloadID)
+        }
+        operation["raw_payload_ids"] = rawPayloadIDs
+        terminalOperations[operationID] = operation
+        rollout["terminal_operations"] = terminalOperations
+
+        if let terminalID = operation["terminal_id"] as? String,
+           let startedAt = execution["started_at_unix_ms"] as? Int,
+           let startedSeq = execution["started_seq"] as? Int {
+            try ensureTerminalSession(
+                threadID: threadID,
+                terminalID: terminalID,
+                operationID: operationID,
+                startedAt: startedAt,
+                startedSeq: startedSeq
+            )
+        }
+    }
+
+    private mutating func ensureTerminalSession(
+        threadID: String,
+        terminalID: String,
+        operationID: String,
+        startedAt: Int,
+        startedSeq: Int
+    ) throws {
+        var sessions = try Self.dictionaryMap(rollout["terminal_sessions"], key: "terminal_sessions")
+        if sessions[terminalID] == nil {
+            sessions[terminalID] = [
+                "terminal_id": terminalID,
+                "thread_id": threadID,
+                "created_by_operation_id": operationID,
+                "operation_ids": [],
+                "execution": [
+                    "started_at_unix_ms": startedAt,
+                    "started_seq": startedSeq,
+                    "ended_at_unix_ms": NSNull(),
+                    "ended_seq": NSNull(),
+                    "status": "running"
+                ]
+            ]
+        }
+        guard var session = sessions[terminalID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("terminal session \(terminalID)")
+        }
+        guard session["thread_id"] as? String == threadID else {
+            throw DebugTraceReducerError.mismatchedTerminalSessionThread(
+                terminalID: terminalID,
+                existingThreadID: session["thread_id"] as? String ?? "",
+                eventThreadID: threadID
+            )
+        }
+        var operationIDs = session["operation_ids"] as? [String] ?? []
+        if !operationIDs.contains(operationID) {
+            operationIDs.append(operationID)
+        }
+        session["operation_ids"] = operationIDs
+        sessions[terminalID] = session
+        rollout["terminal_sessions"] = sessions
+    }
+
+    private mutating func nextTerminalOperationID() -> String {
+        let operationID = "terminal_operation:\(nextTerminalOperationOrdinal)"
+        nextTerminalOperationOrdinal += 1
+        return operationID
+    }
+
+    private func terminalOperationKind(for toolCall: [String: Any]) -> String? {
+        guard let kind = toolCall["kind"] as? [String: Any],
+              let type = kind["type"] as? String
+        else {
+            return nil
+        }
+        switch type {
+        case "exec_command", "write_stdin":
+            return type
+        default:
+            return nil
+        }
+    }
+
+    private func terminalRequest(fromBeginPayload payload: [String: Any], operationKind: String) throws -> [String: Any] {
+        switch operationKind {
+        case "exec_command":
+            return [
+                "type": "exec_command",
+                "command": try Self.requiredStringArray(payload, key: "command"),
+                "display_command": try Self.requiredStringArray(payload, key: "command").joined(separator: " "),
+                "cwd": try Self.requiredString(payload, key: "cwd"),
+                "yield_time_ms": NSNull(),
+                "max_output_tokens": NSNull()
+            ]
+        case "write_stdin":
+            _ = try Self.requiredStringArray(payload, key: "command")
+            _ = try Self.requiredString(payload, key: "cwd")
+            return [
+                "type": "write_stdin",
+                "stdin": payload["interaction_input"] as? String ?? "",
+                "yield_time_ms": NSNull(),
+                "max_output_tokens": NSNull()
+            ]
+        default:
+            throw DebugTraceReducerError.invalidTraceObject("terminal operation kind \(operationKind)")
+        }
+    }
+
+    private func terminalResult(fromEndPayload payload: [String: Any]) throws -> TerminalEndResult {
+        let result: [String: Any] = [
+            "exit_code": try Self.requiredInt(payload, key: "exit_code"),
+            "stdout": try Self.requiredString(payload, key: "stdout"),
+            "stderr": try Self.requiredString(payload, key: "stderr"),
+            "formatted_output": try Self.requiredString(payload, key: "formatted_output"),
+            "original_token_count": NSNull(),
+            "chunk_id": NSNull()
+        ]
+        return TerminalEndResult(terminalID: payload["process_id"] as? String, result: result)
+    }
+
+    private func loadRawPayloadJSON(_ payloadRef: [String: Any]) throws -> [String: Any] {
+        let path = try Self.requiredString(payloadRef, key: "path")
+        return try Self.loadJSONObject(at: bundleURL.appendingPathComponent(path, isDirectory: false))
     }
 
     private func toolThreadID(event: [String: Any]) throws -> String {
@@ -701,6 +932,13 @@ struct DebugTraceReducer {
         }
         throw DebugTraceReducerError.missingField(key)
     }
+
+    private static func requiredStringArray(_ dictionary: [String: Any], key: String) throws -> [String] {
+        guard let value = dictionary[key] as? [String] else {
+            throw DebugTraceReducerError.missingField(key)
+        }
+        return value
+    }
 }
 
 private struct ThreadSpawnMetadata {
@@ -708,6 +946,11 @@ private struct ThreadSpawnMetadata {
     var agentPath: String?
     var taskName: String?
     var agentRole: String?
+}
+
+private struct TerminalEndResult {
+    var terminalID: String?
+    var result: [String: Any]
 }
 
 private enum DebugTraceReducerError: Error, CustomStringConvertible {
@@ -751,6 +994,18 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         requestID: String,
         eventCompactionID: String,
         startedCompactionID: String
+    )
+    case duplicateTerminalOperation(String)
+    case unknownTerminalOperation(String)
+    case mismatchedTerminalProcess(
+        operationID: String,
+        existingTerminalID: String,
+        responseTerminalID: String
+    )
+    case mismatchedTerminalSessionThread(
+        terminalID: String,
+        existingThreadID: String,
+        eventThreadID: String
     )
 
     var description: String {
@@ -809,6 +1064,14 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "compaction request \(requestID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         case let .mismatchedCompactionRequestCompletion(requestID, eventCompactionID, startedCompactionID):
             return "compaction request \(requestID) completion used compaction \(eventCompactionID), but start used \(startedCompactionID)"
+        case let .duplicateTerminalOperation(toolCallID):
+            return "tool runtime start would create a second terminal operation for \(toolCallID)"
+        case let .unknownTerminalOperation(operationID):
+            return "terminal end referenced unknown operation \(operationID)"
+        case let .mismatchedTerminalProcess(operationID, existingTerminalID, responseTerminalID):
+            return "terminal operation \(operationID) changed process id from \(existingTerminalID) to \(responseTerminalID)"
+        case let .mismatchedTerminalSessionThread(terminalID, existingThreadID, eventThreadID):
+            return "terminal session \(terminalID) belongs to thread \(existingThreadID), not \(eventThreadID)"
         }
     }
 }
