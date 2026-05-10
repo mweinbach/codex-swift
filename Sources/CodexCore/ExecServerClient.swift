@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct ExecServerClientConnectOptions: Equatable, Sendable {
@@ -194,6 +195,7 @@ public actor ExecServerLineClientTransport: ExecServerClientTransport {
 
 public final class ExecServerStdioCommandTransport: ExecServerClientTransport, @unchecked Sendable {
     private let process: Process
+    private let supervisor: ExecServerStdioProcessSupervisor
     private let stdin: FileHandleLineWriter
     private let stdout: FileHandleLineReader
     private let stderrDrain: FileHandleDrain
@@ -228,7 +230,9 @@ public final class ExecServerStdioCommandTransport: ExecServerClientTransport, @
         let stdin = FileHandleLineWriter(stdinPipe.fileHandleForWriting)
         let stdout = FileHandleLineReader(stdoutPipe.fileHandleForReading)
         let stderrDrain = FileHandleDrain(stderrPipe.fileHandleForReading)
+        let supervisor = ExecServerStdioProcessSupervisor(process: process)
         self.process = process
+        self.supervisor = supervisor
         self.stdin = stdin
         self.stdout = stdout
         self.stderrDrain = stderrDrain
@@ -246,6 +250,7 @@ public final class ExecServerStdioCommandTransport: ExecServerClientTransport, @
                 "exec-server transport disconnected: failed to spawn exec-server stdio command: \(error)"
             )
         }
+        supervisor.startTracking()
         stderrDrain.start()
     }
 
@@ -259,16 +264,112 @@ public final class ExecServerStdioCommandTransport: ExecServerClientTransport, @
 
     public func terminate() {
         stderrDrain.stop()
+        supervisor.terminate()
         closePipes()
-        if process.isRunning {
-            process.terminate()
-        }
     }
 
     private func closePipes() {
         stdin.close()
         stdout.close()
         stderrDrain.close()
+    }
+}
+
+private final class ExecServerStdioProcessSupervisor: @unchecked Sendable {
+    private static let terminationGracePeriod: TimeInterval = 2
+
+    private let process: Process
+    private let lock = NSLock()
+    private var tracker: SeatbeltPidTracker?
+    private var terminateRequested = false
+
+    init(process: Process) {
+        self.process = process
+    }
+
+    func startTracking() {
+        let pid = process.processIdentifier
+        lock.withLock {
+            tracker = SeatbeltPidTracker(rootPID: pid)
+        }
+        process.terminationHandler = { [weak self] _ in
+            self?.killTrackedProcessTree(signal: SIGKILL, includeRoot: false)
+        }
+    }
+
+    func terminate() {
+        let shouldTerminate = lock.withLock {
+            if terminateRequested {
+                return false
+            }
+            terminateRequested = true
+            process.terminationHandler = nil
+            return true
+        }
+        guard shouldTerminate else {
+            return
+        }
+
+        let pids = signalTrackedProcessTree(signal: SIGTERM, includeRoot: true)
+        guard !pids.isEmpty else {
+            return
+        }
+        if waitForExit(of: pids, timeout: Self.terminationGracePeriod) {
+            return
+        }
+        signalPIDs(pids, signal: SIGKILL)
+        _ = waitForExit(of: pids, timeout: Self.terminationGracePeriod)
+    }
+
+    private func killTrackedProcessTree(signal: Int32, includeRoot: Bool) {
+        _ = signalTrackedProcessTree(signal: signal, includeRoot: includeRoot)
+    }
+
+    private func signalTrackedProcessTree(signal: Int32, includeRoot: Bool) -> Set<pid_t> {
+        let pids = trackedProcessTree(includeRoot: includeRoot)
+        signalPIDs(pids, signal: signal)
+        return pids
+    }
+
+    private func trackedProcessTree(includeRoot: Bool) -> Set<pid_t> {
+        let rootPID = process.processIdentifier
+        var pids = lock.withLock {
+            let tracked = tracker?.stop() ?? []
+            tracker = nil
+            return tracked
+        }
+        collectDescendants(of: rootPID, into: &pids)
+        if includeRoot {
+            pids.insert(rootPID)
+        } else {
+            pids.remove(rootPID)
+        }
+        return pids.filter { $0 > 0 && execServerPIDIsAlive($0) }
+    }
+
+    private func collectDescendants(of parent: pid_t, into pids: inout Set<pid_t>) {
+        for child in listChildPIDs(parent: parent) {
+            if pids.insert(child).inserted {
+                collectDescendants(of: child, into: &pids)
+            }
+        }
+    }
+
+    private func signalPIDs(_ pids: Set<pid_t>, signal: Int32) {
+        for pid in pids.sorted(by: >) where execServerPIDIsAlive(pid) {
+            _ = Darwin.kill(pid, signal)
+        }
+    }
+
+    private func waitForExit(of pids: Set<pid_t>, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if pids.allSatisfy({ !execServerPIDIsAlive($0) }) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return pids.allSatisfy { !execServerPIDIsAlive($0) }
     }
 }
 
@@ -617,4 +718,15 @@ private final class FileHandleDrain: @unchecked Sendable {
             try? handle.close()
         }
     }
+}
+
+private func execServerPIDIsAlive(_ pid: pid_t) -> Bool {
+    guard pid > 0 else {
+        return false
+    }
+    let result = Darwin.kill(pid, 0)
+    if result == 0 {
+        return true
+    }
+    return errno == EPERM
 }

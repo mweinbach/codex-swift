@@ -312,6 +312,37 @@ final class ExecServerClientTests: XCTestCase {
         try await waitForProcessExit(pid)
     }
 
+    func testDroppingStdioClientTerminatesSpawnedProcessTreeLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let serverPIDPath = temp.url.appendingPathComponent("server.pid").path
+        let childPIDPath = temp.url.appendingPathComponent("server-child.pid").path
+        let script = """
+        IFS= read -r _initialize
+        printf '%s\\n' "$$" > '\(shellQuote(serverPIDPath))'
+        sleep 60 >/dev/null 2>&1 &
+        printf '%s\\n' "$!" > '\(shellQuote(childPIDPath))'
+        printf '%s\\n' '{"id":1,"result":{"sessionId":"stdio-session"}}'
+        IFS= read -r _initialized
+        wait
+        """
+
+        var client: ExecServerClient? = try await ExecServerClient.connectStdioCommand(StdioExecServerConnectArgs(
+            command: StdioExecServerCommand(program: "sh", args: ["-c", script]),
+            clientName: "stdio-test-client",
+            initializeTimeoutSeconds: 1
+        ))
+        let serverPID = try waitForPIDFile(serverPIDPath)
+        let childPID = try waitForPIDFile(childPIDPath)
+        XCTAssertNotNil(client)
+        XCTAssertTrue(processExists(serverPID), "spawned stdio process should be running before client drop")
+        XCTAssertTrue(processExists(childPID), "spawned stdio child process should be running before client drop")
+
+        client = nil
+
+        try await waitForProcessExit(serverPID)
+        try await waitForProcessExit(childPID)
+    }
+
     private func XCTAssertThrowsExecServerClientError<T>(
         _ expression: @autoclosure @escaping () async throws -> T,
         description: String,
@@ -445,12 +476,16 @@ private func waitForTextFile(_ path: String) throws -> String {
 
 private func waitForProcessExit(_ pid: Int32) async throws {
     for _ in 0..<30 {
-        if Darwin.kill(pid, 0) != 0 {
+        if !processExists(pid) {
             return
         }
         try await Task.sleep(nanoseconds: 100_000_000)
     }
     XCTFail("process \(pid) should exit")
+}
+
+private func processExists(_ pid: Int32) -> Bool {
+    Darwin.kill(pid, 0) == 0
 }
 
 private final class TemporaryDirectory {
