@@ -44,10 +44,23 @@ public enum JSONSchemaAdditionalProperties: Equatable, Codable, Sendable {
 public indirect enum JSONSchema: Equatable, Codable, Sendable {
     case boolean(description: String?)
     case string(description: String?)
+    case stringEnum(values: [JSONValue], description: String?)
     case number(description: String?)
+    case integer(description: String?)
+    case null(description: String?)
     case array(items: JSONSchema, description: String?)
     case object(
         properties: [String: JSONSchema],
+        required: [String]?,
+        additionalProperties: JSONSchemaAdditionalProperties?
+    )
+    case anyOf(variants: [JSONSchema], description: String?)
+    case typeUnion(
+        types: [String],
+        description: String?,
+        enumValues: [JSONValue]?,
+        items: JSONSchema?,
+        properties: [String: JSONSchema]?,
         required: [String]?,
         additionalProperties: JSONSchemaAdditionalProperties?
     )
@@ -55,26 +68,58 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type
         case description
+        case enumValues = "enum"
         case items
         case properties
         case required
         case additionalProperties
+        case anyOf
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let description = try container.decodeIfPresent(String.self, forKey: .description)
+        if let variants = try container.decodeIfPresent([JSONSchema].self, forKey: .anyOf),
+           !container.contains(.type)
+        {
+            self = .anyOf(variants: variants, description: description)
+            return
+        }
+        if let types = try? container.decode([String].self, forKey: .type) {
+            self = .typeUnion(
+                types: types,
+                description: description,
+                enumValues: try container.decodeIfPresent([JSONValue].self, forKey: .enumValues),
+                items: try container.decodeIfPresent(JSONSchema.self, forKey: .items),
+                properties: try container.decodeIfPresent([String: JSONSchema].self, forKey: .properties),
+                required: try container.decodeIfPresent([String].self, forKey: .required),
+                additionalProperties: try container.decodeIfPresent(
+                    JSONSchemaAdditionalProperties.self,
+                    forKey: .additionalProperties
+                )
+            )
+            return
+        }
         let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "boolean":
-            self = .boolean(description: try container.decodeIfPresent(String.self, forKey: .description))
+            self = .boolean(description: description)
         case "string":
-            self = .string(description: try container.decodeIfPresent(String.self, forKey: .description))
-        case "number", "integer":
-            self = .number(description: try container.decodeIfPresent(String.self, forKey: .description))
+            if let enumValues = try container.decodeIfPresent([JSONValue].self, forKey: .enumValues) {
+                self = .stringEnum(values: enumValues, description: description)
+            } else {
+                self = .string(description: description)
+            }
+        case "number":
+            self = .number(description: description)
+        case "integer":
+            self = .integer(description: description)
+        case "null":
+            self = .null(description: description)
         case "array":
             self = .array(
                 items: try container.decode(JSONSchema.self, forKey: .items),
-                description: try container.decodeIfPresent(String.self, forKey: .description)
+                description: description
             )
         case "object":
             self = .object(
@@ -103,8 +148,18 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
         case let .string(description):
             try container.encode("string", forKey: .type)
             try container.encodeIfPresent(description, forKey: .description)
+        case let .stringEnum(values, description):
+            try container.encode("string", forKey: .type)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encode(values, forKey: .enumValues)
         case let .number(description):
             try container.encode("number", forKey: .type)
+            try container.encodeIfPresent(description, forKey: .description)
+        case let .integer(description):
+            try container.encode("integer", forKey: .type)
+            try container.encodeIfPresent(description, forKey: .description)
+        case let .null(description):
+            try container.encode("null", forKey: .type)
             try container.encodeIfPresent(description, forKey: .description)
         case let .array(items, description):
             try container.encode("array", forKey: .type)
@@ -113,6 +168,17 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
         case let .object(properties, required, additionalProperties):
             try container.encode("object", forKey: .type)
             try container.encode(properties, forKey: .properties)
+            try container.encodeIfPresent(required, forKey: .required)
+            try container.encodeIfPresent(additionalProperties, forKey: .additionalProperties)
+        case let .anyOf(variants, description):
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encode(variants, forKey: .anyOf)
+        case let .typeUnion(types, description, enumValues, items, properties, required, additionalProperties):
+            try container.encode(types, forKey: .type)
+            try container.encodeIfPresent(description, forKey: .description)
+            try container.encodeIfPresent(enumValues, forKey: .enumValues)
+            try container.encodeIfPresent(items, forKey: .items)
+            try container.encodeIfPresent(properties, forKey: .properties)
             try container.encodeIfPresent(required, forKey: .required)
             try container.encodeIfPresent(additionalProperties, forKey: .additionalProperties)
         }
@@ -136,57 +202,97 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
 
     private static func sanitized(fromObject object: [String: Any]) -> JSONSchema {
         let description = object["description"] as? String
-        let type = normalizedType(for: object)
+        if let variants = object["anyOf"] as? [Any], object["type"] == nil {
+            return .anyOf(variants: variants.map(sanitized(from:)), description: description)
+        }
 
-        switch type {
+        let types = normalizedTypes(for: object)
+        let enumValues = enumValues(from: object)
+        let properties = sanitizedProperties(object["properties"])
+        let required = object["required"] as? [String]
+        let additionalProperties = sanitizedAdditionalProperties(object["additionalProperties"])
+        let items = object["items"].map(sanitized(from:))
+
+        if types.count > 1 {
+            return .typeUnion(
+                types: types,
+                description: description,
+                enumValues: enumValues,
+                items: types.contains("array") ? (items ?? .string(description: nil)) : items,
+                properties: types.contains("object") ? properties : (object["properties"] == nil ? nil : properties),
+                required: required,
+                additionalProperties: additionalProperties
+            )
+        }
+
+        switch types.first ?? "string" {
         case "boolean":
             return .boolean(description: description)
         case "array":
-            let items = object["items"].map(sanitized(from:)) ?? .string(description: nil)
-            return .array(items: items, description: description)
+            return .array(items: items ?? .string(description: nil), description: description)
         case "object":
             return .object(
-                properties: sanitizedProperties(object["properties"]),
-                required: object["required"] as? [String],
-                additionalProperties: sanitizedAdditionalProperties(object["additionalProperties"])
+                properties: properties,
+                required: required,
+                additionalProperties: additionalProperties
             )
-        case "number", "integer":
+        case "number":
             return .number(description: description)
+        case "integer":
+            return .integer(description: description)
+        case "null":
+            return .null(description: description)
         case "string":
             fallthrough
         default:
+            if let enumValues {
+                return .stringEnum(values: enumValues, description: description)
+            }
             return .string(description: description)
         }
     }
 
-    private static func normalizedType(for object: [String: Any]) -> String {
+    private static func normalizedTypes(for object: [String: Any]) -> [String] {
         if let type = object["type"] as? String {
-            return type
+            return normalizedType(type, object: object).map { [$0] } ?? []
         }
 
         if let types = object["type"] as? [String],
-           let supported = types.first(where: { ["object", "array", "string", "number", "integer", "boolean"].contains($0) })
+           !types.isEmpty
         {
-            return supported
+            return types.compactMap { normalizedType($0, object: object) }
         }
 
         if object["properties"] != nil || object["required"] != nil || object["additionalProperties"] != nil {
-            return "object"
+            return ["object"]
         }
         if object["items"] != nil || object["prefixItems"] != nil {
-            return "array"
+            return ["array"]
         }
         if object["enum"] != nil || object["const"] != nil || object["format"] != nil {
-            return "string"
+            return ["string"]
         }
         if object["minimum"] != nil || object["maximum"] != nil
             || object["exclusiveMinimum"] != nil || object["exclusiveMaximum"] != nil
             || object["multipleOf"] != nil
         {
-            return "number"
+            return ["number"]
         }
 
-        return "string"
+        return ["string"]
+    }
+
+    private static func normalizedType(_ type: String, object: [String: Any]) -> String? {
+        switch type {
+        case "object", "array", "string", "number", "integer", "boolean", "null":
+            return type
+        case "enum" where object["enum"] != nil || object["const"] != nil:
+            return "string"
+        case "const" where object["enum"] != nil || object["const"] != nil:
+            return "string"
+        default:
+            return nil
+        }
     }
 
     private static func sanitizedProperties(_ value: Any?) -> [String: JSONSchema] {
@@ -204,6 +310,43 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
             return .boolean(bool)
         }
         return .schema(sanitized(from: value))
+    }
+
+    private static func enumValues(from object: [String: Any]) -> [JSONValue]? {
+        if let values = object["enum"] as? [Any] {
+            return values.compactMap(jsonValue)
+        }
+        if let const = object["const"],
+           let value = jsonValue(from: const)
+        {
+            return [value]
+        }
+        return nil
+    }
+
+    private static func jsonValue(from value: Any) -> JSONValue? {
+        switch value {
+        case let value as JSONValue:
+            return value
+        case is NSNull:
+            return .null
+        case let value as Bool:
+            return .bool(value)
+        case let value as Int:
+            return .integer(Int64(value))
+        case let value as Int64:
+            return .integer(value)
+        case let value as Double:
+            return .double(value)
+        case let value as String:
+            return .string(value)
+        case let values as [Any]:
+            return .array(values.compactMap(jsonValue))
+        case let object as [String: Any]:
+            return .object(object.compactMapValues(jsonValue))
+        default:
+            return nil
+        }
     }
 }
 

@@ -38,9 +38,9 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(items["description"] as? String, "values")
     }
 
-    func testJSONSchemaDecodesIntegerAsNumber() throws {
+    func testJSONSchemaDecodesIntegerAsRustInteger() throws {
         let schema = try JSONDecoder().decode(JSONSchema.self, from: Data(#"{"type":"integer"}"#.utf8))
-        XCTAssertEqual(schema, .number(description: nil))
+        XCTAssertEqual(schema, .integer(description: nil))
     }
 
     func testSanitizedSchemaDefaultsMissingTypesAndArrayItems() throws {
@@ -66,7 +66,7 @@ final class ToolSpecTests: XCTestCase {
                     "query": .string(description: "search query"),
                     "tags": .array(items: .string(description: nil), description: nil),
                     "limit": .number(description: nil),
-                    "mode": .string(description: nil)
+                    "mode": .stringEnum(values: [.string("fast"), .string("slow")], description: nil)
                 ],
                 required: nil,
                 additionalProperties: .schema(
@@ -76,6 +76,111 @@ final class ToolSpecTests: XCTestCase {
                         additionalProperties: .boolean(false)
                     )
                 )
+            )
+        )
+    }
+
+    func testSanitizedSchemaPreservesNullableUnionsAndAnyOfLikeRust() throws {
+        let schema = JSONSchema.sanitized(from: [
+            "type": "object",
+            "properties": [
+                "nickname": [
+                    "type": ["string", "null"],
+                    "description": "Optional nickname"
+                ],
+                "open": [
+                    "anyOf": [
+                        [
+                            "type": "array",
+                            "items": [
+                                "type": "object",
+                                "properties": [
+                                    "ref_id": ["type": "string"],
+                                    "lineno": [
+                                        "anyOf": [
+                                            ["type": "integer"],
+                                            ["type": "null"]
+                                        ]
+                                    ]
+                                ],
+                                "required": ["ref_id"],
+                                "additionalProperties": false
+                            ]
+                        ],
+                        ["type": "null"]
+                    ]
+                ]
+            ],
+            "required": ["nickname"],
+            "additionalProperties": false
+        ])
+
+        XCTAssertEqual(
+            schema,
+            .object(
+                properties: [
+                    "nickname": .typeUnion(
+                        types: ["string", "null"],
+                        description: "Optional nickname",
+                        enumValues: nil,
+                        items: nil,
+                        properties: nil,
+                        required: nil,
+                        additionalProperties: nil
+                    ),
+                    "open": .anyOf(
+                        variants: [
+                            .array(
+                                items: .object(
+                                    properties: [
+                                        "ref_id": .string(description: nil),
+                                        "lineno": .anyOf(
+                                            variants: [
+                                                .integer(description: nil),
+                                                .null(description: nil)
+                                            ],
+                                            description: nil
+                                        )
+                                    ],
+                                    required: ["ref_id"],
+                                    additionalProperties: .boolean(false)
+                                ),
+                                description: nil
+                            ),
+                            .null(description: nil)
+                        ],
+                        description: nil
+                    )
+                ],
+                required: ["nickname"],
+                additionalProperties: .boolean(false)
+            )
+        )
+    }
+
+    func testSanitizedSchemaDefaultsNullableObjectAndArrayChildrenLikeRust() {
+        XCTAssertEqual(
+            JSONSchema.sanitized(from: ["type": ["object", "null"]]),
+            .typeUnion(
+                types: ["object", "null"],
+                description: nil,
+                enumValues: nil,
+                items: nil,
+                properties: [:],
+                required: nil,
+                additionalProperties: nil
+            )
+        )
+        XCTAssertEqual(
+            JSONSchema.sanitized(from: ["type": ["array", "null"]]),
+            .typeUnion(
+                types: ["array", "null"],
+                description: nil,
+                enumValues: nil,
+                items: .string(description: nil),
+                properties: nil,
+                required: nil,
+                additionalProperties: nil
             )
         )
     }
@@ -516,9 +621,9 @@ final class ToolSpecTests: XCTestCase {
                     strict: false,
                     parameters: .object(
                         properties: [
-                            "count": .number(description: nil),
+                            "count": .integer(description: nil),
                             "tags": .array(items: .string(description: nil), description: nil),
-                            "mode": .string(description: nil)
+                            "mode": .stringEnum(values: [.string("fast"), .string("slow")], description: nil)
                         ],
                         required: ["count"],
                         additionalProperties: nil
