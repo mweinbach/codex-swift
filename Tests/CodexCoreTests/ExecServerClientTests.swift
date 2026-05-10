@@ -382,6 +382,199 @@ final class ExecServerClientTests: XCTestCase {
         )
     }
 
+    func testRemoteProcessStartsAndDelegatesSessionOperationsLikeRust() async throws {
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            switch request.method {
+            case execServerProcessStartMethod:
+                XCTAssertEqual(request.params?["processId"], .string("proc-remote"))
+                XCTAssertEqual(request.params?["argv"], .array([.string("/bin/cat")]))
+                XCTAssertEqual(request.params?["pipeStdin"], .bool(true))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerExecResponse(processId: "proc-remote"))
+                )
+            case execServerProcessReadMethod:
+                XCTAssertEqual(request.params?["processId"], .string("proc-remote"))
+                XCTAssertEqual(request.params?["afterSeq"], .integer(4))
+                XCTAssertEqual(request.params?["maxBytes"], .integer(128))
+                XCTAssertEqual(request.params?["waitMs"], .integer(50))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerReadResponse(
+                        chunks: [
+                            ExecServerProcessOutputChunk(
+                                seq: 5,
+                                stream: .stdout,
+                                chunk: ExecServerByteChunk(Array("pong".utf8))
+                            )
+                        ],
+                        nextSeq: 6,
+                        exited: false,
+                        closed: false
+                    ))
+                )
+            case execServerProcessWriteMethod:
+                XCTAssertEqual(request.params?["processId"], .string("proc-remote"))
+                XCTAssertEqual(request.params?["chunk"], .string("cGluZw=="))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerWriteResponse(status: .accepted))
+                )
+            case execServerProcessTerminateMethod:
+                XCTAssertEqual(request.params?["processId"], .string("proc-remote"))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerTerminateResponse(running: true))
+                )
+            default:
+                XCTFail("Unexpected method \(request.method)")
+                return nil
+            }
+        }
+        let remoteProcess = ExecServerRemoteProcess(client: ExecServerClient(transport: transport))
+
+        let started = try await remoteProcess.start(ExecServerExecParams(
+            processId: "proc-remote",
+            argv: ["/bin/cat"],
+            cwd: "/tmp",
+            env: [:],
+            tty: false,
+            pipeStdin: true
+        ))
+        let read = try await started.process.read(afterSeq: 4, maxBytes: 128, waitMs: 50)
+        let write = try await started.process.write(Data("ping".utf8))
+        try await started.process.terminate()
+
+        XCTAssertEqual(started.process.processId, "proc-remote")
+        XCTAssertEqual(read.chunks.first?.chunk.bytes, Array("pong".utf8))
+        XCTAssertEqual(write.status, .accepted)
+        let methods = await transport.snapshot().compactMap { message -> String? in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return request.method
+        }
+        XCTAssertEqual(methods, [
+            execServerProcessStartMethod,
+            execServerProcessReadMethod,
+            execServerProcessWriteMethod,
+            execServerProcessTerminateMethod
+        ])
+    }
+
+    func testRemoteProcessUnregistersSessionWhenStartFailsLikeRust() async throws {
+        let startAttempts = AsyncCounter()
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            XCTAssertEqual(request.method, execServerProcessStartMethod)
+            if await startAttempts.increment() == 1 {
+                return ExecServerRPC.error(
+                    id: request.id,
+                    error: ExecServerRPC.invalidRequest("cannot start process")
+                )
+            }
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerExecResponse(processId: "proc-retry"))
+            )
+        }
+        let remoteProcess = ExecServerRemoteProcess(client: ExecServerClient(transport: transport))
+        let params = ExecServerExecParams(
+            processId: "proc-retry",
+            argv: ["/bin/echo", "ok"],
+            cwd: "/tmp",
+            env: [:],
+            tty: false
+        )
+
+        await XCTAssertThrowsExecServerClientError(
+            try await remoteProcess.start(params),
+            description: "exec-server rejected request (-32600): cannot start process"
+        )
+        let started = try await remoteProcess.start(params)
+
+        XCTAssertEqual(started.process.processId, "proc-retry")
+    }
+
+    func testRemoteProcessSessionOrdersNotificationsAndRemovesClosedRouteLikeRust() async throws {
+        let transport = ScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return ExecServerRPC.response(
+                id: request.id,
+                result: try ExecServerRPC.jsonValue(from: ExecServerExecResponse(processId: "proc-events"))
+            )
+        }
+        let client = ExecServerClient(transport: transport)
+        let remoteProcess = ExecServerRemoteProcess(client: client)
+        let started = try await remoteProcess.start(ExecServerExecParams(
+            processId: "proc-events",
+            argv: ["/bin/echo", "hi"],
+            cwd: "/tmp",
+            env: [:],
+            tty: false
+        ))
+
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerProcessClosedMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerClosedNotification(processId: "proc-events", seq: 3))
+        ))
+        let closedFirstSnapshot = await started.process.eventSnapshot()
+        XCTAssertEqual(closedFirstSnapshot, [])
+
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerProcessOutputDeltaMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerOutputDeltaNotification(
+                processId: "proc-events",
+                seq: 1,
+                stream: .stdout,
+                chunk: ExecServerByteChunk(Array("hi".utf8))
+            ))
+        ))
+        let outputSnapshot = await started.process.eventSnapshot()
+        XCTAssertEqual(outputSnapshot, [
+            .output(ExecServerProcessOutputChunk(
+                seq: 1,
+                stream: .stdout,
+                chunk: ExecServerByteChunk(Array("hi".utf8))
+            ))
+        ])
+
+        try await client.handleServerNotification(ExecServerJSONRPCNotification(
+            method: execServerProcessExitedMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExitedNotification(
+                processId: "proc-events",
+                seq: 2,
+                exitCode: 0
+            ))
+        ))
+        let terminalSnapshot = await started.process.eventSnapshot()
+        XCTAssertEqual(terminalSnapshot, [
+            .output(ExecServerProcessOutputChunk(
+                seq: 1,
+                stream: .stdout,
+                chunk: ExecServerByteChunk(Array("hi".utf8))
+            )),
+            .exited(seq: 2, exitCode: 0),
+            .closed(seq: 3)
+        ])
+
+        let replacement = try await remoteProcess.start(ExecServerExecParams(
+            processId: "proc-events",
+            argv: ["/bin/echo", "again"],
+            cwd: "/tmp",
+            env: [:],
+            tty: false
+        ))
+        XCTAssertEqual(replacement.process.processId, "proc-events")
+    }
+
     func testLineClientTransportWritesStdioLinesAndFansOutNotificationsLikeRust() async throws {
         let harness = LineClientHarness()
         let notification = ExecServerJSONRPCNotification(
@@ -651,6 +844,15 @@ private actor ScriptedExecServerClientTransport: ExecServerClientTransport {
 
     func snapshot() -> [ExecServerJSONRPCMessage] {
         messages
+    }
+}
+
+private actor AsyncCounter {
+    private var value = 0
+
+    func increment() -> Int {
+        value += 1
+        return value
     }
 }
 

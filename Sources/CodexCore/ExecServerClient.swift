@@ -217,6 +217,24 @@ public actor ExecServerWebSocketClientTransport: ExecServerClientTransport {
     }
 }
 
+private actor ExecServerClientNotificationRouter {
+    private let userHandler: ExecServerLineClientTransport.NotificationHandler
+    private weak var client: ExecServerClient?
+
+    init(userHandler: @escaping ExecServerLineClientTransport.NotificationHandler) {
+        self.userHandler = userHandler
+    }
+
+    func setClient(_ client: ExecServerClient) {
+        self.client = client
+    }
+
+    func handle(_ notification: ExecServerJSONRPCNotification) async throws {
+        try await client?.handleServerNotification(notification)
+        try await userHandler(notification)
+    }
+}
+
 private enum ExecServerClientWebSocketIncoming: Sendable {
     case text(String)
     case data(Data)
@@ -552,6 +570,7 @@ public actor ExecServerClient {
     private var nextRequestID: Int64 = 1
     private var storedSessionID: String?
     private var disconnectedMessage: String?
+    private var processSessions: [String: ExecServerRemoteProcessEventLog] = [:]
 
     public init(transport: any ExecServerClientTransport) {
         self.transport = transport
@@ -582,11 +601,13 @@ public actor ExecServerClient {
         _ args: RemoteExecServerConnectArgs,
         notificationHandler: @escaping ExecServerWebSocketClientTransport.NotificationHandler = { _ in }
     ) async throws -> ExecServerClient {
+        let router = ExecServerClientNotificationRouter(userHandler: notificationHandler)
         let transport = try ExecServerWebSocketClientTransport(
             websocketURL: args.websocketURL,
-            notificationHandler: notificationHandler
+            notificationHandler: { try await router.handle($0) }
         )
         let client = ExecServerClient(transport: transport)
+        await router.setClient(client)
         do {
             try await withTimeout(
                 seconds: args.connectTimeoutSeconds,
@@ -613,11 +634,13 @@ public actor ExecServerClient {
         _ args: StdioExecServerConnectArgs,
         notificationHandler: @escaping ExecServerLineClientTransport.NotificationHandler = { _ in }
     ) async throws -> ExecServerClient {
+        let router = ExecServerClientNotificationRouter(userHandler: notificationHandler)
         let transport = try ExecServerStdioCommandTransport(
             command: args.command,
-            notificationHandler: notificationHandler
+            notificationHandler: { try await router.handle($0) }
         )
         let client = ExecServerClient(transport: transport)
+        await router.setClient(client)
         do {
             _ = try await client.initialize(options: ExecServerClientConnectOptions(
                 clientName: args.clientName,
@@ -667,6 +690,60 @@ public actor ExecServerClient {
 
     public func terminateProcess(_ params: ExecServerTerminateParams) async throws -> ExecServerTerminateResponse {
         try await call(execServerProcessTerminateMethod, params: params)
+    }
+
+    public func registerProcessSession(processId: String) throws -> ExecServerRemoteProcessSession {
+        if let disconnectedMessage {
+            throw ExecServerClientError.disconnected(disconnectedMessage)
+        }
+        guard processSessions[processId] == nil else {
+            throw ExecServerClientError.protocolError("session already registered for process \(processId)")
+        }
+        let log = ExecServerRemoteProcessEventLog()
+        processSessions[processId] = log
+        return ExecServerRemoteProcessSession(processId: processId, client: self, events: log)
+    }
+
+    public func unregisterProcessSession(processId: String) {
+        processSessions.removeValue(forKey: processId)
+    }
+
+    public func handleServerNotification(_ notification: ExecServerJSONRPCNotification) async throws {
+        switch notification.method {
+        case execServerProcessOutputDeltaMethod:
+            let params = try decodeNotification(notification, as: ExecServerOutputDeltaNotification.self)
+            if let session = processSessions[params.processId] {
+                let publishedClosed = await session.publishOrdered(.output(ExecServerProcessOutputChunk(
+                    seq: params.seq,
+                    stream: params.stream,
+                    chunk: params.chunk
+                )))
+                if publishedClosed {
+                    processSessions.removeValue(forKey: params.processId)
+                }
+            }
+        case execServerProcessExitedMethod:
+            let params = try decodeNotification(notification, as: ExecServerExitedNotification.self)
+            if let session = processSessions[params.processId] {
+                let publishedClosed = await session.publishOrdered(.exited(
+                    seq: params.seq,
+                    exitCode: params.exitCode
+                ))
+                if publishedClosed {
+                    processSessions.removeValue(forKey: params.processId)
+                }
+            }
+        case execServerProcessClosedMethod:
+            let params = try decodeNotification(notification, as: ExecServerClosedNotification.self)
+            if let session = processSessions[params.processId] {
+                let publishedClosed = await session.publishOrdered(.closed(seq: params.seq))
+                if publishedClosed {
+                    processSessions.removeValue(forKey: params.processId)
+                }
+            }
+        default:
+            return
+        }
     }
 
     public func readFile(_ params: ExecServerFsReadFileParams) async throws -> ExecServerFsReadFileResponse {
@@ -725,10 +802,17 @@ public actor ExecServerClient {
             method: method,
             params: try jsonValue(from: params)
         ))
-        let response = try await send(message)
+        let response: ExecServerJSONRPCMessage?
+        do {
+            response = try await send(message)
+        } catch let error as ExecServerClientError where error.isTransportClosedLikeRust {
+            let message = recordDisconnected(reason: nil)
+            await failAllProcessSessions(message)
+            throw ExecServerClientError.disconnected(message)
+        }
         guard let response else {
-            let message = disconnectedMessage(reason: nil)
-            disconnectedMessage = message
+            let message = recordDisconnected(reason: nil)
+            await failAllProcessSessions(message)
             throw ExecServerClientError.disconnected(message)
         }
         return try decodeResponse(response, requestID: requestID, as: R.self)
@@ -780,6 +864,34 @@ public actor ExecServerClient {
             return try ExecServerRPC.jsonValue(from: params)
         } catch {
             throw ExecServerClientError.json(String(describing: error))
+        }
+    }
+
+    private func decodeNotification<R: Decodable>(
+        _ notification: ExecServerJSONRPCNotification,
+        as type: R.Type
+    ) throws -> R {
+        do {
+            return try ExecServerRPC.decodeNotificationParams(notification.params, as: R.self)
+        } catch {
+            throw ExecServerClientError.json(String(describing: error))
+        }
+    }
+
+    private func recordDisconnected(reason: String?) -> String {
+        let message = disconnectedMessage(reason: reason)
+        if let disconnectedMessage {
+            return disconnectedMessage
+        }
+        disconnectedMessage = message
+        return message
+    }
+
+    private func failAllProcessSessions(_ message: String) async {
+        let sessions = processSessions
+        processSessions.removeAll()
+        for session in sessions.values {
+            await session.setFailure(message)
         }
     }
 
