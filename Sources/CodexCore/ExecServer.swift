@@ -894,7 +894,7 @@ public struct ExecServerRemoteExecutorConfiguration: Equatable, Sendable {
         )
     }
 
-    private static func normalizeBaseURL(_ baseURL: String) throws -> String {
+    static func normalizeBaseURL(_ baseURL: String) throws -> String {
         var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") {
             trimmed.removeLast()

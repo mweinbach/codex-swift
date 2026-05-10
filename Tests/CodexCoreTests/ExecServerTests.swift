@@ -1669,6 +1669,22 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    private func XCTAssertThrowsExecServerRemoteError(
+        _ expression: @autoclosure () async throws -> some Any,
+        description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("Expected exec-server remote executor error", file: file, line: line)
+        } catch let error as ExecServerRemoteExecutorError {
+            XCTAssertEqual(String(describing: error), description, file: file, line: line)
+        } catch {
+            XCTFail("Unexpected error: \(error)", file: file, line: line)
+        }
+    }
+
     func testProtocolMethodConstantsMatchRust() {
         XCTAssertEqual(execServerInitializeMethod, "initialize")
         XCTAssertEqual(execServerInitializedMethod, "initialized")
@@ -1965,6 +1981,108 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(config.executorID, "exec-123")
         XCTAssertEqual(config.name, "codex-exec-server")
         XCTAssertEqual(config.bearerToken, "token")
+    }
+
+    func testRemoteExecutorRegistrationRequestMatchesRustShape() throws {
+        let config = try ExecServerRemoteExecutorConfiguration(
+            baseURL: "https://registry.example.test",
+            executorID: "exec-requested",
+            bearerToken: "registry-token"
+        )
+        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let request = config.registrationRequest(registrationID: registrationID)
+
+        XCTAssertEqual(
+            request.idempotencyId,
+            "codex-exec-server-ca85dcc8eab43dfc6a5e632a7fe44adb7f5e904895bec68497baa50e37305fed"
+        )
+        try XCTAssertJSONObjectEqual(request, [
+            "idempotency_id": request.idempotencyId,
+            "executor_id": "exec-requested",
+            "name": "codex-exec-server",
+            "labels": [:],
+            "metadata": [:]
+        ])
+    }
+
+    func testRemoteExecutorRegistryClientPostsWithBearerTokenLikeRust() async throws {
+        let recorder = HTTPRequestRecorder(response: URLSessionTransportResponse(
+            statusCode: 200,
+            body: Data(#"""
+            {
+              "id": "registration-1",
+              "executor_id": "exec-1",
+              "url": "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
+            }
+            """#.utf8)
+        ))
+        let client = try ExecServerRemoteExecutorRegistryClient(
+            baseURL: "https://registry.example.test/",
+            bearerToken: "registry-token",
+            send: { request in await recorder.send(request) }
+        )
+
+        let response = try await client.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
+            idempotencyId: "idem-1",
+            executorId: "exec-requested",
+            name: "codex-exec-server"
+        ))
+
+        XCTAssertEqual(response, ExecServerRemoteExecutorRegistrationResponse(
+            id: "registration-1",
+            executorId: "exec-1",
+            url: "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
+        ))
+        let recordedRequest = await recorder.firstRequest()
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.url?.absoluteString, "https://registry.example.test/cloud/executor/exec-requested/register")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer registry-token")
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(NSDictionary(dictionary: object), NSDictionary(dictionary: [
+            "idempotency_id": "idem-1",
+            "executor_id": "exec-requested",
+            "name": "codex-exec-server",
+            "labels": [:],
+            "metadata": [:]
+        ]))
+    }
+
+    func testRemoteExecutorRegistryClientErrorsMatchRustMessages() async throws {
+        let authClient = try ExecServerRemoteExecutorRegistryClient(
+            baseURL: "https://registry.example.test",
+            bearerToken: "registry-token",
+            send: { _ in URLSessionTransportResponse(
+                statusCode: 403,
+                body: Data(#"{"error":{"message":"bad token"}}"#.utf8)
+            ) }
+        )
+        await XCTAssertThrowsExecServerRemoteError(
+            try await authClient.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
+                idempotencyId: "idem-1",
+                executorId: "exec-1",
+                name: nil
+            )),
+            description: "executor registry authentication error: executor registry authentication failed (403): bad token"
+        )
+
+        let httpClient = try ExecServerRemoteExecutorRegistryClient(
+            baseURL: "https://registry.example.test",
+            bearerToken: "registry-token",
+            send: { _ in URLSessionTransportResponse(
+                statusCode: 500,
+                body: Data(#"{"error":{"code":"registry_failed","message":"try again"}}"#.utf8)
+            ) }
+        )
+        await XCTAssertThrowsExecServerRemoteError(
+            try await httpClient.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
+                idempotencyId: "idem-1",
+                executorId: "exec-1",
+                name: nil
+            )),
+            description: "executor registry request failed (500, registry_failed): try again"
+        )
     }
 
     func testRemoteExecutorConfigurationErrorsMatchRustMessages() {
