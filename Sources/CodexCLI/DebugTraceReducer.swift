@@ -687,7 +687,7 @@ struct DebugTraceReducer {
                     producedBy: producedBy
                 )
             }
-            try updateConversationItem(itemID, producedBy: producedBy)
+            try updateConversationItem(itemID, normalized: item, producedBy: producedBy)
             try attachModelVisibleToolItem(itemID: itemID, normalized: item)
             itemIDs.append(itemID)
         }
@@ -719,13 +719,17 @@ struct DebugTraceReducer {
         return itemID
     }
 
-    private mutating func updateConversationItem(_ itemID: String, producedBy: [[String: Any]]) throws {
-        guard !producedBy.isEmpty else {
-            return
-        }
+    private mutating func updateConversationItem(
+        _ itemID: String,
+        normalized: NormalizedConversationItem,
+        producedBy: [[String: Any]]
+    ) throws {
         var conversationItems = try Self.dictionaryMap(rollout["conversation_items"], key: "conversation_items")
         guard var item = conversationItems[itemID] as? [String: Any] else {
             throw DebugTraceReducerError.invalidTraceObject("conversation item \(itemID)")
+        }
+        if normalized.kind == "reasoning" {
+            try Self.mergeReasoningBody(into: &item, incomingParts: normalized.parts)
         }
         var producers = item["produced_by"] as? [[String: Any]] ?? []
         for producer in producedBy where !producers.contains(where: { NSDictionary(dictionary: $0).isEqual(to: producer) }) {
@@ -810,6 +814,9 @@ struct DebugTraceReducer {
               let existingParts = body["parts"] as? [[String: Any]]
         else {
             return false
+        }
+        if normalized.kind == "reasoning" {
+            return Self.reasoningParts(existingParts, match: normalized.parts)
         }
         return Self.conversationParts(existingParts, match: normalized.parts)
     }
@@ -1242,6 +1249,8 @@ struct DebugTraceReducer {
                 parts: Self.contentParts(item["content"], rawPayloadID: rawPayloadID),
                 callID: nil
             )
+        case "reasoning":
+            return try Self.normalizeReasoningItem(item, rawPayloadID: rawPayloadID)
         case "function_call":
             return NormalizedConversationItem(
                 role: "assistant",
@@ -1554,6 +1563,83 @@ struct DebugTraceReducer {
         return parts
     }
 
+    private static func normalizeReasoningItem(
+        _ item: [String: Any],
+        rawPayloadID: String
+    ) throws -> NormalizedConversationItem {
+        var parts: [[String: Any]] = []
+        try appendReasoningParts(
+            from: item["content"],
+            key: "content",
+            acceptedTypes: ["reasoning_text", "text"],
+            outputType: "text",
+            rawPayloadID: rawPayloadID,
+            parts: &parts
+        )
+        try appendReasoningParts(
+            from: item["summary"],
+            key: "summary",
+            acceptedTypes: ["summary_text"],
+            outputType: "summary",
+            rawPayloadID: rawPayloadID,
+            parts: &parts
+        )
+        if let encrypted = item["encrypted_content"] {
+            if encrypted is NSNull {
+                // Rust treats explicit null as absent.
+            } else if let encrypted = encrypted as? String {
+                parts.append([
+                    "type": "encoded",
+                    "label": "encrypted_content",
+                    "value": encrypted
+                ])
+            } else {
+                throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) encrypted_content")
+            }
+        }
+        if parts.isEmpty {
+            throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) content")
+        }
+        return NormalizedConversationItem(
+            role: "assistant",
+            channel: "analysis",
+            kind: "reasoning",
+            parts: parts,
+            callID: nil
+        )
+    }
+
+    private static func appendReasoningParts(
+        from value: Any?,
+        key: String,
+        acceptedTypes: Set<String>,
+        outputType: String,
+        rawPayloadID: String,
+        parts: inout [[String: Any]]
+    ) throws {
+        guard let value else {
+            return
+        }
+        if key == "content", value is NSNull {
+            return
+        }
+        guard let entries = value as? [[String: Any]] else {
+            throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) \(key)")
+        }
+        for entry in entries {
+            guard let type = entry["type"] as? String else {
+                throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) \(key) type")
+            }
+            guard acceptedTypes.contains(type) else {
+                throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) \(key) \(type)")
+            }
+            guard let text = entry["text"] as? String else {
+                throw DebugTraceReducerError.invalidTraceObject("reasoning item in payload \(rawPayloadID) \(key) text")
+            }
+            parts.append(["type": outputType, "text": text])
+        }
+    }
+
     private static func rawTextOrJSONPart(_ value: Any?, rawPayloadID: String) -> [String: Any] {
         if let text = value as? String {
             if let data = text.data(using: .utf8),
@@ -1627,6 +1713,54 @@ struct DebugTraceReducer {
             }
             return NSDictionary(dictionary: lhs).isEqual(to: rhs)
         }
+    }
+
+    private static func reasoningParts(_ left: [[String: Any]], match right: [[String: Any]]) -> Bool {
+        if conversationParts(left, match: right) {
+            return true
+        }
+        guard let leftEncoded = reasoningEncodedPart(left),
+              let rightEncoded = reasoningEncodedPart(right)
+        else {
+            return false
+        }
+        return NSDictionary(dictionary: leftEncoded).isEqual(to: rightEncoded)
+    }
+
+    private static func mergeReasoningBody(into item: inout [String: Any], incomingParts: [[String: Any]]) throws {
+        guard var body = item["body"] as? [String: Any],
+              let existingParts = body["parts"] as? [[String: Any]]
+        else {
+            throw DebugTraceReducerError.invalidTraceObject("reasoning item body")
+        }
+        if conversationParts(existingParts, match: incomingParts) {
+            return
+        }
+        guard reasoningParts(existingParts, match: incomingParts) else {
+            throw DebugTraceReducerError.invalidTraceObject("reasoning item merge encrypted_content")
+        }
+        let existingText = reasoningParts(existingParts, type: "text")
+        let existingSummary = reasoningParts(existingParts, type: "summary")
+        if !existingText.isEmpty && !existingSummary.isEmpty {
+            return
+        }
+        let incomingText = reasoningParts(incomingParts, type: "text")
+        let incomingSummary = reasoningParts(incomingParts, type: "summary")
+        let text = existingText.isEmpty ? incomingText : existingText
+        let summary = existingSummary.isEmpty ? incomingSummary : existingSummary
+        let encoded = reasoningParts(existingParts, type: "encoded")
+        body["parts"] = text + summary + encoded
+        item["body"] = body
+    }
+
+    private static func reasoningEncodedPart(_ parts: [[String: Any]]) -> [String: Any]? {
+        parts.first {
+            $0["type"] as? String == "encoded" && $0["label"] as? String == "encrypted_content"
+        }
+    }
+
+    private static func reasoningParts(_ parts: [[String: Any]], type: String) -> [[String: Any]] {
+        parts.filter { $0["type"] as? String == type }
     }
 }
 
