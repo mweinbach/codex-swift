@@ -7204,6 +7204,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        _ = try mcpServerStatusDetail(params?["detail"])
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -15992,6 +15993,23 @@ private enum AppServerTurnItemsView: String {
 private enum AppServerThreadTurnsSortDirection {
     case asc
     case desc
+}
+
+private enum AppServerMcpServerStatusDetail: String {
+    case full
+    case toolsAndAuthOnly
+}
+
+private func mcpServerStatusDetail(_ rawValue: Any?) throws -> AppServerMcpServerStatusDetail {
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        return .full
+    }
+    guard let detail = AppServerMcpServerStatusDetail(rawValue: value) else {
+        throw AppServerError.invalidRequest(
+            "Invalid request: unknown variant `\(value)`, expected `full` or `toolsAndAuthOnly`"
+        )
+    }
+    return detail
 }
 
 private func turnItemsView(_ rawValue: Any?) throws -> AppServerTurnItemsView {

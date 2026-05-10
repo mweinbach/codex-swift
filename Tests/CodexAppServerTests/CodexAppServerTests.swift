@@ -8076,6 +8076,14 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondData.map { $0["name"] as? String }, ["github"])
         XCTAssertEqual(secondData[0]["authStatus"] as? String, "bearer_token")
         XCTAssertNil(secondResult["nextCursor"])
+
+        let toolsOnly = try appServerResponse(
+            #"{"id":3,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
+            codexHome: temp.url
+        )
+        let toolsOnlyResult = try XCTUnwrap(toolsOnly["result"] as? [String: Any])
+        let toolsOnlyData = try XCTUnwrap(toolsOnlyResult["data"] as? [[String: Any]])
+        XCTAssertEqual(toolsOnlyData.map { $0["name"] as? String }, ["docs", "github"])
     }
 
     func testMcpServerStatusListRejectsInvalidCursor() throws {
@@ -8089,6 +8097,22 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+    }
+
+    func testMcpServerStatusListRejectsUnknownDetailLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"lite"}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "Invalid request: unknown variant `lite`, expected `full` or `toolsAndAuthOnly`"
+        )
     }
 
     func testMcpServerReloadReturnsEmptyResult() throws {
