@@ -30,6 +30,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var chatgptBaseURL: String?
     public var experimentalInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
+    public var includePermissionsInstructions: Bool?
+    public var includeAppsInstructions: Bool?
+    public var includeEnvironmentContext: Bool?
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
@@ -51,6 +54,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case chatgptBaseURL = "chatgpt_base_url"
         case experimentalInstructionsFile = "experimental_instructions_file"
         case experimentalCompactPromptFile = "experimental_compact_prompt_file"
+        case includePermissionsInstructions = "include_permissions_instructions"
+        case includeAppsInstructions = "include_apps_instructions"
+        case includeEnvironmentContext = "include_environment_context"
         case includeApplyPatchTool = "include_apply_patch_tool"
         case experimentalUseUnifiedExecTool = "experimental_use_unified_exec_tool"
         case experimentalUseFreeformApplyPatch = "experimental_use_freeform_apply_patch"
@@ -73,6 +79,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         chatgptBaseURL: String? = nil,
         experimentalInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
+        includePermissionsInstructions: Bool? = nil,
+        includeAppsInstructions: Bool? = nil,
+        includeEnvironmentContext: Bool? = nil,
         includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         experimentalUseFreeformApplyPatch: Bool? = nil,
@@ -93,6 +102,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.chatgptBaseURL = chatgptBaseURL
         self.experimentalInstructionsFile = experimentalInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
+        self.includePermissionsInstructions = includePermissionsInstructions
+        self.includeAppsInstructions = includeAppsInstructions
+        self.includeEnvironmentContext = includeEnvironmentContext
         self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
@@ -116,6 +128,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.chatgptBaseURL = try container.decodeIfPresent(String.self, forKey: .chatgptBaseURL)
         self.experimentalInstructionsFile = try container.decodeIfPresent(String.self, forKey: .experimentalInstructionsFile)
         self.experimentalCompactPromptFile = try container.decodeIfPresent(String.self, forKey: .experimentalCompactPromptFile)
+        self.includePermissionsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includePermissionsInstructions)
+        self.includeAppsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includeAppsInstructions)
+        self.includeEnvironmentContext = try container.decodeIfPresent(Bool.self, forKey: .includeEnvironmentContext)
         self.includeApplyPatchTool = try container.decodeIfPresent(Bool.self, forKey: .includeApplyPatchTool)
         self.experimentalUseUnifiedExecTool = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseUnifiedExecTool)
         self.experimentalUseFreeformApplyPatch = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseFreeformApplyPatch)
@@ -139,6 +154,9 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(chatgptBaseURL, into: &container, forKey: .chatgptBaseURL)
         try encodeOptional(experimentalInstructionsFile, into: &container, forKey: .experimentalInstructionsFile)
         try encodeOptional(experimentalCompactPromptFile, into: &container, forKey: .experimentalCompactPromptFile)
+        try encodeOptional(includePermissionsInstructions, into: &container, forKey: .includePermissionsInstructions)
+        try encodeOptional(includeAppsInstructions, into: &container, forKey: .includeAppsInstructions)
+        try encodeOptional(includeEnvironmentContext, into: &container, forKey: .includeEnvironmentContext)
         try encodeOptional(includeApplyPatchTool, into: &container, forKey: .includeApplyPatchTool)
         try encodeOptional(experimentalUseUnifiedExecTool, into: &container, forKey: .experimentalUseUnifiedExecTool)
         try encodeOptional(experimentalUseFreeformApplyPatch, into: &container, forKey: .experimentalUseFreeformApplyPatch)

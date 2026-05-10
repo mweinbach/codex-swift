@@ -30,6 +30,10 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.baseInstructions)
         XCTAssertNil(config.developerInstructions)
         XCTAssertNil(config.compactPrompt)
+        XCTAssertTrue(config.includePermissionsInstructions)
+        XCTAssertTrue(config.includeAppsInstructions)
+        XCTAssertTrue(config.includeSkillInstructions)
+        XCTAssertTrue(config.includeEnvironmentContext)
         XCTAssertNil(config.includeApplyPatchTool)
         XCTAssertNil(config.experimentalUseUnifiedExecTool)
         XCTAssertNil(config.experimentalUseFreeformApplyPatch)
@@ -79,6 +83,9 @@ final class ConfigLoaderTests: XCTestCase {
         compact_prompt = "  Summarize differently.  "
         experimental_instructions_file = "instructions.md"
         experimental_compact_prompt_file = "compact.md"
+        include_permissions_instructions = false
+        include_apps_instructions = false
+        include_environment_context = false
         include_apply_patch_tool = true
         experimental_use_unified_exec_tool = true
         experimental_use_freeform_apply_patch = false
@@ -106,6 +113,9 @@ final class ConfigLoaderTests: XCTestCase {
         type = "transcription"
         transport = "webrtc"
         voice = "cedar"
+
+        [skills]
+        include_instructions = false
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -138,6 +148,10 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalInstructionsFile, instructions.path)
         XCTAssertEqual(config.experimentalCompactPromptFile, compact.path)
         XCTAssertEqual(config.baseInstructions, "file instructions")
+        XCTAssertFalse(config.includePermissionsInstructions)
+        XCTAssertFalse(config.includeAppsInstructions)
+        XCTAssertFalse(config.includeSkillInstructions)
+        XCTAssertFalse(config.includeEnvironmentContext)
         XCTAssertEqual(config.includeApplyPatchTool, true)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
@@ -156,6 +170,30 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
+    }
+
+    func testPromptInstructionBlocksCanBeDisabledFromConfigAndProfilesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        include_permissions_instructions = false
+        include_apps_instructions = false
+        include_environment_context = false
+        profile = "chatty"
+
+        [skills]
+        include_instructions = false
+
+        [profiles.chatty]
+        include_permissions_instructions = true
+        include_environment_context = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.includePermissionsInstructions)
+        XCTAssertFalse(config.includeAppsInstructions)
+        XCTAssertFalse(config.includeSkillInstructions)
+        XCTAssertTrue(config.includeEnvironmentContext)
     }
 
     func testCLIOverridesLoadExperimentalRuntimeFieldsLikeRust() throws {

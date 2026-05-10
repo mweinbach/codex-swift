@@ -78,6 +78,10 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var baseInstructions: String?
     public var developerInstructions: String?
     public var compactPrompt: String?
+    public var includePermissionsInstructions: Bool
+    public var includeAppsInstructions: Bool
+    public var includeSkillInstructions: Bool
+    public var includeEnvironmentContext: Bool
     public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var experimentalUseFreeformApplyPatch: Bool?
@@ -104,6 +108,110 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var projectDocFallbackFilenames: [String]
     public var toolOutputTokenLimit: Int?
     public var ossProvider: String?
+
+    public init(
+        model: String? = nil,
+        modelProvider: String? = nil,
+        modelProviders: [String: ModelProviderInfo] = [:],
+        approvalPolicy: AskForApproval? = nil,
+        sandboxMode: SandboxMode? = nil,
+        sandboxPolicy: SandboxPolicy? = nil,
+        modelReasoningEffort: ReasoningEffort? = nil,
+        modelReasoningSummary: ReasoningSummary? = nil,
+        modelVerbosity: Verbosity? = nil,
+        serviceTier: String? = nil,
+        chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
+        cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        forcedLoginMethod: ForcedLoginMethod? = nil,
+        forcedChatGPTWorkspaceID: String? = nil,
+        experimentalInstructionsFile: String? = nil,
+        experimentalCompactPromptFile: String? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        compactPrompt: String? = nil,
+        includePermissionsInstructions: Bool = true,
+        includeAppsInstructions: Bool = true,
+        includeSkillInstructions: Bool = true,
+        includeEnvironmentContext: Bool = true,
+        includeApplyPatchTool: Bool? = nil,
+        experimentalUseUnifiedExecTool: Bool? = nil,
+        experimentalUseFreeformApplyPatch: Bool? = nil,
+        experimentalRealtimeWSBaseURL: String? = nil,
+        experimentalRealtimeWSModel: String? = nil,
+        realtime: RealtimeConfig = RealtimeConfig(),
+        experimentalRealtimeWSBackendPrompt: String? = nil,
+        experimentalRealtimeWSStartupContext: String? = nil,
+        experimentalRealtimeStartInstructions: String? = nil,
+        experimentalThreadConfigEndpoint: String? = nil,
+        experimentalThreadStore: ThreadStoreConfig = .local,
+        webSearchMode: WebSearchMode? = nil,
+        webSearchConfig: WebSearchConfig? = nil,
+        toolsWebSearch: Bool? = nil,
+        toolsViewImage: Bool? = nil,
+        features: FeatureStates = .withDefaults(),
+        mcpServers: [String: McpServerConfig] = [:],
+        mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
+        mcpOAuthCallbackPort: UInt16? = nil,
+        mcpOAuthCallbackURL: String? = nil,
+        activeProfile: String? = nil,
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
+        projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
+        projectDocFallbackFilenames: [String] = [],
+        toolOutputTokenLimit: Int? = nil,
+        ossProvider: String? = nil
+    ) {
+        self.model = model
+        self.modelProvider = modelProvider
+        self.modelProviders = modelProviders
+        self.approvalPolicy = approvalPolicy
+        self.sandboxMode = sandboxMode
+        self.sandboxPolicy = sandboxPolicy
+        self.modelReasoningEffort = modelReasoningEffort
+        self.modelReasoningSummary = modelReasoningSummary
+        self.modelVerbosity = modelVerbosity
+        self.serviceTier = serviceTier
+        self.chatgptBaseURL = chatgptBaseURL
+        self.realtimeAudio = realtimeAudio
+        self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
+        self.forcedLoginMethod = forcedLoginMethod
+        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.experimentalInstructionsFile = experimentalInstructionsFile
+        self.experimentalCompactPromptFile = experimentalCompactPromptFile
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.compactPrompt = compactPrompt
+        self.includePermissionsInstructions = includePermissionsInstructions
+        self.includeAppsInstructions = includeAppsInstructions
+        self.includeSkillInstructions = includeSkillInstructions
+        self.includeEnvironmentContext = includeEnvironmentContext
+        self.includeApplyPatchTool = includeApplyPatchTool
+        self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
+        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
+        self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
+        self.realtime = realtime
+        self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
+        self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
+        self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
+        self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
+        self.experimentalThreadStore = experimentalThreadStore
+        self.webSearchMode = webSearchMode
+        self.webSearchConfig = webSearchConfig
+        self.toolsWebSearch = toolsWebSearch
+        self.toolsViewImage = toolsViewImage
+        self.features = features
+        self.mcpServers = mcpServers
+        self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
+        self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
+        self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
+        self.activeProfile = activeProfile
+        self.projectRootMarkers = projectRootMarkers
+        self.projectDocMaxBytes = projectDocMaxBytes
+        self.projectDocFallbackFilenames = projectDocFallbackFilenames
+        self.toolOutputTokenLimit = toolOutputTokenLimit
+        self.ossProvider = ossProvider
+    }
 
     public init(
         model: String? = nil,
@@ -153,52 +261,58 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         toolOutputTokenLimit: Int? = nil,
         ossProvider: String? = nil
     ) {
-        self.model = model
-        self.modelProvider = modelProvider
-        self.modelProviders = modelProviders
-        self.approvalPolicy = approvalPolicy
-        self.sandboxMode = sandboxMode
-        self.sandboxPolicy = sandboxPolicy
-        self.modelReasoningEffort = modelReasoningEffort
-        self.modelReasoningSummary = modelReasoningSummary
-        self.modelVerbosity = modelVerbosity
-        self.serviceTier = serviceTier
-        self.chatgptBaseURL = chatgptBaseURL
-        self.realtimeAudio = realtimeAudio
-        self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
-        self.forcedLoginMethod = forcedLoginMethod
-        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
-        self.experimentalInstructionsFile = experimentalInstructionsFile
-        self.experimentalCompactPromptFile = experimentalCompactPromptFile
-        self.baseInstructions = baseInstructions
-        self.developerInstructions = developerInstructions
-        self.compactPrompt = compactPrompt
-        self.includeApplyPatchTool = includeApplyPatchTool
-        self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
-        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
-        self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
-        self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
-        self.realtime = realtime
-        self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
-        self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
-        self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
-        self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
-        self.experimentalThreadStore = experimentalThreadStore
-        self.webSearchMode = webSearchMode
-        self.webSearchConfig = webSearchConfig
-        self.toolsWebSearch = toolsWebSearch
-        self.toolsViewImage = toolsViewImage
-        self.features = features
-        self.mcpServers = mcpServers
-        self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
-        self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
-        self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
-        self.activeProfile = activeProfile
-        self.projectRootMarkers = projectRootMarkers
-        self.projectDocMaxBytes = projectDocMaxBytes
-        self.projectDocFallbackFilenames = projectDocFallbackFilenames
-        self.toolOutputTokenLimit = toolOutputTokenLimit
-        self.ossProvider = ossProvider
+        self.init(
+            model: model,
+            modelProvider: modelProvider,
+            modelProviders: modelProviders,
+            approvalPolicy: approvalPolicy,
+            sandboxMode: sandboxMode,
+            sandboxPolicy: sandboxPolicy,
+            modelReasoningEffort: modelReasoningEffort,
+            modelReasoningSummary: modelReasoningSummary,
+            modelVerbosity: modelVerbosity,
+            serviceTier: serviceTier,
+            chatgptBaseURL: chatgptBaseURL,
+            realtimeAudio: realtimeAudio,
+            cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
+            forcedLoginMethod: forcedLoginMethod,
+            forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
+            experimentalInstructionsFile: experimentalInstructionsFile,
+            experimentalCompactPromptFile: experimentalCompactPromptFile,
+            baseInstructions: baseInstructions,
+            developerInstructions: developerInstructions,
+            compactPrompt: compactPrompt,
+            includePermissionsInstructions: true,
+            includeAppsInstructions: true,
+            includeSkillInstructions: true,
+            includeEnvironmentContext: true,
+            includeApplyPatchTool: includeApplyPatchTool,
+            experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
+            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
+            experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
+            experimentalRealtimeWSModel: experimentalRealtimeWSModel,
+            realtime: realtime,
+            experimentalRealtimeWSBackendPrompt: experimentalRealtimeWSBackendPrompt,
+            experimentalRealtimeWSStartupContext: experimentalRealtimeWSStartupContext,
+            experimentalRealtimeStartInstructions: experimentalRealtimeStartInstructions,
+            experimentalThreadConfigEndpoint: experimentalThreadConfigEndpoint,
+            experimentalThreadStore: experimentalThreadStore,
+            webSearchMode: webSearchMode,
+            webSearchConfig: webSearchConfig,
+            toolsWebSearch: toolsWebSearch,
+            toolsViewImage: toolsViewImage,
+            features: features,
+            mcpServers: mcpServers,
+            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
+            mcpOAuthCallbackPort: mcpOAuthCallbackPort,
+            mcpOAuthCallbackURL: mcpOAuthCallbackURL,
+            activeProfile: activeProfile,
+            projectRootMarkers: projectRootMarkers,
+            projectDocMaxBytes: projectDocMaxBytes,
+            projectDocFallbackFilenames: projectDocFallbackFilenames,
+            toolOutputTokenLimit: toolOutputTokenLimit,
+            ossProvider: ossProvider
+        )
     }
 
     public init(
@@ -621,6 +735,7 @@ private struct ParsedCodexConfigToml {
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
+    var skillsIncludeInstructions: Bool?
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -708,6 +823,13 @@ private struct ParsedCodexConfigToml {
                 parsed.realtimeAudio[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .realtime:
                 parsed.realtime[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .skills:
+                if key == "include_instructions" {
+                    parsed.skillsIncludeInstructions = try Self.boolValue(
+                        ConfigValueParser.parseTomlLiteral(valueText),
+                        key: "skills.include_instructions"
+                    )
+                }
             case let .profileFeatures(name):
                 parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -785,6 +907,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "realtime" {
                 realtime[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "skills", parts[1] == "include_instructions" {
+                skillsIncludeInstructions = try Self.boolValue(value, key: path)
                 continue
             }
 
@@ -885,6 +1012,10 @@ private struct ParsedCodexConfigToml {
             realtime[key] = value
         }
 
+        if let skillsIncludeInstructions = overlay.skillsIncludeInstructions {
+            self.skillsIncludeInstructions = skillsIncludeInstructions
+        }
+
         for (profileName, profileValues) in overlay.profileFeatures {
             var mergedProfile = profileFeatures[profileName] ?? [:]
             for (key, value) in profileValues {
@@ -944,6 +1075,15 @@ private struct ParsedCodexConfigToml {
             for (key, value) in featureTable {
                 features[key] = try Self.boolValue(value, key: "features.\(key)")
             }
+        }
+
+        if case let .table(skillsTable) = table["skills"],
+           let includeInstructions = skillsTable["include_instructions"]
+        {
+            skillsIncludeInstructions = try Self.boolValue(
+                includeInstructions,
+                key: "skills.include_instructions"
+            )
         }
 
         if case let .table(toolsTable) = table["tools"],
@@ -1084,6 +1224,7 @@ private struct ParsedCodexConfigToml {
             config.experimentalCompactPromptFile,
             description: "experimental compact prompt file"
         )
+        config.includeSkillInstructions = skillsIncludeInstructions ?? true
 
         var featureStates = FeatureStates.withDefaults()
         featureStates.apply(featureValues: features)
@@ -1288,6 +1429,24 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)experimental_compact_prompt_file"
             )
         }
+        if let includePermissionsInstructions = values["include_permissions_instructions"] {
+            config.includePermissionsInstructions = try boolValue(
+                includePermissionsInstructions,
+                key: "\(keyPrefix)include_permissions_instructions"
+            )
+        }
+        if let includeAppsInstructions = values["include_apps_instructions"] {
+            config.includeAppsInstructions = try boolValue(
+                includeAppsInstructions,
+                key: "\(keyPrefix)include_apps_instructions"
+            )
+        }
+        if let includeEnvironmentContext = values["include_environment_context"] {
+            config.includeEnvironmentContext = try boolValue(
+                includeEnvironmentContext,
+                key: "\(keyPrefix)include_environment_context"
+            )
+        }
         if let includeApplyPatchTool = values["include_apply_patch_tool"] {
             config.includeApplyPatchTool = try boolValue(
                 includeApplyPatchTool,
@@ -1393,6 +1552,9 @@ private struct ParsedCodexConfigToml {
             || key == "compact_prompt"
             || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
+            || key == "include_permissions_instructions"
+            || key == "include_apps_instructions"
+            || key == "include_environment_context"
             || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_use_freeform_apply_patch"
@@ -1430,6 +1592,9 @@ private struct ParsedCodexConfigToml {
             || key == "chatgpt_base_url"
             || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
+            || key == "include_permissions_instructions"
+            || key == "include_apps_instructions"
+            || key == "include_environment_context"
             || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_use_freeform_apply_patch"
@@ -1694,6 +1859,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "realtime" {
             return .realtime
         }
+        if parts.count == 1, parts[0] == "skills" {
+            return .skills
+        }
         if parts.count == 2, parts[0] == "tools", parts[1] == "web_search" {
             return .toolsWebSearch
         }
@@ -1881,6 +2049,7 @@ private enum ConfigSection {
     case sandboxWorkspaceWrite
     case audio
     case realtime
+    case skills
     case toolsWebSearch
     case toolsWebSearchLocation
     case profileFeatures(String)
