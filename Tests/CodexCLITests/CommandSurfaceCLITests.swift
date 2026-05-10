@@ -781,7 +781,6 @@ final class CommandSurfaceCLITests: XCTestCase {
             "app-server",
             "remote-control",
             "app",
-            "update",
             "debug",
             "resume",
             "fork",
@@ -801,6 +800,42 @@ final class CommandSurfaceCLITests: XCTestCase {
                 command
             )
         }
+    }
+
+    func testRunAsyncUpdateDelegatesToRunner() async {
+        var receivedRequest: CodexCLI.UpdateCommandRequest?
+        var stdout: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["update"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            updateRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "updated")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["updated"])
+        XCTAssertEqual(receivedRequest, CodexCLI.UpdateCommandRequest())
+    }
+
+    func testRunAsyncUpdateRejectsArguments() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["update", "now"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            updateRunner: { _ in
+                XCTFail("runner should not be called")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'update': now"])
     }
 
     private struct TestError: Error, Equatable, CustomStringConvertible, Sendable {

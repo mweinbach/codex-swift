@@ -63,7 +63,8 @@ let exitCode = await cli.runAsync(
     stdioToUDSRunner: runStdioToUDSCommand,
     pluginRunner: runPluginCommand,
     cloudRunner: runCloudCommand,
-    responsesAPIProxyRunner: runResponsesAPIProxyCommand
+    responsesAPIProxyRunner: runResponsesAPIProxyCommand,
+    updateRunner: runUpdateCommand
 )
 exit(exitCode)
 
@@ -1597,6 +1598,10 @@ private func runResponsesAPIProxyCommand(_ request: CodexCLI.ResponsesAPIProxyCo
         upstreamURL: request.upstreamURL
     ))
     return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: "server stopped unexpectedly")
+}
+
+private func runUpdateCommand(_ request: CodexCLI.UpdateCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try UpdateCommandRuntime.run()
 }
 
 private struct CloudExecPrompt {

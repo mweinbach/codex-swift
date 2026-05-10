@@ -5,6 +5,8 @@ public enum UpdateAction: Equatable, Sendable {
     case npmGlobalLatest
     case bunGlobalLatest
     case brewUpgrade
+    case standaloneUnix
+    case standaloneWindows
 
     public func commandArgs() -> (command: String, arguments: [String]) {
         switch self {
@@ -13,7 +15,11 @@ public enum UpdateAction: Equatable, Sendable {
         case .bunGlobalLatest:
             return ("bun", ["install", "-g", "@openai/codex"])
         case .brewUpgrade:
-            return ("brew", ["upgrade", "codex"])
+            return ("brew", ["upgrade", "--cask", "codex"])
+        case .standaloneUnix:
+            return ("sh", ["-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"])
+        case .standaloneWindows:
+            return ("powershell", ["-c", "irm https://chatgpt.com/codex/install.ps1|iex"])
         }
     }
 

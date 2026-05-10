@@ -457,6 +457,10 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct UpdateCommandRequest: Equatable, Sendable {
+        public init() {}
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
         public let stdoutMessage: String?
@@ -487,6 +491,7 @@ public struct CodexCLI: Sendable {
     public typealias PluginCommandRunner = (PluginCommandRequest) async throws -> CommandExecutionResult
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
     public typealias ResponsesAPIProxyCommandRunner = (ResponsesAPIProxyCommandRequest) async throws -> CommandExecutionResult
+    public typealias UpdateCommandRunner = (UpdateCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -611,7 +616,8 @@ public struct CodexCLI: Sendable {
         stdioToUDSRunner: StdioToUDSCommandRunner? = nil,
         pluginRunner: PluginCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil,
-        responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil
+        responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil,
+        updateRunner: UpdateCommandRunner? = nil
     ) async -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -983,6 +989,23 @@ public struct CodexCLI: Sendable {
             case let .failure(message, exitCode):
                 stderr(message)
                 return exitCode
+            }
+        case let .command(spec, commandArguments) where spec.name == "update":
+            guard let updateRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            guard commandArguments.isEmpty else {
+                stderr("codex-swift: unexpected argument for command 'update': \(commandArguments[0])")
+                return 64
+            }
+            do {
+                let result = try await updateRunner(UpdateCommandRequest())
+                emit(result, stdout: stdout, stderr: stderr)
+                return result.exitCode
+            } catch {
+                stderr(describe(error))
+                return 1
             }
         case let .command(spec, commandArguments) where spec.name == "features":
             guard let featuresRunner else {

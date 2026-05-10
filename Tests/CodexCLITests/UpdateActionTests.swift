@@ -8,13 +8,19 @@ final class UpdateActionTests: XCTestCase {
         XCTAssertEqual(UpdateAction.bunGlobalLatest.commandArgs().command, "bun")
         XCTAssertEqual(UpdateAction.bunGlobalLatest.commandArgs().arguments, ["install", "-g", "@openai/codex"])
         XCTAssertEqual(UpdateAction.brewUpgrade.commandArgs().command, "brew")
-        XCTAssertEqual(UpdateAction.brewUpgrade.commandArgs().arguments, ["upgrade", "codex"])
+        XCTAssertEqual(UpdateAction.brewUpgrade.commandArgs().arguments, ["upgrade", "--cask", "codex"])
+        XCTAssertEqual(UpdateAction.standaloneUnix.commandArgs().command, "sh")
+        XCTAssertEqual(UpdateAction.standaloneUnix.commandArgs().arguments, ["-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"])
+        XCTAssertEqual(UpdateAction.standaloneWindows.commandArgs().command, "powershell")
+        XCTAssertEqual(UpdateAction.standaloneWindows.commandArgs().arguments, ["-c", "irm https://chatgpt.com/codex/install.ps1|iex"])
     }
 
     func testCommandStringMatchesRustShellRendering() {
         XCTAssertEqual(UpdateAction.npmGlobalLatest.commandString(), "npm install -g @openai/codex")
         XCTAssertEqual(UpdateAction.bunGlobalLatest.commandString(), "bun install -g @openai/codex")
-        XCTAssertEqual(UpdateAction.brewUpgrade.commandString(), "brew upgrade codex")
+        XCTAssertEqual(UpdateAction.brewUpgrade.commandString(), "brew upgrade --cask codex")
+        XCTAssertEqual(UpdateAction.standaloneUnix.commandString(), "sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'")
+        XCTAssertEqual(UpdateAction.standaloneWindows.commandString(), "powershell -c 'irm https://chatgpt.com/codex/install.ps1|iex'")
     }
 
     func testDetectUpdateActionWithoutEnvironmentMutation() {
@@ -91,6 +97,6 @@ final class UpdateActionTests: XCTestCase {
         let normalized = UpdateAction.brewUpgrade.normalizedCommandArgsForWSL(isWSL: true)
 
         XCTAssertEqual(normalized.command, "brew")
-        XCTAssertEqual(normalized.arguments, ["upgrade", "codex"])
+        XCTAssertEqual(normalized.arguments, ["upgrade", "--cask", "codex"])
     }
 }
