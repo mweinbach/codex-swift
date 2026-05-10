@@ -51,6 +51,7 @@ public enum McpServerTransportConfig: Equatable, Sendable {
 public struct McpServerConfig: Equatable, Sendable {
     public var transport: McpServerTransportConfig
     public var enabled: Bool
+    public var disabledReason: String?
     public var startupTimeoutSec: Double?
     public var toolTimeoutSec: Double?
     public var enabledTools: [String]?
@@ -59,6 +60,7 @@ public struct McpServerConfig: Equatable, Sendable {
     public init(
         transport: McpServerTransportConfig,
         enabled: Bool = true,
+        disabledReason: String? = nil,
         startupTimeoutSec: Double? = nil,
         toolTimeoutSec: Double? = nil,
         enabledTools: [String]? = nil,
@@ -66,6 +68,7 @@ public struct McpServerConfig: Equatable, Sendable {
     ) {
         self.transport = transport
         self.enabled = enabled
+        self.disabledReason = disabledReason
         self.startupTimeoutSec = startupTimeoutSec
         self.toolTimeoutSec = toolTimeoutSec
         self.enabledTools = enabledTools
@@ -328,7 +331,7 @@ public enum McpCommandFormatter {
         var httpRows: [[String]] = []
 
         for (name, server) in entries {
-            let status = server.enabled ? "enabled" : "disabled"
+            let status = formatStatus(server)
             let auth = (authStatuses?[name] ?? McpAuthStatusResolver.authStatus(for: server)).description
             switch server.transport {
             case let .stdio(command, args, env, envVars, cwd):
@@ -371,6 +374,9 @@ public enum McpCommandFormatter {
         }
 
         if !server.enabled {
+            if let reason = server.disabledReason {
+                return "\(name) (disabled: \(reason))"
+            }
             return "\(name) (disabled)"
         }
 
@@ -418,6 +424,7 @@ public enum McpCommandFormatter {
         .object([
             "name": .string(name),
             "enabled": .bool(server.enabled),
+            "disabled_reason": server.disabledReason.map(JSONValue.string) ?? .null,
             "transport": transportJSONValue(server.transport),
             "startup_timeout_sec": secondsJSONValue(server.startupTimeoutSec),
             "tool_timeout_sec": secondsJSONValue(server.toolTimeoutSec),
@@ -429,6 +436,7 @@ public enum McpCommandFormatter {
         .object([
             "name": .string(name),
             "enabled": .bool(server.enabled),
+            "disabled_reason": server.disabledReason.map(JSONValue.string) ?? .null,
             "transport": transportJSONValue(server.transport),
             "enabled_tools": stringArrayJSONValue(server.enabledTools),
             "disabled_tools": stringArrayJSONValue(server.disabledTools),
@@ -457,6 +465,16 @@ public enum McpCommandFormatter {
                 "env_http_headers": stringMapJSONValue(envHttpHeaders)
             ])
         }
+    }
+
+    private static func formatStatus(_ server: McpServerConfig) -> String {
+        if server.enabled {
+            return "enabled"
+        }
+        if let reason = server.disabledReason {
+            return "disabled: \(reason)"
+        }
+        return "disabled"
     }
 
     private static func prettyJSON(_ value: JSONValue) throws -> String {

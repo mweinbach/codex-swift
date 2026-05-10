@@ -400,6 +400,7 @@ final class McpConfigTests: XCTestCase {
             .object([
                 "name": .string("docs"),
                 "enabled": .bool(true),
+                "disabled_reason": .null,
                 "transport": .object([
                     "type": .string("stdio"),
                     "command": .string("echo"),
@@ -413,6 +414,73 @@ final class McpConfigTests: XCTestCase {
                 "auth_status": .string("unsupported")
             ])
         ]))
+    }
+
+    func testFormatMcpDisabledReasonMatchesRustListAndGet() throws {
+        let server = McpServerConfig(
+            transport: .stdio(command: "echo", args: [], env: nil, envVars: [], cwd: nil),
+            enabled: false,
+            disabledReason: "requirements"
+        )
+
+        let list = try McpCommandFormatter.list(servers: ["docs": server], json: false)
+        XCTAssertTrue(list.contains("disabled: requirements"))
+
+        let listJSON = try JSONDecoder().decode(
+            JSONValue.self,
+            from: Data(try McpCommandFormatter.list(servers: ["docs": server], json: true).utf8)
+        )
+        XCTAssertEqual(
+            listJSON,
+            .array([
+                .object([
+                    "name": .string("docs"),
+                    "enabled": .bool(false),
+                    "disabled_reason": .string("requirements"),
+                    "transport": .object([
+                        "type": .string("stdio"),
+                        "command": .string("echo"),
+                        "args": .array([]),
+                        "env": .null,
+                        "env_vars": .array([]),
+                        "cwd": .null
+                    ]),
+                    "startup_timeout_sec": .null,
+                    "tool_timeout_sec": .null,
+                    "auth_status": .string("unsupported")
+                ])
+            ])
+        )
+
+        XCTAssertEqual(
+            try McpCommandFormatter.get(name: "docs", server: server, json: false),
+            "docs (disabled: requirements)"
+        )
+
+        let getJSON = try JSONDecoder().decode(
+            JSONValue.self,
+            from: Data(try McpCommandFormatter.get(name: "docs", server: server, json: true).utf8)
+        )
+        XCTAssertEqual(
+            getJSON,
+            .object([
+                "name": .string("docs"),
+                "enabled": .bool(false),
+                "disabled_reason": .string("requirements"),
+                "transport": .object([
+                    "type": .string("stdio"),
+                    "command": .string("echo"),
+                    "args": .array([]),
+                    "env": .null,
+                    "env_vars": .array([]),
+                    "cwd": .null
+                ]),
+                "enabled_tools": .null,
+                "disabled_tools": .null,
+                "startup_timeout_sec": .null,
+                "tool_timeout_sec": .null
+            ])
+        )
     }
 
     func testAuthStatusResolverMarksBearerTokenHTTPServers() throws {
