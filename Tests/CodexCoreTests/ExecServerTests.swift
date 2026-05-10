@@ -566,6 +566,50 @@ final class ExecServerTests: XCTestCase {
         XCTAssertTrue(read.closed)
     }
 
+    func testConnectionProcessorWritesToPtyProcessWithoutPipeStdinLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        let start = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-pty-stdin",
+                argv: ["/bin/sh", "-c", "IFS= read line; printf 'from-stdin:%s\\n' \"$line\""],
+                cwd: cwd,
+                env: [:],
+                tty: true,
+                pipeStdin: false
+            ))
+        ))))
+
+        let write = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessWriteMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerWriteParams(
+                processId: "proc-pty-stdin",
+                chunk: ExecServerByteChunk(Array("hello\n".utf8))
+            ))
+        ))))
+        let notifications = try await collectProcessLifecycleNotifications(
+            from: connection,
+            processId: "proc-pty-stdin"
+        )
+        let read = try await readProcessUntilClosed(connection, processId: "proc-pty-stdin")
+
+        XCTAssertEqual(start?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("proc-pty-stdin")])
+        ))
+        XCTAssertEqual(write?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["status": .string("accepted")])
+        ))
+        XCTAssertEqual(notifications.output?.stream, .pty)
+        XCTAssertTrue(read.output.contains("from-stdin:hello"), "unexpected PTY output: \(read.output)")
+        XCTAssertEqual(read.exitCode, 0)
+        XCTAssertTrue(read.closed)
+    }
+
     func testConnectionProcessorReportsProcessWriteStatusesLikeRust() async throws {
         let connection = try await initializedConnection()
         let cwd = FileManager.default.currentDirectoryPath

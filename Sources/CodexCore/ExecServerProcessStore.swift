@@ -21,6 +21,7 @@ public actor ExecServerProcessStore {
             if process.process.isRunning {
                 process.process.terminate()
             }
+            process.pseudoTerminal?.closeSlaveHandles()
             closeStdin(process)
         }
         processes.removeAll()
@@ -33,10 +34,6 @@ public actor ExecServerProcessStore {
         guard processes[params.processId] == nil else {
             throw ExecServerRPC.invalidRequest("process \(params.processId) already exists")
         }
-        guard params.tty == false else {
-            throw ExecServerRPC.internalError("pty process execution is not implemented")
-        }
-
         let process = Process()
         if program.hasPrefix("/") {
             process.executableURL = URL(fileURLWithPath: program)
@@ -51,26 +48,49 @@ public actor ExecServerProcessStore {
         let stdout = Pipe()
         let stderr = Pipe()
         let stdin = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = stdin
+        let pseudoTerminal: ExecServerPseudoTerminal?
+        let stdoutHandle: FileHandle
+        let stderrHandle: FileHandle
+        let stdinHandle: FileHandle?
+        if params.tty {
+            let pty = try ExecServerPseudoTerminal()
+            pseudoTerminal = pty
+            process.standardInput = pty.stdinHandle
+            process.standardOutput = pty.stdoutHandle
+            process.standardError = pty.stderrHandle
+            stdoutHandle = pty.master
+            stderrHandle = pty.master
+            stdinHandle = pty.master
+        } else {
+            pseudoTerminal = nil
+            process.standardOutput = stdout
+            process.standardError = stderr
+            process.standardInput = stdin
+            stdoutHandle = stdout.fileHandleForReading
+            stderrHandle = stderr.fileHandleForReading
+            stdinHandle = params.pipeStdin ? stdin.fileHandleForWriting : nil
+        }
 
         let state = ExecServerProcessState(
             process: process,
-            stdout: stdout.fileHandleForReading,
-            stderr: stderr.fileHandleForReading,
-            stdin: params.pipeStdin ? stdin.fileHandleForWriting : nil,
-            pipeStdin: params.pipeStdin
+            stdout: stdoutHandle,
+            stderr: stderrHandle,
+            stdin: stdinHandle,
+            tty: params.tty,
+            pipeStdin: params.pipeStdin,
+            pseudoTerminal: pseudoTerminal
         )
         processes[params.processId] = state
 
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stdoutHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            Task { await self?.handleOutput(data, processId: params.processId, stream: .stdout) }
+            Task { await self?.handleOutput(data, processId: params.processId, stream: params.tty ? .pty : .stdout) }
         }
-        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { await self?.handleOutput(data, processId: params.processId, stream: .stderr) }
+        if !params.tty {
+            stderrHandle.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                Task { await self?.handleOutput(data, processId: params.processId, stream: .stderr) }
+            }
         }
         process.terminationHandler = { [weak self] process in
             Task { await self?.handleExit(processId: params.processId, exitCode: process.terminationStatus) }
@@ -78,14 +98,16 @@ public actor ExecServerProcessStore {
 
         do {
             try process.run()
-            if !params.pipeStdin {
+            pseudoTerminal?.closeSlaveHandles()
+            if !params.tty && !params.pipeStdin {
                 closeStdin(state)
             }
             return ExecServerExecResponse(processId: params.processId)
         } catch {
             processes.removeValue(forKey: params.processId)
-            stdout.fileHandleForReading.readabilityHandler = nil
-            stderr.fileHandleForReading.readabilityHandler = nil
+            stdoutHandle.readabilityHandler = nil
+            stderrHandle.readabilityHandler = nil
+            pseudoTerminal?.closeSlaveHandles()
             closeStdin(state)
             throw ExecServerRPC.internalError(error.localizedDescription)
         }
@@ -116,7 +138,7 @@ public actor ExecServerProcessStore {
         guard let state = processes[params.processId] else {
             return ExecServerWriteResponse(status: .unknownProcess)
         }
-        guard state.pipeStdin, let stdin = state.stdin else {
+        guard (state.tty || state.pipeStdin), let stdin = state.stdin else {
             return ExecServerWriteResponse(status: .stdinClosed)
         }
         do {
@@ -133,6 +155,7 @@ public actor ExecServerProcessStore {
         }
         if state.process.isRunning {
             state.process.terminate()
+            state.pseudoTerminal?.closeSlaveHandles()
             return ExecServerTerminateResponse(running: true)
         }
         return ExecServerTerminateResponse(running: false)
@@ -143,7 +166,10 @@ public actor ExecServerProcessStore {
             return
         }
         if data.isEmpty {
-            if stream == .stdout {
+            if stream == .pty {
+                state.stdoutClosed = true
+                state.stderrClosed = true
+            } else if stream == .stdout {
                 state.stdoutClosed = true
             } else {
                 state.stderrClosed = true
@@ -198,6 +224,7 @@ public actor ExecServerProcessStore {
         state.nextSeq += 1
         state.stdout.readabilityHandler = nil
         state.stderr.readabilityHandler = nil
+        state.pseudoTerminal?.closeSlaveHandles()
         closeStdin(state)
         await sendNotification(
             method: execServerProcessClosedMethod,
@@ -291,7 +318,9 @@ private final class ExecServerProcessState {
     let stdout: FileHandle
     let stderr: FileHandle
     let stdin: FileHandle?
+    let tty: Bool
     let pipeStdin: Bool
+    let pseudoTerminal: ExecServerPseudoTerminal?
     var output: [ExecServerRetainedOutputChunk] = []
     var retainedBytes = 0
     var nextSeq: UInt64 = 1
@@ -300,12 +329,22 @@ private final class ExecServerProcessState {
     var stderrClosed = false
     var closed = false
 
-    init(process: Process, stdout: FileHandle, stderr: FileHandle, stdin: FileHandle?, pipeStdin: Bool) {
+    init(
+        process: Process,
+        stdout: FileHandle,
+        stderr: FileHandle,
+        stdin: FileHandle?,
+        tty: Bool,
+        pipeStdin: Bool,
+        pseudoTerminal: ExecServerPseudoTerminal?
+    ) {
         self.process = process
         self.stdout = stdout
         self.stderr = stderr
         self.stdin = stdin
+        self.tty = tty
         self.pipeStdin = pipeStdin
+        self.pseudoTerminal = pseudoTerminal
     }
 }
 
