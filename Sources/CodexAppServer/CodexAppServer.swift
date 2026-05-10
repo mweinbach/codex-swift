@@ -5123,6 +5123,9 @@ public enum CodexAppServer {
                 "invalid remote plugin id: only ASCII letters, digits, `_`, `-`, and `~` are allowed"
             )
         }
+        guard !skillName.isEmpty else {
+            throw AppServerError.invalidRequest("invalid remote plugin skill name: cannot be empty")
+        }
         guard let auth = try? currentAuth(configuration: configuration),
               case .chatGPT = auth.kind
         else {

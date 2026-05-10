@@ -5918,6 +5918,75 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testPluginSkillReadValidatesEmptySkillNameAndEscapesPathSegment() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+
+        let emptySkill = try appServerResponse(
+            #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"chatgpt-global","remotePluginId":"\#(pluginID)","skillName":""}}"#,
+            codexHome: temp.url
+        )
+        let error = try XCTUnwrap(emptySkill["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid remote plugin skill name: cannot be empty")
+
+        let capture = MCPHTTPTransportCapture()
+        let skillBody = """
+        {
+          "plugin_id": "\(pluginID)",
+          "status": "ENABLED",
+          "plugin_release_id": "release-1",
+          "name": "plan/work",
+          "description": "Plan work",
+          "plugin_release_skill_id": "skill-1",
+          "skill_md_contents": "# Plan Work"
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                let encodedPath = request.url.flatMap {
+                    URLComponents(url: $0, resolvingAgainstBaseURL: false)?.percentEncodedPath
+                }
+                switch encodedPath {
+                case "/backend-api/ps/plugins/\(pluginID)/skills/plan%2Fwork":
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(skillBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+        let escaped = try appServerResponse(
+            #"{"id":2,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"chatgpt-global","remotePluginId":"\#(pluginID)","skillName":"plan/work"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(escaped["result"] as? [String: Any])
+        XCTAssertEqual(result["contents"] as? String, "# Plan Work")
+        XCTAssertEqual(
+            capture.requests.first?.url?.absoluteString,
+            "https://chatgpt.example/backend-api/ps/plugins/\(pluginID)/skills/plan%2Fwork"
+        )
+    }
+
     func testPluginShareRoutesReportDisabledWhenFeatureUnavailable() throws {
         let temp = try TemporaryDirectory()
         let pluginPath = temp.url.appendingPathComponent("plugin").path
