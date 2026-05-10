@@ -2923,11 +2923,6 @@ public enum CodexAppServer {
             "marketplaceLoadErrors": [],
             "featuredPluginIds": []
         ]
-        let kinds = stringArrayParam(params?["marketplaceKinds"]) ?? ["local"]
-        guard kinds.contains("local") else {
-            return empty
-        }
-
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -2942,11 +2937,19 @@ public enum CodexAppServer {
             return empty
         }
 
-        var result = try localPluginListResult(cwds: cwds, configuration: configuration)
+        let kinds = stringArrayParam(params?["marketplaceKinds"]) ?? ["local"]
+        var result = kinds.contains("local")
+            ? try localPluginListResult(cwds: cwds, configuration: configuration)
+            : empty
         let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
-        if !kinds.contains("local") || (params?["marketplaceKinds"] == nil && runtimeConfig.features.isEnabled(.remotePlugin)) {
+        let includeDefaultRemote = params?["marketplaceKinds"] == nil && runtimeConfig.features.isEnabled(.remotePlugin)
+        let includeWorkspaceDirectory = kinds.contains("workspace-directory")
+        let includeSharedWithMe = kinds.contains("shared-with-me")
+        if includeDefaultRemote || includeWorkspaceDirectory || includeSharedWithMe {
             let remoteMarketplaces = remotePluginMarketplaces(
-                includeGlobal: params?["marketplaceKinds"] == nil,
+                includeGlobal: includeDefaultRemote,
+                includeWorkspaceDirectory: includeWorkspaceDirectory,
+                includeSharedWithMe: includeSharedWithMe,
                 runtimeConfig: runtimeConfig,
                 configuration: configuration
             )
@@ -3023,13 +3026,36 @@ public enum CodexAppServer {
 
     private static func remotePluginMarketplaces(
         includeGlobal: Bool,
+        includeWorkspaceDirectory: Bool,
+        includeSharedWithMe: Bool,
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration
     ) -> [[String: Any]] {
-        guard includeGlobal,
-              let auth = try? currentAuth(configuration: configuration),
-              case .chatGPT = auth.kind,
-              let directory = remotePluginPage(
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            return []
+        }
+
+        let workspaceInstalled: [[String: Any]]?
+        if includeWorkspaceDirectory || includeSharedWithMe {
+            workspaceInstalled = remotePluginPages(
+                path: "/ps/plugins/installed",
+                queryItems: [URLQueryItem(name: "scope", value: "WORKSPACE")],
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            )
+            guard workspaceInstalled != nil else {
+                return []
+            }
+        } else {
+            workspaceInstalled = nil
+        }
+
+        var marketplaces: [[String: Any]] = []
+        if includeGlobal {
+            guard let directory = remotePluginPages(
                 path: "/ps/plugins/list",
                 queryItems: [
                     URLQueryItem(name: "scope", value: "GLOBAL"),
@@ -3038,28 +3064,100 @@ public enum CodexAppServer {
                 runtimeConfig: runtimeConfig,
                 configuration: configuration,
                 auth: auth
-              ),
-              let installed = remotePluginPage(
-                path: "/ps/plugins/installed",
-                queryItems: [URLQueryItem(name: "scope", value: "GLOBAL")],
+            ),
+                  let installed = remotePluginPages(
+                    path: "/ps/plugins/installed",
+                    queryItems: [URLQueryItem(name: "scope", value: "GLOBAL")],
+                    runtimeConfig: runtimeConfig,
+                    configuration: configuration,
+                    auth: auth
+                  )
+            else {
+                return []
+            }
+            if let marketplace = remotePluginMarketplace(
+                name: "chatgpt-global",
+                displayName: "ChatGPT Plugins",
+                directoryPlugins: directory,
+                installedPlugins: installed,
+                includeInstalledOnly: true
+            ) {
+                marketplaces.append(marketplace)
+            }
+        }
+        if includeWorkspaceDirectory {
+            guard let directory = remotePluginPages(
+                path: "/ps/plugins/list",
+                queryItems: [
+                    URLQueryItem(name: "scope", value: "WORKSPACE"),
+                    URLQueryItem(name: "limit", value: "200")
+                ],
                 runtimeConfig: runtimeConfig,
                 configuration: configuration,
                 auth: auth
-              )
-        else {
-            return []
+            ) else {
+                return []
+            }
+            if let marketplace = remotePluginMarketplace(
+                name: "workspace-directory",
+                displayName: "Workspace Directory",
+                directoryPlugins: directory,
+                installedPlugins: workspaceInstalled ?? [],
+                includeInstalledOnly: false
+            ) {
+                marketplaces.append(marketplace)
+            }
         }
+        if includeSharedWithMe {
+            guard let directory = remotePluginPages(
+                path: "/ps/plugins/workspace/shared",
+                queryItems: [URLQueryItem(name: "limit", value: "200")],
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            ) else {
+                return []
+            }
+            if let marketplace = remotePluginMarketplace(
+                name: "shared-with-me",
+                displayName: "Shared with me",
+                directoryPlugins: directory,
+                installedPlugins: workspaceInstalled ?? [],
+                includeInstalledOnly: false
+            ) {
+                marketplaces.append(marketplace)
+            }
+        }
+        return marketplaces
+    }
 
-        guard let marketplace = remotePluginMarketplace(
-            name: "chatgpt-global",
-            displayName: "ChatGPT Plugins",
-            directoryPlugins: directory,
-            installedPlugins: installed,
-            includeInstalledOnly: true
-        ) else {
-            return []
-        }
-        return [marketplace]
+    private static func remotePluginPages(
+        path: String,
+        queryItems: [URLQueryItem],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) -> [[String: Any]]? {
+        var plugins: [[String: Any]] = []
+        var pageToken: String?
+        repeat {
+            var pageQueryItems = queryItems
+            if let pageToken {
+                pageQueryItems.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            guard let page = remotePluginPage(
+                path: path,
+                queryItems: pageQueryItems,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            ) else {
+                return nil
+            }
+            plugins.append(contentsOf: page.plugins)
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+        return plugins
     }
 
     private static func remotePluginPage(
@@ -3068,7 +3166,7 @@ public enum CodexAppServer {
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration,
         auth: AppServerAuth
-    ) -> [[String: Any]]? {
+    ) -> (plugins: [[String: Any]], nextPageToken: String?)? {
         let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
         guard var components = URLComponents(string: normalizedBaseURL + path) else {
             return nil
@@ -3089,7 +3187,11 @@ public enum CodexAppServer {
         else {
             return nil
         }
-        return object["plugins"] as? [[String: Any]] ?? []
+        let pagination = object["pagination"] as? [String: Any]
+        return (
+            plugins: object["plugins"] as? [[String: Any]] ?? [],
+            nextPageToken: pagination?["next_page_token"] as? String
+        )
     }
 
     private static func remotePluginMarketplace(
@@ -3147,7 +3249,7 @@ public enum CodexAppServer {
         [
             "id": plugin["id"] as? String ?? "",
             "name": plugin["name"] as? String ?? "",
-            "shareContext": NSNull(),
+            "shareContext": remotePluginShareContext(plugin),
             "source": ["type": "remote"],
             "installed": installed != nil,
             "enabled": installed?["enabled"] as? Bool ?? false,
@@ -3157,6 +3259,32 @@ public enum CodexAppServer {
             "interface": remotePluginInterface(plugin),
             "keywords": (plugin["release"] as? [String: Any])?["keywords"] as? [String] ?? []
         ].nullStripped()
+    }
+
+    private static func remotePluginShareContext(_ plugin: [String: Any]) -> Any {
+        guard plugin["scope"] as? String == "WORKSPACE" else {
+            return NSNull()
+        }
+        return [
+            "remotePluginId": plugin["id"] as? String ?? "",
+            "shareUrl": nullable(plugin["share_url"] as? String),
+            "creatorAccountUserId": nullable(plugin["creator_account_user_id"] as? String),
+            "creatorName": nullable(plugin["creator_name"] as? String),
+            "shareTargets": nullable(remotePluginShareTargets(plugin["share_principals"] as? [[String: Any]]))
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func remotePluginShareTargets(_ principals: [[String: Any]]?) -> [[String: Any]]? {
+        principals?.compactMap { principal in
+            guard principal["role"] as? String == "reader" else {
+                return nil
+            }
+            return [
+                "principalType": principal["principal_type"] as? String ?? "",
+                "principalId": principal["principal_id"] as? String ?? "",
+                "name": principal["name"] as? String ?? ""
+            ]
+        }
     }
 
     private static func remotePluginDisplayName(_ plugin: [String: Any]) -> String {
@@ -3202,11 +3330,12 @@ public enum CodexAppServer {
 
     private static func remotePluginDefaultPrompt(_ prompt: String?) -> [String]? {
         guard let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !prompt.isEmpty
+              !prompt.isEmpty,
+              prompt.count <= 128
         else {
             return nil
         }
-        return prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        return [prompt]
     }
 
     private static func featuredPluginIDs(

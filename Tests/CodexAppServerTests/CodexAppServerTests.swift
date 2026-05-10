@@ -4349,6 +4349,162 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
     }
 
+    func testPluginListFetchesWorkspaceDirectoryKindWithoutRemotePluginFlag() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let directoryBody = workspaceRemotePluginPageBody(
+            id: "plugins~Plugin_11111111111111111111111111111111",
+            name: "workspace-linear",
+            displayName: "Workspace Linear"
+        )
+        let installedBody = workspaceRemotePluginPageBody(
+            id: "plugins~Plugin_11111111111111111111111111111111",
+            name: "workspace-linear",
+            displayName: "Workspace Linear",
+            enabled: false
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/list", "scope=WORKSPACE&limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=WORKSPACE"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404)
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"marketplaceKinds":["workspace-directory"]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "workspace-directory")
+        let marketplaceInterface = try XCTUnwrap(marketplaces[0]["interface"] as? [String: Any])
+        XCTAssertEqual(marketplaceInterface["displayName"] as? String, "Workspace Directory")
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["name"] as? String, "workspace-linear")
+        XCTAssertEqual(plugins[0]["installed"] as? Bool, true)
+        XCTAssertEqual(plugins[0]["enabled"] as? Bool, false)
+        let shareContext = try XCTUnwrap(plugins[0]["shareContext"] as? [String: Any])
+        XCTAssertEqual(shareContext["remotePluginId"] as? String, "plugins~Plugin_11111111111111111111111111111111")
+        XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertFalse(requests.contains { $0.url?.query?.contains("scope=GLOBAL") == true })
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
+    }
+
+    func testPluginListFetchesSharedWithMeKindAndShareContext() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let sharedBody = workspaceRemotePluginPageBody(
+            id: "plugins~Plugin_22222222222222222222222222222222",
+            name: "shared-linear",
+            displayName: "Shared Linear"
+        )
+        let installedBody = workspaceRemotePluginPageBody(
+            id: "plugins~Plugin_22222222222222222222222222222222",
+            name: "shared-linear",
+            displayName: "Shared Linear",
+            enabled: true
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/workspace/shared", "limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(sharedBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=WORKSPACE"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404)
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"marketplaceKinds":["shared-with-me"]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "shared-with-me")
+        let marketplaceInterface = try XCTUnwrap(marketplaces[0]["interface"] as? [String: Any])
+        XCTAssertEqual(marketplaceInterface["displayName"] as? String, "Shared with me")
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["name"] as? String, "shared-linear")
+        XCTAssertEqual(plugins[0]["installed"] as? Bool, true)
+        XCTAssertEqual(plugins[0]["enabled"] as? Bool, true)
+        let shareContext = try XCTUnwrap(plugins[0]["shareContext"] as? [String: Any])
+        XCTAssertEqual(shareContext["remotePluginId"] as? String, "plugins~Plugin_22222222222222222222222222222222")
+        XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
+        XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
+        XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
+        let shareTargets = try XCTUnwrap(shareContext["shareTargets"] as? [[String: Any]])
+        XCTAssertEqual(shareTargets.count, 1)
+        XCTAssertEqual(shareTargets[0]["principalType"] as? String, "user")
+        XCTAssertEqual(shareTargets[0]["principalId"] as? String, "user-ada__account-123")
+        XCTAssertEqual(shareTargets[0]["name"] as? String, "Ada")
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertFalse(requests.contains { $0.url?.path == "/backend-api/ps/plugins/list" })
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
+    }
+
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
@@ -14168,6 +14324,57 @@ private final class MCPHTTPTransportCapture: @unchecked Sendable {
         storedRequests.append(request)
         lock.unlock()
     }
+}
+
+private func workspaceRemotePluginPageBody(
+    id: String,
+    name: String,
+    displayName: String,
+    enabled: Bool? = nil
+) -> String {
+    let enabledField = enabled.map { #", "enabled": \#($0), "disabled_skill_names": []"# } ?? ""
+    return """
+    {
+      "plugins": [
+        {
+          "id": "\(id)",
+          "name": "\(name)",
+          "scope": "WORKSPACE",
+          "creator_account_user_id": "user-gavin__account-123",
+          "share_url": "https://chatgpt.example/plugins/share/share-key-1",
+          "installation_policy": "AVAILABLE",
+          "authentication_policy": "ON_USE",
+          "status": "ENABLED",
+          "creator_name": "Gavin",
+          "share_principals": [
+            {
+              "principal_type": "user",
+              "principal_id": "user-gavin__account-123",
+              "role": "owner",
+              "name": "Gavin"
+            },
+            {
+              "principal_type": "user",
+              "principal_id": "user-ada__account-123",
+              "role": "reader",
+              "name": "Ada"
+            }
+          ],
+          "release": {
+            "display_name": "\(displayName)",
+            "description": "Track work",
+            "app_ids": [],
+            "interface": {},
+            "skills": []
+          }\(enabledField)
+        }
+      ],
+      "pagination": {
+        "limit": 50,
+        "next_page_token": null
+      }
+    }
+    """
 }
 
 private actor AppServerMcpOAuthLoginCapture {
