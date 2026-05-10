@@ -7,6 +7,7 @@ import Foundation
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
 public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
 public typealias AppServerMcpHTTPTransport = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
+public typealias AppServerPluginHTTPTransport = @Sendable (URLRequest) throws -> URLSessionTransportResponse
 public typealias AppServerMcpOAuthLoginCompletion = @Sendable (_ success: Bool, _ error: String?) async -> Void
 public typealias AppServerMcpOAuthLoginStarter = @Sendable (
     AppServerMcpOAuthLoginStartRequest,
@@ -115,6 +116,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let authRefreshTransport: AppServerAuthRefreshTransport?
     public let authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
+    public let pluginHTTPTransport: AppServerPluginHTTPTransport
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
     public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
@@ -138,6 +140,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
+        pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -166,6 +169,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.authRefreshTransport = authRefreshTransport
         self.authDeviceCodeTransport = authDeviceCodeTransport
         self.mcpHTTPTransport = mcpHTTPTransport
+        self.pluginHTTPTransport = pluginHTTPTransport
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
         self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
@@ -684,6 +688,42 @@ public enum CodexAppServer {
             ),
             body: data
         )
+    }
+
+    public static func defaultPluginHTTPTransport(_ request: URLRequest) throws -> URLSessionTransportResponse {
+        let semaphore = DispatchSemaphore(value: 0)
+        final class Box: @unchecked Sendable {
+            var result: Result<URLSessionTransportResponse, Error>?
+        }
+        let box = Box()
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            defer { semaphore.signal() }
+            if let error {
+                box.result = .failure(error)
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                box.result = .failure(AppServerError.internalError("plugin service returned a non-HTTP response"))
+                return
+            }
+            box.result = .success(URLSessionTransportResponse(
+                statusCode: httpResponse.statusCode,
+                headers: Dictionary(
+                    uniqueKeysWithValues: httpResponse.allHeaderFields.compactMap { key, value in
+                        guard let name = key as? String else {
+                            return nil
+                        }
+                        return (name, String(describing: value))
+                    }
+                ),
+                body: data ?? Data()
+            ))
+        }
+        task.resume()
+        semaphore.wait()
+        return try box.result?.get() ?? {
+            throw AppServerError.internalError("plugin service request did not complete")
+        }()
     }
 
     fileprivate static func isUnauthorizedBackendError(_ error: Error) -> Bool {
@@ -2902,7 +2942,14 @@ public enum CodexAppServer {
             return empty
         }
 
-        return try localPluginListResult(cwds: cwds, configuration: configuration)
+        var result = try localPluginListResult(cwds: cwds, configuration: configuration)
+        let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        result["featuredPluginIds"] = featuredPluginIDs(
+            for: marketplaces,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        )
+        return result
     }
 
     private static func localPluginListResult(
@@ -2940,6 +2987,42 @@ public enum CodexAppServer {
             "marketplaceLoadErrors": loadErrors,
             "featuredPluginIds": []
         ]
+    }
+
+    private static func featuredPluginIDs(
+        for marketplaces: [[String: Any]],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) -> [String] {
+        guard marketplaces.contains(where: { $0["name"] as? String == "openai-curated" }) else {
+            return []
+        }
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
+        guard var components = URLComponents(string: normalizedBaseURL + "/plugins/featured") else {
+            return []
+        }
+        components.queryItems = [URLQueryItem(name: "platform", value: "codex")]
+        guard let url = components.url else {
+            return []
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if let auth = try? currentAuth(configuration: configuration),
+           case .chatGPT = auth.kind {
+            request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
+            if let accountID = auth.accountID, !accountID.isEmpty {
+                request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+            }
+        }
+
+        guard let response = try? configuration.pluginHTTPTransport(request),
+              (200..<300).contains(response.statusCode),
+              let ids = try? JSONDecoder().decode([String].self, from: response.body)
+        else {
+            return []
+        }
+        return ids
     }
 
     private static func localMarketplaceDiscoveryRoots(

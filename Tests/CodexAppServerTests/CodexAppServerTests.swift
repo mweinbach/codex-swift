@@ -4168,6 +4168,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((remoteOnlyResult["marketplaces"] as? [Any])?.count, 0)
     }
 
+    func testPluginListFetchesFeaturedPluginIdsForOpenAICuratedMarketplaceWithoutAuth() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(
+            named: "openai-curated",
+            pluginName: "linear",
+            in: temp.url
+        )
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [marketplaces.openai-curated]
+        source_type = "local"
+        source = "\(sourcePath)"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                return URLSessionTransportResponse(
+                    statusCode: 200,
+                    body: Data(#"["linear@openai-curated"]"#.utf8)
+                )
+            }
+        )
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], ["linear@openai-curated"])
+        let request = try XCTUnwrap(capture.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.example/backend-api/plugins/featured?platform=codex")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(request.value(forHTTPHeaderField: "chatgpt-account-id"))
+    }
+
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
@@ -13312,6 +13353,7 @@ final class CodexAppServerTests: XCTestCase {
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
+        pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -13336,6 +13378,7 @@ final class CodexAppServerTests: XCTestCase {
             authRefreshTransport: authRefreshTransport,
             authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
+            pluginHTTPTransport: pluginHTTPTransport,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,
