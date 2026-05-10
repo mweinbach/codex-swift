@@ -5672,6 +5672,22 @@ final class CodexAppServerTests: XCTestCase {
         }
         """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
         let pluginID = "plugins_123"
+        let bundleSource = temp.url.appendingPathComponent("remote-bundle-source", isDirectory: true)
+        try writePluginFixture(
+            root: bundleSource,
+            relativePath: "linear",
+            pluginName: "linear",
+            version: "0.0.1-local-ignored",
+            marker: "from-remote-bundle"
+        )
+        let bundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: bundleSource.appendingPathComponent("linear", isDirectory: true),
+            in: temp.url
+        )
+        let installedManifest = temp.url
+            .appendingPathComponent("plugins/cache/chatgpt-global/linear/1.2.3/.codex-plugin/plugin.json", isDirectory: false)
+        let installedMarker = temp.url
+            .appendingPathComponent("plugins/cache/chatgpt-global/linear/1.2.3/marker.txt", isDirectory: false)
         let detailBody = remotePluginDetailBody(
             id: pluginID,
             name: "linear",
@@ -5694,7 +5710,12 @@ final class CodexAppServerTests: XCTestCase {
                 switch (request.httpMethod, request.url?.path, request.url?.query) {
                 case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
                 case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
+                    guard FileManager.default.fileExists(atPath: installedManifest.path) else {
+                        return URLSessionTransportResponse(statusCode: 409, body: Data("cache missing before mutation".utf8))
+                    }
                     return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
@@ -5709,13 +5730,19 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["authPolicy"] as? String, "ON_USE")
         XCTAssertEqual((result["appsNeedingAuth"] as? [Any])?.count, 0)
-        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "POST"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "POST"])
+        XCTAssertEqual(
+            try String(contentsOf: installedMarker, encoding: .utf8),
+            "from-remote-bundle"
+        )
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
             "Bearer chatgpt-token",
+            nil,
             "Bearer chatgpt-token"
         ])
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
             "account-123",
+            nil,
             "account-123"
         ])
     }
@@ -14691,6 +14718,23 @@ final class CodexAppServerTests: XCTestCase {
         let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, "git \(args.joined(separator: " ")) failed: \(stderr)")
         return (stdout, stderr)
+    }
+
+    private func remotePluginBundleTarGzBytes(pluginRoot: URL, in tempRoot: URL) throws -> Data {
+        let archive = tempRoot.appendingPathComponent("remote-plugin-bundle-\(UUID().uuidString).tar.gz", isDirectory: false)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-czf", archive.path, "-C", pluginRoot.path, "."]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "tar remote plugin bundle failed: \(stderr)\(stdout)")
+        return try Data(contentsOf: archive)
     }
 
     private func base64URL(_ object: Any) throws -> String {

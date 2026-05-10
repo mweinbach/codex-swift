@@ -4803,10 +4803,15 @@ public enum CodexAppServer {
             let pluginID = detail["id"] as? String ?? remotePluginID
             throw AppServerError.invalidRequest("remote plugin \(pluginID) is not available for install")
         }
-        try validateRemotePluginBundleMetadata(
+        let bundle = try validateRemotePluginBundleMetadata(
             remotePluginID: remotePluginID,
             detail: detail,
             environment: configuration.environment
+        )
+        _ = try downloadAndInstallRemotePluginBundle(
+            bundle,
+            configuration: configuration,
+            failurePrefix: "install remote plugin bundle"
         )
         let response = try remotePluginObject(
             path: "/ps/plugins/\(remotePluginID)/install",
@@ -4833,11 +4838,20 @@ public enum CodexAppServer {
         ]
     }
 
+    private struct RemotePluginBundleMetadata {
+        let pluginName: String
+        let marketplaceName: String
+        let version: String
+        let downloadURL: URL
+    }
+
     private static func validateRemotePluginBundleMetadata(
         remotePluginID: String,
         detail: [String: Any],
         environment: [String: String]
-    ) throws {
+    ) throws -> RemotePluginBundleMetadata {
+        let pluginName = detail["name"] as? String ?? ""
+        let marketplaceName = remotePluginMarketplaceName(forScope: detail["scope"] as? String ?? "GLOBAL")
         let release = detail["release"] as? [String: Any]
         let version = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !version.isEmpty else {
@@ -4873,6 +4887,12 @@ public enum CodexAppServer {
                 "install remote plugin bundle: backend returned an unsupported download URL scheme for remote plugin `\(remotePluginID)`: \(scheme)"
             )
         }
+        return RemotePluginBundleMetadata(
+            pluginName: pluginName,
+            marketplaceName: marketplaceName,
+            version: version,
+            downloadURL: parsedURL
+        )
     }
 
     private static func isAllowedTestLoopbackHTTPRemotePluginBundleURL(
@@ -4886,6 +4906,140 @@ public enum CodexAppServer {
             return false
         }
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    private static func downloadAndInstallRemotePluginBundle(
+        _ bundle: RemotePluginBundleMetadata,
+        configuration: CodexAppServerConfiguration,
+        failurePrefix: String
+    ) throws -> URL {
+        var request = URLRequest(url: bundle.downloadURL)
+        request.httpMethod = "GET"
+        let response: URLSessionTransportResponse
+        do {
+            response = try configuration.pluginHTTPTransport(request)
+        } catch {
+            throw AppServerError.internalError(
+                "\(failurePrefix): failed to send remote plugin bundle download request to \(bundle.downloadURL.absoluteString): \(error)"
+            )
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            let body = String(data: response.body, encoding: .utf8) ?? ""
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle download from \(bundle.downloadURL.absoluteString) failed with status \(response.statusCode): \(body)"
+            )
+        }
+        let maxDownloadBytes = 50 * 1024 * 1024
+        guard response.body.count <= maxDownloadBytes else {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle download from \(bundle.downloadURL.absoluteString) exceeded maximum size of \(maxDownloadBytes) bytes"
+            )
+        }
+        return try installRemotePluginBundleBytes(
+            response.body,
+            bundle: bundle,
+            codexHome: configuration.codexHome,
+            environment: configuration.environment,
+            failurePrefix: failurePrefix
+        )
+    }
+
+    private static func installRemotePluginBundleBytes(
+        _ bytes: Data,
+        bundle: RemotePluginBundleMetadata,
+        codexHome: URL,
+        environment: [String: String],
+        failurePrefix: String
+    ) throws -> URL {
+        let stagingRoot = codexHome
+            .appendingPathComponent("plugins", isDirectory: true)
+            .appendingPathComponent(".remote-plugin-install-staging", isDirectory: true)
+        let extractionRoot = stagingRoot
+            .appendingPathComponent("remote-plugin-bundle-\(UUID().uuidString)", isDirectory: true)
+        let archivePath = extractionRoot.appendingPathComponent("bundle.tar.gz", isDirectory: false)
+        do {
+            try FileManager.default.createDirectory(at: extractionRoot, withIntermediateDirectories: true)
+            try bytes.write(to: archivePath)
+            try extractRemotePluginBundleArchive(
+                archivePath: archivePath,
+                destination: extractionRoot,
+                environment: environment,
+                failurePrefix: failurePrefix
+            )
+            let pluginRoot = try extractedRemotePluginRoot(
+                extractionRoot: extractionRoot,
+                archivePath: archivePath,
+                failurePrefix: failurePrefix
+            )
+            let installedPath = try installLocalPluginCacheEntry(
+                sourcePath: pluginRoot,
+                pluginName: bundle.pluginName,
+                marketplaceName: bundle.marketplaceName,
+                codexHome: codexHome,
+                version: bundle.version
+            )
+            try? FileManager.default.removeItem(at: extractionRoot)
+            return installedPath
+        } catch let error as AppServerError {
+            try? FileManager.default.removeItem(at: extractionRoot)
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: extractionRoot)
+            throw AppServerError.internalError("\(failurePrefix): \(error)")
+        }
+    }
+
+    private static func extractRemotePluginBundleArchive(
+        archivePath: URL,
+        destination: URL,
+        environment: [String: String],
+        failurePrefix: String
+    ) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = ["-xzf", archivePath.path, "-C", destination.path]
+        process.environment = environment
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let message = [stderr, stdout]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            throw AppServerError.internalError(
+                "\(failurePrefix): failed to unpack remote plugin bundle entry: \(message)"
+            )
+        }
+    }
+
+    private static func extractedRemotePluginRoot(
+        extractionRoot: URL,
+        archivePath: URL,
+        failurePrefix: String
+    ) throws -> URL {
+        if localPluginManifest(root: extractionRoot).name != nil {
+            return extractionRoot
+        }
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: extractionRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        let pluginRoots = entries.filter { entry in
+            entry.path != archivePath.path && localPluginManifest(root: entry).name != nil
+        }
+        guard pluginRoots.count == 1, let pluginRoot = pluginRoots.first else {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle did not contain a standard plugin root with plugin.json"
+            )
+        }
+        return pluginRoot
     }
 
     private static func localPluginInstallResult(
