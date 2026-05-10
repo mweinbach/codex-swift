@@ -4277,7 +4277,14 @@ public enum CodexAppServer {
 
     private static func isAllowedPluginConnectorID(_ connectorID: String) -> Bool {
         let disallowedConnectorIDPrefixes = ["connector_openai_"]
-        let disallowedConnectorIDs = Set(["asdk_app_6938a94a61d881918ef32cb999ff937c"])
+        let disallowedConnectorIDs = Set([
+            "asdk_app_6938a94a61d881918ef32cb999ff937c",
+            "connector_2b0a9009c9c64bf9933a3dae3f2b1254",
+            "connector_3f8d1a79f27c4c7ba1a897ab13bf37dc",
+            "connector_68de829bf7648191acd70a907364c67c",
+            "connector_68e004f14af881919eb50893d3d9f523",
+            "connector_69272cb413a081919685ec3c88d1744e"
+        ])
         if disallowedConnectorIDs.contains(connectorID) {
             return false
         }
@@ -4308,7 +4315,9 @@ public enum CodexAppServer {
             ) else {
                 return []
             }
-            connectors.append(contentsOf: page["apps"] as? [[String: Any]] ?? [])
+            connectors.append(contentsOf: (page["apps"] as? [[String: Any]] ?? []).filter {
+                ($0["visibility"] as? String) != "HIDDEN"
+            })
             token = (
                 (page["next_token"] as? String) ??
                 (page["nextToken"] as? String) ??

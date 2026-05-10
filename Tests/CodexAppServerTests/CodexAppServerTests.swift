@@ -5943,6 +5943,28 @@ final class CodexAppServerTests: XCTestCase {
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
         let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
         try """
+        {
+          "apps": {
+            "weather": {
+              "id": "connector_weather",
+              "name": "Weather"
+            },
+            "disallowed": {
+              "id": "asdk_app_6938a94a61d881918ef32cb999ff937c",
+              "name": "Disallowed app"
+            },
+            "hidden": {
+              "id": "connector_hidden",
+              "name": "Hidden app"
+            }
+          }
+        }
+        """.write(
+            to: sourceRoot.appendingPathComponent("plugins/weather/.app.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
         chatgpt_base_url = "https://chatgpt.example/backend-api/"
 
         [features]
@@ -5973,6 +5995,12 @@ final class CodexAppServerTests: XCTestCase {
               "id": "asdk_app_6938a94a61d881918ef32cb999ff937c",
               "name": "Disallowed app",
               "description": "Filtered app"
+            },
+            {
+              "id": "connector_hidden",
+              "name": "Hidden app",
+              "description": "Hidden connector",
+              "visibility": "HIDDEN"
             }
           ],
           "next_token": null
