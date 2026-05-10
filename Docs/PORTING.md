@@ -514,7 +514,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/catalog_processor.rs` collaboration mode listing
   - `collaborationMode/list` now returns the Rust-ordered collaboration mode presets for Plan and Default, with mode aliases and `reasoning_effort` wire keys matching the protocol.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` requirements listing
-  - `configRequirements/read` now returns null when no requirements are configured and maps the ported requirements fields for allowed approval policies and sandbox modes into the Rust app-server response keys.
+  - `configRequirements/read` now returns null when no requirements are configured, maps the ported requirements fields for allowed approval policies and sandbox modes into the Rust app-server response keys, and reads the full thread-agnostic config layer state so legacy managed-config-derived requirements are included and merged like Rust.
 - `codex-rs/app-server/src/request_processors/account_processor.rs` add-credits nudge emails
   - `account/sendAddCreditsNudgeEmail` now preserves Rust auth requirement errors, ChatGPT-auth backend headers, `credits`/`usage_limit` request bodies, `sent` and `cooldown_active` response statuses, and backend-failure internal errors.
 - `codex-rs/app-server/src/request_processors/account_processor.rs` external ChatGPT auth tokens

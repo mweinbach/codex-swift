@@ -198,6 +198,7 @@ public enum CodexConfigLayerLoader {
         return try ConfigLayerStack(
             layers: layers,
             requirements: try requirementsToml.requirements(),
+            requirementsToml: requirementsToml,
             ignoreUserAndProjectExecPolicyRules: overrides.ignoreUserAndProjectExecPolicyRules
         )
     }

@@ -9679,24 +9679,19 @@ public enum CodexAppServer {
     fileprivate static func configRequirementsReadResult(
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let requirementsPath = configuration.configLayerOverrides.requirementsPath
-            ?? CodexConfigLayerLoader.defaultRequirementsTomlFile()
-        guard let requirementsPath else {
-            return ["requirements": NSNull()]
-        }
-        guard FileManager.default.fileExists(atPath: requirementsPath.path) else {
-            return ["requirements": NSNull()]
-        }
-        let requirements: ConfigRequirementsToml
         do {
-            let contents = try String(contentsOf: requirementsPath, encoding: .utf8)
-            requirements = try ConfigRequirementsToml.parse(contents)
+            let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            let requirements = stack.requirementsToml
+            return [
+                "requirements": requirements.isEmpty ? NSNull() : requirements.appServerRequirementsObject()
+            ]
         } catch {
             throw AppServerError.internalError("failed to read config requirements: \(error)")
         }
-        return [
-            "requirements": requirements.isEmpty ? NSNull() : requirements.appServerRequirementsObject()
-        ]
     }
 
     fileprivate static func configValueWriteResult(

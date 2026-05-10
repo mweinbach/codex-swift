@@ -10283,6 +10283,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["requirements"] is NSNull)
     }
 
+    func testConfigRequirementsReadIncludesLegacyManagedConfigRequirementsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let missingRequirements = temp.url.appendingPathComponent("missing-requirements.toml", isDirectory: false)
+        let managedConfig = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try """
+        approval_policy = "on-request"
+        sandbox_mode = "read-only"
+        """.write(to: managedConfig, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(
+                    managedConfigPath: managedConfig,
+                    requirementsPath: missingRequirements
+                )
+            )
+        )
+
+        XCTAssertNil(response["error"], "\(response)")
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let requirements = try XCTUnwrap(result["requirements"] as? [String: Any])
+        XCTAssertEqual(requirements["allowedApprovalPolicies"] as? [String], ["on-request"])
+        XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only"])
+    }
+
+    func testConfigRequirementsReadMergesFileAndLegacyManagedConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        let managedConfig = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try #"allowed_approval_policies = ["untrusted"]"#.write(
+            to: requirementsPath,
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"sandbox_mode = "read-only""#.write(to: managedConfig, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(
+                    managedConfigPath: managedConfig,
+                    requirementsPath: requirementsPath
+                )
+            )
+        )
+
+        XCTAssertNil(response["error"], "\(response)")
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let requirements = try XCTUnwrap(result["requirements"] as? [String: Any])
+        XCTAssertEqual(requirements["allowedApprovalPolicies"] as? [String], ["untrusted"])
+        XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only"])
+    }
+
     func testConfigRequirementsReadReturnsRustShapeForAllowedPoliciesAndSandboxes() throws {
         let temp = try TemporaryDirectory()
         let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
