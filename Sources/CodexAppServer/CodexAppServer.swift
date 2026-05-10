@@ -620,6 +620,7 @@ public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
     private static let maxUserInputTextScalars = 1 << 20
+    private static let pluginTransportFinalURLHeader = "x-codex-plugin-transport-final-url"
     fileprivate static let persistExtendedHistoryDeprecationSummary =
         "persistExtendedHistory is deprecated and ignored"
     fileprivate static let persistExtendedHistoryDeprecationDetails =
@@ -720,16 +721,20 @@ public enum CodexAppServer {
                 box.result = .failure(AppServerError.internalError("plugin service returned a non-HTTP response"))
                 return
             }
+            var headers: [String: String] = Dictionary(
+                uniqueKeysWithValues: httpResponse.allHeaderFields.compactMap { key, value in
+                    guard let name = key as? String else {
+                        return nil
+                    }
+                    return (name, String(describing: value))
+                }
+            )
+            if let finalURL = httpResponse.url?.absoluteString {
+                headers[Self.pluginTransportFinalURLHeader] = finalURL
+            }
             box.result = .success(URLSessionTransportResponse(
                 statusCode: httpResponse.statusCode,
-                headers: Dictionary(
-                    uniqueKeysWithValues: httpResponse.allHeaderFields.compactMap { key, value in
-                        guard let name = key as? String else {
-                            return nil
-                        }
-                        return (name, String(describing: value))
-                    }
-                ),
+                headers: headers,
                 body: data ?? Data()
             ))
         }
@@ -6055,7 +6060,7 @@ public enum CodexAppServer {
                 "install remote plugin bundle: backend returned an invalid download URL for remote plugin `\(remotePluginID)`: \(bundleDownloadURL)"
             )
         }
-        guard scheme == "https" || isAllowedTestLoopbackHTTPRemotePluginBundleURL(parsedURL, environment: environment) else {
+        guard isAllowedRemotePluginBundleURL(parsedURL, environment: environment) else {
             throw AppServerError.internalError(
                 "install remote plugin bundle: backend returned an unsupported download URL scheme for remote plugin `\(remotePluginID)`: \(scheme)"
             )
@@ -6068,6 +6073,13 @@ public enum CodexAppServer {
         )
     }
 
+    private static func isAllowedRemotePluginBundleURL(
+        _ url: URL,
+        environment: [String: String]
+    ) -> Bool {
+        url.scheme == "https" || isAllowedTestLoopbackHTTPRemotePluginBundleURL(url, environment: environment)
+    }
+
     private static func isAllowedTestLoopbackHTTPRemotePluginBundleURL(
         _ url: URL,
         environment: [String: String]
@@ -6078,7 +6090,28 @@ public enum CodexAppServer {
         else {
             return false
         }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+        return isRemotePluginBundleLoopbackHost(host)
+    }
+
+    private static func isRemotePluginBundleLoopbackHost(_ host: String) -> Bool {
+        if host == "localhost" {
+            return true
+        }
+
+        var ipv4 = in_addr()
+        if host.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+            let address = UInt32(bigEndian: ipv4.s_addr)
+            return (address & 0xff00_0000) == 0x7f00_0000
+        }
+
+        var ipv6 = in6_addr()
+        guard host.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 else {
+            return false
+        }
+        let loopbackBytes = [UInt8](repeating: 0, count: 15) + [1]
+        return withUnsafeBytes(of: &ipv6.__u6_addr.__u6_addr8) { bytes in
+            Array(bytes) == loopbackBytes
+        }
     }
 
     private static func downloadAndInstallRemotePluginBundle(
@@ -6096,16 +6129,22 @@ public enum CodexAppServer {
                 "\(failurePrefix): failed to send remote plugin bundle download request to \(bundle.downloadURL.absoluteString): \(error)"
             )
         }
+        let finalURL = remotePluginBundleFinalURL(from: response) ?? bundle.downloadURL
+        guard isAllowedRemotePluginBundleURL(finalURL, environment: configuration.environment) else {
+            throw AppServerError.internalError(
+                "\(failurePrefix): remote plugin bundle download from \(bundle.downloadURL.absoluteString) redirected to unsupported URL \(finalURL.absoluteString)"
+            )
+        }
         guard (200..<300).contains(response.statusCode) else {
             let body = String(data: response.body, encoding: .utf8) ?? ""
             throw AppServerError.internalError(
-                "\(failurePrefix): remote plugin bundle download from \(bundle.downloadURL.absoluteString) failed with status \(response.statusCode): \(body)"
+                "\(failurePrefix): remote plugin bundle download from \(finalURL.absoluteString) failed with status \(response.statusCode): \(body)"
             )
         }
         let maxDownloadBytes = 50 * 1024 * 1024
         guard response.body.count <= maxDownloadBytes else {
             throw AppServerError.internalError(
-                "\(failurePrefix): remote plugin bundle download from \(bundle.downloadURL.absoluteString) exceeded maximum size of \(maxDownloadBytes) bytes"
+                "\(failurePrefix): remote plugin bundle download from \(finalURL.absoluteString) exceeded maximum size of \(maxDownloadBytes) bytes"
             )
         }
         return try installRemotePluginBundleBytes(
@@ -6115,6 +6154,10 @@ public enum CodexAppServer {
             environment: configuration.environment,
             failurePrefix: failurePrefix
         )
+    }
+
+    private static func remotePluginBundleFinalURL(from response: URLSessionTransportResponse) -> URL? {
+        response.headers[pluginTransportFinalURLHeader].flatMap { URL(string: $0) }
     }
 
     private static func installRemotePluginBundleBytes(

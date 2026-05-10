@@ -7213,6 +7213,234 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(capture.requests.count, 2)
     }
 
+    func testPluginInstallRemoteRejectsMissingBundleDownloadURLBeforeMutation() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3"
+        )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertTrue((error["message"] as? String)?.contains("backend did not return a download URL") == true)
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET"])
+    }
+
+    func testPluginInstallRemoteRejectsPlainHTTPBundleURLWithoutLoopbackTestGate() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "http://127.1.2.3/bundles/linear.tar.gz"
+        )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertTrue((error["message"] as? String)?.contains("unsupported download URL scheme") == true)
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET"])
+    }
+
+    func testPluginInstallRemoteAllowsLoopbackHTTPBundleURLWithTestGate() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let bundleSource = temp.url.appendingPathComponent("remote-bundle-source", isDirectory: true)
+        try writePluginFixture(
+            root: bundleSource,
+            relativePath: "linear",
+            pluginName: "linear",
+            version: "0.0.1-local-ignored",
+            marker: "from-loopback-http-bundle"
+        )
+        let bundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: bundleSource.appendingPathComponent("linear", isDirectory: true),
+            in: temp.url
+        )
+        let installedMarker = temp.url
+            .appendingPathComponent("plugins/cache/chatgpt-global/linear/1.2.3/marker.txt", isDirectory: false)
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "http://127.1.2.3/bundles/linear.tar.gz"
+        )
+        let installBody = """
+        {
+          "id": "\(pluginID)",
+          "enabled": true
+        }
+        """
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            environment: ["CODEX_TEST_ALLOW_HTTP_REMOTE_PLUGIN_BUNDLE_DOWNLOADS": "1"],
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.host, request.url?.path, request.url?.query) {
+                case ("GET", "chatgpt.example", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "chatgpt.example", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                case ("GET", "127.1.2.3", "/bundles/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
+                case ("POST", "chatgpt.example", "/backend-api/ps/plugins/\(pluginID)/install", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
+                case ("GET", "chatgpt.example", "/backend-api/ps/plugins/installed", "scope=GLOBAL&includeDownloadUrls=true"),
+                     ("GET", "chatgpt.example", "/backend-api/ps/plugins/installed", "scope=WORKSPACE&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertEqual(try String(contentsOf: installedMarker, encoding: .utf8), "from-loopback-http-bundle")
+        XCTAssertEqual(capture.requests.map { $0.url?.host ?? "" }, [
+            "chatgpt.example",
+            "chatgpt.example",
+            "127.1.2.3",
+            "chatgpt.example",
+            "chatgpt.example",
+            "chatgpt.example"
+        ])
+    }
+
     func testPluginInstallRemoteRejectsBundleLinksBeforeExtraction() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -7293,6 +7521,82 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32603)
         XCTAssertTrue((error["message"] as? String)?.contains("remote plugin bundle tar entry `./link-to-marker` is a link") == true)
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "GET"])
+        let cacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/linear", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheRoot.path))
+    }
+
+    func testPluginInstallRemoteRejectsUnsupportedFinalBundleURL() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "https://bundles.example/linear.tar.gz"
+        )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                case ("GET", "/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["x-codex-plugin-transport-final-url": "http://bundles.example/linear.tar.gz"],
+                        body: Data("not reached".utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "install remote plugin bundle: remote plugin bundle download from https://bundles.example/linear.tar.gz redirected to unsupported URL http://bundles.example/linear.tar.gz"
+        )
         XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "GET"])
         let cacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/linear", isDirectory: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheRoot.path))
