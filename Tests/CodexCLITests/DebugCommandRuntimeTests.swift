@@ -23,8 +23,19 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(output.contains("\n  {"))
 
         let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
-        XCTAssertEqual(decoded.count, 2)
-        guard case let .message(_, environmentRole, environmentContent, _) = decoded[0] else {
+        XCTAssertEqual(decoded.count, 3)
+        guard case let .message(_, permissionsRole, permissionsContent, _) = decoded[0] else {
+            return XCTFail("expected permissions developer message")
+        }
+        XCTAssertEqual(permissionsRole, "developer")
+        XCTAssertTrue(permissionsContent.contains {
+            guard case let .inputText(text) = $0 else {
+                return false
+            }
+            return text.contains("<permissions instructions>")
+        })
+
+        guard case let .message(_, environmentRole, environmentContent, _) = decoded[1] else {
             return XCTFail("expected environment context message")
         }
         XCTAssertEqual(environmentRole, "user")
@@ -33,7 +44,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(environmentText.contains("<environment_context>"))
 
-        guard case let .message(_, userRole, userContent, _) = decoded[1] else {
+        guard case let .message(_, userRole, userContent, _) = decoded[2] else {
             return XCTFail("expected user input message")
         }
         XCTAssertEqual(userRole, "user")
@@ -60,8 +71,19 @@ final class DebugCommandRuntimeTests: XCTestCase {
 
         let output = try XCTUnwrap(result.stdoutMessage)
         let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
-        XCTAssertEqual(decoded.count, 1)
-        guard case let .message(_, role, content, _) = decoded[0] else {
+        XCTAssertEqual(decoded.count, 2)
+        guard case let .message(_, permissionsRole, permissionsContent, _) = decoded[0] else {
+            return XCTFail("expected permissions developer message")
+        }
+        XCTAssertEqual(permissionsRole, "developer")
+        XCTAssertTrue(permissionsContent.contains {
+            guard case let .inputText(text) = $0 else {
+                return false
+            }
+            return text.contains("<permissions instructions>")
+        })
+
+        guard case let .message(_, role, content, _) = decoded[1] else {
             return XCTFail("expected environment context message")
         }
         XCTAssertEqual(role, "user")
@@ -69,6 +91,26 @@ final class DebugCommandRuntimeTests: XCTestCase {
             return XCTFail("expected environment text")
         }
         XCTAssertTrue(text.contains("<environment_context>"))
+    }
+
+    func testPromptInputHonorsInitialContextInstructionGates() async throws {
+        let temp = try TemporaryDirectory()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    includePermissionsInstructions: false,
+                    includeEnvironmentContext: false
+                )
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        XCTAssertEqual(decoded, [])
     }
 
     func testClearMemoriesClearsStateRowsAndMemoryRoots() async throws {
@@ -2398,11 +2440,14 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual((nestedTool["requester"] as? [String: Any])?["code_cell_id"] as? String, "code_cell:call-code")
     }
 
-    private func testDependencies(codexHome: URL) -> DebugCommandRuntime.Dependencies {
+    private func testDependencies(
+        codexHome: URL,
+        config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider")
+    ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
             loadConfig: { _, _ in
-                CodexRuntimeConfig(modelProvider: "test-provider")
+                config
             }
         )
     }

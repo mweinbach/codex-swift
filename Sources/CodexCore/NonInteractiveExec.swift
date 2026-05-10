@@ -42,20 +42,14 @@ public struct NonInteractiveExecLoopResult: Equatable, Sendable {
 public enum NonInteractiveExec {
     private static let unifiedExecSessions = UnifiedExecSessionRegistry()
 
-    public static func makePrompt(
-        prompt: String,
-        imagePaths: [String],
-        outputSchema: JSONValue?,
+    public static func makeInitialPromptInput(
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
-        includePermissionsInstructions: Bool = true,
-        history: [ResponseItem] = [],
-        tools: [ToolSpec] = [],
-        parallelToolCalls: Bool = false
-    ) -> Prompt {
+        includePermissionsInstructions: Bool = true
+    ) -> [ResponseItem] {
         let context = TurnContext(
             cwd: cwd.path,
             approvalPolicy: approvalPolicy,
@@ -83,6 +77,31 @@ public enum NonInteractiveExec {
                     .asResponseItem()
             )
         }
+        return input
+    }
+
+    public static func makePrompt(
+        prompt: String,
+        imagePaths: [String],
+        outputSchema: JSONValue?,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        shell: Shell,
+        includeEnvironmentContext: Bool = true,
+        includePermissionsInstructions: Bool = true,
+        history: [ResponseItem] = [],
+        tools: [ToolSpec] = [],
+        parallelToolCalls: Bool = false
+    ) -> Prompt {
+        var input = makeInitialPromptInput(
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            shell: shell,
+            includeEnvironmentContext: includeEnvironmentContext,
+            includePermissionsInstructions: includePermissionsInstructions
+        )
         input.append(contentsOf: history)
 
         let userInputs = imagePaths.map { UserInput.localImage(path: $0) } + [.text(prompt)]
