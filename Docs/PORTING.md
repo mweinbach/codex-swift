@@ -893,6 +893,8 @@ Source baseline inspected for this scaffold:
   - matched Rust's case-sensitive shell executable stem detection and platform-native path separator handling while preserving recursive extension stripping for wrappers such as `powershell.EXE`, so uppercase wrapper names and non-native path separators now fall back to whole-command unknown summaries.
 - `codex-rs/app-server/tests/suite/v2/command_exec.rs` non-streaming termination response
   - pinned Swift `command/exec` parity for terminating a non-streaming process-id session: `command/exec/terminate` returns an empty object immediately and the original deferred request still completes with a nonzero exit code and empty buffered stdout/stderr.
+- `codex-rs/app-server/tests/suite/v2/command_exec.rs` request validation
+  - pinned Swift `command/exec` parity for Rust's negative `timeoutMs` rejection and process-id-required streaming/tty requests, preserving exact JSON-RPC error codes and messages.
 - `codex-rs/shell-command/src/bash.rs` heredoc command-prefix parsing
   - tightened Swift's `parseShellLcSingleCommandPrefix` to match Rust's literal word/number-only heredoc prefix contract, so quoted, escaped, arithmetic-expanded, or otherwise non-literal prefix words are no longer accepted for exec-policy prefix matching.
 - `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply

@@ -11822,6 +11822,28 @@ final class CodexAppServerTests: XCTestCase {
             "command/exec cannot set both timeoutMs and disableTimeout"
         )
 
+        let negativeTimeout = try appServerResponse(
+            #"{"id":6,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","timeoutMs":-1}}"#,
+            codexHome: codexHome.url
+        )
+        let negativeTimeoutError = try XCTUnwrap(negativeTimeout["error"] as? [String: Any])
+        XCTAssertEqual(negativeTimeoutError["code"] as? Int, -32602)
+        XCTAssertEqual(
+            negativeTimeoutError["message"] as? String,
+            "command/exec timeoutMs must be non-negative, got -1"
+        )
+
+        let streamingWithoutProcessID = try appServerResponse(
+            #"{"id":7,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#,
+            codexHome: codexHome.url
+        )
+        let streamingWithoutProcessIDError = try XCTUnwrap(streamingWithoutProcessID["error"] as? [String: Any])
+        XCTAssertEqual(streamingWithoutProcessIDError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            streamingWithoutProcessIDError["message"] as? String,
+            "command/exec tty or streaming requires a client-supplied processId"
+        )
+
         let nullTimeoutWithDisable = try appServerResponse(
             #"{"id":4,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","timeoutMs":null,"disableTimeout":true}}"#,
             codexHome: codexHome.url
