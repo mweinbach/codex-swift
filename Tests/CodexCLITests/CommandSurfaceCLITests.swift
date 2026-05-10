@@ -58,6 +58,42 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncExecResumeParsesImageOptionsLikeRust() async {
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "exec",
+                "--image",
+                "before.png",
+                "resume",
+                "--last",
+                "--image",
+                "one.png,two.png",
+                "-ithree.png",
+                "follow up"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .resume(CodexCLI.ExecResumeCommand(
+            sessionID: "follow up",
+            last: true,
+            prompt: nil
+        )))
+        XCTAssertEqual(receivedRequest?.options.imagePaths, [
+            "before.png",
+            "one.png",
+            "two.png",
+            "three.png"
+        ])
+    }
+
     func testRunAsyncExecParsesReviewSubcommand() async {
         var receivedRequest: CodexCLI.ExecCommandRequest?
 

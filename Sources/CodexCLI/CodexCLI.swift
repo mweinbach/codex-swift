@@ -1259,15 +1259,17 @@ public struct CodexCLI: Sendable {
             }
         } else if actionTokens.first == "resume" {
             switch parseExecResumeCommand(Array(actionTokens.dropFirst()), rootPrompt: nil) {
-            case let .success(resume):
-                action = .resume(resume)
+            case let .success(parsed):
+                imagePaths.append(contentsOf: parsed.imagePaths)
+                action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
         } else if actionTokens.count >= 2, actionTokens[1] == "resume" {
             switch parseExecResumeCommand(Array(actionTokens.dropFirst(2)), rootPrompt: actionTokens[0]) {
-            case let .success(resume):
-                action = .resume(resume)
+            case let .success(parsed):
+                imagePaths.append(contentsOf: parsed.imagePaths)
+                action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
@@ -1309,27 +1311,65 @@ public struct CodexCLI: Sendable {
         return .success(tokens[0])
     }
 
+    private struct ParsedExecResume {
+        let command: ExecResumeCommand
+        let imagePaths: [String]
+    }
+
     private func parseExecResumeCommand(
         _ arguments: [String],
         rootPrompt: String?
-    ) -> ParseResult<ExecResumeCommand> {
+    ) -> ParseResult<ParsedExecResume> {
         var last = false
         var all = false
+        var imagePaths: [String] = []
         var positionals: [String] = []
+        var index = 0
 
-        for argument in arguments {
+        func value(after option: String, at index: Int) -> ParseResult<String> {
+            guard index + 1 < arguments.count else {
+                return .failure("codex-swift: missing value for \(option)", 64)
+            }
+            return .success(arguments[index + 1])
+        }
+
+        while index < arguments.count {
+            let argument = arguments[index]
             if argument == "--last" {
                 last = true
+                index += 1
                 continue
             }
             if argument == "--all" {
                 all = true
+                index += 1
+                continue
+            }
+            if argument == "--image" || argument == "-i" {
+                switch value(after: argument, at: index) {
+                case let .success(paths):
+                    imagePaths.append(contentsOf: splitCommaDelimited(paths))
+                    index += 2
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+            }
+            if argument.hasPrefix("--image=") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst("--image=".count))))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
+                imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
+                index += 1
                 continue
             }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'exec resume': \(argument)", 64)
             }
             positionals.append(argument)
+            index += 1
         }
 
         guard positionals.count <= 2 else {
@@ -1345,11 +1385,14 @@ public struct CodexCLI: Sendable {
             prompt = nil
         }
 
-        return .success(ExecResumeCommand(
-            sessionID: positionals.first,
-            last: last,
-            all: all,
-            prompt: prompt
+        return .success(ParsedExecResume(
+            command: ExecResumeCommand(
+                sessionID: positionals.first,
+                last: last,
+                all: all,
+                prompt: prompt
+            ),
+            imagePaths: imagePaths
         ))
     }
 
