@@ -4216,6 +4216,75 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testAppListMergesAccessibleConnectorsWithDirectoryMetadata() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let directoryPage = """
+        {
+          "apps": [
+            {
+              "id": "calendar",
+              "name": "  "
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryPage.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            },
+            accessibleConnectorProvider: { _, _ in
+                return [
+                    DiscoverableConnectorInfo(
+                        id: "calendar",
+                        name: "Google Calendar",
+                        description: "Plan events",
+                        isAccessible: true,
+                        isEnabled: true,
+                        pluginDisplayNames: ["sample", "alpha", "sample"]
+                    )
+                ]
+            }
+        )
+
+        let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["id"] as? String, "calendar")
+        XCTAssertEqual(data[0]["name"] as? String, "Google Calendar")
+        XCTAssertEqual(data[0]["description"] as? String, "Plan events")
+        XCTAssertEqual(data[0]["installUrl"] as? String, "https://chatgpt.com/apps/calendar/calendar")
+        XCTAssertEqual(data[0]["isAccessible"] as? Bool, true)
+        XCTAssertEqual(data[0]["isEnabled"] as? Bool, true)
+        XCTAssertEqual(data[0]["pluginDisplayNames"] as? [String], ["alpha", "sample"])
+        XCTAssertTrue(result["nextCursor"] is NSNull)
+    }
+
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -15305,6 +15374,7 @@ final class CodexAppServerTests: XCTestCase {
         environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
+        accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -15330,6 +15400,7 @@ final class CodexAppServerTests: XCTestCase {
             authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             pluginHTTPTransport: pluginHTTPTransport,
+            accessibleConnectorProvider: accessibleConnectorProvider,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,

@@ -8,6 +8,10 @@ public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async th
 public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
 public typealias AppServerMcpHTTPTransport = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
 public typealias AppServerPluginHTTPTransport = @Sendable (URLRequest) throws -> URLSessionTransportResponse
+public typealias AppServerAccessibleConnectorProvider = @Sendable (
+    _ runtimeConfig: CodexRuntimeConfig,
+    _ usesChatGPTBackend: Bool
+) throws -> [DiscoverableConnectorInfo]?
 public typealias AppServerMcpOAuthLoginCompletion = @Sendable (_ success: Bool, _ error: String?) async -> Void
 public typealias AppServerMcpOAuthLoginStarter = @Sendable (
     AppServerMcpOAuthLoginStartRequest,
@@ -117,6 +121,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let pluginHTTPTransport: AppServerPluginHTTPTransport
+    public let accessibleConnectorProvider: AppServerAccessibleConnectorProvider
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
     public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
@@ -141,6 +146,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
+        accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -170,6 +176,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.authDeviceCodeTransport = authDeviceCodeTransport
         self.mcpHTTPTransport = mcpHTTPTransport
         self.pluginHTTPTransport = pluginHTTPTransport
+        self.accessibleConnectorProvider = accessibleConnectorProvider
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
         self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
@@ -688,6 +695,13 @@ public enum CodexAppServer {
             ),
             body: data
         )
+    }
+
+    public static func defaultAccessibleConnectorProvider(
+        runtimeConfig _: CodexRuntimeConfig,
+        usesChatGPTBackend _: Bool
+    ) throws -> [DiscoverableConnectorInfo]? {
+        nil
     }
 
     public static func defaultPluginHTTPTransport(_ request: URLRequest) throws -> URLSessionTransportResponse {
@@ -2825,29 +2839,33 @@ public enum CodexAppServer {
         let config = effectiveConfig(loadedConfig, applyingRuntimeFeatureEnablement: runtimeFeatureEnablement)
         var appsByID: [String: [String: Any]] = [:]
 
-        if var runtimeConfig = try? CodexConfigLoader.load(
+        var runtimeConfigForApps = try? CodexConfigLoader.load(
             codexHome: configuration.codexHome,
             systemConfigFile: nil,
             environment: configuration.environment
-        ) {
+        )
+        if var runtimeConfig = runtimeConfigForApps {
             applyRuntimeFeatureEnablement(
                 runtimeFeatureEnablement,
                 to: &runtimeConfig.features,
                 protectedFeatureKeys: protectedFeatureKeys(in: loadedConfig)
             )
-            if runtimeConfig.features.isEnabled(.apps),
-               let auth = try? currentAuth(configuration: configuration),
-               case .chatGPT = auth.kind {
-                for app in connectorDirectoryApps(
-                    runtimeConfig: runtimeConfig,
-                    configuration: configuration,
-                    auth: auth
-                ) {
-                    guard let id = app["id"] as? String else {
-                        continue
-                    }
-                    appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
+            runtimeConfigForApps = runtimeConfig
+        }
+
+        if let runtimeConfig = runtimeConfigForApps,
+           runtimeConfig.features.isEnabled(.apps),
+           let auth = try? currentAuth(configuration: configuration),
+           case .chatGPT = auth.kind {
+            for app in connectorDirectoryApps(
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            ) {
+                guard let id = app["id"] as? String else {
+                    continue
                 }
+                appsByID[id] = appInfoByMergingConnectorAppInfo(existing: appsByID[id], incoming: app)
             }
         }
 
@@ -2855,8 +2873,36 @@ public enum CodexAppServer {
             guard let id = app["id"] as? String else {
                 continue
             }
-            if appsByID[id] == nil {
-                appsByID[id] = app
+            appsByID[id] = appInfoByMergingConnectorAppInfo(
+                existing: appsByID[id],
+                incoming: app,
+                recomputeInstallURLOnNameMerge: false
+            )
+        }
+
+        if let runtimeConfig = runtimeConfigForApps {
+            let auth = try? currentAuth(configuration: configuration)
+            let usesChatGPTBackend: Bool
+            if case .chatGPT = auth?.kind {
+                usesChatGPTBackend = true
+            } else {
+                usesChatGPTBackend = false
+            }
+            if runtimeConfig.features.isEnabled(.apps),
+               let accessibleConnectors = try configuration.accessibleConnectorProvider(
+                   runtimeConfig,
+                   usesChatGPTBackend
+               ) {
+                for app in appInfosForAccessibleConnectors(accessibleConnectors) {
+                    guard let id = app["id"] as? String else {
+                        continue
+                    }
+                    appsByID[id] = appInfoByMergingConnectorAppInfo(
+                        existing: appsByID[id],
+                        incoming: app,
+                        recomputeInstallURLOnNameMerge: false
+                    )
+                }
             }
         }
 
@@ -2934,6 +2980,33 @@ public enum CodexAppServer {
             "isEnabled": configuredAppEnabled(id: id, in: config),
             "pluginDisplayNames": []
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func appInfosForAccessibleConnectors(
+        _ connectors: [DiscoverableConnectorInfo]
+    ) -> [[String: Any]] {
+        connectors.compactMap { connector in
+            let id = connector.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else {
+                return nil
+            }
+            let name = normalizeConnectorName(connector.name, connectorID: id)
+            return [
+                "id": id,
+                "name": name,
+                "description": connector.description as Any? ?? NSNull(),
+                "logoUrl": NSNull(),
+                "logoUrlDark": NSNull(),
+                "distributionChannel": NSNull(),
+                "branding": NSNull(),
+                "appMetadata": NSNull(),
+                "labels": NSNull(),
+                "installUrl": connector.installURL ?? connectorInstallURL(name: name, connectorID: id),
+                "isAccessible": connector.isAccessible,
+                "isEnabled": connector.isEnabled,
+                "pluginDisplayNames": Array(Set(connector.pluginDisplayNames)).sorted()
+            ].nullStripped(keepNulls: true)
+        }
     }
 
     private static func sortedAppInfos(_ apps: [[String: Any]]) -> [[String: Any]] {
@@ -4466,7 +4539,8 @@ public enum CodexAppServer {
 
     private static func appInfoByMergingConnectorAppInfo(
         existing: [String: Any]?,
-        incoming: [String: Any]
+        incoming: [String: Any],
+        recomputeInstallURLOnNameMerge: Bool = true
     ) -> [String: Any] {
         guard var merged = existing else {
             return incoming
@@ -4495,7 +4569,8 @@ public enum CodexAppServer {
         if merged["installUrl"] == nil || merged["installUrl"] is NSNull,
            let installURL = stringParam(incoming["installUrl"]) {
             merged["installUrl"] = installURL
-        } else if updatedName,
+        } else if recomputeInstallURLOnNameMerge,
+                  updatedName,
                   let mergedName = stringParam(merged["name"]) {
             merged["installUrl"] = connectorInstallURL(name: mergedName, connectorID: id)
         }
