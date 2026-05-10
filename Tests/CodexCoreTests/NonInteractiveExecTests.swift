@@ -302,6 +302,44 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.stdoutMessage, "done")
     }
 
+    func testResponsesLoopContinuesWhenCompletedEndTurnFalseWithoutToolCalls() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "continue")])
+        ])
+        let script = EndTurnFalseLoopScript()
+
+        let events = await NonInteractiveExec.runResponsesLoop(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { _ in
+                .functionCallOutput(
+                    callID: "unused",
+                    output: FunctionCallOutputPayload(content: "unused", success: false)
+                )
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].input.contains {
+            if case let .message(_, role, content, _) = $0 {
+                return role == "assistant" && content == [.outputText(text: "still working")]
+            }
+            return false
+        })
+
+        let result = NonInteractiveExec.finish(
+            responseEvents: events,
+            outputMode: .human,
+            conversationID: ConversationId(),
+            lastMessageFile: nil
+        )
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.stdoutMessage, "done")
+    }
+
     func testResponsesLoopWithTranscriptIncludesToolCallsOutputsAndFinalMessage() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])
@@ -1258,6 +1296,36 @@ private actor ExecLoopScript {
 
         return [
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
+            .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor EndTurnFalseLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(.message(role: "assistant", content: [
+                    .outputText(text: "still working")
+                ]))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil, endTurn: false))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [
+                .outputText(text: "done")
+            ]))),
             .success(.completed(responseID: "resp-2", tokenUsage: nil))
         ]
     }

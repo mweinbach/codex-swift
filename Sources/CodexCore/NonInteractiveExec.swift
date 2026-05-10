@@ -246,6 +246,9 @@ public enum NonInteractiveExec {
 
             let toolCalls = toolCalls(from: completedItems)
             if toolCalls.isEmpty {
+                if completedResponseNeedsFollowUp(turnEvents) {
+                    continue
+                }
                 if let stopHookContext {
                     let stopOutcome = await runStopHooks(
                         context: stopHookContext,
@@ -1000,6 +1003,15 @@ public enum NonInteractiveExec {
                  .other:
                 return false
             }
+        }
+    }
+
+    private static func completedResponseNeedsFollowUp(_ events: ResponseEventResults) -> Bool {
+        events.contains { result in
+            guard case let .success(.completed(_, _, endTurn)) = result else {
+                return false
+            }
+            return endTurn == false
         }
     }
 
