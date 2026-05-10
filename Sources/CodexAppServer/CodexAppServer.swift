@@ -810,6 +810,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
         let item = ConversationItem(path: started.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
         let thread = try threadObject(
