@@ -3194,6 +3194,86 @@ public enum CodexAppServer {
         )
     }
 
+    private static func remotePluginPagesOrThrow(
+        path: String,
+        queryItems: [URLQueryItem],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth,
+        failurePrefix: String
+    ) throws -> [[String: Any]] {
+        var plugins: [[String: Any]] = []
+        var pageToken: String?
+        repeat {
+            var pageQueryItems = queryItems
+            if let pageToken {
+                pageQueryItems.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            let object = try remotePluginObject(
+                path: path,
+                queryItems: pageQueryItems,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth,
+                failurePrefix: failurePrefix
+            )
+            plugins.append(contentsOf: object["plugins"] as? [[String: Any]] ?? [])
+            let pagination = object["pagination"] as? [String: Any]
+            pageToken = pagination?["next_page_token"] as? String
+        } while pageToken != nil
+        return plugins
+    }
+
+    private static func remotePluginObject(
+        path: String,
+        queryItems: [URLQueryItem],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth,
+        failurePrefix: String
+    ) throws -> [String: Any] {
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
+        guard var components = URLComponents(string: normalizedBaseURL + path) else {
+            throw AppServerError.invalidRequest("\(failurePrefix): invalid remote plugin catalog base URL")
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            throw AppServerError.invalidRequest("\(failurePrefix): invalid remote plugin catalog base URL path")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
+        if let accountID = auth.accountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        let response: URLSessionTransportResponse
+        do {
+            response = try configuration.pluginHTTPTransport(request)
+        } catch {
+            throw AppServerError.invalidRequest(
+                "\(failurePrefix): failed to send remote plugin catalog request to \(url.absoluteString): \(error)"
+            )
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            let body = String(data: response.body, encoding: .utf8) ?? ""
+            throw AppServerError.invalidRequest(
+                "\(failurePrefix): remote plugin catalog request to \(url.absoluteString) failed with status \(response.statusCode): \(body)"
+            )
+        }
+        do {
+            guard let object = try JSONSerialization.jsonObject(with: response.body) as? [String: Any] else {
+                throw AppServerError.invalidRequest("\(failurePrefix): failed to parse remote plugin catalog response from \(url.absoluteString)")
+            }
+            return object
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.invalidRequest(
+                "\(failurePrefix): failed to parse remote plugin catalog response from \(url.absoluteString): \(error)"
+            )
+        }
+    }
+
     private static func remotePluginMarketplace(
         name: String,
         displayName: String,
@@ -3594,6 +3674,124 @@ public enum CodexAppServer {
                 "mcpServers": mcpServers
             ].nullStripped(keepNulls: true)
         ]
+    }
+
+    private static func remotePluginReadResult(
+        remoteMarketplaceName: String,
+        pluginID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
+        guard runtimeConfig.features.isEnabled(.plugins) else {
+            throw AppServerError.invalidRequest("remote plugin read is not enabled for marketplace \(remoteMarketplaceName)")
+        }
+        guard isValidRemotePluginID(pluginID) else {
+            throw AppServerError.invalidRequest(
+                "invalid remote plugin id: only ASCII letters, digits, `_`, `-`, and `~` are allowed"
+            )
+        }
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            throw AppServerError.invalidRequest("read remote plugin details: chatgpt authentication required for remote plugin catalog")
+        }
+        let plugin = try remotePluginObject(
+            path: "/ps/plugins/\(pluginID)",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "read remote plugin details"
+        )
+        let scope = plugin["scope"] as? String ?? "GLOBAL"
+        let marketplaceName = remotePluginMarketplaceName(forScope: scope)
+        let installedPlugins = try remotePluginPagesOrThrow(
+            path: "/ps/plugins/installed",
+            queryItems: [URLQueryItem(name: "scope", value: scope == "WORKSPACE" ? "WORKSPACE" : "GLOBAL")],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "read remote plugin details"
+        )
+        let installedPlugin = installedPlugins.first { $0["id"] as? String == pluginID }
+        let disabledSkillNames = Set(installedPlugin?["disabled_skill_names"] as? [String] ?? [])
+        return [
+            "plugin": [
+                "marketplaceName": marketplaceName,
+                "marketplacePath": NSNull(),
+                "summary": remotePluginSummary(plugin, installed: installedPlugin),
+                "description": nullable(remotePluginDescription(plugin)),
+                "skills": remotePluginSkills(plugin, disabledSkillNames: disabledSkillNames),
+                "hooks": [],
+                "apps": [],
+                "mcpServers": []
+            ].nullStripped(keepNulls: true)
+        ]
+    }
+
+    private static func pluginRuntimeConfig(configuration: CodexAppServerConfiguration) throws -> CodexRuntimeConfig {
+        do {
+            return try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+    }
+
+    private static func remotePluginMarketplaceName(forScope scope: String) -> String {
+        scope == "WORKSPACE" ? "workspace-directory" : "chatgpt-global"
+    }
+
+    private static func remotePluginScope(forMarketplaceName marketplaceName: String) -> String? {
+        switch marketplaceName {
+        case "chatgpt-global":
+            return "GLOBAL"
+        case "workspace-directory", "shared-with-me":
+            return "WORKSPACE"
+        default:
+            return nil
+        }
+    }
+
+    private static func remotePluginDescription(_ plugin: [String: Any]) -> String? {
+        let description = ((plugin["release"] as? [String: Any])?["description"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let description, !description.isEmpty else {
+            return nil
+        }
+        return description
+    }
+
+    private static func remotePluginSkills(_ plugin: [String: Any], disabledSkillNames: Set<String>) -> [[String: Any]] {
+        let skills = (plugin["release"] as? [String: Any])?["skills"] as? [[String: Any]] ?? []
+        return skills.map { skill in
+            let name = skill["name"] as? String ?? ""
+            return [
+                "name": name,
+                "description": skill["description"] as? String ?? "",
+                "shortDescription": nullable((skill["interface"] as? [String: Any])?["short_description"] as? String),
+                "interface": remotePluginSkillInterface(skill["interface"] as? [String: Any]),
+                "path": NSNull(),
+                "enabled": !disabledSkillNames.contains(name)
+            ].nullStripped(keepNulls: true)
+        }
+    }
+
+    private static func remotePluginSkillInterface(_ interface: [String: Any]?) -> Any {
+        guard let interface else {
+            return NSNull()
+        }
+        return [
+            "displayName": nullable(interface["display_name"] as? String),
+            "shortDescription": nullable(interface["short_description"] as? String),
+            "iconSmall": NSNull(),
+            "iconLarge": NSNull(),
+            "brandColor": nullable(interface["brand_color"] as? String),
+            "defaultPrompt": nullable(interface["default_prompt"] as? String)
+        ].nullStripped()
     }
 
     private static func localPluginSourcePath(_ value: Any?, marketplaceRoot: URL) -> URL? {
@@ -4227,15 +4425,57 @@ public enum CodexAppServer {
                 configuration: configuration
             )
         case (.none, .some(let remoteMarketplaceName)):
-            throw AppServerError.invalidRequest("remote plugin read is not enabled for marketplace \(remoteMarketplaceName)")
+            return try remotePluginReadResult(
+                remoteMarketplaceName: remoteMarketplaceName,
+                pluginID: pluginName,
+                configuration: configuration
+            )
         }
     }
 
-    fileprivate static func pluginSkillReadResult(params: [String: Any]?) throws -> [String: Any] {
+    fileprivate static func pluginSkillReadResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"]) ?? ""
-        _ = stringParam(params?["remotePluginId"]) ?? ""
-        _ = stringParam(params?["skillName"]) ?? ""
-        throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
+        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
+        let skillName = stringParam(params?["skillName"]) ?? ""
+        guard remotePluginScope(forMarketplaceName: remoteMarketplaceName) != nil else {
+            throw AppServerError.invalidRequest("remote marketplace `\(remoteMarketplaceName)` is not supported")
+        }
+        let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
+        guard runtimeConfig.features.isEnabled(.plugins) else {
+            throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
+        }
+        guard isValidRemotePluginID(remotePluginID) else {
+            throw AppServerError.invalidRequest(
+                "invalid remote plugin id: only ASCII letters, digits, `_`, `-`, and `~` are allowed"
+            )
+        }
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind
+        else {
+            throw AppServerError.invalidRequest("read remote plugin skill: chatgpt authentication required for remote plugin catalog")
+        }
+        let object = try remotePluginObject(
+            path: "/ps/plugins/\(remotePluginID)/skills/\(remotePluginPathSegment(skillName))",
+            queryItems: [],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "read remote plugin skill"
+        )
+        if let pluginID = object["plugin_id"] as? String, pluginID != remotePluginID {
+            throw AppServerError.invalidRequest(
+                "read remote plugin skill: remote plugin mutation returned unexpected plugin id: expected `\(remotePluginID)`, got `\(pluginID)`"
+            )
+        }
+        if let responseSkillName = object["name"] as? String, responseSkillName != skillName {
+            throw AppServerError.invalidRequest(
+                "read remote plugin skill: remote plugin skill response returned unexpected skill name: expected `\(skillName)`, got `\(responseSkillName)`"
+            )
+        }
+        return ["contents": nullable(object["skill_md_contents"] as? String)].nullStripped(keepNulls: true)
     }
 
     fileprivate static func pluginShareSaveResult(params: [String: Any]?) throws -> [String: Any] {
@@ -12294,6 +12534,12 @@ public enum CodexAppServer {
         }
     }
 
+    private static func remotePluginPathSegment(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
     private static func isLikelyLocalPluginID(_ pluginID: String) -> Bool {
         let parts = pluginID.split(separator: "@", omittingEmptySubsequences: false)
         return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
@@ -17878,7 +18124,7 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/skill/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginSkillReadResult(params: params)
+                        result: try CodexAppServer.pluginSkillReadResult(params: params, configuration: configuration)
                     )
                 case "plugin/share/save":
                     response = CodexAppServer.responseObject(

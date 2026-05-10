@@ -4962,7 +4962,7 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
-    func testPluginReadValidatesSourceAndReportsRemoteDisabled() throws {
+    func testPluginReadValidatesSourceAndReportsRemoteDisabledWhenPluginsDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path
 
@@ -4988,6 +4988,10 @@ final class CodexAppServerTests: XCTestCase {
             "plugin/read requires exactly one of marketplacePath or remoteMarketplaceName"
         )
 
+        try """
+        [features]
+        plugins = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         let remoteDisabled = try appServerResponse(
             #"{"id":3,"method":"plugin/read","params":{"remoteMarketplaceName":"openai-curated","pluginName":"plugins~Plugin_gmail"}}"#,
             codexHome: temp.url
@@ -5000,18 +5004,221 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
-    func testPluginSkillReadReportsRemoteDisabled() throws {
+    func testPluginReadReadsRemotePluginDetailsAndSkills() throws {
         let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+        let detailBody = remotePluginDetailBody(id: pluginID, scope: "GLOBAL")
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work in Linear",
+                "app_ids": [],
+                "interface": {
+                  "short_description": "Plan and track work",
+                  "capabilities": ["Read", "Write"]
+                },
+                "skills": []
+              },
+              "enabled": false,
+              "disabled_skill_names": ["plan-work"]
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/\(pluginID)", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"openai-curated","remotePluginId":"plugins~Plugin_gmail","skillName":""}}"#,
-            codexHome: temp.url
+            #"{"id":1,"method":"plugin/read","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
         )
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32600)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["marketplaceName"] as? String, "chatgpt-global")
+        XCTAssertTrue(plugin["marketplacePath"] is NSNull)
+        XCTAssertEqual(plugin["description"] as? String, "Track work in Linear")
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        XCTAssertEqual(summary["id"] as? String, pluginID)
+        XCTAssertEqual(summary["name"] as? String, "linear")
+        XCTAssertEqual(summary["installed"] as? Bool, true)
+        XCTAssertEqual(summary["enabled"] as? Bool, false)
+        let source = try XCTUnwrap(summary["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "remote")
+        XCTAssertEqual(summary["keywords"] as? [String], ["issue-tracking", "project management"])
+        let interface = try XCTUnwrap(summary["interface"] as? [String: Any])
+        XCTAssertEqual(interface["displayName"] as? String, "Linear")
+        XCTAssertEqual(interface["shortDescription"] as? String, "Plan and track work")
+        let skills = try XCTUnwrap(plugin["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.count, 1)
+        XCTAssertEqual(skills[0]["name"] as? String, "plan-work")
+        XCTAssertEqual(skills[0]["description"] as? String, "Plan work from Linear issues")
+        XCTAssertEqual(skills[0]["shortDescription"] as? String, "Create a plan from issues")
+        XCTAssertTrue(skills[0]["path"] is NSNull)
+        XCTAssertEqual(skills[0]["enabled"] as? Bool, false)
+        XCTAssertEqual((plugin["apps"] as? [[String: Any]])?.count, 0)
+        XCTAssertEqual((plugin["hooks"] as? [[String: Any]])?.count, 0)
+        XCTAssertEqual(plugin["mcpServers"] as? [String], [])
+        XCTAssertTrue(capture.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer chatgpt-token" })
+    }
+
+    func testPluginReadReturnsShareContextForWorkspaceRemotePlugin() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins~Plugin_11111111111111111111111111111111"
+        let detailBody = remotePluginDetailBody(id: pluginID, name: "shared-linear", displayName: "Shared Linear", scope: "WORKSPACE")
+        let installedBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/\(pluginID)", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=WORKSPACE"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"remoteMarketplaceName":"shared-with-me","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
+        XCTAssertEqual(plugin["marketplaceName"] as? String, "workspace-directory")
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        let shareContext = try XCTUnwrap(summary["shareContext"] as? [String: Any])
+        XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
+        XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
+        XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
+        XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
+        let shareTargets = try XCTUnwrap(shareContext["shareTargets"] as? [[String: Any]])
+        XCTAssertEqual(shareTargets.count, 1)
+        XCTAssertEqual(shareTargets[0]["principalType"] as? String, "user")
+        XCTAssertEqual(shareTargets[0]["principalId"] as? String, "user-ada__account-123")
+        XCTAssertEqual(shareTargets[0]["name"] as? String, "Ada")
+    }
+
+    func testPluginSkillReadReadsRemoteSkillContents() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+        let skillBody = """
+        {
+          "plugin_id": "\(pluginID)",
+          "name": "plan-work",
+          "skill_md_contents": "# Plan Work\\n\\nUse Linear issues to create a plan."
+        }
+        """
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/\(pluginID)/skills/plan-work", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(skillBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"chatgpt-global","remotePluginId":"\#(pluginID)","skillName":"plan-work"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(
-            error["message"] as? String,
-            "remote plugin skill read is not enabled for marketplace openai-curated"
+            result["contents"] as? String,
+            "# Plan Work\n\nUse Linear issues to create a plan."
         )
     }
 
@@ -14372,6 +14579,67 @@ private func workspaceRemotePluginPageBody(
       "pagination": {
         "limit": 50,
         "next_page_token": null
+      }
+    }
+    """
+}
+
+private func remotePluginDetailBody(
+    id: String,
+    name: String = "linear",
+    displayName: String = "Linear",
+    scope: String
+) -> String {
+    let workspaceFields = scope == "WORKSPACE" ? """
+    ,
+      "creator_account_user_id": "user-gavin__account-123",
+      "creator_name": "Gavin",
+      "share_url": "https://chatgpt.example/plugins/share/share-key-1",
+      "share_principals": [
+        {
+          "principal_type": "user",
+          "principal_id": "user-gavin__account-123",
+          "role": "owner",
+          "name": "Gavin"
+        },
+        {
+          "principal_type": "user",
+          "principal_id": "user-ada__account-123",
+          "role": "reader",
+          "name": "Ada"
+        }
+      ]
+    """ : ""
+    return """
+    {
+      "id": "\(id)",
+      "name": "\(name)",
+      "scope": "\(scope)"\(workspaceFields),
+      "installation_policy": "AVAILABLE",
+      "authentication_policy": "ON_USE",
+      "status": "ENABLED",
+      "release": {
+        "display_name": "\(displayName)",
+        "description": "Track work in Linear",
+        "app_ids": [],
+        "keywords": ["issue-tracking", "project management"],
+        "interface": {
+          "short_description": "Plan and track work",
+          "capabilities": ["Read", "Write"],
+          "logo_url": "https://example.com/linear.png",
+          "screenshot_urls": ["https://example.com/linear-shot.png"]
+        },
+        "skills": [
+          {
+            "name": "plan-work",
+            "description": "Plan work from Linear issues",
+            "plugin_release_skill_id": "skill-1",
+            "interface": {
+              "display_name": "Plan Work",
+              "short_description": "Create a plan from issues"
+            }
+          }
+        ]
       }
     }
     """
