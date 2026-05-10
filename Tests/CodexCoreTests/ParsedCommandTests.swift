@@ -566,6 +566,37 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testDropsRustSmallFormattingHelperMatrixInPipelines() {
+        for helper in [
+            "wc -l",
+            "tr a b",
+            "cut -d: -f1",
+            "sort",
+            "uniq",
+            "tee /tmp/out",
+            "column -t",
+            "xargs",
+            "awk '{print $1}'",
+            "sed 's/foo/bar/'"
+        ] {
+            XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | \(helper)"]), [
+                .listFiles(cmd: "rg --files", path: nil)
+            ], helper)
+        }
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "wc -l"]), [
+            .unknown(cmd: "wc -l")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "awk '{print $1}' Cargo.toml"]), [
+            .read(cmd: "awk '{print $1}' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "sed -n 1,5p Cargo.toml"]), [
+            .read(cmd: "sed -n '1,5p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+    }
+
     func testSplitsSemicolonAndOrConnectorsLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg foo ; echo done"]), [
             .unknown(cmd: "rg foo ; echo done")
