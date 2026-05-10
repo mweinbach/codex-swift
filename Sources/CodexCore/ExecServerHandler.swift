@@ -3,16 +3,19 @@ import Foundation
 public actor ExecServerHandler {
     private let sessionRegistry: ExecServerSessionRegistry
     private let fileSystem: ExecServerFileSystem
+    private let processStore: ExecServerProcessStore
     private var session: ExecServerSessionHandle?
     private var initializeRequested = false
     private var initialized = false
 
     public init(
         sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
-        fileSystem: ExecServerFileSystem = ExecServerFileSystem()
+        fileSystem: ExecServerFileSystem = ExecServerFileSystem(),
+        processStore: ExecServerProcessStore = ExecServerProcessStore()
     ) {
         self.sessionRegistry = sessionRegistry
         self.fileSystem = fileSystem
+        self.processStore = processStore
     }
 
     public func initialize(_ params: ExecServerInitializeParams) async throws -> ExecServerInitializeResponse {
@@ -54,8 +57,10 @@ public actor ExecServerHandler {
 
     public func shutdown() async {
         guard let session else {
+            await processStore.shutdown()
             return
         }
+        await processStore.shutdown()
         await session.detach()
     }
 
@@ -114,6 +119,26 @@ public actor ExecServerHandler {
     public func copy(_ params: ExecServerFsCopyParams) async throws -> ExecServerFsCopyResponse {
         _ = try await requireInitialized(for: "filesystem")
         return try fileSystem.copy(params)
+    }
+
+    public func startProcess(_ params: ExecServerExecParams) async throws -> ExecServerExecResponse {
+        _ = try await requireInitialized(for: "exec")
+        return try await processStore.start(params)
+    }
+
+    public func readProcess(_ params: ExecServerReadParams) async throws -> ExecServerReadResponse {
+        _ = try await requireInitialized(for: "exec")
+        return try await processStore.read(params)
+    }
+
+    public func writeProcess(_ params: ExecServerWriteParams) async throws -> ExecServerWriteResponse {
+        _ = try await requireInitialized(for: "exec")
+        return try await processStore.write(params)
+    }
+
+    public func terminateProcess(_ params: ExecServerTerminateParams) async throws -> ExecServerTerminateResponse {
+        _ = try await requireInitialized(for: "exec")
+        return try await processStore.terminate(params)
     }
 }
 

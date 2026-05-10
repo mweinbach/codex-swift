@@ -113,9 +113,9 @@ final class ExecServerTests: XCTestCase {
             result: .object(["sessionId": .string("session-1")])
         ))
         XCTAssertNil(initializedResponse)
-        XCTAssertEqual(pendingExecResponse, .error(
+        XCTAssertEqual(pendingExecResponse, .response(
             requestID: .integer(2),
-            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `process/terminate` yet")
+            result: .object(["running": .bool(false)])
         ))
     }
 
@@ -154,6 +154,201 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(requestID, .integer(-1))
         XCTAssertEqual(error.code, -32600)
         XCTAssertTrue(error.message.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
+    }
+
+    func testConnectionProcessorStartsAndReadsPipeProcessLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+
+        let start = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-output",
+                argv: ["/bin/sh", "-c", "printf 'session output\\n'"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+        let read = try await readProcessUntilClosed(connection, processId: "proc-output")
+
+        XCTAssertEqual(start?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(2),
+            result: .object(["processId": .string("proc-output")])
+        ))
+        XCTAssertEqual(read.output, "session output\n")
+        XCTAssertEqual(read.exitCode, 0)
+        XCTAssertTrue(read.closed)
+    }
+
+    func testConnectionProcessorWritesToPipeStdinLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-stdin",
+                argv: ["/bin/sh", "-c", "IFS= read line; printf 'from-stdin:%s\\n' \"$line\""],
+                cwd: cwd,
+                env: [:],
+                tty: false,
+                pipeStdin: true
+            ))
+        ))))
+
+        let write = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessWriteMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerWriteParams(
+                processId: "proc-stdin",
+                chunk: ExecServerByteChunk(Array("hello\n".utf8))
+            ))
+        ))))
+        let read = try await readProcessUntilClosed(connection, processId: "proc-stdin")
+
+        XCTAssertEqual(write?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["status": .string("accepted")])
+        ))
+        XCTAssertEqual(read.output, "from-stdin:hello\n")
+        XCTAssertEqual(read.exitCode, 0)
+        XCTAssertTrue(read.closed)
+    }
+
+    func testConnectionProcessorReportsProcessWriteStatusesLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-closed-stdin",
+                argv: ["/bin/sh", "-c", "sleep 0.1; if IFS= read line; then printf 'read:%s\\n' \"$line\"; else printf 'eof\\n'; fi"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+
+        let closed = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessWriteMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerWriteParams(
+                processId: "proc-closed-stdin",
+                chunk: ExecServerByteChunk(Array("ignored\n".utf8))
+            ))
+        ))))
+        let unknown = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerProcessWriteMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerWriteParams(
+                processId: "missing",
+                chunk: ExecServerByteChunk(Array("ignored\n".utf8))
+            ))
+        ))))
+
+        XCTAssertEqual(closed?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["status": .string("stdinClosed")])
+        ))
+        XCTAssertEqual(unknown?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(4),
+            result: .object(["status": .string("unknownProcess")])
+        ))
+    }
+
+    func testConnectionProcessorTerminatesProcessLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-terminate",
+                argv: ["/bin/sh", "-c", "sleep 5"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+
+        let terminated = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "proc-terminate"))
+        ))))
+        let secondTerminate = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "missing"))
+        ))))
+
+        XCTAssertEqual(terminated?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["running": .bool(true)])
+        ))
+        XCTAssertEqual(secondTerminate?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(4),
+            result: .object(["running": .bool(false)])
+        ))
+    }
+
+    func testConnectionProcessorReportsProcessValidationErrorsLikeRust() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        let emptyArgv = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-empty",
+                argv: [],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-duplicate",
+                argv: ["/bin/sh", "-c", "sleep 0.2"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+        let duplicate = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(4),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-duplicate",
+                argv: ["/bin/sh", "-c", "true"],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+        let unknownRead = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(5),
+            method: execServerProcessReadMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerReadParams(processId: "missing"))
+        ))))
+
+        XCTAssertEqual(emptyArgv?.jsonRPCMessage, ExecServerRPC.error(
+            id: .integer(2),
+            error: ExecServerRPC.invalidParams("argv must not be empty")
+        ))
+        XCTAssertEqual(duplicate?.jsonRPCMessage, ExecServerRPC.error(
+            id: .integer(4),
+            error: ExecServerRPC.invalidRequest("process proc-duplicate already exists")
+        ))
+        XCTAssertEqual(unknownRead?.jsonRPCMessage, ExecServerRPC.error(
+            id: .integer(5),
+            error: ExecServerRPC.invalidRequest("unknown process id missing")
+        ))
     }
 
     func testFilesystemDirectOperationsCoverRustSurfaceArea() throws {
@@ -546,7 +741,7 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
-    func testRouterReportsPendingRegisteredAndUnknownMethodsWithRustStubMessage() async throws {
+    func testRouterReportsPendingHttpAndUnknownMethodsWithRustStubMessage() async throws {
         let router = ExecServerRouter()
         let handler = ExecServerHandler(sessionRegistry: ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1"])))
         _ = try await handler.initialize(ExecServerInitializeParams(clientName: "client"))
@@ -554,8 +749,12 @@ final class ExecServerTests: XCTestCase {
 
         let pending = await router.handleRequest(ExecServerJSONRPCRequest(
             id: .integer(1),
-            method: execServerProcessTerminateMethod,
-            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "p1"))
+            method: execServerHttpRequestMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerHttpRequestParams(
+                method: "GET",
+                url: "https://example.test",
+                requestId: "request-1"
+            ))
         ), using: handler)
         let unknown = await router.handleRequest(ExecServerJSONRPCRequest(
             id: .integer(2),
@@ -565,7 +764,7 @@ final class ExecServerTests: XCTestCase {
 
         XCTAssertEqual(pending, .error(
             requestID: .integer(1),
-            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `process/terminate` yet")
+            error: ExecServerRPC.methodNotFound("exec-server stub does not implement `http/request` yet")
         ))
         XCTAssertEqual(unknown, .error(
             requestID: .integer(2),
@@ -1274,5 +1473,64 @@ final class ExecServerTests: XCTestCase {
 
     private func absolutePath(_ path: String) throws -> AbsolutePath {
         try AbsolutePath(absolutePath: path)
+    }
+
+    private func initializedConnection() async throws -> ExecServerConnection {
+        let connection = ExecServerConnection()
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        ))))
+        _ = await connection.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+        return connection
+    }
+
+    private func readProcessUntilClosed(
+        _ connection: ExecServerConnection,
+        processId: String
+    ) async throws -> (output: String, exitCode: Int32?, closed: Bool) {
+        var output = ""
+        var afterSeq: UInt64?
+        var exitCode: Int32?
+        for index in 0..<20 {
+            let response = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+                id: .integer(Int64(100 + index)),
+                method: execServerProcessReadMethod,
+                params: try ExecServerRPC.jsonValue(from: ExecServerReadParams(
+                    processId: processId,
+                    afterSeq: afterSeq,
+                    waitMs: 250
+                ))
+            ))))
+            guard case let .response(_, result) = response else {
+                throw NSError(
+                    domain: "ExecServerTests",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Expected process/read response"]
+                )
+            }
+            let read = try decodeJSONValue(result, as: ExecServerReadResponse.self)
+            for chunk in read.chunks {
+                output += String(decoding: chunk.chunk.bytes, as: UTF8.self)
+                afterSeq = chunk.seq
+            }
+            if read.exited {
+                exitCode = read.exitCode
+            }
+            if read.closed {
+                return (output, exitCode, true)
+            }
+            afterSeq = read.nextSeq > 0 ? read.nextSeq - 1 : afterSeq
+        }
+        return (output, exitCode, false)
+    }
+
+    private func decodeJSONValue<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(type, from: data)
     }
 }

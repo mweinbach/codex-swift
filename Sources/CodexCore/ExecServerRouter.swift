@@ -63,21 +63,17 @@ public struct ExecServerRouter: Sendable {
             _ = try await handler.requireInitialized(for: "http")
             throw methodPending(request.method)
         case execServerProcessStartMethod:
-            _ = try decodeRequest(request.params, as: ExecServerExecParams.self)
-            _ = try await handler.requireInitialized(for: "exec")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerExecParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.startProcess(params))
         case execServerProcessReadMethod:
-            _ = try decodeRequest(request.params, as: ExecServerReadParams.self)
-            _ = try await handler.requireInitialized(for: "exec")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerReadParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.readProcess(params))
         case execServerProcessWriteMethod:
-            _ = try decodeRequest(request.params, as: ExecServerWriteParams.self)
-            _ = try await handler.requireInitialized(for: "exec")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerWriteParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.writeProcess(params))
         case execServerProcessTerminateMethod:
-            _ = try decodeRequest(request.params, as: ExecServerTerminateParams.self)
-            _ = try await handler.requireInitialized(for: "exec")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerTerminateParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.terminateProcess(params))
         case execServerFsReadFileMethod:
             let params = try decodeRequest(request.params, as: ExecServerFsReadFileParams.self)
             return try ExecServerRPC.jsonValue(from: try await handler.readFile(params))
