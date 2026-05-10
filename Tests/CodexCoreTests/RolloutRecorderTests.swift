@@ -98,6 +98,98 @@ final class RolloutRecorderTests: XCTestCase {
         XCTAssertEqual(lines[1].item, .responseItem(.message(role: "assistant", content: [.outputText(text: "appended")])))
     }
 
+    func testExtendedEventPersistenceSanitizesExecEndLikeRust() throws {
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let dates = DateSequence([
+            fixedDate(year: 2026, month: 5, day: 8, hour: 11, minute: 22, second: 33),
+            fixedDate(year: 2026, month: 5, day: 8, hour: 11, minute: 22, second: 34)
+        ])
+        let recorder = try RolloutRecorder.create(
+            codexHome: temp.url,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true),
+            conversationID: conversationID,
+            source: .cli,
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            modelProvider: "openai",
+            eventPersistenceMode: .extended,
+            calendar: utcCalendar(),
+            timestampProvider: dates.next
+        )
+        let aggregate = String(repeating: "a", count: 12_000) + "tail"
+        try recorder.recordItems([
+            .eventMsg(.execCommandEnd(ExecCommandEndEvent(
+                callID: "call-1",
+                turnID: "turn-1",
+                command: ["bash", "-lc", "generate-output"],
+                cwd: "/repo",
+                parsedCmd: [.unknown(cmd: "generate-output")],
+                stdout: "raw stdout",
+                stderr: "raw stderr",
+                aggregatedOutput: aggregate,
+                exitCode: 0,
+                duration: ProtocolDuration(secs: 1),
+                formattedOutput: "formatted output"
+            )))
+        ])
+        try recorder.flush()
+
+        let lines = try rolloutLines(at: recorder.rolloutPath)
+        XCTAssertEqual(lines.count, 2)
+        guard case let .eventMsg(.execCommandEnd(event)) = lines[1].item else {
+            return XCTFail("expected persisted exec command end event")
+        }
+        XCTAssertEqual(event.stdout, "")
+        XCTAssertEqual(event.stderr, "")
+        XCTAssertEqual(event.formattedOutput, "")
+        XCTAssertTrue(event.aggregatedOutput.hasPrefix(String(repeating: "a", count: 100)))
+        XCTAssertTrue(event.aggregatedOutput.contains("chars truncated"))
+        XCTAssertTrue(event.aggregatedOutput.hasSuffix("tail"))
+    }
+
+    func testLimitedEventPersistenceFiltersExtendedExecEndLikeRust() throws {
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let dates = DateSequence([
+            fixedDate(year: 2026, month: 5, day: 8, hour: 11, minute: 22, second: 33),
+            fixedDate(year: 2026, month: 5, day: 8, hour: 11, minute: 22, second: 34)
+        ])
+        let recorder = try RolloutRecorder.create(
+            codexHome: temp.url,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true),
+            conversationID: conversationID,
+            source: .cli,
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            modelProvider: "openai",
+            calendar: utcCalendar(),
+            timestampProvider: dates.next
+        )
+        try recorder.recordItems([
+            .eventMsg(.execCommandEnd(ExecCommandEndEvent(
+                callID: "call-1",
+                turnID: "turn-1",
+                command: ["bash", "-lc", "generate-output"],
+                cwd: "/repo",
+                parsedCmd: [.unknown(cmd: "generate-output")],
+                stdout: "raw stdout",
+                stderr: "raw stderr",
+                aggregatedOutput: "aggregate",
+                exitCode: 0,
+                duration: ProtocolDuration(secs: 1),
+                formattedOutput: "formatted output"
+            )))
+        ])
+        try recorder.flush()
+
+        let lines = try rolloutLines(at: recorder.rolloutPath)
+        XCTAssertEqual(lines.count, 1)
+        guard case .sessionMeta = lines[0].item else {
+            return XCTFail("limited mode should only keep the session meta")
+        }
+    }
+
     func testGetRolloutHistorySkipsBadLinesAndUsesFirstSessionMetaID() throws {
         let temp = try RolloutRecorderTemporaryDirectory()
         let path = temp.url.appendingPathComponent("history.jsonl")

@@ -37,12 +37,21 @@ public enum RolloutRecorderParams: Equatable, Sendable {
 public final class RolloutRecorder {
     public let rolloutPath: URL
 
+    private static let persistedExecAggregatedOutputMaxBytes = 10_000
+
     private let timestampProvider: () -> Date
+    private let eventPersistenceMode: EventPersistenceMode
     private var fileHandle: FileHandle?
 
-    private init(rolloutPath: URL, fileHandle: FileHandle, timestampProvider: @escaping () -> Date) {
+    private init(
+        rolloutPath: URL,
+        fileHandle: FileHandle,
+        eventPersistenceMode: EventPersistenceMode,
+        timestampProvider: @escaping () -> Date
+    ) {
         self.rolloutPath = rolloutPath
         self.fileHandle = fileHandle
+        self.eventPersistenceMode = eventPersistenceMode
         self.timestampProvider = timestampProvider
     }
 
@@ -62,6 +71,7 @@ public final class RolloutRecorder {
         cliVersion: String,
         modelProvider: String?,
         gitInfo: GitInfo? = nil,
+        eventPersistenceMode: EventPersistenceMode = .limited,
         calendar: Calendar = .current,
         timestampProvider: @escaping () -> Date = Date.init,
         fileManager: FileManager = .default
@@ -78,6 +88,7 @@ public final class RolloutRecorder {
         let recorder = RolloutRecorder(
             rolloutPath: rolloutPath,
             fileHandle: handle,
+            eventPersistenceMode: eventPersistenceMode,
             timestampProvider: timestampProvider
         )
         try recorder.writeRolloutItem(.sessionMeta(SessionMetaLine(
@@ -98,9 +109,18 @@ public final class RolloutRecorder {
         return recorder
     }
 
-    public static func resume(path: URL, timestampProvider: @escaping () -> Date = Date.init) throws -> RolloutRecorder {
+    public static func resume(
+        path: URL,
+        eventPersistenceMode: EventPersistenceMode = .limited,
+        timestampProvider: @escaping () -> Date = Date.init
+    ) throws -> RolloutRecorder {
         let handle = try openForAppend(path: path, fileManager: .default)
-        return RolloutRecorder(rolloutPath: path, fileHandle: handle, timestampProvider: timestampProvider)
+        return RolloutRecorder(
+            rolloutPath: path,
+            fileHandle: handle,
+            eventPersistenceMode: eventPersistenceMode,
+            timestampProvider: timestampProvider
+        )
     }
 
     public static func create(
@@ -113,6 +133,7 @@ public final class RolloutRecorder {
         threadSource: ThreadSource? = nil,
         params: RolloutRecorderParams,
         gitInfo: GitInfo? = nil,
+        eventPersistenceMode: EventPersistenceMode = .limited,
         calendar: Calendar = .current,
         timestampProvider: @escaping () -> Date = Date.init,
         fileManager: FileManager = .default
@@ -131,17 +152,24 @@ public final class RolloutRecorder {
                 cliVersion: cliVersion,
                 modelProvider: modelProvider,
                 gitInfo: gitInfo,
+                eventPersistenceMode: eventPersistenceMode,
                 calendar: calendar,
                 timestampProvider: timestampProvider,
                 fileManager: fileManager
             )
         case let .resume(path):
-            return try resume(path: path, timestampProvider: timestampProvider)
+            return try resume(
+                path: path,
+                eventPersistenceMode: eventPersistenceMode,
+                timestampProvider: timestampProvider
+            )
         }
     }
 
     public func recordItems(_ items: [RolloutRecordItem]) throws {
-        let filtered = items.filter(Self.shouldPersist)
+        let filtered = items
+            .filter { Self.shouldPersist($0, mode: eventPersistenceMode) }
+            .map { Self.sanitizeForPersistence($0, mode: eventPersistenceMode) }
         guard !filtered.isEmpty else {
             return
         }
@@ -278,14 +306,52 @@ public final class RolloutRecorder {
         try fileHandle.synchronize()
     }
 
-    private static func shouldPersist(_ item: RolloutRecordItem) -> Bool {
+    private static func shouldPersist(_ item: RolloutRecordItem, mode: EventPersistenceMode) -> Bool {
         switch item {
         case .sessionMeta, .compacted, .turnContext:
             return true
         case let .responseItem(responseItem):
             return RolloutPolicy.shouldPersistResponseItem(responseItem)
         case let .eventMsg(event):
-            return RolloutPolicy.shouldPersistEventMessage(event)
+            return RolloutPolicy.shouldPersistEventMessage(event, mode: mode)
+        }
+    }
+
+    private static func sanitizeForPersistence(
+        _ item: RolloutRecordItem,
+        mode: EventPersistenceMode
+    ) -> RolloutRecordItem {
+        guard mode == .extended else {
+            return item
+        }
+        switch item {
+        case let .eventMsg(.execCommandEnd(event)):
+            let sanitized = ExecCommandEndEvent(
+                callID: event.callID,
+                processID: event.processID,
+                turnID: event.turnID,
+                command: event.command,
+                cwd: event.cwd,
+                parsedCmd: event.parsedCmd,
+                source: event.source,
+                interactionInput: event.interactionInput,
+                stdout: "",
+                stderr: "",
+                aggregatedOutput: Truncation.truncateText(
+                    event.aggregatedOutput,
+                    policy: .bytes(persistedExecAggregatedOutputMaxBytes)
+                ),
+                exitCode: event.exitCode,
+                duration: event.duration,
+                formattedOutput: ""
+            )
+            return .eventMsg(.execCommandEnd(sanitized))
+        case .sessionMeta,
+             .responseItem,
+             .compacted,
+             .turnContext,
+             .eventMsg:
+            return item
         }
     }
 

@@ -796,6 +796,8 @@ Source baseline inspected for this scaffold:
   - added parity coverage for quoted `cmd /c start` URL launches, empty-title `start "" https://...` launches, PowerShell `rm` alias force deletes, and the Rust-safe case where `-Force` appears in a separate PowerShell segment from `Remove-Item`.
 - `codex-rs/rollout/src/recorder.rs` legacy response-item filtering
   - matched Rust rollout-history loading for legacy `ghost_snapshot` response items by skipping top-level snapshot lines, filtering snapshots from compaction replacement history, and preventing new snapshot persistence.
+- `codex-rs/rollout/src/recorder.rs` event persistence mode
+  - added Swift limited-vs-extended rollout event persistence mode handling, including Rust's extended-only `exec_command_end` persistence and storage sanitization that keeps a bounded `aggregated_output` while clearing stdout, stderr, and formatted output.
 - `codex-rs/core/src/thread_rollout_truncation.rs`
   - added Swift rollout truncation helpers for detecting prior user turns, cutting before the nth real user message, keeping the last N fork turns, applying thread rollback markers, and treating assistant inter-agent `trigger_turn` envelopes as fork-turn boundaries while non-trigger envelopes only participate in rollback accounting.
 - `codex-rs/core/src/agent/control.rs` forked rollout filtering
