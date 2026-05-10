@@ -2,6 +2,102 @@ import CodexCore
 import XCTest
 
 final class ExecServerTests: XCTestCase {
+    func testJSONRPCMessagesUseRustShapeWithoutJsonrpcField() throws {
+        try XCTAssertJSONObjectEqual(ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        )), [
+            "id": 1,
+            "method": "initialize",
+            "params": [
+                "clientName": "client"
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(ExecServerRPC.response(
+            id: .string("req-1"),
+            result: .object(["sessionId": .string("session-1")])
+        ), [
+            "id": "req-1",
+            "result": [
+                "sessionId": "session-1"
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(ExecServerRPC.notification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ), [
+            "method": "initialized",
+            "params": [:]
+        ])
+    }
+
+    func testJSONRPCMessageDecodingDistinguishesMessageKinds() throws {
+        let decoder = JSONDecoder()
+
+        XCTAssertEqual(
+            try decoder.decode(ExecServerJSONRPCMessage.self, from: Data(#"{"id":1,"method":"process/read","params":{"processId":"p1"}}"#.utf8)),
+            .request(ExecServerJSONRPCRequest(
+                id: .integer(1),
+                method: execServerProcessReadMethod,
+                params: .object(["processId": .string("p1")])
+            ))
+        )
+        XCTAssertEqual(
+            try decoder.decode(ExecServerJSONRPCMessage.self, from: Data(#"{"method":"initialized","params":{}}"#.utf8)),
+            .notification(ExecServerJSONRPCNotification(method: execServerInitializedMethod, params: .object([:])))
+        )
+        XCTAssertEqual(
+            try decoder.decode(ExecServerJSONRPCMessage.self, from: Data(#"{"id":"a","result":{"ok":true}}"#.utf8)),
+            .response(ExecServerJSONRPCResponse(id: .string("a"), result: .object(["ok": .bool(true)])))
+        )
+        XCTAssertEqual(
+            try decoder.decode(ExecServerJSONRPCMessage.self, from: Data(#"{"id":-1,"error":{"code":-32600,"message":"bad"}}"#.utf8)),
+            .error(ExecServerJSONRPCError(id: .integer(-1), error: ExecServerRPC.invalidRequest("bad")))
+        )
+    }
+
+    func testJSONRPCErrorCodesMatchRustHelpers() {
+        XCTAssertEqual(ExecServerRPC.invalidRequest("bad"), ExecServerJSONRPCErrorDetail(code: -32600, message: "bad"))
+        XCTAssertEqual(ExecServerRPC.methodNotFound("missing"), ExecServerJSONRPCErrorDetail(code: -32601, message: "missing"))
+        XCTAssertEqual(ExecServerRPC.invalidParams("params"), ExecServerJSONRPCErrorDetail(code: -32602, message: "params"))
+        XCTAssertEqual(ExecServerRPC.notFound("gone"), ExecServerJSONRPCErrorDetail(code: -32004, message: "gone"))
+        XCTAssertEqual(ExecServerRPC.internalError("boom"), ExecServerJSONRPCErrorDetail(code: -32603, message: "boom"))
+    }
+
+    func testRequestParamDecodingRetriesEmptyObjectAsNullLikeRust() throws {
+        struct NullParams: Decodable, Equatable {
+            init() {}
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                guard container.decodeNil() else {
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "expected null"
+                    )
+                }
+            }
+        }
+
+        XCTAssertEqual(
+            try ExecServerRPC.decodeRequestParams(.object([:]), as: NullParams.self),
+            NullParams()
+        )
+        XCTAssertEqual(
+            try ExecServerRPC.decodeNotificationParams(nil, as: NullParams.self),
+            NullParams()
+        )
+        XCTAssertThrowsError(try ExecServerRPC.decodeRequestParams(
+            .object(["unexpected": .bool(true)]),
+            as: NullParams.self
+        )) { error in
+            XCTAssertTrue(String(describing: error).contains("invalid params:"))
+        }
+    }
+
     func testProtocolMethodConstantsMatchRust() {
         XCTAssertEqual(execServerInitializeMethod, "initialize")
         XCTAssertEqual(execServerInitializedMethod, "initialized")

@@ -601,6 +601,229 @@ public struct ExecServerClosedNotification: Codable, Equatable, Sendable {
     }
 }
 
+public struct ExecServerJSONRPCErrorDetail: Codable, Equatable, Sendable {
+    public let code: Int
+    public let message: String
+    public let data: JSONValue?
+
+    public init(code: Int, message: String, data: JSONValue? = nil) {
+        self.code = code
+        self.message = message
+        self.data = data
+    }
+}
+
+public struct ExecServerJSONRPCRequest: Codable, Equatable, Sendable {
+    public let id: RequestID
+    public let method: String
+    public let params: JSONValue?
+
+    public init(id: RequestID, method: String, params: JSONValue? = nil) {
+        self.id = id
+        self.method = method
+        self.params = params
+    }
+}
+
+public struct ExecServerJSONRPCResponse: Codable, Equatable, Sendable {
+    public let id: RequestID
+    public let result: JSONValue
+
+    public init(id: RequestID, result: JSONValue) {
+        self.id = id
+        self.result = result
+    }
+}
+
+public struct ExecServerJSONRPCError: Codable, Equatable, Sendable {
+    public let id: RequestID
+    public let error: ExecServerJSONRPCErrorDetail
+
+    public init(id: RequestID, error: ExecServerJSONRPCErrorDetail) {
+        self.id = id
+        self.error = error
+    }
+}
+
+public struct ExecServerJSONRPCNotification: Codable, Equatable, Sendable {
+    public let method: String
+    public let params: JSONValue?
+
+    public init(method: String, params: JSONValue? = nil) {
+        self.method = method
+        self.params = params
+    }
+}
+
+public enum ExecServerJSONRPCMessage: Codable, Equatable, Sendable {
+    case request(ExecServerJSONRPCRequest)
+    case response(ExecServerJSONRPCResponse)
+    case error(ExecServerJSONRPCError)
+    case notification(ExecServerJSONRPCNotification)
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case method
+        case params
+        case result
+        case error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let hasID = container.contains(.id)
+        let hasMethod = container.contains(.method)
+        let hasResult = container.contains(.result)
+        let hasError = container.contains(.error)
+
+        switch (hasID, hasMethod, hasResult, hasError) {
+        case (true, true, false, false):
+            self = .request(ExecServerJSONRPCRequest(
+                id: try container.decode(RequestID.self, forKey: .id),
+                method: try container.decode(String.self, forKey: .method),
+                params: try container.decodeIfPresent(JSONValue.self, forKey: .params)
+            ))
+        case (false, true, false, false):
+            self = .notification(ExecServerJSONRPCNotification(
+                method: try container.decode(String.self, forKey: .method),
+                params: try container.decodeIfPresent(JSONValue.self, forKey: .params)
+            ))
+        case (true, false, true, false):
+            self = .response(ExecServerJSONRPCResponse(
+                id: try container.decode(RequestID.self, forKey: .id),
+                result: try container.decode(JSONValue.self, forKey: .result)
+            ))
+        case (true, false, false, true):
+            self = .error(ExecServerJSONRPCError(
+                id: try container.decode(RequestID.self, forKey: .id),
+                error: try container.decode(ExecServerJSONRPCErrorDetail.self, forKey: .error)
+            ))
+        default:
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "invalid exec-server JSON-RPC message"
+                )
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .request(request):
+            try container.encode(request.id, forKey: .id)
+            try container.encode(request.method, forKey: .method)
+            try container.encodeIfPresent(request.params, forKey: .params)
+        case let .notification(notification):
+            try container.encode(notification.method, forKey: .method)
+            try container.encodeIfPresent(notification.params, forKey: .params)
+        case let .response(response):
+            try container.encode(response.id, forKey: .id)
+            try container.encode(response.result, forKey: .result)
+        case let .error(error):
+            try container.encode(error.id, forKey: .id)
+            try container.encode(error.error, forKey: .error)
+        }
+    }
+}
+
+public enum ExecServerRPC {
+    public static func invalidRequest(_ message: String) -> ExecServerJSONRPCErrorDetail {
+        ExecServerJSONRPCErrorDetail(code: -32600, message: message)
+    }
+
+    public static func methodNotFound(_ message: String) -> ExecServerJSONRPCErrorDetail {
+        ExecServerJSONRPCErrorDetail(code: -32601, message: message)
+    }
+
+    public static func invalidParams(_ message: String) -> ExecServerJSONRPCErrorDetail {
+        ExecServerJSONRPCErrorDetail(code: -32602, message: message)
+    }
+
+    public static func notFound(_ message: String) -> ExecServerJSONRPCErrorDetail {
+        ExecServerJSONRPCErrorDetail(code: -32004, message: message)
+    }
+
+    public static func internalError(_ message: String) -> ExecServerJSONRPCErrorDetail {
+        ExecServerJSONRPCErrorDetail(code: -32603, message: message)
+    }
+
+    public static func response(id: RequestID, result: JSONValue) -> ExecServerJSONRPCMessage {
+        .response(ExecServerJSONRPCResponse(id: id, result: result))
+    }
+
+    public static func error(id: RequestID, error: ExecServerJSONRPCErrorDetail) -> ExecServerJSONRPCMessage {
+        .error(ExecServerJSONRPCError(id: id, error: error))
+    }
+
+    public static func notification(method: String, params: JSONValue? = nil) -> ExecServerJSONRPCMessage {
+        .notification(ExecServerJSONRPCNotification(method: method, params: params))
+    }
+
+    public static func jsonValue<T: Encodable>(from value: T, encoder: JSONEncoder = JSONEncoder()) throws -> JSONValue {
+        let data = try encoder.encode(value)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    public static func decodeRequestParams<T: Decodable>(
+        _ params: JSONValue?,
+        as type: T.Type,
+        decoder: JSONDecoder = JSONDecoder()
+    ) throws -> T {
+        do {
+            return try decodeParams(params, as: type, decoder: decoder)
+        } catch {
+            throw ExecServerRPCParamDecodingError(String(describing: error))
+        }
+    }
+
+    public static func decodeNotificationParams<T: Decodable>(
+        _ params: JSONValue?,
+        as type: T.Type,
+        decoder: JSONDecoder = JSONDecoder()
+    ) throws -> T {
+        try decodeParams(params, as: type, decoder: decoder)
+    }
+
+    private static func decodeParams<T: Decodable>(
+        _ params: JSONValue?,
+        as type: T.Type,
+        decoder: JSONDecoder
+    ) throws -> T {
+        let value = params ?? .null
+        do {
+            return try decode(value, as: type, decoder: decoder)
+        } catch let originalError {
+            if value == .object([:]) {
+                do {
+                    return try decode(.null, as: type, decoder: decoder)
+                } catch {
+                    throw originalError
+                }
+            }
+            throw originalError
+        }
+    }
+
+    private static func decode<T: Decodable>(_ value: JSONValue, as type: T.Type, decoder: JSONDecoder) throws -> T {
+        let data = try JSONEncoder().encode(value)
+        return try decoder.decode(type, from: data)
+    }
+}
+
+public struct ExecServerRPCParamDecodingError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let message: String
+
+    public init(_ message: String) {
+        self.message = message
+    }
+
+    public var description: String {
+        "invalid params: \(message)"
+    }
+}
+
 public enum ExecServerListenTransport: Equatable, Sendable {
     case webSocket(host: String, port: UInt16)
     case stdio
