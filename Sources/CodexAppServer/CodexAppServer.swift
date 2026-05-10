@@ -3130,7 +3130,9 @@ public enum CodexAppServer {
 
     fileprivate static func pluginListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        cachedFeaturedPluginIDs: [String]? = nil,
+        cacheFeaturedPluginIDs: (([String]) -> Void)? = nil
     ) throws -> [String: Any] {
         let cwds = stringArrayParam(params?["cwds"]) ?? []
         for cwd in cwds {
@@ -3192,7 +3194,9 @@ public enum CodexAppServer {
         result["featuredPluginIds"] = featuredPluginIDs(
             for: updatedMarketplaces,
             runtimeConfig: runtimeConfig,
-            configuration: configuration
+            configuration: configuration,
+            cachedFeaturedPluginIDs: cachedFeaturedPluginIDs,
+            cacheFeaturedPluginIDs: cacheFeaturedPluginIDs
         )
         return result
     }
@@ -3689,10 +3693,15 @@ public enum CodexAppServer {
     private static func featuredPluginIDs(
         for marketplaces: [[String: Any]],
         runtimeConfig: CodexRuntimeConfig,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        cachedFeaturedPluginIDs: [String]? = nil,
+        cacheFeaturedPluginIDs: (([String]) -> Void)? = nil
     ) -> [String] {
         guard marketplaces.contains(where: { $0["name"] as? String == "openai-curated" }) else {
             return []
+        }
+        if let cachedFeaturedPluginIDs {
+            return cachedFeaturedPluginIDs
         }
         let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
         guard var components = URLComponents(string: normalizedBaseURL + "/plugins/featured") else {
@@ -3719,6 +3728,7 @@ public enum CodexAppServer {
         else {
             return []
         }
+        cacheFeaturedPluginIDs?(ids)
         return ids
     }
 
@@ -18609,6 +18619,11 @@ final class CodexAppServerMessageProcessor {
         let cwd: URL
     }
 
+    private struct FeaturedPluginIDsCache {
+        let key: String
+        let ids: [String]
+    }
+
     private let connectionID: AppServerConnectionID = 0
     private var initialized = false
     private var requestAttestation = false
@@ -18626,6 +18641,7 @@ final class CodexAppServerMessageProcessor {
     private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
     private var cachedAppList: [[String: Any]]?
     private var lastGlobalAppListRefreshFailed = false
+    private var featuredPluginIDsCache: FeaturedPluginIDsCache?
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
@@ -18777,6 +18793,40 @@ final class CodexAppServerMessageProcessor {
             }
             throw error
         }
+    }
+
+    private func pluginListResult(params: [String: Any]?) throws -> [String: Any] {
+        let cacheKey = featuredPluginIDsCacheKey()
+        let cachedIDs = featuredPluginIDsCache.flatMap { $0.key == cacheKey ? $0.ids : nil }
+        return try CodexAppServer.pluginListResult(
+            params: params,
+            configuration: configuration,
+            cachedFeaturedPluginIDs: cachedIDs,
+            cacheFeaturedPluginIDs: { ids in
+                self.featuredPluginIDsCache = FeaturedPluginIDsCache(key: cacheKey, ids: ids)
+            }
+        )
+    }
+
+    private func featuredPluginIDsCacheKey() -> String {
+        let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        )
+        let baseURL = runtimeConfig?.chatgptBaseURL ?? CodexConfigDefaults.chatgptBaseURL
+        guard let auth = try? CodexAppServer.currentAuth(configuration: configuration),
+              case let .chatGPT(idToken) = auth.kind
+        else {
+            return "\(baseURL)|no-auth"
+        }
+        let workspace: Bool
+        if case let .known(plan)? = idToken.chatGPTPlanType {
+            workspace = plan.isWorkspaceAccount
+        } else {
+            workspace = false
+        }
+        return "\(baseURL)|\(auth.accountID ?? "")|\(idToken.email ?? "")|\(workspace)"
     }
 
     private func trackResolvedTurnForAnalytics(threadID: String, turn: [String: Any]) {
@@ -19928,7 +19978,7 @@ final class CodexAppServerMessageProcessor {
                 case "plugin/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginListResult(params: params, configuration: configuration)
+                        result: try pluginListResult(params: params)
                     )
                 case "plugin/read":
                     response = CodexAppServer.responseObject(

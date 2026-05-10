@@ -4727,6 +4727,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(request.value(forHTTPHeaderField: "chatgpt-account-id"))
     }
 
+    func testPluginListReusesFeaturedPluginIdsCacheForProcessor() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(
+            named: "openai-curated",
+            pluginName: "linear",
+            in: temp.url
+        )
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [marketplaces.openai-curated]
+        source_type = "local"
+        source = "\(sourcePath)"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let transport = FeaturedPluginIDsTransport()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                transport.response(for: request)
+            }
+        ))
+
+        let first = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"plugin/list","params":{}}"#.utf8
+        )))
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        XCTAssertEqual(firstResult["featuredPluginIds"] as? [String], ["linear@openai-curated"])
+
+        transport.setFailing(true)
+        let second = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"plugin/list","params":{}}"#.utf8
+        )))
+        let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
+        XCTAssertEqual(secondResult["featuredPluginIds"] as? [String], ["linear@openai-curated"])
+        XCTAssertEqual(transport.requestCount, 1)
+    }
+
     func testPluginListIncludesRemoteGlobalMarketplaceWhenRemotePluginEnabled() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -16595,6 +16633,41 @@ private final class AppListDirectoryTransport: @unchecked Sendable {
             return URLSessionTransportResponse(statusCode: 401, body: Data("unauthorized".utf8))
         }
         return URLSessionTransportResponse(statusCode: 200, body: Data(successBody.utf8))
+    }
+}
+
+private final class FeaturedPluginIDsTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failing = false
+    private var requests = 0
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+
+    func setFailing(_ failing: Bool) {
+        lock.lock()
+        self.failing = failing
+        lock.unlock()
+    }
+
+    func response(for request: URLRequest) -> URLSessionTransportResponse {
+        lock.lock()
+        requests += 1
+        let shouldFail = failing
+        lock.unlock()
+
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.example/backend-api/plugins/featured?platform=codex")
+        if shouldFail {
+            return URLSessionTransportResponse(statusCode: 500, body: Data("boom".utf8))
+        }
+        return URLSessionTransportResponse(
+            statusCode: 200,
+            body: Data(#"["linear@openai-curated"]"#.utf8)
+        )
     }
 }
 
