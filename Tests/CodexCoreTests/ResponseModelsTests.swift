@@ -852,6 +852,71 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(item, .other)
     }
 
+    func testUnknownResponseItemFallsBackToOtherLikeRust() throws {
+        let json = #"""
+        {
+            "type": "future_response_item",
+            "payload": "kept by provider"
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .other)
+    }
+
+    func testKnownResponseItemMalformedPayloadThrowsLikeRustSerde() throws {
+        let decoder = JSONDecoder()
+        let malformedKnownItems = [
+            #"{ "type": "function_call", "name": "search", "arguments": "{}" }"#,
+            #"{ "type": "tool_search_call", "execution": "search" }"#,
+            #"{ "type": "function_call_output", "call_id": "call-1", "output": { "unexpected": true } }"#,
+            #"{ "type": "custom_tool_call", "call_id": "custom-1", "name": "tool" }"#,
+            #"{ "type": "tool_search_output", "status": "completed", "execution": "search" }"#,
+            #"{ "type": "image_generation_call", "id": "ig_1", "status": "completed" }"#,
+        ]
+
+        for json in malformedKnownItems {
+            XCTAssertThrowsError(try decoder.decode(ResponseItem.self, from: Data(json.utf8)))
+        }
+    }
+
+    func testKnownResponseItemNestedUnknownTagsThrowLikeRustSerde() throws {
+        let decoder = JSONDecoder()
+        let malformedNestedItems = [
+            #"""
+            {
+                "type": "reasoning",
+                "summary": [
+                    {"type": "future_summary", "text": "Step 1"}
+                ]
+            }
+            """#,
+            #"""
+            {
+                "type": "reasoning",
+                "summary": [],
+                "content": [
+                    {"type": "future_content", "text": "raw details"}
+                ]
+            }
+            """#,
+            #"""
+            {
+                "type": "local_shell_call",
+                "status": "completed",
+                "action": {
+                    "type": "future_action",
+                    "command": ["echo", "hi"]
+                }
+            }
+            """#,
+        ]
+
+        for json in malformedNestedItems {
+            XCTAssertThrowsError(try decoder.decode(ResponseItem.self, from: Data(json.utf8)))
+        }
+    }
+
     func testDecodesReasoningPayload() throws {
         let json = #"""
         {

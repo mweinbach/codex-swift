@@ -34,8 +34,7 @@ final class RolloutPolicyTests: XCTestCase {
             "custom_tool_call_output",
             "image_generation_call"
         ] {
-            let item = try JSONDecoder().decode(ResponseItem.self, from: Data(#"{"type":"\#(type)"}"#.utf8))
-            XCTAssertEqual(item, .knownPersisted(type: type))
+            let item = ResponseItem.knownPersisted(type: type)
             XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(item), type)
         }
 

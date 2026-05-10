@@ -934,108 +934,61 @@ public enum ResponseItem: Equatable, Codable, Sendable {
                 phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase)
             )
         case "reasoning":
-            if let summary = try? container.decode([ReasoningItemReasoningSummary].self, forKey: .summary)
-            {
-                self = .reasoning(
-                    id: try container.decodeIfPresent(String.self, forKey: .id) ?? "",
-                    summary: summary,
-                    content: try container.decodeIfPresent([ReasoningItemContent].self, forKey: .content),
-                    encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent)
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .reasoning(
+                id: try container.decodeIfPresent(String.self, forKey: .id) ?? "",
+                summary: try container.decode([ReasoningItemReasoningSummary].self, forKey: .summary),
+                content: try container.decodeIfPresent([ReasoningItemContent].self, forKey: .content),
+                encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent)
+            )
         case "local_shell_call":
-            if let status = try? container.decode(LocalShellStatus.self, forKey: .status),
-               let action = try? container.decode(LocalShellAction.self, forKey: .action)
-            {
-                self = .localShellCall(
-                    id: try container.decodeIfPresent(String.self, forKey: .id),
-                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
-                    status: status,
-                    action: action
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .localShellCall(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
+                callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                status: try container.decode(LocalShellStatus.self, forKey: .status),
+                action: try container.decode(LocalShellAction.self, forKey: .action)
+            )
         case "function_call":
-            if let name = try? container.decode(String.self, forKey: .name),
-               let arguments = try? container.decode(String.self, forKey: .arguments),
-               let callID = try? container.decode(String.self, forKey: .callID)
-            {
-                self = .functionCall(
-                    id: try container.decodeIfPresent(String.self, forKey: .id),
-                    name: name,
-                    namespace: try container.decodeIfPresent(String.self, forKey: .namespace),
-                    arguments: arguments,
-                    callID: callID
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .functionCall(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
+                name: try container.decode(String.self, forKey: .name),
+                namespace: try container.decodeIfPresent(String.self, forKey: .namespace),
+                arguments: try container.decode(String.self, forKey: .arguments),
+                callID: try container.decode(String.self, forKey: .callID)
+            )
         case "tool_search_call":
-            if let execution = try? container.decode(String.self, forKey: .execution),
-               let arguments = try? container.decode(JSONValue.self, forKey: .arguments)
-            {
-                self = .toolSearchCall(
-                    id: try container.decodeIfPresent(String.self, forKey: .id),
-                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
-                    status: try container.decodeIfPresent(String.self, forKey: .status),
-                    execution: execution,
-                    arguments: arguments
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .toolSearchCall(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
+                callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                status: try container.decodeIfPresent(String.self, forKey: .status),
+                execution: try container.decode(String.self, forKey: .execution),
+                arguments: try container.decode(JSONValue.self, forKey: .arguments)
+            )
         case "function_call_output":
-            if let callID = try? container.decode(String.self, forKey: .callID),
-               let output = try? container.decode(FunctionCallOutputPayload.self, forKey: .output)
-            {
-                self = .functionCallOutput(callID: callID, output: output)
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .functionCallOutput(
+                callID: try container.decode(String.self, forKey: .callID),
+                output: try container.decode(FunctionCallOutputPayload.self, forKey: .output)
+            )
         case "custom_tool_call":
-            if let callID = try? container.decode(String.self, forKey: .callID),
-               let name = try? container.decode(String.self, forKey: .name),
-               let input = try? container.decode(String.self, forKey: .input)
-            {
-                self = .customToolCall(
-                    id: try container.decodeIfPresent(String.self, forKey: .id),
-                    status: try container.decodeIfPresent(String.self, forKey: .status),
-                    callID: callID,
-                    name: name,
-                    input: input
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .customToolCall(
+                id: try container.decodeIfPresent(String.self, forKey: .id),
+                status: try container.decodeIfPresent(String.self, forKey: .status),
+                callID: try container.decode(String.self, forKey: .callID),
+                name: try container.decode(String.self, forKey: .name),
+                input: try container.decode(String.self, forKey: .input)
+            )
         case "custom_tool_call_output":
-            if let callID = try? container.decode(String.self, forKey: .callID),
-               let output = try? container.decode(FunctionCallOutputPayload.self, forKey: .output)
-            {
-                self = .customToolCallOutput(
-                    callID: callID,
-                    name: try container.decodeIfPresent(String.self, forKey: .name),
-                    output: output
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .customToolCallOutput(
+                callID: try container.decode(String.self, forKey: .callID),
+                name: try container.decodeIfPresent(String.self, forKey: .name),
+                output: try container.decode(FunctionCallOutputPayload.self, forKey: .output)
+            )
         case "tool_search_output":
-            if let status = try? container.decode(String.self, forKey: .status),
-               let execution = try? container.decode(String.self, forKey: .execution),
-               let tools = try? container.decode([JSONValue].self, forKey: .tools)
-            {
-                self = .toolSearchOutput(
-                    callID: try container.decodeIfPresent(String.self, forKey: .callID),
-                    status: status,
-                    execution: execution,
-                    tools: tools
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .toolSearchOutput(
+                callID: try container.decodeIfPresent(String.self, forKey: .callID),
+                status: try container.decode(String.self, forKey: .status),
+                execution: try container.decode(String.self, forKey: .execution),
+                tools: try container.decode([JSONValue].self, forKey: .tools)
+            )
         case "web_search_call":
             self = .webSearchCall(
                 id: try container.decodeIfPresent(String.self, forKey: .id),
@@ -1043,19 +996,12 @@ public enum ResponseItem: Equatable, Codable, Sendable {
                 action: try container.decodeIfPresent(WebSearchAction.self, forKey: .action)
             )
         case "image_generation_call":
-            if let id = try? container.decode(String.self, forKey: .id),
-               let status = try? container.decode(String.self, forKey: .status),
-               let result = try? container.decode(String.self, forKey: .result)
-            {
-                self = .imageGenerationCall(
-                    id: id,
-                    status: status,
-                    revisedPrompt: try container.decodeIfPresent(String.self, forKey: .revisedPrompt),
-                    result: result
-                )
-            } else {
-                self = .knownPersisted(type: type)
-            }
+            self = .imageGenerationCall(
+                id: try container.decode(String.self, forKey: .id),
+                status: try container.decode(String.self, forKey: .status),
+                revisedPrompt: try container.decodeIfPresent(String.self, forKey: .revisedPrompt),
+                result: try container.decode(String.self, forKey: .result)
+            )
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
         case "context_compaction":
