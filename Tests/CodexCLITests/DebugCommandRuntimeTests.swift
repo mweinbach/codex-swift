@@ -1047,6 +1047,21 @@ final class DebugCommandRuntimeTests: XCTestCase {
             "kind": ["type": "tool_result"],
             "path": "payloads/tool-result.json"
         ]
+        let firstRequestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-1",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-1.json"
+        ]
+        let firstResponsePayload: [String: Any] = [
+            "raw_payload_id": "payload-response-1",
+            "kind": ["type": "inference_response"],
+            "path": "payloads/response-1.json"
+        ]
+        let secondRequestPayload: [String: Any] = [
+            "raw_payload_id": "payload-request-2",
+            "kind": ["type": "inference_request"],
+            "path": "payloads/request-2.json"
+        ]
 
         try writeTraceBundle(at: bundle, events: [
             traceEvent(seq: 1, wallTime: 101, payload: [
@@ -1090,6 +1105,30 @@ final class DebugCommandRuntimeTests: XCTestCase {
                 "tool_call_id": "tool-1",
                 "status": "completed",
                 "result_payload": resultPayload
+            ]),
+            traceEvent(seq: 7, wallTime: 107, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-1",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": firstRequestPayload
+            ]),
+            traceEvent(seq: 8, wallTime: 108, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_completed",
+                "inference_call_id": "inference-1",
+                "response_id": "resp-1",
+                "response_payload": firstResponsePayload
+            ]),
+            traceEvent(seq: 9, wallTime: 109, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "inference_started",
+                "inference_call_id": "inference-2",
+                "thread_id": "thread-root",
+                "codex_turn_id": "turn-1",
+                "model": "gpt-test",
+                "provider_name": "openai",
+                "request_payload": secondRequestPayload
             ])
         ])
         try writeJSONObject([
@@ -1126,6 +1165,31 @@ final class DebugCommandRuntimeTests: XCTestCase {
                 "output": "ok\n"
             ]
         ], to: bundle.appendingPathComponent("payloads/tool-result.json", isDirectory: false))
+        try writeJSONObject([
+            "input": []
+        ], to: bundle.appendingPathComponent("payloads/request-1.json", isDirectory: false))
+        try writeJSONObject([
+            "response_id": "resp-1",
+            "output_items": [
+                [
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"cargo test\"}",
+                    "call_id": "call-1"
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/response-1.json", isDirectory: false))
+        try writeJSONObject([
+            "type": "response.create",
+            "previous_response_id": "resp-1",
+            "input": [
+                [
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "ok\n"
+                ]
+            ]
+        ], to: bundle.appendingPathComponent("payloads/request-2.json", isDirectory: false))
 
         _ = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
@@ -1151,7 +1215,11 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(operation["tool_call_id"] as? String, "tool-1")
         XCTAssertEqual(operation["kind"] as? String, "exec_command")
         XCTAssertEqual(operation["raw_payload_ids"] as? [String], ["payload-terminal-start", "payload-terminal-end"])
-        XCTAssertEqual(operation["model_observations"] as? [AnyHashable], [])
+        let observations = try XCTUnwrap(operation["model_observations"] as? [[String: Any]])
+        XCTAssertEqual(observations.count, 1)
+        XCTAssertEqual(observations[0]["source"] as? String, "direct_tool_call")
+        XCTAssertEqual(observations[0]["call_item_ids"] as? [String], ["conversation_item:1"])
+        XCTAssertEqual(observations[0]["output_item_ids"] as? [String], ["conversation_item:2"])
 
         let execution = try XCTUnwrap(operation["execution"] as? [String: Any])
         XCTAssertEqual(execution["started_seq"] as? Int, 4)

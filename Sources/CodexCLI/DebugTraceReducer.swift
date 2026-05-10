@@ -415,6 +415,7 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try syncTerminalModelObservation(toolCallID: toolCallID)
     }
 
     private mutating func startToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
@@ -443,6 +444,7 @@ struct DebugTraceReducer {
         }
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try syncTerminalModelObservation(toolCallID: toolCallID)
     }
 
     private mutating func endToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
@@ -791,6 +793,40 @@ struct DebugTraceReducer {
         toolCall[key] = ids
         toolCalls[toolCallID] = toolCall
         rollout["tool_calls"] = toolCalls
+        try syncTerminalModelObservation(toolCallID: toolCallID)
+    }
+
+    private mutating func syncTerminalModelObservation(toolCallID: String) throws {
+        let toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard let toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("tool call \(toolCallID)")
+        }
+        guard let operationID = toolCall["terminal_operation_id"] as? String else {
+            return
+        }
+        let callItemIDs = toolCall["model_visible_call_item_ids"] as? [String] ?? []
+        let outputItemIDs = toolCall["model_visible_output_item_ids"] as? [String] ?? []
+        guard !callItemIDs.isEmpty || !outputItemIDs.isEmpty else {
+            return
+        }
+        var terminalOperations = try Self.dictionaryMap(rollout["terminal_operations"], key: "terminal_operations")
+        guard var operation = terminalOperations[operationID] as? [String: Any] else {
+            throw DebugTraceReducerError.invalidTraceObject("terminal operation \(operationID)")
+        }
+        var observations = operation["model_observations"] as? [[String: Any]] ?? []
+        if let index = observations.firstIndex(where: { $0["source"] as? String == "direct_tool_call" }) {
+            observations[index]["call_item_ids"] = callItemIDs
+            observations[index]["output_item_ids"] = outputItemIDs
+        } else {
+            observations.append([
+                "call_item_ids": callItemIDs,
+                "output_item_ids": outputItemIDs,
+                "source": "direct_tool_call"
+            ])
+        }
+        operation["model_observations"] = observations
+        terminalOperations[operationID] = operation
+        rollout["terminal_operations"] = terminalOperations
     }
 
     private func findMatchingSnapshotItem(
