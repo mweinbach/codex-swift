@@ -29,6 +29,8 @@ public struct ExecServerRouter: Sendable {
             return result.map { .response(requestID: request.id, result: $0) }
         } catch let error as ExecServerJSONRPCErrorDetail {
             return .error(requestID: request.id, error: error)
+        } catch let error as ExecServerFileSystemError {
+            return .error(requestID: request.id, error: error.rpcError)
         } catch {
             return .error(requestID: request.id, error: ExecServerRPC.internalError(String(describing: error)))
         }
@@ -77,33 +79,26 @@ public struct ExecServerRouter: Sendable {
             _ = try await handler.requireInitialized(for: "exec")
             throw methodPending(request.method)
         case execServerFsReadFileMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsReadFileParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsReadFileParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.readFile(params))
         case execServerFsWriteFileMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsWriteFileParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsWriteFileParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.writeFile(params))
         case execServerFsCreateDirectoryMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsCreateDirectoryParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsCreateDirectoryParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.createDirectory(params))
         case execServerFsGetMetadataMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsGetMetadataParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsGetMetadataParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.getMetadata(params))
         case execServerFsReadDirectoryMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsReadDirectoryParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsReadDirectoryParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.readDirectory(params))
         case execServerFsRemoveMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsRemoveParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsRemoveParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.remove(params))
         case execServerFsCopyMethod:
-            _ = try decodeRequest(request.params, as: ExecServerFsCopyParams.self)
-            _ = try await handler.requireInitialized(for: "filesystem")
-            throw methodPending(request.method)
+            let params = try decodeRequest(request.params, as: ExecServerFsCopyParams.self)
+            return try ExecServerRPC.jsonValue(from: try await handler.copy(params))
         default:
             throw methodPending(request.method)
         }

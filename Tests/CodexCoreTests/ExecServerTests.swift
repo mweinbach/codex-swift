@@ -156,6 +156,183 @@ final class ExecServerTests: XCTestCase {
         XCTAssertTrue(error.message.hasPrefix("failed to parse websocket JSON-RPC message from exec-server websocket peer:"))
     }
 
+    func testFilesystemDirectOperationsCoverRustSurfaceArea() throws {
+        let fileSystem = ExecServerFileSystem()
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceDirectory = tempDirectory.appendingPathComponent("source")
+        let nestedDirectory = sourceDirectory.appendingPathComponent("nested")
+        let nestedFile = nestedDirectory.appendingPathComponent("note.txt")
+        let rootFile = sourceDirectory.appendingPathComponent("root.txt")
+        let copiedFile = tempDirectory.appendingPathComponent("copy.txt")
+        let copiedDirectory = tempDirectory.appendingPathComponent("copied")
+
+        _ = try fileSystem.createDirectory(ExecServerFsCreateDirectoryParams(
+            path: absolutePath(nestedDirectory.path),
+            recursive: true
+        ))
+        _ = try fileSystem.writeFile(ExecServerFsWriteFileParams(
+            path: absolutePath(nestedFile.path),
+            dataBase64: Data("hello from trait".utf8).base64EncodedString()
+        ))
+        _ = try fileSystem.writeFile(ExecServerFsWriteFileParams(
+            path: absolutePath(rootFile.path),
+            dataBase64: Data("hello from source root".utf8).base64EncodedString()
+        ))
+
+        let read = try fileSystem.readFile(ExecServerFsReadFileParams(path: absolutePath(nestedFile.path)))
+        XCTAssertEqual(Data(base64Encoded: read.dataBase64), Data("hello from trait".utf8))
+
+        _ = try fileSystem.copy(ExecServerFsCopyParams(
+            sourcePath: absolutePath(nestedFile.path),
+            destinationPath: absolutePath(copiedFile.path),
+            recursive: false
+        ))
+        XCTAssertEqual(try String(contentsOf: copiedFile, encoding: .utf8), "hello from trait")
+
+        _ = try fileSystem.copy(ExecServerFsCopyParams(
+            sourcePath: absolutePath(sourceDirectory.path),
+            destinationPath: absolutePath(copiedDirectory.path),
+            recursive: true
+        ))
+        XCTAssertEqual(
+            try String(contentsOf: copiedDirectory.appendingPathComponent("nested/note.txt"), encoding: .utf8),
+            "hello from trait"
+        )
+
+        try FileManager.default.createSymbolicLink(
+            at: sourceDirectory.appendingPathComponent("broken-link"),
+            withDestinationURL: sourceDirectory.appendingPathComponent("missing-target")
+        )
+        let entries = try fileSystem.readDirectory(ExecServerFsReadDirectoryParams(path: absolutePath(sourceDirectory.path)))
+            .entries
+            .sorted { $0.fileName < $1.fileName }
+        XCTAssertEqual(entries, [
+            ExecServerFsReadDirectoryEntry(fileName: "nested", isDirectory: true, isFile: false),
+            ExecServerFsReadDirectoryEntry(fileName: "root.txt", isDirectory: false, isFile: true)
+        ])
+
+        _ = try fileSystem.remove(ExecServerFsRemoveParams(
+            path: absolutePath(copiedDirectory.path),
+            recursive: true,
+            force: true
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copiedDirectory.path))
+    }
+
+    func testFilesystemMetadataAndSymlinkCopyMatchRust() throws {
+        let fileSystem = ExecServerFileSystem()
+        let tempDirectory = try makeTemporaryDirectory()
+        let fileURL = tempDirectory.appendingPathComponent("note.txt")
+        let linkURL = tempDirectory.appendingPathComponent("note-link.txt")
+        let copiedLinkURL = tempDirectory.appendingPathComponent("copied-link.txt")
+        try Data("hello".utf8).write(to: fileURL)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: fileURL)
+
+        let fileMetadata = try fileSystem.getMetadata(ExecServerFsGetMetadataParams(path: absolutePath(fileURL.path)))
+        let linkMetadata = try fileSystem.getMetadata(ExecServerFsGetMetadataParams(path: absolutePath(linkURL.path)))
+        _ = try fileSystem.copy(ExecServerFsCopyParams(
+            sourcePath: absolutePath(linkURL.path),
+            destinationPath: absolutePath(copiedLinkURL.path),
+            recursive: false
+        ))
+
+        XCTAssertFalse(fileMetadata.isDirectory)
+        XCTAssertTrue(fileMetadata.isFile)
+        XCTAssertFalse(fileMetadata.isSymlink)
+        XCTAssertGreaterThan(fileMetadata.modifiedAtMs, 0)
+        XCTAssertFalse(linkMetadata.isDirectory)
+        XCTAssertTrue(linkMetadata.isFile)
+        XCTAssertTrue(linkMetadata.isSymlink)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: copiedLinkURL.path), fileURL.path)
+    }
+
+    func testFilesystemRustErrorsAndSandboxDefaults() throws {
+        let fileSystem = ExecServerFileSystem()
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceDirectory = tempDirectory.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try fileSystem.copy(ExecServerFsCopyParams(
+            sourcePath: absolutePath(sourceDirectory.path),
+            destinationPath: absolutePath(tempDirectory.appendingPathComponent("dest").path),
+            recursive: false
+        ))) { error in
+            XCTAssertEqual((error as? ExecServerFileSystemError)?.kind, .invalidInput)
+            XCTAssertEqual(
+                String(describing: error),
+                "fs/copy requires recursive: true when sourcePath is a directory"
+            )
+        }
+
+        XCTAssertThrowsError(try fileSystem.writeFile(ExecServerFsWriteFileParams(
+            path: absolutePath(tempDirectory.appendingPathComponent("bad.txt").path),
+            dataBase64: "@"
+        ))) { error in
+            XCTAssertEqual(error as? ExecServerJSONRPCErrorDetail, ExecServerRPC.invalidRequest(
+                "fs/writeFile requires valid base64 dataBase64: Invalid byte 64, offset 0."
+            ))
+        }
+
+        let disabledSandbox = FileSystemSandboxContext(permissions: .disabled)
+        let externalSandbox = FileSystemSandboxContext(permissions: .external(network: .restricted))
+        for (fileName, sandbox) in [("disabled.txt", disabledSandbox), ("external.txt", externalSandbox)] {
+            let path = tempDirectory.appendingPathComponent(fileName)
+            _ = try fileSystem.writeFile(ExecServerFsWriteFileParams(
+                path: absolutePath(path.path),
+                dataBase64: Data("ok".utf8).base64EncodedString(),
+                sandbox: sandbox
+            ))
+            let response = try fileSystem.readFile(ExecServerFsReadFileParams(
+                path: absolutePath(path.path),
+                sandbox: sandbox
+            ))
+            XCTAssertEqual(Data(base64Encoded: response.dataBase64), Data("ok".utf8))
+        }
+
+        XCTAssertThrowsError(try fileSystem.readFile(ExecServerFsReadFileParams(
+            path: absolutePath(tempDirectory.appendingPathComponent("managed.txt").path),
+            sandbox: FileSystemSandboxContext(permissions: .readOnly())
+        ))) { error in
+            XCTAssertEqual((error as? ExecServerFileSystemError)?.kind, .invalidInput)
+            XCTAssertEqual(String(describing: error), "sandboxed filesystem operations require configured runtime paths")
+        }
+    }
+
+    func testConnectionProcessorRoutesFilesystemRequestsLikeRust() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let noteURL = tempDirectory.appendingPathComponent("note.txt")
+        let connection = ExecServerConnection()
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerInitializeParams(clientName: "client"))
+        ))))
+        _ = await connection.handle(.message(.notification(ExecServerJSONRPCNotification(
+            method: execServerInitializedMethod,
+            params: .object([:])
+        ))))
+
+        let write = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerFsWriteFileMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerFsWriteFileParams(
+                path: absolutePath(noteURL.path),
+                dataBase64: Data("routed".utf8).base64EncodedString()
+            ))
+        ))))
+        let read = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerFsReadFileMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerFsReadFileParams(path: absolutePath(noteURL.path)))
+        ))))
+
+        XCTAssertEqual(write?.jsonRPCMessage, ExecServerRPC.response(id: .integer(2), result: .object([:])))
+        XCTAssertEqual(read?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["dataBase64": .string(Data("routed".utf8).base64EncodedString())])
+        ))
+    }
+
     func testConnectionProcessorReportsMalformedMessagesWithRustRequestID() async {
         let connection = ExecServerConnection()
 
@@ -1086,5 +1263,16 @@ final class ExecServerTests: XCTestCase {
                 "executor registry authentication error: executor registry bearer token environment variable `CODEX_EXEC_SERVER_REMOTE_BEARER_TOKEN` is empty"
             )
         }
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-exec-fs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func absolutePath(_ path: String) throws -> AbsolutePath {
+        try AbsolutePath(absolutePath: path)
     }
 }

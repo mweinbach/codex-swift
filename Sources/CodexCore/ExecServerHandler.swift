@@ -2,12 +2,17 @@ import Foundation
 
 public actor ExecServerHandler {
     private let sessionRegistry: ExecServerSessionRegistry
+    private let fileSystem: ExecServerFileSystem
     private var session: ExecServerSessionHandle?
     private var initializeRequested = false
     private var initialized = false
 
-    public init(sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry()) {
+    public init(
+        sessionRegistry: ExecServerSessionRegistry = ExecServerSessionRegistry(),
+        fileSystem: ExecServerFileSystem = ExecServerFileSystem()
+    ) {
         self.sessionRegistry = sessionRegistry
+        self.fileSystem = fileSystem
     }
 
     public func initialize(_ params: ExecServerInitializeParams) async throws -> ExecServerInitializeResponse {
@@ -74,6 +79,41 @@ public actor ExecServerHandler {
             return session
         }
         throw ExecServerRPC.invalidRequest("session has been resumed by another connection")
+    }
+
+    public func readFile(_ params: ExecServerFsReadFileParams) async throws -> ExecServerFsReadFileResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.readFile(params)
+    }
+
+    public func writeFile(_ params: ExecServerFsWriteFileParams) async throws -> ExecServerFsWriteFileResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.writeFile(params)
+    }
+
+    public func createDirectory(_ params: ExecServerFsCreateDirectoryParams) async throws -> ExecServerFsCreateDirectoryResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.createDirectory(params)
+    }
+
+    public func getMetadata(_ params: ExecServerFsGetMetadataParams) async throws -> ExecServerFsGetMetadataResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.getMetadata(params)
+    }
+
+    public func readDirectory(_ params: ExecServerFsReadDirectoryParams) async throws -> ExecServerFsReadDirectoryResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.readDirectory(params)
+    }
+
+    public func remove(_ params: ExecServerFsRemoveParams) async throws -> ExecServerFsRemoveResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.remove(params)
+    }
+
+    public func copy(_ params: ExecServerFsCopyParams) async throws -> ExecServerFsCopyResponse {
+        _ = try await requireInitialized(for: "filesystem")
+        return try fileSystem.copy(params)
     }
 }
 
