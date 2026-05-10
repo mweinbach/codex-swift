@@ -4233,6 +4233,132 @@ public enum CodexAppServer {
         return appSummaries.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
     }
 
+    private static func pluginAppsNeedingAuthForInstall(
+        installedPath: URL,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth?
+    ) -> [[String: Any]] {
+        guard runtimeConfig.features.isEnabled(.apps),
+              let auth,
+              case .chatGPT = auth.kind
+        else {
+            return []
+        }
+        let manifest = localPluginManifest(root: installedPath)
+        let pluginAppIDs = Set(localPluginApps(root: installedPath, manifest: manifest).compactMap { $0["id"] as? String })
+        guard !pluginAppIDs.isEmpty else {
+            return []
+        }
+        let connectors = connectorDirectoryApps(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth
+        )
+        return connectors
+            .filter { connector in
+                guard let id = connector["id"] as? String else {
+                    return false
+                }
+                return pluginAppIDs.contains(id) && isAllowedPluginConnectorID(id)
+            }
+            .map { connector in
+                let id = connector["id"] as? String ?? ""
+                let name = connector["name"] as? String ?? id
+                return [
+                    "id": id,
+                    "name": name,
+                    "description": connector["description"] as Any? ?? NSNull(),
+                    "installUrl": stringParam(connector["installUrl"]) ?? connectorInstallURL(name: name, connectorID: id),
+                    "needsAuth": true
+                ].nullStripped(keepNulls: true)
+            }
+    }
+
+    private static func isAllowedPluginConnectorID(_ connectorID: String) -> Bool {
+        let disallowedConnectorIDPrefixes = ["connector_openai_"]
+        let disallowedConnectorIDs = Set(["asdk_app_6938a94a61d881918ef32cb999ff937c"])
+        if disallowedConnectorIDs.contains(connectorID) {
+            return false
+        }
+        for prefix in disallowedConnectorIDPrefixes where connectorID.hasPrefix(prefix) {
+            return false
+        }
+        return true
+    }
+
+    private static func connectorDirectoryApps(
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) -> [[String: Any]] {
+        var connectors: [[String: Any]] = []
+        var token: String?
+        repeat {
+            var queryItems = [URLQueryItem(name: "external_logos", value: "true")]
+            if let token {
+                queryItems.append(URLQueryItem(name: "token", value: token))
+            }
+            guard let page = connectorDirectoryObject(
+                path: "/connectors/directory/list",
+                queryItems: queryItems,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration,
+                auth: auth
+            ) else {
+                return []
+            }
+            connectors.append(contentsOf: page["apps"] as? [[String: Any]] ?? [])
+            token = (
+                (page["next_token"] as? String) ??
+                (page["nextToken"] as? String) ??
+                (page["pagination"] as? [String: Any])?["next_page_token"] as? String ??
+                (page["pagination"] as? [String: Any])?["nextPageToken"] as? String
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if token?.isEmpty == true {
+                token = nil
+            }
+        } while token != nil
+        return connectors.sorted {
+            let leftName = $0["name"] as? String ?? $0["id"] as? String ?? ""
+            let rightName = $1["name"] as? String ?? $1["id"] as? String ?? ""
+            if leftName != rightName {
+                return leftName < rightName
+            }
+            return ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+        }
+    }
+
+    private static func connectorDirectoryObject(
+        path: String,
+        queryItems: [URLQueryItem],
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        auth: AppServerAuth
+    ) -> [String: Any]? {
+        let normalizedBaseURL = AccountBackendEndpoint.normalizedBaseURL(runtimeConfig.chatgptBaseURL)
+        guard var components = URLComponents(string: normalizedBaseURL + path) else {
+            return nil
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(auth.token)", forHTTPHeaderField: "Authorization")
+        if let accountID = auth.accountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        guard let response = try? configuration.pluginHTTPTransport(request),
+              (200..<300).contains(response.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+        else {
+            return nil
+        }
+        return object
+    }
+
     private static func localPluginMcpServerNames(root: URL, manifest: LocalPluginManifest) -> [String] {
         let mcpPath = manifest.mcpConfig ?? root.appendingPathComponent(".mcp.json", isDirectory: false)
         guard let data = try? Data(contentsOf: mcpPath),
@@ -4808,7 +4934,7 @@ public enum CodexAppServer {
             detail: detail,
             environment: configuration.environment
         )
-        _ = try downloadAndInstallRemotePluginBundle(
+        let installedPath = try downloadAndInstallRemotePluginBundle(
             bundle,
             configuration: configuration,
             failurePrefix: "install remote plugin bundle"
@@ -4832,9 +4958,15 @@ public enum CodexAppServer {
                 "install remote plugin: remote plugin mutation returned unexpected enabled state for `\(remotePluginID)`: expected true, got false"
             )
         }
+        let appsNeedingAuth = pluginAppsNeedingAuthForInstall(
+            installedPath: installedPath,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth
+        )
         return [
             "authPolicy": detail["authentication_policy"] as? String ?? "ON_USE",
-            "appsNeedingAuth": []
+            "appsNeedingAuth": appsNeedingAuth
         ]
     }
 
@@ -5178,7 +5310,7 @@ public enum CodexAppServer {
             guard isDirectory(materialized.path) else {
                 throw AppServerError.invalidRequest("path does not exist or is not a directory")
             }
-            _ = try installLocalPluginCacheEntry(
+            let installedPath = try installLocalPluginCacheEntry(
                 sourcePath: materialized.path,
                 pluginName: pluginName,
                 marketplaceName: marketplaceName,
@@ -5186,17 +5318,22 @@ public enum CodexAppServer {
             )
             setLocalPluginEnabled(id: "\(pluginName)@\(marketplaceName)", enabled: true, in: &config)
             try renderConfigToml(config).write(to: configFile, atomically: true, encoding: .utf8)
+            let appsNeedingAuth = pluginAppsNeedingAuthForInstall(
+                installedPath: installedPath,
+                runtimeConfig: try pluginRuntimeConfig(configuration: configuration),
+                configuration: configuration,
+                auth: try? currentAuth(configuration: configuration)
+            )
+            let summaryPolicy = summary["authPolicy"] as? String
+            return [
+                "authPolicy": summaryPolicy ?? "ON_INSTALL",
+                "appsNeedingAuth": appsNeedingAuth
+            ]
         } catch let error as AppServerError {
             throw error
         } catch {
             throw AppServerError.internalError("failed to install local plugin: \(error)")
         }
-
-        let summaryPolicy = summary["authPolicy"] as? String
-        return [
-            "authPolicy": summaryPolicy ?? "ON_INSTALL",
-            "appsNeedingAuth": []
-        ]
     }
 
     private static func materializePluginInstallSource(

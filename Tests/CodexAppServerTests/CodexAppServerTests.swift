@@ -5938,6 +5938,198 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(uninstalledSummary["installed"] as? Bool, false)
     }
 
+    func testPluginInstallReturnsDirectoryAppsNeedingAuth() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml", isDirectory: false), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let connectorBody = """
+        {
+          "apps": [
+            {
+              "id": "connector_weather",
+              "name": "Weather",
+              "description": "Weather connector"
+            },
+            {
+              "id": "asdk_app_6938a94a61d881918ef32cb999ff937c",
+              "name": "Disallowed app",
+              "description": "Filtered app"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(connectorBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let install = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            configuration: configuration
+        )
+        let installResult = try XCTUnwrap(install["result"] as? [String: Any])
+        let appsNeedingAuth = try XCTUnwrap(installResult["appsNeedingAuth"] as? [[String: Any]])
+        XCTAssertEqual(appsNeedingAuth.count, 1)
+        XCTAssertEqual(appsNeedingAuth[0]["id"] as? String, "connector_weather")
+        XCTAssertEqual(appsNeedingAuth[0]["name"] as? String, "Weather")
+        XCTAssertEqual(appsNeedingAuth[0]["description"] as? String, "Weather connector")
+        XCTAssertEqual(appsNeedingAuth[0]["installUrl"] as? String, "https://chatgpt.com/apps/weather/connector_weather")
+        XCTAssertEqual(appsNeedingAuth[0]["needsAuth"] as? Bool, true)
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer chatgpt-token"])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, ["account-123"])
+    }
+
+    func testPluginInstallRemoteReturnsDirectoryAppsNeedingAuth() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        apps = true
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let bundleSource = temp.url.appendingPathComponent("remote-bundle-source", isDirectory: true)
+        try writePluginFixture(
+            root: bundleSource,
+            relativePath: "linear",
+            pluginName: "linear",
+            version: "0.0.1-local-ignored",
+            marker: "from-remote-bundle"
+        )
+        try """
+        {
+          "apps": {
+            "weather": {
+              "id": "connector_weather",
+              "name": "Weather"
+            }
+          }
+        }
+        """.write(
+            to: bundleSource.appendingPathComponent("linear/.app.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let bundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: bundleSource.appendingPathComponent("linear", isDirectory: true),
+            in: temp.url
+        )
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "https://bundles.example/linear.tar.gz"
+        )
+        let installBody = """
+        {
+          "id": "\(pluginID)",
+          "enabled": true
+        }
+        """
+        let connectorBody = """
+        {
+          "apps": [
+            {
+              "id": "connector_weather",
+              "name": "Weather",
+              "description": "Weather connector"
+            }
+          ],
+          "next_token": null
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
+                case ("POST", "/backend-api/ps/plugins/\(pluginID)/install", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installBody.utf8))
+                case ("GET", "/backend-api/connectors/directory/list", "external_logos=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(connectorBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let install = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let installResult = try XCTUnwrap(install["result"] as? [String: Any])
+        let appsNeedingAuth = try XCTUnwrap(installResult["appsNeedingAuth"] as? [[String: Any]])
+        XCTAssertEqual(appsNeedingAuth.count, 1)
+        XCTAssertEqual(appsNeedingAuth[0]["id"] as? String, "connector_weather")
+        XCTAssertEqual(appsNeedingAuth[0]["name"] as? String, "Weather")
+        XCTAssertEqual(appsNeedingAuth[0]["description"] as? String, "Weather connector")
+        XCTAssertEqual(appsNeedingAuth[0]["installUrl"] as? String, "https://chatgpt.com/apps/weather/connector_weather")
+        XCTAssertEqual(appsNeedingAuth[0]["needsAuth"] as? Bool, true)
+        XCTAssertEqual(capture.requests.map { $0.httpMethod }, ["GET", "GET", "POST", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer chatgpt-token",
+            nil,
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
+            "account-123",
+            nil,
+            "account-123",
+            "account-123"
+        ])
+    }
+
     func testPluginInstallMaterializesGitSubdirPluginSource() throws {
         let temp = try TemporaryDirectory()
         let pluginRepo = temp.url.appendingPathComponent("plugin-repo", isDirectory: true)
