@@ -8212,6 +8212,185 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func realtimeStartedNotification(
+        threadID: String,
+        event: RealtimeConversationStartedEvent
+    ) -> [String: Any] {
+        [
+            "method": "thread/realtime/started",
+            "params": [
+                "threadId": threadID,
+                "realtimeSessionId": event.realtimeSessionID as Any? ?? NSNull(),
+                "version": event.version.rawValue
+            ]
+        ]
+    }
+
+    fileprivate static func realtimeSdpNotification(
+        threadID: String,
+        event: RealtimeConversationSdpEvent
+    ) -> [String: Any] {
+        [
+            "method": "thread/realtime/sdp",
+            "params": [
+                "threadId": threadID,
+                "sdp": event.sdp
+            ]
+        ]
+    }
+
+    fileprivate static func realtimeClosedNotification(
+        threadID: String,
+        event: RealtimeConversationClosedEvent
+    ) -> [String: Any] {
+        [
+            "method": "thread/realtime/closed",
+            "params": [
+                "threadId": threadID,
+                "reason": event.reason as Any? ?? NSNull()
+            ]
+        ]
+    }
+
+    fileprivate static func realtimeNotification(
+        threadID: String,
+        event: RealtimeConversationRealtimeEvent
+    ) -> [String: Any]? {
+        switch event.payload {
+        case .sessionUpdated:
+            return nil
+        case let .inputAudioSpeechStarted(event):
+            return realtimeItemAddedNotification(
+                threadID: threadID,
+                item: [
+                    "type": "input_audio_buffer.speech_started",
+                    "item_id": event.itemID as Any? ?? NSNull()
+                ]
+            )
+        case let .inputTranscriptDelta(event):
+            return realtimeTranscriptDeltaNotification(threadID: threadID, role: "user", delta: event.delta)
+        case let .inputTranscriptDone(event):
+            return realtimeTranscriptDoneNotification(threadID: threadID, role: "user", text: event.text)
+        case let .outputTranscriptDelta(event):
+            return realtimeTranscriptDeltaNotification(threadID: threadID, role: "assistant", delta: event.delta)
+        case let .outputTranscriptDone(event):
+            return realtimeTranscriptDoneNotification(threadID: threadID, role: "assistant", text: event.text)
+        case let .audioOut(audio):
+            return [
+                "method": "thread/realtime/outputAudio/delta",
+                "params": [
+                    "threadId": threadID,
+                    "audio": realtimeAudioChunkObject(audio)
+                ]
+            ]
+        case .responseCreated, .responseDone, .conversationItemDone, .noopRequested:
+            return nil
+        case let .responseCancelled(event):
+            return realtimeItemAddedNotification(
+                threadID: threadID,
+                item: [
+                    "type": "response.cancelled",
+                    "response_id": event.responseID as Any? ?? NSNull()
+                ]
+            )
+        case let .conversationItemAdded(item):
+            return realtimeItemAddedNotification(threadID: threadID, item: jsonObject(from: item))
+        case let .handoffRequested(handoff):
+            return realtimeItemAddedNotification(
+                threadID: threadID,
+                item: [
+                    "type": "handoff_request",
+                    "handoff_id": handoff.handoffID,
+                    "item_id": handoff.itemID,
+                    "input_transcript": handoff.inputTranscript,
+                    "active_transcript": handoff.activeTranscript.map { entry in
+                        [
+                            "role": entry.role,
+                            "text": entry.text
+                        ]
+                    }
+                ]
+            )
+        case let .error(message):
+            return [
+                "method": "thread/realtime/error",
+                "params": [
+                    "threadId": threadID,
+                    "message": message
+                ]
+            ]
+        }
+    }
+
+    private static func realtimeItemAddedNotification(threadID: String, item: Any) -> [String: Any] {
+        [
+            "method": "thread/realtime/itemAdded",
+            "params": [
+                "threadId": threadID,
+                "item": item
+            ]
+        ]
+    }
+
+    private static func realtimeTranscriptDeltaNotification(
+        threadID: String,
+        role: String,
+        delta: String
+    ) -> [String: Any] {
+        [
+            "method": "thread/realtime/transcript/delta",
+            "params": [
+                "threadId": threadID,
+                "role": role,
+                "delta": delta
+            ]
+        ]
+    }
+
+    private static func realtimeTranscriptDoneNotification(
+        threadID: String,
+        role: String,
+        text: String
+    ) -> [String: Any] {
+        [
+            "method": "thread/realtime/transcript/done",
+            "params": [
+                "threadId": threadID,
+                "role": role,
+                "text": text
+            ]
+        ]
+    }
+
+    private static func realtimeAudioChunkObject(_ audio: RealtimeAudioFrame) -> [String: Any] {
+        [
+            "data": audio.data,
+            "sampleRate": audio.sampleRate,
+            "numChannels": audio.numChannels,
+            "samplesPerChannel": audio.samplesPerChannel as Any? ?? NSNull(),
+            "itemId": audio.itemID as Any? ?? NSNull()
+        ]
+    }
+
+    private static func jsonObject(from value: JSONValue) -> Any {
+        switch value {
+        case .null:
+            return NSNull()
+        case let .bool(value):
+            return value
+        case let .integer(value):
+            return value
+        case let .double(value):
+            return value
+        case let .string(value):
+            return value
+        case let .array(value):
+            return value.map(jsonObject(from:))
+        case let .object(value):
+            return value.mapValues(jsonObject(from:))
+        }
+    }
+
     fileprivate static func runtimeEventNotification(
         threadID: String,
         turnID: String,
@@ -8226,6 +8405,14 @@ public enum CodexAppServer {
             )
         case let .mcpStartupUpdate(update):
             return mcpServerStatusUpdatedNotification(update)
+        case let .realtimeConversationStarted(event):
+            return realtimeStartedNotification(threadID: threadID, event: event)
+        case let .realtimeConversationSdp(event):
+            return realtimeSdpNotification(threadID: threadID, event: event)
+        case let .realtimeConversationRealtime(event):
+            return realtimeNotification(threadID: threadID, event: event)
+        case let .realtimeConversationClosed(event):
+            return realtimeClosedNotification(threadID: threadID, event: event)
         default:
             return nil
         }

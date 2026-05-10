@@ -740,6 +740,171 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(cancelledParams["error"] is NSNull)
     }
 
+    func testRuntimeRealtimeLifecycleEventsEmitNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .realtimeConversationStarted(
+                RealtimeConversationStartedEvent(realtimeSessionID: "rt-123", version: .v2)
+            )
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .realtimeConversationSdp(RealtimeConversationSdpEvent(sdp: "v=0\r\n"))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .realtimeConversationClosed(RealtimeConversationClosedEvent(reason: nil))
+        )
+
+        let started = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(started.count, 1)
+        XCTAssertEqual(started[0]["method"] as? String, "thread/realtime/started")
+        let startedParams = try XCTUnwrap(started[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["realtimeSessionId"] as? String, "rt-123")
+        XCTAssertEqual(startedParams["version"] as? String, "v2")
+
+        let sdp = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(sdp[0]["method"] as? String, "thread/realtime/sdp")
+        let sdpParams = try XCTUnwrap(sdp[0]["params"] as? [String: Any])
+        XCTAssertEqual(sdpParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(sdpParams["sdp"] as? String, "v=0\r\n")
+
+        let closed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(closed[0]["method"] as? String, "thread/realtime/closed")
+        let closedParams = try XCTUnwrap(closed[0]["params"] as? [String: Any])
+        XCTAssertEqual(closedParams["threadId"] as? String, "thread-1")
+        XCTAssertTrue(closedParams["reason"] is NSNull)
+    }
+
+    func testRuntimeRealtimePayloadEventsEmitRustNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let events: [RealtimeEvent] = [
+            .inputAudioSpeechStarted(RealtimeInputAudioSpeechStarted(itemID: nil)),
+            .inputTranscriptDelta(RealtimeTranscriptDelta(delta: "hel")),
+            .inputTranscriptDone(RealtimeTranscriptDone(text: "hello")),
+            .outputTranscriptDelta(RealtimeTranscriptDelta(delta: "hi")),
+            .outputTranscriptDone(RealtimeTranscriptDone(text: "hi there")),
+            .audioOut(
+                RealtimeAudioFrame(
+                    data: "AAAA",
+                    sampleRate: 24_000,
+                    numChannels: 1,
+                    samplesPerChannel: nil,
+                    itemID: "out-1"
+                )
+            ),
+            .responseCancelled(RealtimeResponseCancelled(responseID: nil)),
+            .conversationItemAdded(.object(["type": .string("message"), "id": .string("item-1")])),
+            .handoffRequested(
+                RealtimeHandoffRequested(
+                    handoffID: "handoff-1",
+                    itemID: "item-2",
+                    inputTranscript: "transfer me",
+                    activeTranscript: [RealtimeTranscriptEntry(role: "assistant", text: "working")]
+                )
+            ),
+            .error("realtime failed")
+        ]
+
+        for event in events {
+            await processor.handleRuntimeEvent(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                event: .realtimeConversationRealtime(RealtimeConversationRealtimeEvent(payload: event))
+            )
+        }
+
+        let speech = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(speech[0]["method"] as? String, "thread/realtime/itemAdded")
+        let speechParams = try XCTUnwrap(speech[0]["params"] as? [String: Any])
+        let speechItem = try XCTUnwrap(speechParams["item"] as? [String: Any])
+        XCTAssertEqual(speechItem["type"] as? String, "input_audio_buffer.speech_started")
+        XCTAssertTrue(speechItem["item_id"] is NSNull)
+
+        let inputDelta = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(inputDelta[0]["method"] as? String, "thread/realtime/transcript/delta")
+        let inputDeltaParams = try XCTUnwrap(inputDelta[0]["params"] as? [String: Any])
+        XCTAssertEqual(inputDeltaParams["role"] as? String, "user")
+        XCTAssertEqual(inputDeltaParams["delta"] as? String, "hel")
+
+        let inputDone = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(inputDone[0]["method"] as? String, "thread/realtime/transcript/done")
+        let inputDoneParams = try XCTUnwrap(inputDone[0]["params"] as? [String: Any])
+        XCTAssertEqual(inputDoneParams["role"] as? String, "user")
+        XCTAssertEqual(inputDoneParams["text"] as? String, "hello")
+
+        let outputDelta = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let outputDeltaParams = try XCTUnwrap(outputDelta[0]["params"] as? [String: Any])
+        XCTAssertEqual(outputDelta[0]["method"] as? String, "thread/realtime/transcript/delta")
+        XCTAssertEqual(outputDeltaParams["role"] as? String, "assistant")
+        XCTAssertEqual(outputDeltaParams["delta"] as? String, "hi")
+
+        let outputDone = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let outputDoneParams = try XCTUnwrap(outputDone[0]["params"] as? [String: Any])
+        XCTAssertEqual(outputDone[0]["method"] as? String, "thread/realtime/transcript/done")
+        XCTAssertEqual(outputDoneParams["role"] as? String, "assistant")
+        XCTAssertEqual(outputDoneParams["text"] as? String, "hi there")
+
+        let audio = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(audio[0]["method"] as? String, "thread/realtime/outputAudio/delta")
+        let audioParams = try XCTUnwrap(audio[0]["params"] as? [String: Any])
+        let audioChunk = try XCTUnwrap(audioParams["audio"] as? [String: Any])
+        XCTAssertEqual(audioChunk["data"] as? String, "AAAA")
+        XCTAssertEqual(audioChunk["sampleRate"] as? Int, 24_000)
+        XCTAssertEqual(audioChunk["numChannels"] as? Int, 1)
+        XCTAssertTrue(audioChunk["samplesPerChannel"] is NSNull)
+        XCTAssertEqual(audioChunk["itemId"] as? String, "out-1")
+
+        let cancelled = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let cancelledParams = try XCTUnwrap(cancelled[0]["params"] as? [String: Any])
+        let cancelledItem = try XCTUnwrap(cancelledParams["item"] as? [String: Any])
+        XCTAssertEqual(cancelled[0]["method"] as? String, "thread/realtime/itemAdded")
+        XCTAssertEqual(cancelledItem["type"] as? String, "response.cancelled")
+        XCTAssertTrue(cancelledItem["response_id"] is NSNull)
+
+        let conversationItem = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let conversationItemParams = try XCTUnwrap(conversationItem[0]["params"] as? [String: Any])
+        let item = try XCTUnwrap(conversationItemParams["item"] as? [String: Any])
+        XCTAssertEqual(conversationItem[0]["method"] as? String, "thread/realtime/itemAdded")
+        XCTAssertEqual(item["type"] as? String, "message")
+        XCTAssertEqual(item["id"] as? String, "item-1")
+
+        let handoff = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let handoffParams = try XCTUnwrap(handoff[0]["params"] as? [String: Any])
+        let handoffItem = try XCTUnwrap(handoffParams["item"] as? [String: Any])
+        XCTAssertEqual(handoff[0]["method"] as? String, "thread/realtime/itemAdded")
+        XCTAssertEqual(handoffItem["type"] as? String, "handoff_request")
+        XCTAssertEqual(handoffItem["handoff_id"] as? String, "handoff-1")
+        XCTAssertEqual(handoffItem["item_id"] as? String, "item-2")
+        XCTAssertEqual(handoffItem["input_transcript"] as? String, "transfer me")
+        let activeTranscript = try XCTUnwrap(handoffItem["active_transcript"] as? [[String: Any]])
+        XCTAssertEqual(activeTranscript.first?["role"] as? String, "assistant")
+        XCTAssertEqual(activeTranscript.first?["text"] as? String, "working")
+
+        let error = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(error[0]["method"] as? String, "thread/realtime/error")
+        let errorParams = try XCTUnwrap(error[0]["params"] as? [String: Any])
+        XCTAssertEqual(errorParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(errorParams["message"] as? String, "realtime failed")
+    }
+
     func testAcceptedLineAnalyticsUploadsOnTurnCompletion() async throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
