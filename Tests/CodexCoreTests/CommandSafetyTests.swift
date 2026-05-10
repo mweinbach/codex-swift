@@ -186,6 +186,19 @@ final class CommandSafetyTests: XCTestCase {
             "msedge.exe",
             "https://example.com"
         ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "explorer.exe",
+            "https://example.com"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "mshta.exe",
+            "https://example.com"
+        ]))
+        XCTAssertTrue(CommandSafety.commandMightBeDangerous([
+            "rundll32.exe",
+            "url.dll,FileProtocolHandler",
+            "https://example.com"
+        ]))
     }
 
     func testWindowsPowerShellForceDeleteMatchesRustDangerHeuristic() {
@@ -387,8 +400,18 @@ final class CommandSafetyTests: XCTestCase {
             ["powershell.exe", "-Command", "Write-Output $(Get-Content foo)"],
             ["powershell.exe", "-Command", "''"],
             ["powershell.exe", "-Command", "git -c core.pager=cat show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git --config-env core.pager=PAGER show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git --config-env=core.pager=PAGER show HEAD:foo.rs"],
             ["powershell.exe", "-Command", "git --git-dir=.evil-git diff HEAD~1..HEAD"],
+            ["powershell.exe", "-Command", "git --work-tree . status"],
+            ["powershell.exe", "-Command", "git --exec-path .git/helpers show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git --namespace attacker show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git --super-prefix attacker/ show HEAD:foo.rs"],
             ["powershell.exe", "-Command", "git diff --output codex_poc.txt"],
+            ["powershell.exe", "-Command", "git diff --ext-diff HEAD"],
+            ["powershell.exe", "-Command", "git log --textconv -1"],
+            ["powershell.exe", "-Command", "git show --output=codex_poc.txt HEAD"],
+            ["powershell.exe", "-Command", "git cat-file --filters HEAD:a.txt"],
             ["powershell.exe", "-Command", "-git cat-file -p HEAD:foo.rs"],
             ["powershell.exe", "-EncodedCommand", "RwBlAHQALQBMAG8AYwBhAHQAaQBvAG4A"],
             ["powershell.exe", "-UnknownFlag", "Get-Location"],
