@@ -185,6 +185,46 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testMcpToolMetadataRoundTripsRustToolInfoFields() throws {
+        let tool = McpTool(
+            name: "calendar_create_event",
+            inputSchema: McpToolInputSchema(),
+            connectorID: "calendar",
+            connectorName: "Calendar",
+            description: "Create an event",
+            namespaceDescription: "Plan events",
+            pluginDisplayNames: ["calendar-plugin"],
+            title: "Create Event"
+        )
+
+        try XCTAssertJSONObjectEqual(tool, [
+            "connector_id": "calendar",
+            "connector_name": "Calendar",
+            "description": "Create an event",
+            "inputSchema": [
+                "type": "object"
+            ],
+            "name": "calendar_create_event",
+            "namespace_description": "Plan events",
+            "plugin_display_names": ["calendar-plugin"],
+            "title": "Create Event"
+        ])
+
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "connector_id": "calendar",
+          "connector_name": "Calendar",
+          "description": "Create an event",
+          "inputSchema": {"type": "object"},
+          "name": "calendar_create_event",
+          "namespace_description": "Plan events",
+          "plugin_display_names": ["calendar-plugin"],
+          "title": "Create Event"
+        }
+        """.utf8))
+        XCTAssertEqual(decoded, tool)
+    }
+
     func testSplitQualifiedToolNameReturnsServerAndTool() throws {
         let split = try XCTUnwrap(McpToolName.splitQualifiedToolName("mcp__alpha__do_thing"))
         XCTAssertEqual(split.serverName, "alpha")

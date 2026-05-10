@@ -90,6 +90,71 @@ final class ToolDiscoveryTests: XCTestCase {
         )
     }
 
+    func testAccessibleConnectorsFromMCPToolsCarriesPluginDisplayNames() {
+        let tools = [
+            "mcp__codex_apps__calendar_list_events": McpTool(
+                name: "calendar_list_events",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "calendar",
+                pluginDisplayNames: ["sample", "sample"]
+            ),
+            "mcp__codex_apps__calendar_create_event": McpTool(
+                name: "calendar_create_event",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "calendar",
+                connectorName: "Google Calendar",
+                pluginDisplayNames: ["beta", "sample"]
+            ),
+            "mcp__sample__echo": McpTool(
+                name: "echo",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "ignored",
+                connectorName: "Ignored",
+                pluginDisplayNames: ["ignored"]
+            )
+        ]
+
+        XCTAssertEqual(
+            accessibleConnectorsFromMCPTools(tools),
+            [
+                DiscoverableConnectorInfo(
+                    id: "calendar",
+                    name: "Google Calendar",
+                    installURL: "https://chatgpt.com/apps/google-calendar/calendar",
+                    isAccessible: true,
+                    isEnabled: true,
+                    pluginDisplayNames: ["beta", "sample"]
+                )
+            ]
+        )
+    }
+
+    func testAccessibleConnectorsFromMCPToolsPreservesDescriptionAndSlashQualifiedServerNames() {
+        let tools = [
+            "codex_apps/calendar_create_event": McpTool(
+                name: "calendar_create_event",
+                inputSchema: McpToolInputSchema(),
+                connectorID: "calendar",
+                connectorName: "Calendar",
+                namespaceDescription: "Plan events"
+            )
+        ]
+
+        XCTAssertEqual(
+            accessibleConnectorsFromMCPTools(tools),
+            [
+                DiscoverableConnectorInfo(
+                    id: "calendar",
+                    name: "Calendar",
+                    description: "Plan events",
+                    installURL: "https://chatgpt.com/apps/calendar/calendar",
+                    isAccessible: true,
+                    isEnabled: true
+                )
+            ]
+        )
+    }
+
     func testBuildRequestPluginInstallElicitationRequestUsesExpectedShape() throws {
         let args = RequestPluginInstallArgs(
             toolType: .connector,

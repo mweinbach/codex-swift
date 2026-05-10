@@ -289,18 +289,26 @@ public struct McpResourceTemplate: Equatable, Codable, Sendable {
 
 public struct McpTool: Equatable, Codable, Sendable {
     public let annotations: McpToolAnnotations?
+    public let connectorID: String?
+    public let connectorName: String?
     public let description: String?
     public let inputSchema: McpToolInputSchema
     public let name: String
+    public let namespaceDescription: String?
     public let outputSchema: McpToolOutputSchema?
+    public let pluginDisplayNames: [String]
     public let title: String?
 
     private enum CodingKeys: String, CodingKey {
         case annotations
+        case connectorID = "connector_id"
+        case connectorName = "connector_name"
         case description
         case inputSchema = "inputSchema"
         case name
+        case namespaceDescription = "namespace_description"
         case outputSchema = "outputSchema"
+        case pluginDisplayNames = "plugin_display_names"
         case title
     }
 
@@ -308,16 +316,54 @@ public struct McpTool: Equatable, Codable, Sendable {
         name: String,
         inputSchema: McpToolInputSchema,
         annotations: McpToolAnnotations? = nil,
+        connectorID: String? = nil,
+        connectorName: String? = nil,
         description: String? = nil,
+        namespaceDescription: String? = nil,
         outputSchema: McpToolOutputSchema? = nil,
+        pluginDisplayNames: [String] = [],
         title: String? = nil
     ) {
         self.annotations = annotations
+        self.connectorID = connectorID
+        self.connectorName = connectorName
         self.description = description
         self.inputSchema = inputSchema
         self.name = name
+        self.namespaceDescription = namespaceDescription
         self.outputSchema = outputSchema
+        self.pluginDisplayNames = pluginDisplayNames
         self.title = title
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        annotations = try container.decodeIfPresent(McpToolAnnotations.self, forKey: .annotations)
+        connectorID = try container.decodeIfPresent(String.self, forKey: .connectorID)
+        connectorName = try container.decodeIfPresent(String.self, forKey: .connectorName)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        inputSchema = try container.decode(McpToolInputSchema.self, forKey: .inputSchema)
+        name = try container.decode(String.self, forKey: .name)
+        namespaceDescription = try container.decodeIfPresent(String.self, forKey: .namespaceDescription)
+        outputSchema = try container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchema)
+        pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(connectorID, forKey: .connectorID)
+        try container.encodeIfPresent(connectorName, forKey: .connectorName)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(inputSchema, forKey: .inputSchema)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(namespaceDescription, forKey: .namespaceDescription)
+        try container.encodeIfPresent(outputSchema, forKey: .outputSchema)
+        if !pluginDisplayNames.isEmpty {
+            try container.encode(pluginDisplayNames, forKey: .pluginDisplayNames)
+        }
+        try container.encodeIfPresent(title, forKey: .title)
     }
 }
 

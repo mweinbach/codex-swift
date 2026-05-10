@@ -4,6 +4,7 @@ public let requestPluginInstallApprovalKindValue = "tool_suggestion"
 public let requestPluginInstallPersistKey = "persist"
 public let requestPluginInstallPersistAlwaysValue = "always"
 public let requestPluginInstallToolName = "request_plugin_install"
+public let codexAppsMCPServerName = "codex_apps"
 
 public enum DiscoverableToolType: String, Codable, Equatable, Sendable {
     case connector
@@ -358,9 +359,127 @@ public func verifiedConnectorInstallCompleted(
     accessibleConnectors.first { $0.id == toolID }?.isAccessible == true
 }
 
+public func accessibleConnectorsFromMCPTools(
+    _ tools: [String: McpTool],
+    codexAppsServerName: String = codexAppsMCPServerName
+) -> [DiscoverableConnectorInfo] {
+    var connectorsByID: [String: (connector: DiscoverableConnectorInfo, pluginDisplayNames: Set<String>)] = [:]
+    for (qualifiedName, tool) in tools where mcpToolServerName(from: qualifiedName) == codexAppsServerName {
+        guard let rawConnectorID = tool.connectorID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawConnectorID.isEmpty
+        else {
+            continue
+        }
+        let connectorName = normalizeConnectorValue(tool.connectorName) ?? rawConnectorID
+        let connectorDescription = normalizeConnectorValue(tool.namespaceDescription)
+        let pluginDisplayNames = Set(tool.pluginDisplayNames)
+
+        if var existing = connectorsByID[rawConnectorID] {
+            var connector = existing.connector
+            if connector.name == rawConnectorID, connectorName != rawConnectorID {
+                connector = DiscoverableConnectorInfo(
+                    id: connector.id,
+                    name: connectorName,
+                    description: connector.description,
+                    installURL: connector.installURL,
+                    isAccessible: connector.isAccessible,
+                    isEnabled: connector.isEnabled,
+                    pluginDisplayNames: connector.pluginDisplayNames
+                )
+            }
+            if connector.description == nil, let connectorDescription {
+                connector = DiscoverableConnectorInfo(
+                    id: connector.id,
+                    name: connector.name,
+                    description: connectorDescription,
+                    installURL: connector.installURL,
+                    isAccessible: connector.isAccessible,
+                    isEnabled: connector.isEnabled,
+                    pluginDisplayNames: connector.pluginDisplayNames
+                )
+            }
+            existing.pluginDisplayNames.formUnion(pluginDisplayNames)
+            existing.connector = connector
+            connectorsByID[rawConnectorID] = existing
+        } else {
+            connectorsByID[rawConnectorID] = (
+                DiscoverableConnectorInfo(
+                    id: rawConnectorID,
+                    name: connectorName,
+                    description: connectorDescription,
+                    installURL: connectorInstallURL(name: connectorName, connectorID: rawConnectorID),
+                    isAccessible: true,
+                    isEnabled: true
+                ),
+                pluginDisplayNames
+            )
+        }
+    }
+
+    return connectorsByID.values
+        .map { entry in
+            DiscoverableConnectorInfo(
+                id: entry.connector.id,
+                name: entry.connector.name,
+                description: entry.connector.description,
+                installURL: connectorInstallURL(name: entry.connector.name, connectorID: entry.connector.id),
+                isAccessible: true,
+                isEnabled: true,
+                pluginDisplayNames: entry.pluginDisplayNames.sorted()
+            )
+        }
+        .sorted {
+            if $0.isAccessible != $1.isAccessible {
+                return $0.isAccessible && !$1.isAccessible
+            }
+            if $0.name != $1.name {
+                return $0.name < $1.name
+            }
+            return $0.id < $1.id
+        }
+}
+
 private extension JSONValue {
     static func codexEncoded<T: Encodable>(_ value: T) throws -> JSONValue {
         let data = try JSONEncoder().encode(value)
         return try JSONDecoder().decode(JSONValue.self, from: data)
     }
+}
+
+private func mcpToolServerName(from qualifiedName: String) -> String {
+    if qualifiedName.hasPrefix("mcp__") {
+        let remainder = qualifiedName.dropFirst("mcp__".count)
+        if let delimiterRange = remainder.range(of: "__") {
+            return String(remainder[..<delimiterRange.lowerBound])
+        }
+    }
+    if let slashIndex = qualifiedName.firstIndex(of: "/") {
+        return String(qualifiedName[..<slashIndex])
+    }
+    return qualifiedName
+}
+
+private func normalizeConnectorValue(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? nil : trimmed
+}
+
+private func connectorInstallURL(name: String, connectorID: String) -> String {
+    "https://chatgpt.com/apps/\(connectorNameSlug(name))/\(connectorID)"
+}
+
+private func connectorNameSlug(_ value: String) -> String {
+    var slug = ""
+    var lastWasDash = false
+    for scalar in value.unicodeScalars {
+        if scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) {
+            slug.unicodeScalars.append(UnicodeScalar(String(scalar).lowercased())!)
+            lastWasDash = false
+        } else if !lastWasDash {
+            slug.append("-")
+            lastWasDash = true
+        }
+    }
+    let trimmed = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    return trimmed.isEmpty ? "migrated" : trimmed
 }
