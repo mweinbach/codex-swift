@@ -5400,6 +5400,63 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(archivedData.map { $0["preview"] as? String }, ["archived target match"])
     }
 
+    func testThreadListSupportsRustSortAndBackwardsCursor() throws {
+        let temp = try TemporaryDirectory()
+        let oldestID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-01T12-00-00",
+            timestamp: "2025-01-01T12:00:00Z",
+            preview: "oldest",
+            provider: "openai"
+        )
+        let middleID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T12-00-00",
+            timestamp: "2025-01-02T12:00:00Z",
+            preview: "middle",
+            provider: "openai"
+        )
+        let newestID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-03T12-00-00",
+            timestamp: "2025-01-03T12:00:00Z",
+            preview: "newest",
+            provider: "openai"
+        )
+        try setModificationDate("2025-02-03T12:00:00Z", for: oldestID, codexHome: temp.url)
+        try setModificationDate("2025-02-01T12:00:00Z", for: middleID, codexHome: temp.url)
+        try setModificationDate("2025-02-02T12:00:00Z", for: newestID, codexHome: temp.url)
+
+        let firstResponse = try appServerResponse(
+            #"{"id":1,"method":"thread/list","params":{"limit":2,"sortDirection":"asc"}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(firstResponse["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.map { $0["preview"] as? String }, ["oldest", "middle"])
+        XCTAssertEqual(firstResult["nextCursor"] as? String, "2025-01-02T12:00:00Z")
+        XCTAssertEqual(firstResult["backwardsCursor"] as? String, "2025-01-01T12:00:00.001Z")
+
+        let cursor = try XCTUnwrap(firstResult["nextCursor"] as? String)
+        let secondResponse = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"limit":2,"sortDirection":"asc","cursor":"\#(cursor)"}}"#,
+            codexHome: temp.url
+        )
+        let secondResult = try XCTUnwrap(secondResponse["result"] as? [String: Any])
+        let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
+        XCTAssertEqual(secondData.map { $0["preview"] as? String }, ["newest"])
+        XCTAssertTrue(secondResult["nextCursor"] is NSNull)
+        XCTAssertEqual(secondResult["backwardsCursor"] as? String, "2025-01-03T12:00:00.001Z")
+
+        let updatedResponse = try appServerResponse(
+            #"{"id":3,"method":"thread/list","params":{"sortKey":"updated_at"}}"#,
+            codexHome: temp.url
+        )
+        let updatedResult = try XCTUnwrap(updatedResponse["result"] as? [String: Any])
+        let updatedData = try XCTUnwrap(updatedResult["data"] as? [[String: Any]])
+        XCTAssertEqual(updatedData.map { $0["preview"] as? String }, ["oldest", "newest", "middle"])
+    }
+
     func testThreadArchiveMovesRolloutIntoArchivedDirectory() throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
@@ -10109,6 +10166,17 @@ final class CodexAppServerTests: XCTestCase {
         let url = URL(fileURLWithPath: path)
         let existing = try String(contentsOf: url, encoding: .utf8)
         try (existing + "\n" + lines).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func setModificationDate(_ timestamp: String, for threadID: String, codexHome: URL) throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let date = try XCTUnwrap(formatter.date(from: timestamp))
+        let path = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: codexHome,
+            idString: threadID
+        ))
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: path)
     }
 
     private func fakeJWT(email: String, plan: String, accountID: String = "acct-test") throws -> String {

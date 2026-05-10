@@ -3,17 +3,20 @@ import Foundation
 public struct ConversationsPage: Equatable, Sendable {
     public let items: [ConversationItem]
     public let nextCursor: ConversationCursor?
+    public let backwardsCursor: ConversationCursor?
     public let numScannedFiles: Int
     public let reachedScanCap: Bool
 
     public init(
         items: [ConversationItem] = [],
         nextCursor: ConversationCursor? = nil,
+        backwardsCursor: ConversationCursor? = nil,
         numScannedFiles: Int = 0,
         reachedScanCap: Bool = false
     ) {
         self.items = items
         self.nextCursor = nextCursor
+        self.backwardsCursor = backwardsCursor
         self.numScannedFiles = numScannedFiles
         self.reachedScanCap = reachedScanCap
     }
@@ -40,11 +43,9 @@ public struct ConversationItem: Equatable, Sendable {
 
 public struct ConversationCursor: Equatable, Codable, Sendable {
     fileprivate let timestamp: Date
-    fileprivate let uuid: UUID
 
-    fileprivate init(timestamp: Date, uuid: UUID) {
+    fileprivate init(timestamp: Date) {
         self.timestamp = timestamp
-        self.uuid = uuid
     }
 
     public init(from decoder: Decoder) throws {
@@ -65,8 +66,18 @@ public struct ConversationCursor: Equatable, Codable, Sendable {
     }
 
     public var token: String {
-        "\(RolloutListing.filenameTimestampFormatter.string(from: timestamp))|\(uuid.uuidString.lowercased())"
+        RolloutListing.formatRFC3339Timestamp(timestamp)
     }
+}
+
+public enum ConversationSortKey: Equatable, Sendable {
+    case createdAt
+    case updatedAt
+}
+
+public enum ConversationSortDirection: Equatable, Sendable {
+    case ascending
+    case descending
 }
 
 public enum RolloutListing {
@@ -84,6 +95,8 @@ public enum RolloutListing {
         cwdFilters: [String]? = nil,
         searchTerm: String? = nil,
         sourceMatcher: SessionSourceMatcher? = nil,
+        sortKey: ConversationSortKey = .createdAt,
+        sortDirection: ConversationSortDirection = .descending,
         defaultProvider: String
     ) throws -> ConversationsPage {
         let root = codexHome.appendingPathComponent(
@@ -104,20 +117,30 @@ public enum RolloutListing {
             providerMatcher: providerMatcher,
             cwdFilters: cwdFilters,
             searchTerm: searchTerm,
-            sourceMatcher: sourceMatcher
+            sourceMatcher: sourceMatcher,
+            sortKey: sortKey,
+            sortDirection: sortDirection
         )
     }
 
     public static func parseCursor(_ token: String) -> ConversationCursor? {
-        let parts = token.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let timestamp = filenameTimestampFormatter.date(from: String(parts[0])),
-              let uuid = UUID(uuidString: String(parts[1]))
-        else {
-            return nil
+        if let timestamp = parseRFC3339Date(token) {
+            return ConversationCursor(timestamp: timestamp)
         }
 
-        return ConversationCursor(timestamp: timestamp, uuid: uuid)
+        if let timestamp = filenameTimestampFormatter.date(from: token) {
+            return ConversationCursor(timestamp: timestamp)
+        }
+
+        let parts = token.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count == 2,
+           let timestamp = filenameTimestampFormatter.date(from: String(parts[0])),
+           UUID(uuidString: String(parts[1])) != nil
+        {
+            return ConversationCursor(timestamp: timestamp)
+        }
+
+        return nil
     }
 
     public static func parseTimestampUUIDFromFilename(_ name: String) -> (Date, UUID)? {
@@ -205,52 +228,26 @@ public enum RolloutListing {
         providerMatcher: ProviderMatcher?,
         cwdFilters: [String]?,
         searchTerm: String?,
-        sourceMatcher: SessionSourceMatcher?
+        sourceMatcher: SessionSourceMatcher?,
+        sortKey: ConversationSortKey,
+        sortDirection: ConversationSortDirection
     ) throws -> ConversationsPage {
-        var items: [ConversationItem] = []
-        items.reserveCapacity(max(pageSize, 0))
+        var candidates: [ConversationCandidate] = []
         var scannedFiles = 0
-        var anchorPassed = anchor == nil
-        let anchorTimestamp = anchor?.timestamp ?? Date(timeIntervalSince1970: 0)
-        let anchorID = anchor?.uuid ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        var moreMatchesAvailable = false
 
-        func sortedRolloutFiles(in directory: URL) throws -> [RolloutFile] {
-            var files = try collectFiles(directory) { fileName, path -> RolloutFile? in
+        func rolloutFiles(in directory: URL) throws -> [RolloutFile] {
+            try collectFiles(directory) { fileName, path -> RolloutFile? in
                 guard let (timestamp, uuid) = parseTimestampUUIDFromFilename(fileName) else {
                     return nil
                 }
                 return RolloutFile(timestamp: timestamp, uuid: uuid, path: path)
             }
-            files.sort { lhs, rhs in
-                if lhs.timestamp != rhs.timestamp {
-                    return lhs.timestamp > rhs.timestamp
-                }
-                return uuidCompare(lhs.uuid, rhs.uuid) == .orderedDescending
-            }
-            return files
         }
 
         func processRolloutFiles(_ files: [RolloutFile]) throws -> Bool {
             for file in files {
                 scannedFiles += 1
-                if scannedFiles >= maxScanFiles && items.count >= pageSize {
-                    moreMatchesAvailable = true
-                    return true
-                }
-
-                if !anchorPassed {
-                    if file.timestamp < anchorTimestamp
-                        || (file.timestamp == anchorTimestamp && uuidCompare(file.uuid, anchorID) == .orderedAscending)
-                    {
-                        anchorPassed = true
-                    } else {
-                        continue
-                    }
-                }
-
-                if items.count == pageSize {
-                    moreMatchesAvailable = true
+                if scannedFiles >= maxScanFiles {
                     return true
                 }
 
@@ -294,23 +291,37 @@ public enum RolloutListing {
                     let updatedAt = summary.updatedAt
                         ?? fileModifiedRFC3339(file.path)
                         ?? summary.createdAt
-                    items.append(ConversationItem(
-                        path: file.path.path,
-                        head: summary.head,
-                        createdAt: summary.createdAt,
-                        updatedAt: updatedAt
+                    candidates.append(ConversationCandidate(
+                        uuid: file.uuid,
+                        sortCreatedAt: file.timestamp,
+                        sortUpdatedAt: parseRFC3339Date(updatedAt) ?? file.timestamp,
+                        item: ConversationItem(
+                            path: file.path.path,
+                            head: summary.head,
+                            createdAt: summary.createdAt,
+                            updatedAt: updatedAt
+                        )
                     ))
                 }
             }
             return false
         }
 
-        if try processRolloutFiles(sortedRolloutFiles(in: root)) {
+        if try processRolloutFiles(rolloutFiles(in: root)) {
+            let page = pageCandidates(
+                candidates,
+                pageSize: pageSize,
+                anchor: anchor,
+                sortKey: sortKey,
+                sortDirection: sortDirection,
+                forceMoreMatches: true
+            )
             return ConversationsPage(
-                items: items,
-                nextCursor: moreMatchesAvailable ? buildNextCursor(items) : nil,
+                items: page.items,
+                nextCursor: page.nextCursor,
+                backwardsCursor: page.backwardsCursor,
                 numScannedFiles: scannedFiles,
-                reachedScanCap: scannedFiles >= maxScanFiles
+                reachedScanCap: true
             )
         }
 
@@ -333,7 +344,7 @@ public enum RolloutListing {
                         break outer
                     }
 
-                    if try processRolloutFiles(sortedRolloutFiles(in: dayPath)) {
+                    if try processRolloutFiles(rolloutFiles(in: dayPath)) {
                         break outer
                     }
                 }
@@ -341,27 +352,100 @@ public enum RolloutListing {
         }
 
         let reachedScanCap = scannedFiles >= maxScanFiles
-        if reachedScanCap && !items.isEmpty {
-            moreMatchesAvailable = true
-        }
+        let pageWasFilledWithFilteredMatches = pageSize > 0 && candidates.count >= pageSize
+        let unreturnedFilesMayRemain = pageWasFilledWithFilteredMatches && scannedFiles > candidates.count
+        let page = pageCandidates(
+            candidates,
+            pageSize: pageSize,
+            anchor: anchor,
+            sortKey: sortKey,
+            sortDirection: sortDirection,
+            forceMoreMatches: (reachedScanCap && !candidates.isEmpty) || unreturnedFilesMayRemain
+        )
 
         return ConversationsPage(
-            items: items,
-            nextCursor: moreMatchesAvailable ? buildNextCursor(items) : nil,
+            items: page.items,
+            nextCursor: page.nextCursor,
+            backwardsCursor: page.backwardsCursor,
             numScannedFiles: scannedFiles,
             reachedScanCap: reachedScanCap
         )
     }
 
-    private static func buildNextCursor(_ items: [ConversationItem]) -> ConversationCursor? {
-        guard let last = items.last,
-              let fileName = URL(fileURLWithPath: last.path).lastPathComponent.nilIfEmpty,
-              let (timestamp, uuid) = parseTimestampUUIDFromFilename(fileName)
-        else {
-            return nil
+    private static func pageCandidates(
+        _ candidates: [ConversationCandidate],
+        pageSize: Int,
+        anchor: ConversationCursor?,
+        sortKey: ConversationSortKey,
+        sortDirection: ConversationSortDirection,
+        forceMoreMatches: Bool
+    ) -> (items: [ConversationItem], nextCursor: ConversationCursor?, backwardsCursor: ConversationCursor?) {
+        let sorted = candidates.sorted { lhs, rhs in
+            let comparison = compareCandidate(lhs, rhs, sortKey: sortKey)
+            switch sortDirection {
+            case .ascending:
+                return comparison == .orderedAscending
+            case .descending:
+                return comparison == .orderedDescending
+            }
+        }
+        let filtered: [ConversationCandidate]
+        if let anchorTimestamp = anchor?.timestamp {
+            filtered = sorted.filter { candidate in
+                let timestamp = candidate.timestamp(for: sortKey)
+                switch sortDirection {
+                case .ascending:
+                    return timestamp > anchorTimestamp
+                case .descending:
+                    return timestamp < anchorTimestamp
+                }
+            }
+        } else {
+            filtered = sorted
         }
 
-        return ConversationCursor(timestamp: timestamp, uuid: uuid)
+        let normalizedPageSize = max(pageSize, 0)
+        let pageCandidates = Array(filtered.prefix(normalizedPageSize))
+        let moreMatchesAvailable = filtered.count > pageCandidates.count || forceMoreMatches
+        return (
+            items: pageCandidates.map(\.item),
+            nextCursor: moreMatchesAvailable ? pageCandidates.last.map { buildCursor($0, sortKey: sortKey) } : nil,
+            backwardsCursor: pageCandidates.first.map {
+                buildBackwardsCursor($0, sortKey: sortKey, sortDirection: sortDirection)
+            }
+        )
+    }
+
+    private static func compareCandidate(
+        _ lhs: ConversationCandidate,
+        _ rhs: ConversationCandidate,
+        sortKey: ConversationSortKey
+    ) -> ComparisonResult {
+        let lhsTimestamp = lhs.timestamp(for: sortKey)
+        let rhsTimestamp = rhs.timestamp(for: sortKey)
+        if lhsTimestamp < rhsTimestamp {
+            return .orderedAscending
+        }
+        if lhsTimestamp > rhsTimestamp {
+            return .orderedDescending
+        }
+        return uuidCompare(lhs.uuid, rhs.uuid)
+    }
+
+    private static func buildCursor(
+        _ candidate: ConversationCandidate,
+        sortKey: ConversationSortKey
+    ) -> ConversationCursor {
+        ConversationCursor(timestamp: candidate.timestamp(for: sortKey))
+    }
+
+    private static func buildBackwardsCursor(
+        _ candidate: ConversationCandidate,
+        sortKey: ConversationSortKey,
+        sortDirection: ConversationSortDirection
+    ) -> ConversationCursor {
+        let interval: TimeInterval = sortDirection == .ascending ? 0.001 : -0.001
+        return ConversationCursor(timestamp: candidate.timestamp(for: sortKey).addingTimeInterval(interval))
     }
 
     private static func collectDirectoriesDescending<T: Comparable>(
@@ -473,10 +557,37 @@ public enum RolloutListing {
             return nil
         }
 
+        return formatRFC3339Timestamp(modified)
+    }
+
+    fileprivate static func formatRFC3339Timestamp(_ date: Date) -> String {
+        let wholeSeconds = date.timeIntervalSince1970.rounded(.towardZero)
+        if abs(date.timeIntervalSince1970 - wholeSeconds) < 0.000_001 {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            return formatter.string(from: date)
+        }
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter.string(from: modified)
+        return formatter.string(from: date)
+    }
+
+    private static func parseRFC3339Date(_ value: String?) -> Date? {
+        guard let value else {
+            return nil
+        }
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        fractionalFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let timestamp = fractionalFormatter.date(from: value) {
+            return timestamp
+        }
+        let wholeSecondFormatter = ISO8601DateFormatter()
+        wholeSecondFormatter.formatOptions = [.withInternetDateTime]
+        wholeSecondFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return wholeSecondFormatter.date(from: value)
     }
 
     private static func uuidCompare(_ lhs: UUID, _ rhs: UUID) -> ComparisonResult {
@@ -502,6 +613,22 @@ private struct RolloutFile {
     let timestamp: Date
     let uuid: UUID
     let path: URL
+}
+
+private struct ConversationCandidate {
+    let uuid: UUID
+    let sortCreatedAt: Date
+    let sortUpdatedAt: Date
+    let item: ConversationItem
+
+    func timestamp(for sortKey: ConversationSortKey) -> Date {
+        switch sortKey {
+        case .createdAt:
+            return sortCreatedAt
+        case .updatedAt:
+            return sortUpdatedAt
+        }
+    }
 }
 
 private struct HeadTailSummary {

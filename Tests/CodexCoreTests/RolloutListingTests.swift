@@ -73,7 +73,7 @@ final class RolloutListingTests: XCTestCase {
             [higher.path, lower.path].map(comparablePath)
         )
         let cursor = try XCTUnwrap(firstPage.nextCursor)
-        XCTAssertEqual(cursor.token, "2025-01-02T12-00-00|00000000-0000-0000-0000-000000000001")
+        XCTAssertEqual(cursor.token, "2025-01-02T12:00:00Z")
 
         let cursorData = try JSONEncoder().encode(cursor)
         XCTAssertEqual(try JSONDecoder().decode(ConversationCursor.self, from: cursorData), cursor)
@@ -88,6 +88,43 @@ final class RolloutListingTests: XCTestCase {
 
         XCTAssertEqual(secondPage.items.map { comparablePath($0.path) }, [older.path].map(comparablePath))
         XCTAssertNil(secondPage.nextCursor)
+    }
+
+    func testListsConversationsWithRustSortDirectionAndBackwardsCursor() throws {
+        let temp = try TemporaryDirectory()
+        let olderID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000004"))
+        let middleID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000005"))
+        let newerID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000006"))
+
+        let older = try writeSessionFile(home: temp.url, timestamp: "2025-01-01T12-00-00", id: olderID)
+        let middle = try writeSessionFile(home: temp.url, timestamp: "2025-01-02T12-00-00", id: middleID)
+        let newer = try writeSessionFile(home: temp.url, timestamp: "2025-01-03T12-00-00", id: newerID)
+
+        let firstPage = try RolloutListing.getConversations(
+            codexHome: temp.url,
+            pageSize: 2,
+            sortDirection: .ascending,
+            defaultProvider: "test-provider"
+        )
+
+        XCTAssertEqual(
+            firstPage.items.map { comparablePath($0.path) },
+            [older.path, middle.path].map(comparablePath)
+        )
+        XCTAssertEqual(firstPage.nextCursor?.token, "2025-01-02T12:00:00Z")
+        XCTAssertEqual(firstPage.backwardsCursor?.token, "2025-01-01T12:00:00.001Z")
+
+        let secondPage = try RolloutListing.getConversations(
+            codexHome: temp.url,
+            pageSize: 2,
+            cursor: try XCTUnwrap(firstPage.nextCursor),
+            sortDirection: .ascending,
+            defaultProvider: "test-provider"
+        )
+
+        XCTAssertEqual(secondPage.items.map { comparablePath($0.path) }, [newer.path].map(comparablePath))
+        XCTAssertNil(secondPage.nextCursor)
+        XCTAssertEqual(secondPage.backwardsCursor?.token, "2025-01-03T12:00:00.001Z")
     }
 
     func testSourceProviderAndUserMessageFiltersMatchRustListingRules() throws {

@@ -719,6 +719,8 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let sourceFilter = try threadListSourceFilter(params?["sourceKinds"])
+        let sortKey = try threadListSortKey(params?["sortKey"])
+        let sortDirection = try threadListSortDirection(params?["sortDirection"])
         let page = try RolloutListing.getConversations(
             codexHome: configuration.codexHome,
             pageSize: listLimit(params?["limit"]),
@@ -729,12 +731,15 @@ public enum CodexAppServer {
             cwdFilters: try threadListCwdFilters(params?["cwd"]),
             searchTerm: stringParam(params?["searchTerm"]),
             sourceMatcher: sourceFilter.matcher,
+            sortKey: sortKey,
+            sortDirection: sortDirection,
             defaultProvider: configuration.defaultModelProvider
         )
         return [
             "data": try page.items.map { try threadObject(for: $0, defaultProvider: configuration.defaultModelProvider) },
-            "nextCursor": page.nextCursor?.token as Any
-        ].nullStripped()
+            "nextCursor": (page.nextCursor?.token as Any?) ?? NSNull(),
+            "backwardsCursor": (page.backwardsCursor?.token as Any?) ?? NSNull()
+        ]
     }
 
     fileprivate static func threadStartResult(
@@ -10799,6 +10804,34 @@ public enum CodexAppServer {
 
         return rawFilters.map { cwd in
             URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL.path
+        }
+    }
+
+    private static func threadListSortKey(_ value: Any?) throws -> ConversationSortKey {
+        guard let value = stringParam(value) else {
+            return .createdAt
+        }
+        switch value {
+        case "created_at":
+            return .createdAt
+        case "updated_at":
+            return .updatedAt
+        default:
+            throw AppServerError.invalidParams("invalid thread/list sortKey `\(value)`")
+        }
+    }
+
+    private static func threadListSortDirection(_ value: Any?) throws -> ConversationSortDirection {
+        guard let value = stringParam(value) else {
+            return .descending
+        }
+        switch value {
+        case "asc":
+            return .ascending
+        case "desc":
+            return .descending
+        default:
+            throw AppServerError.invalidParams("invalid thread/list sortDirection `\(value)`")
         }
     }
 

@@ -409,6 +409,8 @@ Source baseline inspected for this scaffold:
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list filters
   - file-backed `thread/list` now honors Rust's `sourceKinds`, `cwd`, `archived`, and `searchTerm` filters while preserving default interactive-source and default-provider filtering.
+- `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list ordering
+  - file-backed `thread/list` now accepts Rust's `sortKey` and `sortDirection` values, returns RFC3339 timestamp `nextCursor`/`backwardsCursor` fields, and orders by created-at filename timestamps or updated-at file modification times.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` experimental thread history pagination
   - `thread/turns/list` now pages reconstructed rollout turns with Rust-shaped JSON cursors, descending default sort, `summary`/`full`/`notLoaded` item views, Rust enum validation for `itemsView` and `sortDirection`, `nextCursor`/`backwardsCursor`, and invalid-cursor/thread-id errors; `thread/turns/items/list` returns the current Rust unsupported JSON-RPC error.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` loaded-thread listing
