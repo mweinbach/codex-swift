@@ -633,6 +633,20 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testShellWrapperVariantsFromRustParser() {
+        XCTAssertEqual(parseCommand(["bash", "-c", "rg --files | head -n 1"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+
+        XCTAssertEqual(parseCommand(["/bin/zsh", "-lc", "sed -n '1,10p' Cargo.toml"]), [
+            .read(cmd: "sed -n '1,10p' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+
+        XCTAssertEqual(parseCommand(["sh", "-c", "tail -n+10 README.md"]), [
+            .read(cmd: "tail -n+10 README.md", name: "README.md", path: "README.md")
+        ])
+    }
+
     func testDedupesConsecutiveCommandsAndKeepsCommandParserCompatibility() {
         XCTAssertEqual(CommandParser.parseCommand(["bash", "-lc", "rg foo && rg foo"]), [
             .search(cmd: "rg foo", query: "foo", path: nil)
