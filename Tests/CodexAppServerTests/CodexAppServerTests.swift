@@ -2398,6 +2398,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(beyondError["message"] as? String, "cursor 1 exceeds total apps 0")
     }
 
+    func testAppListReturnsConfiguredLocalPluginAppsAndPaginates() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        [marketplaces.debug]
+        source_type = "local"
+        source = "\(sourcePath)"
+
+        [plugins."weather@debug"]
+        enabled = true
+
+        [apps.connector_weather]
+        enabled = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let first = try appServerResponse(
+            #"{"id":1,"method":"app/list","params":{"limit":1}}"#,
+            codexHome: temp.url
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
+        XCTAssertEqual(firstData.count, 1)
+        XCTAssertEqual(firstData[0]["id"] as? String, "connector_weather")
+        XCTAssertEqual(firstData[0]["name"] as? String, "Weather")
+        XCTAssertEqual(firstData[0]["installUrl"] as? String, "https://chatgpt.com/apps/weather/connector_weather")
+        XCTAssertEqual(firstData[0]["isAccessible"] as? Bool, false)
+        XCTAssertEqual(firstData[0]["isEnabled"] as? Bool, false)
+        XCTAssertEqual(firstData[0]["pluginDisplayNames"] as? [String], [])
+        XCTAssertTrue(firstResult["nextCursor"] is NSNull)
+
+        let beyond = try appServerResponse(
+            #"{"id":2,"method":"app/list","params":{"cursor":"2"}}"#,
+            codexHome: temp.url
+        )
+        let beyondError = try XCTUnwrap(beyond["error"] as? [String: Any])
+        XCTAssertEqual(beyondError["code"] as? Int, -32600)
+        XCTAssertEqual(beyondError["message"] as? String, "cursor 2 exceeds total apps 1")
+    }
+
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

@@ -2458,20 +2458,120 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func appListResult(params: [String: Any]?) throws -> [String: Any] {
-        let total = 0
+    fileprivate static func appListResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let apps = try localPluginAppList(configuration: configuration)
+        let total = apps.count
+        var start = 0
         if let cursor = stringParam(params?["cursor"]) {
-            guard let start = Int(cursor), start >= 0 else {
+            guard let parsedStart = Int(cursor), parsedStart >= 0 else {
                 throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
             }
+            start = parsedStart
             guard start <= total else {
                 throw AppServerError.invalidRequest("cursor \(start) exceeds total apps \(total)")
             }
         }
+        let limit = max(1, intParam(params?["limit"], defaultValue: total))
+        let end = min(total, start + limit)
         return [
-            "data": [],
-            "nextCursor": NSNull()
+            "data": Array(apps[start..<end]),
+            "nextCursor": end < total ? String(end) : NSNull()
         ]
+    }
+
+    private static func localPluginAppList(configuration: CodexAppServerConfiguration) throws -> [[String: Any]] {
+        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let roots = localMarketplaceDiscoveryRoots(cwds: [], codexHome: configuration.codexHome, config: config)
+        let manifestPaths = localMarketplaceManifestPaths(from: roots)
+        var appsByID: [String: [String: Any]] = [:]
+
+        for manifestPath in manifestPaths {
+            let marketplaceRoot = try marketplaceRoot(forManifestPath: manifestPath)
+            let data = try Data(contentsOf: manifestPath)
+            let object = try marketplaceManifestObject(data: data, manifestPath: manifestPath)
+            guard let marketplaceName = object["name"] as? String,
+                  let plugins = object["plugins"] as? [[String: Any]]
+            else {
+                continue
+            }
+            for plugin in plugins {
+                guard let pluginName = plugin["name"] as? String,
+                      configuredPluginEnabled(id: "\(pluginName)@\(marketplaceName)", in: config),
+                      let source = marketplacePluginSource(plugin["source"], marketplaceRoot: marketplaceRoot)
+                else {
+                    continue
+                }
+                let root: URL?
+                switch source {
+                case .local(let sourcePath):
+                    root = sourcePath
+                case .git:
+                    root = activeLocalPluginRoot(id: "\(pluginName)@\(marketplaceName)", codexHome: configuration.codexHome)
+                }
+                guard let root else {
+                    continue
+                }
+                let manifest = localPluginManifest(root: root)
+                for app in localPluginApps(root: root, manifest: manifest) {
+                    guard let id = app["id"] as? String else {
+                        continue
+                    }
+                    appsByID[id] = appInfoForPluginApp(app, config: config)
+                }
+            }
+        }
+
+        return appsByID.values.sorted {
+            let leftAccessible = $0["isAccessible"] as? Bool ?? false
+            let rightAccessible = $1["isAccessible"] as? Bool ?? false
+            if leftAccessible != rightAccessible {
+                return leftAccessible && !rightAccessible
+            }
+            let leftName = $0["name"] as? String ?? ""
+            let rightName = $1["name"] as? String ?? ""
+            if leftName != rightName {
+                return leftName < rightName
+            }
+            return ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "")
+        }
+    }
+
+    private static func appInfoForPluginApp(_ app: [String: Any], config: ConfigValue) -> [String: Any] {
+        let id = app["id"] as? String ?? ""
+        let name = app["name"] as? String ?? id
+        return [
+            "id": id,
+            "name": name,
+            "description": app["description"] as Any? ?? NSNull(),
+            "logoUrl": NSNull(),
+            "logoUrlDark": NSNull(),
+            "distributionChannel": NSNull(),
+            "branding": NSNull(),
+            "appMetadata": NSNull(),
+            "labels": NSNull(),
+            "installUrl": stringParam(app["installUrl"]) ?? connectorInstallURL(name: name, connectorID: id),
+            "isAccessible": false,
+            "isEnabled": configuredAppEnabled(id: id, in: config),
+            "pluginDisplayNames": []
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func configuredAppEnabled(id: String, in config: ConfigValue) -> Bool {
+        guard let root = configTable(config),
+              let apps = root["apps"].flatMap(configTable),
+              let entry = apps[id].flatMap(configTable)
+        else {
+            return true
+        }
+        return boolConfig(entry, "enabled") ?? true
+    }
+
+    private static func connectorInstallURL(name: String, connectorID: String) -> String {
+        "https://chatgpt.com/apps/\(slugifyExternalAgentName(name))/\(connectorID)"
     }
 
     fileprivate static func pluginListResult(
@@ -15170,7 +15270,7 @@ final class CodexAppServerMessageProcessor {
                 case "app/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.appListResult(params: params)
+                        result: try CodexAppServer.appListResult(params: params, configuration: configuration)
                     )
                 case "plugin/list":
                     response = CodexAppServer.responseObject(
