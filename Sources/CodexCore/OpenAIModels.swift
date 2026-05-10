@@ -139,6 +139,19 @@ public struct ModelInstructionsVariables: Equatable, Codable, Sendable {
             && personalityFriendly != nil
             && personalityPragmatic != nil
     }
+
+    public func personalityMessage(for personality: Personality?) -> String? {
+        switch personality {
+        case .some(.none):
+            return ""
+        case .some(.friendly):
+            return personalityFriendly
+        case .some(.pragmatic):
+            return personalityPragmatic
+        case nil:
+            return personalityDefault
+        }
+    }
 }
 
 public struct ModelMessages: Equatable, Codable, Sendable {
@@ -163,6 +176,10 @@ public struct ModelMessages: Equatable, Codable, Sendable {
     public var supportsPersonality: Bool {
         instructionsTemplate?.contains(Self.personalityPlaceholder) == true
             && instructionsVariables?.isComplete == true
+    }
+
+    public func personalityMessage(for personality: Personality?) -> String? {
+        instructionsVariables?.personalityMessage(for: personality)
     }
 }
 
@@ -558,6 +575,23 @@ public struct ModelInfo: Equatable, Sendable {
 
     public var supportsPersonality: Bool {
         modelMessages?.supportsPersonality == true
+    }
+
+    public func modelInstructions(personality: Personality?) -> String {
+        guard let template = modelMessages?.instructionsTemplate else {
+            return baseInstructions ?? ""
+        }
+        let personalityMessage = modelMessages?.personalityMessage(for: personality) ?? ""
+        return template.replacingOccurrences(
+            of: ModelMessages.personalityPlaceholder,
+            with: personalityMessage
+        )
+    }
+
+    public func personalityMessage(for personality: Personality) -> String? {
+        modelMessages?.personalityMessage(for: personality).flatMap { message in
+            message.isEmpty ? nil : message
+        }
     }
 
     public func autoCompactTokenLimitValue() -> Int64? {

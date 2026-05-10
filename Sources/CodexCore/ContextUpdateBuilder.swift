@@ -6,17 +6,32 @@ public enum ContextUpdateBuilder {
         current: TurnContextItem,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
+        previousModel: String? = nil,
+        currentModelInfo: ModelInfo? = nil,
+        personalityFeatureEnabled: Bool = true,
         previousRealtimeActive: Bool? = nil,
         realtimeStartInstructions: String? = nil
     ) -> [ResponseItem] {
         var items: [ResponseItem] = []
 
         let developerSections = [
+            buildModelInstructionsUpdateText(
+                previousModel: previousModel,
+                current: current,
+                currentModelInfo: currentModelInfo
+            ),
+            buildCollaborationModeUpdateText(previous: previous, current: current),
             buildRealtimeUpdateText(
                 previous: previous,
                 previousRealtimeActive: previousRealtimeActive,
                 current: current,
                 realtimeStartInstructions: realtimeStartInstructions
+            ),
+            buildPersonalityUpdateText(
+                previous: previous,
+                current: current,
+                currentModelInfo: currentModelInfo,
+                personalityFeatureEnabled: personalityFeatureEnabled
             )
         ].compactMap(\.self)
 
@@ -50,6 +65,40 @@ public enum ContextUpdateBuilder {
         return environmentItem(from: currentEnvironment.diff(from: previous))
     }
 
+    public static func buildModelInstructionsUpdateText(
+        previousModel: String?,
+        current: TurnContextItem,
+        currentModelInfo: ModelInfo?
+    ) -> String? {
+        guard let previousModel,
+              let currentModelInfo,
+              previousModel != current.model
+        else {
+            return nil
+        }
+
+        let modelInstructions = currentModelInfo.modelInstructions(personality: current.personality)
+        guard !modelInstructions.isEmpty else {
+            return nil
+        }
+        return renderModelSwitchInstructions(modelInstructions)
+    }
+
+    public static func buildCollaborationModeUpdateText(
+        previous: TurnContextItem?,
+        current: TurnContextItem
+    ) -> String? {
+        guard let previous,
+              previous.collaborationMode != current.collaborationMode,
+              let developerInstructions = current.collaborationMode?.settings.developerInstructions,
+              !developerInstructions.isEmpty
+        else {
+            return nil
+        }
+
+        return renderCollaborationModeInstructions(developerInstructions)
+    }
+
     public static func buildRealtimeUpdateText(
         previous: TurnContextItem?,
         previousRealtimeActive: Bool?,
@@ -69,6 +118,49 @@ public enum ContextUpdateBuilder {
             }
             return renderRealtimeEndInstructions(reason: "inactive")
         }
+    }
+
+    public static func buildPersonalityUpdateText(
+        previous: TurnContextItem?,
+        current: TurnContextItem,
+        currentModelInfo: ModelInfo?,
+        personalityFeatureEnabled: Bool
+    ) -> String? {
+        guard personalityFeatureEnabled,
+              let previous,
+              current.model == previous.model,
+              let personality = current.personality,
+              current.personality != previous.personality,
+              let message = currentModelInfo?.personalityMessage(for: personality)
+        else {
+            return nil
+        }
+
+        return renderPersonalitySpecInstructions(message)
+    }
+
+    public static func renderModelSwitchInstructions(_ modelInstructions: String) -> String {
+        contextualFragment(
+            openTag: "<model_switch>",
+            closeTag: "</model_switch>",
+            body: "\nThe user was previously using a different model. Please continue the conversation according to the following instructions:\n\n\(modelInstructions)\n"
+        )
+    }
+
+    public static func renderCollaborationModeInstructions(_ instructions: String) -> String {
+        contextualFragment(
+            openTag: "<collaboration_mode>",
+            closeTag: "</collaboration_mode>",
+            body: instructions
+        )
+    }
+
+    public static func renderPersonalitySpecInstructions(_ spec: String) -> String {
+        contextualFragment(
+            openTag: "<personality_spec>",
+            closeTag: "</personality_spec>",
+            body: " The user has requested a new communication style. Future messages should adhere to the following personality: \n\(spec) "
+        )
     }
 
     public static func renderRealtimeStartInstructions(_ instructions: String? = nil) -> String {

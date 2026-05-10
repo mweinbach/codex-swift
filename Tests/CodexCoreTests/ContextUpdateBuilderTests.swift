@@ -109,6 +109,117 @@ final class ContextUpdateBuilderTests: XCTestCase {
         XCTAssertEqual(userTexts(in: items), [])
     }
 
+    func testBuildSettingsUpdateItemsPrependsModelSwitchInstructionsLikeRust() {
+        let previous = contextItem(cwd: "/repo", model: "previous-regular-model")
+        let current = contextItem(cwd: "/repo", model: "gpt-5.4", personality: .friendly)
+        let modelInfo = modelInfo(
+            slug: "gpt-5.4",
+            baseInstructions: "base instructions",
+            modelMessages: ModelMessages(
+                instructionsTemplate: "Base\n{{ personality }}",
+                instructionsVariables: ModelInstructionsVariables(
+                    personalityDefault: "default style",
+                    personalityFriendly: "friendly style",
+                    personalityPragmatic: "pragmatic style"
+                )
+            )
+        )
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            previousModel: previous.model,
+            currentModelInfo: modelInfo
+        )
+
+        XCTAssertEqual(developerTexts(in: items), ["""
+        <model_switch>
+
+        The user was previously using a different model. Please continue the conversation according to the following instructions:
+
+        Base
+        friendly style
+
+        </model_switch>
+        """])
+    }
+
+    func testBuildSettingsUpdateItemsOmitsModelSwitchWhenInstructionsEmptyLikeRust() {
+        let previous = contextItem(cwd: "/repo", model: "old-model")
+        let current = contextItem(cwd: "/repo", model: "new-model")
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            previousModel: previous.model,
+            currentModelInfo: modelInfo(slug: "new-model", baseInstructions: nil)
+        )
+
+        XCTAssertEqual(developerTexts(in: items), [])
+    }
+
+    func testBuildSettingsUpdateItemsEmitsCollaborationModeInstructionsLikeRust() {
+        let previous = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .defaultMode,
+                settings: CollaborationModeSettings(model: "gpt-5.4")
+            )
+        )
+        let current = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .plan,
+                settings: CollaborationModeSettings(
+                    model: "gpt-5.4",
+                    developerInstructions: "Plan before editing."
+                )
+            )
+        )
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell()
+        )
+
+        XCTAssertEqual(developerTexts(in: items), ["""
+        <collaboration_mode>
+        Plan before editing.
+        </collaboration_mode>
+        """])
+    }
+
+    func testBuildSettingsUpdateItemsOmitsEmptyCollaborationModeInstructionsLikeRust() {
+        let previous = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .plan,
+                settings: CollaborationModeSettings(
+                    model: "gpt-5.4",
+                    developerInstructions: "Plan first."
+                )
+            )
+        )
+        let current = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .defaultMode,
+                settings: CollaborationModeSettings(model: "gpt-5.4", developerInstructions: "")
+            )
+        )
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell()
+        )
+
+        XCTAssertEqual(developerTexts(in: items), [])
+    }
+
     func testBuildSettingsUpdateItemsEmitsRealtimeStartAndEndLikeRust() {
         let inactive = contextItem(cwd: "/repo", realtimeActive: false)
         let active = contextItem(cwd: "/repo", realtimeActive: true)
@@ -169,6 +280,69 @@ final class ContextUpdateBuilderTests: XCTestCase {
 
         XCTAssertEqual(developerTexts(in: items), ["<realtime_conversation>\n\n</realtime_conversation>"])
     }
+
+    func testBuildSettingsUpdateItemsEmitsPersonalitySpecWhenFeatureEnabledLikeRust() {
+        let previous = contextItem(cwd: "/repo", personality: .friendly)
+        let current = contextItem(cwd: "/repo", personality: .pragmatic)
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            currentModelInfo: modelInfo(
+                slug: current.model,
+                modelMessages: ModelMessages(
+                    instructionsTemplate: "Base\n{{ personality }}",
+                    instructionsVariables: ModelInstructionsVariables(
+                        personalityDefault: "default style",
+                        personalityFriendly: "friendly style",
+                        personalityPragmatic: "pragmatic style"
+                    )
+                )
+            )
+        )
+
+        XCTAssertEqual(developerTexts(in: items), [
+            "<personality_spec>\n"
+                + " The user has requested a new communication style. Future messages should adhere to the following personality: \n"
+                + "pragmatic style \n"
+                + "</personality_spec>"
+        ])
+    }
+
+    func testBuildSettingsUpdateItemsOmitsPersonalitySpecWhenFeatureDisabledOrModelChangedLikeRust() {
+        let previous = contextItem(cwd: "/repo", model: "old-model", personality: .friendly)
+        let current = contextItem(cwd: "/repo", model: "new-model", personality: .pragmatic)
+        let modelInfo = modelInfo(
+            slug: "new-model",
+            baseInstructions: "new instructions",
+            modelMessages: ModelMessages(
+                instructionsTemplate: "Base\n{{ personality }}",
+                instructionsVariables: ModelInstructionsVariables(
+                    personalityDefault: "default style",
+                    personalityFriendly: "friendly style",
+                    personalityPragmatic: "pragmatic style"
+                )
+            )
+        )
+
+        let disabledItems = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: contextItem(cwd: "/repo", model: "old-model", personality: .pragmatic),
+            shell: shell(),
+            currentModelInfo: modelInfo,
+            personalityFeatureEnabled: false
+        )
+        let changedModelItems = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            currentModelInfo: modelInfo
+        )
+
+        XCTAssertEqual(developerTexts(in: disabledItems), [])
+        XCTAssertEqual(developerTexts(in: changedModelItems), [])
+    }
 }
 
 private func contextItem(
@@ -176,6 +350,9 @@ private func contextItem(
     currentDate: String? = nil,
     timezone: String? = nil,
     network: TurnContextNetworkItem? = nil,
+    model: String = "gpt-5.4",
+    personality: Personality? = nil,
+    collaborationMode: CollaborationMode? = nil,
     realtimeActive: Bool? = nil
 ) -> TurnContextItem {
     TurnContextItem(
@@ -185,7 +362,9 @@ private func contextItem(
         approvalPolicy: .onRequest,
         sandboxPolicy: .readOnly,
         network: network,
-        model: "gpt-5.4",
+        model: model,
+        personality: personality,
+        collaborationMode: collaborationMode,
         realtimeActive: realtimeActive,
         summary: .auto
     )
@@ -193,6 +372,29 @@ private func contextItem(
 
 private func shell() -> Shell {
     Shell(shellType: .bash, shellPath: "/bin/bash")
+}
+
+private func modelInfo(
+    slug: String,
+    baseInstructions: String? = "base instructions",
+    modelMessages: ModelMessages? = nil
+) -> ModelInfo {
+    ModelInfo(
+        slug: slug,
+        displayName: slug,
+        supportedReasoningLevels: [],
+        shellType: .default,
+        visibility: .hide,
+        supportedInAPI: false,
+        priority: 0,
+        baseInstructions: baseInstructions,
+        modelMessages: modelMessages,
+        supportsReasoningSummaries: false,
+        supportVerbosity: false,
+        truncationPolicy: .bytes(4096),
+        supportsParallelToolCalls: false,
+        experimentalSupportedTools: []
+    )
 }
 
 private func userTexts(in items: [ResponseItem]) -> [String] {

@@ -371,6 +371,44 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertTrue(preset.supportsFastMode())
     }
 
+    func testModelInstructionsResolvePersonalityTemplateLikeRust() {
+        let info = ModelInfo(
+            slug: "gpt-5.4",
+            displayName: "GPT-5.4",
+            supportedReasoningLevels: [],
+            shellType: .default,
+            visibility: .hide,
+            supportedInAPI: true,
+            priority: 0,
+            baseInstructions: "base",
+            modelMessages: ModelMessages(
+                instructionsTemplate: "System\n{{ personality }}",
+                instructionsVariables: ModelInstructionsVariables(
+                    personalityDefault: "default voice",
+                    personalityFriendly: "friendly voice",
+                    personalityPragmatic: "pragmatic voice"
+                )
+            ),
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(4096),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
+        )
+
+        XCTAssertEqual(info.modelInstructions(personality: nil), "System\ndefault voice")
+        XCTAssertEqual(info.modelInstructions(personality: .friendly), "System\nfriendly voice")
+        XCTAssertEqual(info.modelInstructions(personality: .pragmatic), "System\npragmatic voice")
+        XCTAssertEqual(info.modelInstructions(personality: Personality.none), "System\n")
+        XCTAssertEqual(info.personalityMessage(for: .pragmatic), "pragmatic voice")
+        XCTAssertNil(info.personalityMessage(for: Personality.none))
+    }
+
+    func testModelInstructionsFallsBackToBaseInstructionsLikeRust() {
+        XCTAssertEqual(minimalModelInfo().modelInstructions(personality: nil), "base")
+        XCTAssertEqual(minimalModelInfo().modelInstructions(personality: .friendly), "base")
+    }
+
     private func minimalModelInfo() -> ModelInfo {
         ModelInfo(
             slug: "codex-mini",
