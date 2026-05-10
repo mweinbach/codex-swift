@@ -2987,6 +2987,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedThread["gitInfo"] as? NSNull, NSNull())
     }
 
+    func testThreadMetadataUpdateRepairsArchivedThreadLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-30-00",
+            timestamp: "2025-01-06T08:30:00Z",
+            preview: "Archived thread preview",
+            provider: "mock_provider",
+            archived: true
+        )
+
+        let update = try appServerResponse(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"branch":"feature/archived-thread"}}}"#,
+            codexHome: temp.url
+        )
+
+        let updateResult = try XCTUnwrap(update["result"] as? [String: Any])
+        let updatedThread = try XCTUnwrap(updateResult["thread"] as? [String: Any])
+        let gitInfo = try XCTUnwrap(updatedThread["gitInfo"] as? [String: Any])
+        XCTAssertEqual(updatedThread["id"] as? String, threadID)
+        XCTAssertEqual(updatedThread["preview"] as? String, "Archived thread preview")
+        XCTAssertEqual(updatedThread["createdAt"] as? Int, 1_736_152_200)
+        XCTAssertNil(gitInfo["sha"] as? String)
+        XCTAssertEqual(gitInfo["branch"] as? String, "feature/archived-thread")
+        XCTAssertNil(gitInfo["originUrl"] as? String)
+
+        let read = try appServerResponse(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let readThread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        let readGitInfo = try XCTUnwrap(readThread["gitInfo"] as? [String: Any])
+        XCTAssertEqual(readGitInfo["branch"] as? String, "feature/archived-thread")
+    }
+
     func testThreadMetadataUpdateRejectsEmptyAndInvalidGitFields() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

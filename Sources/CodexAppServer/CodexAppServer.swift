@@ -2166,7 +2166,11 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("gitInfo must include at least one field")
         }
 
-        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        let rolloutPath = try rolloutPathForConversation(
+            threadID,
+            configuration: configuration,
+            includeArchived: true
+        )
         let updatedPath = try updateRolloutSessionGitInfo(rolloutPath: rolloutPath, patch: patch)
         let item = ConversationItem(path: updatedPath, head: [], createdAt: nil, updatedAt: nil)
         return [
@@ -13905,12 +13909,14 @@ public enum CodexAppServer {
 
     private static func rolloutPathForConversation(
         _ conversationID: ConversationId,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        includeArchived: Bool = false
     ) throws -> String {
         do {
             guard let foundPath = try RolloutListing.findConversationPathByIDString(
                 codexHome: configuration.codexHome,
-                idString: conversationID.description
+                idString: conversationID.description,
+                includeArchived: includeArchived
             ) else {
                 throw AppServerError.invalidRequest("no rollout found for conversation id \(conversationID)")
             }
