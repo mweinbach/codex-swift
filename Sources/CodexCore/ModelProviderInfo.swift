@@ -601,7 +601,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     }
 }
 
-public struct ModelProviderAuthInfo: Codable, Equatable, Sendable {
+public struct ModelProviderAuthInfo: Codable, Equatable, Hashable, Sendable {
     public static let defaultTimeoutMilliseconds: UInt64 = 5_000
     public static let defaultRefreshIntervalMilliseconds: UInt64 = 300_000
 

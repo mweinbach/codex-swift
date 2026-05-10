@@ -233,12 +233,17 @@ public enum ModelsManager {
         auth: AuthDotJSON?,
         transport: Transport,
         clientVersion: String,
+        commandAuthRunner: ProviderAuthCommandRunner = ProviderAuthCommandRunner(),
         now: Date = Date(),
         cacheTTL: TimeInterval = defaultModelCacheTTL
     ) async throws -> ModelsResponse {
         let providerInfo = config.selectedModelProvider ?? ModelProviderInfo.createOpenAIProvider()
         let apiProvider = providerInfo.toAPIProvider(authMode: auth?.authMode)
-        let authProvider = try APIAuthResolver.authProvider(auth: auth, provider: providerInfo)
+        let authProvider = try await APIAuthResolver.authProvider(
+            auth: auth,
+            provider: providerInfo,
+            commandRunner: commandAuthRunner
+        )
         let cacheURL = cachePath(codexHome: codexHome)
         let fallbackModels = bundledModels
 

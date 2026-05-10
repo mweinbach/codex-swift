@@ -152,6 +152,105 @@ final class APIAuthTests: XCTestCase {
             )
         }
     }
+
+    func testAuthResolverUsesProviderCommandAuthLikeRust() async throws {
+        let script = try ProviderAuthScript(tokens: ["provider-token", "next-token"])
+        let provider = try ModelProviderInfo(
+            name: "Provider",
+            auth: script.authConfig()
+        )
+        let auth = AuthDotJSON(
+            openAIAPIKey: "auth-json-key",
+            tokens: tokenData(accessToken: "chatgpt-token", accountID: "acct"),
+            lastRefresh: nil
+        )
+
+        let resolved = try await APIAuthResolver.authProvider(
+            auth: auth,
+            provider: provider,
+            commandRunner: ProviderAuthCommandRunner()
+        )
+
+        XCTAssertEqual(resolved, StaticAPIAuthProvider(bearerToken: "provider-token"))
+    }
+
+    func testAuthResolverUsesCachedProviderCommandTokenLikeRust() async throws {
+        let script = try ProviderAuthScript(tokens: ["provider-token", "next-token"])
+        let provider = try ModelProviderInfo(name: "Provider", auth: script.authConfig())
+        let runner = ProviderAuthCommandRunner()
+
+        let first = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: provider,
+            commandRunner: runner
+        )
+        let second = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: provider,
+            commandRunner: runner
+        )
+
+        XCTAssertEqual(first, StaticAPIAuthProvider(bearerToken: "provider-token"))
+        XCTAssertEqual(second, StaticAPIAuthProvider(bearerToken: "provider-token"))
+    }
+
+    func testProviderCommandAuthZeroRefreshIntervalKeepsCachedTokenLikeRust() async throws {
+        let script = try ProviderAuthScript(tokens: ["provider-token", "next-token"])
+        let provider = try ModelProviderInfo(
+            name: "Provider",
+            auth: script.authConfig(refreshIntervalMilliseconds: 0)
+        )
+        let runner = ProviderAuthCommandRunner()
+
+        let first = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: provider,
+            commandRunner: runner
+        )
+        let second = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: provider,
+            commandRunner: runner
+        )
+
+        XCTAssertEqual(first, StaticAPIAuthProvider(bearerToken: "provider-token"))
+        XCTAssertEqual(second, StaticAPIAuthProvider(bearerToken: "provider-token"))
+    }
+
+    func testProviderCommandAuthFailuresReturnUnauthenticatedLikeRust() async throws {
+        let script = try ProviderAuthScript.failing()
+        let provider = try ModelProviderInfo(name: "Provider", auth: script.authConfig())
+
+        let resolved = try await APIAuthResolver.authProvider(
+            auth: nil,
+            provider: provider,
+            commandRunner: ProviderAuthCommandRunner()
+        )
+
+        XCTAssertEqual(resolved, StaticAPIAuthProvider())
+    }
+
+    func testProviderAuthCommandRunnerErrorsMatchRust() async throws {
+        let emptyScript = try ProviderAuthScript(tokens: ["  "])
+        await XCTAssertThrowsErrorAsync(
+            try await ProviderAuthCommandRunner.runProviderAuthCommand(emptyScript.authConfig())
+        ) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "provider auth command `./print-token.sh` produced an empty token"
+            )
+        }
+
+        let failingScript = try ProviderAuthScript.failing(stderr: "no token")
+        await XCTAssertThrowsErrorAsync(
+            try await ProviderAuthCommandRunner.runProviderAuthCommand(failingScript.authConfig())
+        ) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "provider auth command `./fail.sh` exited with status exit status: 1: no token"
+            )
+        }
+    }
 }
 
 private func tokenData(accessToken: String, accountID: String?) -> AuthTokenData {
@@ -161,4 +260,79 @@ private func tokenData(accessToken: String, accountID: String?) -> AuthTokenData
         refreshToken: "refresh-token",
         accountID: accountID
     )
+}
+
+private struct ProviderAuthScript {
+    let directory: URL
+    let command: String
+
+    init(tokens: [String]) throws {
+        self.directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-provider-auth-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        self.command = "./print-token.sh"
+        let tokenText = tokens.joined(separator: "\n") + "\n"
+        try tokenText.write(
+            to: directory.appendingPathComponent("tokens.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Self.writeExecutable(
+            """
+            #!/bin/sh
+            first_line=$(sed -n '1p' tokens.txt)
+            printf '%s\\n' "$first_line"
+            tail -n +2 tokens.txt > tokens.next
+            mv tokens.next tokens.txt
+            """,
+            to: directory.appendingPathComponent("print-token.sh")
+        )
+    }
+
+    static func failing(stderr: String = "") throws -> ProviderAuthScript {
+        let script = try ProviderAuthScript(tokens: ["unused"])
+        let stderrLine = stderr.isEmpty ? "" : "printf '%s\\n' '\(stderr)' >&2"
+        try writeExecutable(
+            """
+            #!/bin/sh
+            \(stderrLine)
+            exit 1
+            """,
+            to: script.directory.appendingPathComponent("fail.sh")
+        )
+        return ProviderAuthScript(directory: script.directory, command: "./fail.sh")
+    }
+
+    private init(directory: URL, command: String) {
+        self.directory = directory
+        self.command = command
+    }
+
+    func authConfig(refreshIntervalMilliseconds: UInt64 = 60_000) throws -> ModelProviderAuthInfo {
+        try ModelProviderAuthInfo(
+            command: command,
+            timeoutMilliseconds: 10_000,
+            refreshIntervalMilliseconds: refreshIntervalMilliseconds,
+            cwd: AbsolutePath(absolutePath: directory.path)
+        )
+    }
+
+    private static func writeExecutable(_ contents: String, to url: URL) throws {
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ verify: (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected error to be thrown", file: file, line: line)
+    } catch {
+        verify(error)
+    }
 }

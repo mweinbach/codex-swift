@@ -42,6 +42,39 @@ public enum APIAuthResolver {
 
         return StaticAPIAuthProvider()
     }
+
+    public static func authProvider(
+        auth: AuthDotJSON?,
+        provider: ModelProviderInfo,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        commandRunner: ProviderAuthCommandRunner
+    ) async throws -> StaticAPIAuthProvider {
+        if let apiKey = try provider.apiKey(environment: environment) {
+            return StaticAPIAuthProvider(bearerToken: apiKey)
+        }
+
+        if let token = provider.experimentalBearerToken {
+            return StaticAPIAuthProvider(bearerToken: token)
+        }
+
+        if let providerAuth = provider.auth,
+           let token = try? await commandRunner.resolveToken(config: providerAuth) {
+            return StaticAPIAuthProvider(bearerToken: token)
+        }
+
+        if let apiKey = auth?.openAIAPIKey {
+            return StaticAPIAuthProvider(bearerToken: apiKey)
+        }
+
+        if let tokens = auth?.tokens {
+            return StaticAPIAuthProvider(
+                bearerToken: tokens.accessToken,
+                accountID: tokens.accountID
+            )
+        }
+
+        return StaticAPIAuthProvider()
+    }
 }
 
 public enum APIAuthHeaders {

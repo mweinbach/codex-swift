@@ -147,6 +147,45 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(cache.models.map(\.slug), ["remote-model"])
     }
 
+    func testRawModelCatalogOnlineIfUncachedUsesProviderCommandAuthLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let remoteModel = minimalModelInfo(slug: "remote-model", priority: 0)
+        let responseBody = try JSONEncoder().encode(ModelsResponse(models: [remoteModel], etag: "body-etag"))
+        let capture = APIRequestCapture()
+        let transport = RecordingAPITransport { request in
+            await capture.append(request)
+            return URLSessionTransportResponse(statusCode: 200, body: responseBody)
+        }
+        let provider = try ModelProviderInfo(
+            name: "Corp",
+            baseURL: "https://corp.example/v1",
+            auth: ModelProviderAuthInfo(
+                command: "printf",
+                args: ["provider-token"],
+                timeoutMilliseconds: 10_000,
+                cwd: AbsolutePath.currentDirectory()
+            ),
+            wireAPI: .responses
+        )
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "corp", modelProviders: ["corp": provider]),
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "auth-json-key", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3",
+            commandAuthRunner: ProviderAuthCommandRunner(),
+            now: try parseDate("2026-05-08T12:00:00Z")
+        )
+
+        XCTAssertTrue(response.models.contains { $0.slug == "remote-model" })
+        let capturedRequest = await capture.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.url, "https://corp.example/v1/models?client_version=1.2.3")
+        XCTAssertEqual(request.headers["authorization"], "Bearer provider-token")
+    }
+
     func testRawModelCatalogOnlineIfUncachedFallsBackToBundledOnFetchFailure() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
