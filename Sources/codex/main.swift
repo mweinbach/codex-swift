@@ -818,7 +818,6 @@ private func runNonInteractiveExec(
             model: resolvedModel,
             effort: settings.modelReasoningEffort ?? modelFamily.defaultReasoningEffort,
             summary: settings.modelReasoningSummary ?? (modelFamily.supportsReasoningSummaries ? .auto : .none),
-            baseInstructions: prompt.baseInstructionsOverride,
             finalOutputJSONSchema: outputSchema,
             truncationPolicy: modelFamily.truncationPolicy
         ))

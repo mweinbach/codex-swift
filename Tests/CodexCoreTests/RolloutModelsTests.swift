@@ -237,7 +237,6 @@ final class RolloutModelsTests: XCTestCase {
             realtimeActive: true,
             effort: .high,
             summary: .detailed,
-            baseInstructions: "base",
             userInstructions: "user",
             developerInstructions: "dev",
             finalOutputJSONSchema: .object(["type": .string("object")]),
@@ -305,7 +304,6 @@ final class RolloutModelsTests: XCTestCase {
             "realtime_active": true,
             "effort": "high",
             "summary": "detailed",
-            "base_instructions": "base",
             "user_instructions": "user",
             "developer_instructions": "dev",
             "final_output_json_schema": [

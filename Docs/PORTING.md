@@ -357,7 +357,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/approvals.rs` Guardian assessment models
   - Guardian assessment status/risk/user-authorization/source enums, tagged assessment actions, network approval protocol aliases, event defaults, and denied-action retry payloads
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
-  - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines
+  - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines. Swift now matches Rust's split where `base_instructions` is persisted on `session_meta`, while `turn_context` carries user/developer instructions and omits base instructions.
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
   - conversation path response payloads, new/cleared/resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
 - `codex-rs/exec/src/lib.rs` resume target resolution

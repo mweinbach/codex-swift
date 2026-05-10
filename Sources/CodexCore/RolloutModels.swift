@@ -256,7 +256,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
     public let realtimeActive: Bool?
     public let effort: ReasoningEffort?
     public let summary: ReasoningSummary
-    public let baseInstructions: String?
     public let userInstructions: String?
     public let developerInstructions: String?
     public let finalOutputJSONSchema: JSONValue?
@@ -279,7 +278,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         case realtimeActive = "realtime_active"
         case effort
         case summary
-        case baseInstructions = "base_instructions"
         case userInstructions = "user_instructions"
         case developerInstructions = "developer_instructions"
         case finalOutputJSONSchema = "final_output_json_schema"
@@ -303,7 +301,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         realtimeActive: Bool? = nil,
         effort: ReasoningEffort? = nil,
         summary: ReasoningSummary,
-        baseInstructions: String? = nil,
         userInstructions: String? = nil,
         developerInstructions: String? = nil,
         finalOutputJSONSchema: JSONValue? = nil,
@@ -325,7 +322,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         self.realtimeActive = realtimeActive
         self.effort = effort
         self.summary = summary
-        self.baseInstructions = baseInstructions
         self.userInstructions = userInstructions
         self.developerInstructions = developerInstructions
         self.finalOutputJSONSchema = finalOutputJSONSchema
@@ -339,7 +335,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         model: String,
         effort: ReasoningEffort? = nil,
         summary: ReasoningSummary,
-        baseInstructions: String? = nil,
         userInstructions: String? = nil,
         developerInstructions: String? = nil,
         finalOutputJSONSchema: JSONValue? = nil,
@@ -362,7 +357,6 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
             realtimeActive: nil,
             effort: effort,
             summary: summary,
-            baseInstructions: baseInstructions,
             userInstructions: userInstructions,
             developerInstructions: developerInstructions,
             finalOutputJSONSchema: finalOutputJSONSchema,
