@@ -573,6 +573,106 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncExecServerParsesListenAndRemoteFlags() async {
+        var requests: [CodexCLI.ExecServerCommandRequest] = []
+
+        for arguments in [
+            ["exec-server"],
+            ["exec-server", "--listen", "stdio"],
+            ["exec-server", "--listen=ws://127.0.0.1:4500"],
+            ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-123"],
+            [
+                "exec-server",
+                "--remote=https://registry.example.test/",
+                "--executor-id=exec-123",
+                "--name",
+                "Local Executor"
+            ]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                execServerRunner: { request in
+                    requests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(requests, [
+            CodexCLI.ExecServerCommandRequest(action: .listen(url: defaultExecServerListenURL)),
+            CodexCLI.ExecServerCommandRequest(action: .listen(url: "stdio")),
+            CodexCLI.ExecServerCommandRequest(action: .listen(url: "ws://127.0.0.1:4500")),
+            CodexCLI.ExecServerCommandRequest(action: .remote(
+                baseURL: "https://registry.example.test",
+                executorID: "exec-123",
+                name: nil
+            )),
+            CodexCLI.ExecServerCommandRequest(action: .remote(
+                baseURL: "https://registry.example.test/",
+                executorID: "exec-123",
+                name: "Local Executor"
+            ))
+        ])
+    }
+
+    func testRunAsyncExecServerRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String, Int32)] = [
+            (
+                ["--remote", "ws://root.example.test", "exec-server"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex exec-server`",
+                1
+            ),
+            (
+                ["--remote-auth-token-env", "ROOT_TOKEN", "exec-server"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex exec-server`",
+                1
+            ),
+            (
+                ["exec-server", "--listen"],
+                "codex-swift: missing value for --listen",
+                64
+            ),
+            (
+                ["exec-server", "--remote", "https://registry.example.test"],
+                "codex-swift: --executor-id is required when --remote is set",
+                64
+            ),
+            (
+                ["exec-server", "--listen", "stdio", "--remote", "https://registry.example.test"],
+                "codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen",
+                64
+            ),
+            (
+                ["exec-server", "--bogus"],
+                "codex-swift: unsupported option for command 'exec-server': --bogus",
+                64
+            ),
+            (
+                ["exec-server", "extra"],
+                "codex-swift: unexpected argument for command 'exec-server': extra",
+                64
+            )
+        ]
+
+        for (arguments, expectedMessage, expectedExitCode) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                execServerRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncMcpServerDelegatesWithOverrides() async {
         var receivedRequest: CodexCLI.McpServerCommandRequest?
 
@@ -1018,8 +1118,7 @@ final class CommandSurfaceCLITests: XCTestCase {
             "mcp-server",
             "app-server",
             "debug",
-            "resume",
-            "exec-server"
+            "resume"
         ] {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(

@@ -55,6 +55,7 @@ let exitCode = await cli.runAsync(
     reviewRunner: runReviewCommand,
     resumeRunner: runResumeCommand,
     forkRunner: runForkCommand,
+    execServerRunner: runExecServerCommand,
     mcpServerRunner: runMcpServerCommand,
     appServerRunner: runAppServerCommand,
     appRunner: runAppCommand,
@@ -1262,6 +1263,27 @@ private func runForkCommand(_ request: CodexCLI.ForkCommandRequest) async throws
         )
     case .picker:
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+    }
+}
+
+private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    switch request.action {
+    case let .listen(url):
+        _ = try ExecServerListenURLParser.parse(url)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec-server \(url) transport runtime is not complete yet."
+        )
+    case let .remote(baseURL, executorID, name):
+        _ = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
+            baseURL: baseURL,
+            executorID: executorID,
+            name: name
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: exec-server remote executor runtime is not complete yet."
+        )
     }
 }
 

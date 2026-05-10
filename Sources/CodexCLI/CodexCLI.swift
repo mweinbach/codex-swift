@@ -326,6 +326,19 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public enum ExecServerCommandAction: Equatable, Sendable {
+        case listen(url: String)
+        case remote(baseURL: String, executorID: String, name: String?)
+    }
+
+    public struct ExecServerCommandRequest: Equatable, Sendable {
+        public let action: ExecServerCommandAction
+
+        public init(action: ExecServerCommandAction) {
+            self.action = action
+        }
+    }
+
     public struct McpServerCommandRequest: Equatable, Sendable {
         public let configOverrides: CliConfigOverrides
 
@@ -518,6 +531,7 @@ public struct CodexCLI: Sendable {
     public typealias ReviewCommandRunner = (ReviewCommandRequest) async throws -> CommandExecutionResult
     public typealias ResumeCommandRunner = (ResumeCommandRequest) async throws -> CommandExecutionResult
     public typealias ForkCommandRunner = (ForkCommandRequest) async throws -> CommandExecutionResult
+    public typealias ExecServerCommandRunner = (ExecServerCommandRequest) async throws -> CommandExecutionResult
     public typealias McpServerCommandRunner = (McpServerCommandRequest) async throws -> CommandExecutionResult
     public typealias AppServerCommandRunner = (AppServerCommandRequest) async throws -> CommandExecutionResult
     public typealias AppCommandRunner = (AppCommandRequest) async throws -> CommandExecutionResult
@@ -646,6 +660,7 @@ public struct CodexCLI: Sendable {
         reviewRunner: ReviewCommandRunner? = nil,
         resumeRunner: ResumeCommandRunner? = nil,
         forkRunner: ForkCommandRunner? = nil,
+        execServerRunner: ExecServerCommandRunner? = nil,
         mcpServerRunner: McpServerCommandRunner? = nil,
         appServerRunner: AppServerCommandRunner? = nil,
         appRunner: AppCommandRunner? = nil,
@@ -820,6 +835,26 @@ public struct CodexCLI: Sendable {
             case let .success(request):
                 do {
                     let result = try await forkRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
+        case let .command(spec, _) where spec.name == "exec-server":
+            guard let execServerRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            switch parseExecServerCommand(rawArguments, rootArguments: arguments) {
+            case let .success(request):
+                do {
+                    let result = try await execServerRunner(request)
                     emit(result, stdout: stdout, stderr: stderr)
                     return result.exitCode
                 } catch {
@@ -1209,7 +1244,10 @@ public struct CodexCLI: Sendable {
             "--rules",
             "-r",
             "--ref",
-            "--sparse"
+            "--sparse",
+            "--listen",
+            "--executor-id",
+            "--name"
         ].contains(argument)
     }
 
@@ -2150,6 +2188,99 @@ public struct CodexCLI: Sendable {
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
         }
+    }
+
+    private func parseExecServerCommand(
+        _ arguments: [String],
+        rootArguments: [String]
+    ) -> ParseResult<ExecServerCommandRequest> {
+        if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "exec-server", in: rootArguments) {
+            return .failure(
+                "`--remote \(remote)` is only supported for interactive TUI commands, not `codex exec-server`",
+                1
+            )
+        }
+        if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: "exec-server", in: rootArguments) != nil {
+            return .failure(
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex exec-server`",
+                1
+            )
+        }
+
+        var listen: String?
+        var remote: String?
+        var executorID: String?
+        var name: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--listen", "--remote", "--executor-id", "--name":
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--listen":
+                    guard remote == nil else {
+                        return .failure("codex-swift: argument conflict for command 'exec-server': --listen conflicts with --remote", 64)
+                    }
+                    listen = value
+                case "--remote":
+                    guard listen == nil else {
+                        return .failure("codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen", 64)
+                    }
+                    remote = value
+                case "--executor-id":
+                    executorID = value
+                case "--name":
+                    name = value
+                default:
+                    break
+                }
+                index += 2
+            default:
+                if argument.hasPrefix("--listen=") {
+                    guard remote == nil else {
+                        return .failure("codex-swift: argument conflict for command 'exec-server': --listen conflicts with --remote", 64)
+                    }
+                    listen = String(argument.dropFirst("--listen=".count))
+                    index += 1
+                } else if argument.hasPrefix("--remote=") {
+                    guard listen == nil else {
+                        return .failure("codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen", 64)
+                    }
+                    remote = String(argument.dropFirst("--remote=".count))
+                    index += 1
+                } else if argument.hasPrefix("--executor-id=") {
+                    executorID = String(argument.dropFirst("--executor-id=".count))
+                    index += 1
+                } else if argument.hasPrefix("--name=") {
+                    name = String(argument.dropFirst("--name=".count))
+                    index += 1
+                } else if argument.hasPrefix("-") {
+                    return .failure("codex-swift: unsupported option for command 'exec-server': \(argument)", 64)
+                } else {
+                    return .failure("codex-swift: unexpected argument for command 'exec-server': \(argument)", 64)
+                }
+            }
+        }
+
+        if let remote {
+            guard let executorID else {
+                return .failure("codex-swift: --executor-id is required when --remote is set", 64)
+            }
+            return .success(ExecServerCommandRequest(action: .remote(
+                baseURL: remote,
+                executorID: executorID,
+                name: name
+            )))
+        }
+
+        return .success(ExecServerCommandRequest(action: .listen(
+            url: listen ?? defaultExecServerListenURL
+        )))
     }
 
     private func parseMcpServerCommand(
