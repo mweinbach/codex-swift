@@ -20583,6 +20583,8 @@ private struct AppServerFSWatchEntry: Equatable {
     let exists: Bool
     let isDirectory: Bool
     let type: String
+    let deviceID: UInt64?
+    let fileID: UInt64?
     let modifiedAtMs: Int64
     let size: UInt64
     let linkDestination: String?
@@ -20699,6 +20701,8 @@ private final class AppServerFSWatch: @unchecked Sendable {
                 exists: false,
                 isDirectory: false,
                 type: "",
+                deviceID: nil,
+                fileID: nil,
                 modifiedAtMs: 0,
                 size: 0,
                 linkDestination: nil
@@ -20706,6 +20710,8 @@ private final class AppServerFSWatch: @unchecked Sendable {
         }
         let modifiedAt = attributes[.modificationDate] as? Date
         let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let deviceID = (attributes[.systemNumber] as? NSNumber)?.uint64Value
+        let fileID = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
         let linkDestination = type == .typeSymbolicLink
             ? try? fileManager.destinationOfSymbolicLink(atPath: path)
             : nil
@@ -20713,6 +20719,8 @@ private final class AppServerFSWatch: @unchecked Sendable {
             exists: true,
             isDirectory: type == .typeDirectory,
             type: type.rawValue,
+            deviceID: deviceID,
+            fileID: fileID,
             modifiedAtMs: CodexAppServer.millisecondsSinceEpoch(modifiedAt),
             size: size,
             linkDestination: linkDestination

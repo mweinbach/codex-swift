@@ -6188,6 +6188,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["changedPaths"] as? [String], [watched.path])
     }
 
+    func testFsWatchReportsAtomicReplaceWhenSizeAndModifiedDateMatch() async throws {
+        let temp = try TemporaryDirectory()
+        let watched = temp.url.appendingPathComponent("HEAD", isDirectory: false)
+        let replacement = temp.url.appendingPathComponent("HEAD.tmp", isDirectory: false)
+        let stableModifiedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try "main".write(to: watched, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: stableModifiedAt], ofItemAtPath: watched.path)
+
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        let watch = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fs/watch","params":{"watchId":"watch-head","path":"\#(watched.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((watch["result"] as? [String: Any])?["path"] as? String, watched.path)
+
+        try "next".write(to: replacement, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: stableModifiedAt], ofItemAtPath: replacement.path)
+        _ = try FileManager.default.replaceItemAt(watched, withItemAt: replacement)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "fs/changed")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["watchId"] as? String, "watch-head")
+        XCTAssertEqual(params["changedPaths"] as? [String], [watched.path])
+    }
+
     func testFsWatchAndUnwatchRejectMalformedParamsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let watched = temp.url.appendingPathComponent("FETCH_HEAD", isDirectory: false)
