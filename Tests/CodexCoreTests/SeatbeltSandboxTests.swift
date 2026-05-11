@@ -95,6 +95,79 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertTrue(args[1].contains(#"(allow network-outbound)"#))
     }
 
+    func testAllowUnixSocketsAddsRustSeatbeltPolicyAndParams() throws {
+        let cwd = try AbsolutePath(absolutePath: FileManager.default.currentDirectoryPath)
+        let tempDir = try SeatbeltSandboxTemporaryDirectory()
+        let socketRoot = tempDir.url.appendingPathComponent("codex-browser-use", isDirectory: true)
+        try FileManager.default.createDirectory(at: socketRoot, withIntermediateDirectories: true)
+
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            sandboxPolicy: .readOnly,
+            sandboxPolicyCwd: cwd,
+            allowUnixSockets: [socketRoot.path],
+            environment: [:]
+        )
+
+        let policyText = args[1]
+        XCTAssertTrue(policyText.contains("; allow unix domain sockets for local IPC"))
+        XCTAssertTrue(policyText.contains("(allow system-socket (socket-domain AF_UNIX))"))
+        XCTAssertTrue(
+            policyText.contains(#"(allow network-bind (local unix-socket (subpath (param "UNIX_SOCKET_PATH_0"))))"#)
+        )
+        XCTAssertTrue(
+            policyText.contains(#"(allow network-outbound (remote unix-socket (subpath (param "UNIX_SOCKET_PATH_0"))))"#)
+        )
+        XCTAssertFalse(policyText.contains("(allow network-outbound (remote unix-socket))"))
+        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(socketRoot.path)"))
+    }
+
+    func testAllowUnixSocketsUseStableSortedDeduplicatedParamNames() throws {
+        let cwd = try AbsolutePath(absolutePath: FileManager.default.currentDirectoryPath)
+        let tempDir = try SeatbeltSandboxTemporaryDirectory()
+        let aSocketRoot = tempDir.url.appendingPathComponent("a.sock", isDirectory: true)
+        let bSocketRoot = tempDir.url.appendingPathComponent("b.sock", isDirectory: true)
+        try FileManager.default.createDirectory(at: aSocketRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bSocketRoot, withIntermediateDirectories: true)
+
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            sandboxPolicy: .readOnly,
+            sandboxPolicyCwd: cwd,
+            allowUnixSockets: [bSocketRoot.path, aSocketRoot.path, aSocketRoot.path, "relative.sock"],
+            environment: [:]
+        )
+
+        let unixSocketParams = args.filter { $0.hasPrefix("-DUNIX_SOCKET_PATH_") }
+        XCTAssertEqual(unixSocketParams, [
+            "-DUNIX_SOCKET_PATH_0=\(aSocketRoot.path)",
+            "-DUNIX_SOCKET_PATH_1=\(bSocketRoot.path)"
+        ])
+    }
+
+    func testFullNetworkStillIncludesExplicitUnixSocketAllowlist() throws {
+        let cwd = try AbsolutePath(absolutePath: FileManager.default.currentDirectoryPath)
+        let tempDir = try SeatbeltSandboxTemporaryDirectory()
+        let socketRoot = tempDir.url.appendingPathComponent("codex-browser-use", isDirectory: true)
+        try FileManager.default.createDirectory(at: socketRoot, withIntermediateDirectories: true)
+
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            sandboxPolicy: .readOnlyWithNetworkAccess,
+            sandboxPolicyCwd: cwd,
+            allowUnixSockets: [socketRoot.path],
+            environment: [:]
+        )
+
+        let policyText = args[1]
+        XCTAssertTrue(policyText.contains("(allow network-outbound)"))
+        XCTAssertTrue(policyText.contains("(allow network-inbound)"))
+        XCTAssertTrue(
+            policyText.contains(#"(allow network-outbound (remote unix-socket (subpath (param "UNIX_SOCKET_PATH_0"))))"#)
+        )
+        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(socketRoot.path)"))
+    }
+
     func testFullAutoSelectsWorkspaceWritePolicy() {
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: false), .readOnly)
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: true), .newWorkspaceWritePolicy())

@@ -1277,16 +1277,11 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
             )
         }
 
-        guard allowUnixSockets.isEmpty else {
-            return CodexCLI.CommandExecutionResult(
-                exitCode: 78,
-                stderrMessage: "codex-swift: sandbox Unix socket allowlist runtime is not complete yet."
-            )
-        }
         let exitCode = try SeatbeltSandbox.run(
             command: command,
             sandboxPolicy: sandboxConfiguration.sandboxPolicy,
             cwd: sandboxConfiguration.cwd,
+            allowUnixSockets: allowUnixSockets,
             logDenials: logDenials
         )
         return CodexCLI.CommandExecutionResult(exitCode: exitCode)

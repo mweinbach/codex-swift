@@ -46,6 +46,7 @@ public enum SeatbeltSandbox {
         command: [String],
         sandboxPolicy policy: SandboxPolicy,
         cwd: URL,
+        allowUnixSockets: [String] = [],
         environment: [String: String] = ProcessInfo.processInfo.environment,
         executablePath: String = Self.executablePath,
         logDenials: Bool = false,
@@ -59,6 +60,7 @@ public enum SeatbeltSandbox {
             command: command,
             sandboxPolicy: policy,
             sandboxPolicyCwd: absoluteCwd,
+            allowUnixSockets: allowUnixSockets,
             environment: environment,
             fileManager: fileManager
         )
@@ -96,6 +98,7 @@ public enum SeatbeltSandbox {
         command: [String],
         sandboxPolicy: SandboxPolicy,
         sandboxPolicyCwd: AbsolutePath,
+        allowUnixSockets: [String] = [],
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
     ) -> [String] {
@@ -109,14 +112,18 @@ public enum SeatbeltSandbox {
             ? "; allow read-only file operations\n(allow file-read*)"
             : ""
         let networkPolicy = sandboxPolicy.hasFullNetworkAccess ? macOSSeatbeltNetworkPolicy : ""
+        let (unixSocketPolicy, unixSocketParams) = unixSocketPolicyAndParams(
+            allowUnixSockets: allowUnixSockets
+        )
         let fullPolicy = """
         \(macOSSeatbeltBasePolicy)
         \(fileReadPolicy)
         \(fileWritePolicy)
         \(networkPolicy)
+        \(unixSocketPolicy)
         """
 
-        let dirParams = fileWriteDirParams
+        let dirParams = fileWriteDirParams + unixSocketParams
         var args = ["-p", fullPolicy]
         args.append(contentsOf: dirParams.map { key, value in "-D\(key)=\(value)" })
         args.append("--")
@@ -173,6 +180,34 @@ public enum SeatbeltSandbox {
             return ("", [])
         }
         return ("(allow file-write*\n\(folderPolicies.joined(separator: " "))\n)", params)
+    }
+
+    private static func unixSocketPolicyAndParams(allowUnixSockets: [String]) -> (String, [(String, String)]) {
+        let canonicalSocketPaths = Set(
+            allowUnixSockets.compactMap { socketPath -> String? in
+                guard socketPath.hasPrefix("/") else {
+                    return nil
+                }
+                return canonicalPath(socketPath)
+            }
+        ).sorted()
+
+        guard !canonicalSocketPaths.isEmpty else {
+            return ("", [])
+        }
+
+        var policyLines = [
+            "; allow unix domain sockets for local IPC",
+            "(allow system-socket (socket-domain AF_UNIX))"
+        ]
+        var params: [(String, String)] = []
+        for (index, socketPath) in canonicalSocketPaths.enumerated() {
+            let param = "UNIX_SOCKET_PATH_\(index)"
+            params.append((param, socketPath))
+            policyLines.append(#"(allow network-bind (local unix-socket (subpath (param "\#(param)"))))"#)
+            policyLines.append(#"(allow network-outbound (remote unix-socket (subpath (param "\#(param)"))))"#)
+        }
+        return (policyLines.joined(separator: "\n") + "\n", params)
     }
 
     private static func canonicalPath(_ path: String) -> String {
