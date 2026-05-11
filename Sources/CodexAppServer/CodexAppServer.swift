@@ -3394,18 +3394,16 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        let rawItems = try rustRequiredArrayParam(params?["items"], field: "items")
         let threadID: ConversationId
         do {
             threadID = try ConversationId(string: rawThreadID)
         } catch {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
-        guard let rawItems = params?["items"] as? [Any] else {
-            throw AppServerError.invalidRequest("missing items")
-        }
+
+        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
         guard !rawItems.isEmpty else {
             throw AppServerError.invalidRequest("items must not be empty")
         }
@@ -3424,7 +3422,6 @@ public enum CodexAppServer {
             }
         }
 
-        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
         let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
         try recorder.recordItems(items.map { .responseItem($0) })
         try recorder.shutdown()
@@ -17767,6 +17764,19 @@ public enum CodexAppServer {
             }
             return string
         }
+    }
+
+    private static func rustRequiredArrayParam(_ value: Any?, field: String) throws -> [Any] {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
+        }
+        guard !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        guard let values = value as? [Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return values
     }
 
     private static func rustRequiredStringArrayParam(_ value: Any?, missingMessage: String) throws -> [String] {

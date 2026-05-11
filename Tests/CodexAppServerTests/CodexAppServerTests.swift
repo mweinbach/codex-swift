@@ -5268,10 +5268,55 @@ final class CodexAppServerTests: XCTestCase {
 
     func testThreadInjectItemsRejectsEmptyInvalidAndMissingThread() throws {
         let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T10-30-00",
+            timestamp: "2025-01-06T10:30:00Z",
+            preview: "Inject validation thread",
+            provider: "mock_provider"
+        )
         let missingID = UUID().uuidString.lowercased()
 
+        let missingThreadID = try appServerResponse(
+            #"{"id":1,"method":"thread/inject_items","params":{"items":[]}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let integerThreadID = try appServerResponse(
+            #"{"id":2,"method":"thread/inject_items","params":{"threadId":1,"items":[]}}"#,
+            codexHome: temp.url
+        )
+        let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
+        XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerThreadIDError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let missingItems = try appServerResponse(
+            #"{"id":3,"method":"thread/inject_items","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingItemsError = try XCTUnwrap(missingItems["error"] as? [String: Any])
+        XCTAssertEqual(missingItemsError["code"] as? Int, -32600)
+        XCTAssertEqual(missingItemsError["message"] as? String, "missing field `items`")
+
+        let stringItems = try appServerResponse(
+            #"{"id":4,"method":"thread/inject_items","params":{"threadId":"\#(threadID)","items":"bad"}}"#,
+            codexHome: temp.url
+        )
+        let stringItemsError = try XCTUnwrap(stringItems["error"] as? [String: Any])
+        XCTAssertEqual(stringItemsError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            stringItemsError["message"] as? String,
+            #"Invalid request: invalid type: string "bad", expected a sequence"#
+        )
+
         let empty = try appServerResponse(
-            #"{"id":1,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[]}}"#,
+            #"{"id":5,"method":"thread/inject_items","params":{"threadId":"\#(threadID)","items":[]}}"#,
             codexHome: temp.url
         )
         let emptyError = try XCTUnwrap(empty["error"] as? [String: Any])
@@ -5279,7 +5324,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(emptyError["message"] as? String, "items must not be empty")
 
         let invalid = try appServerResponse(
-            #"{"id":2,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[{"role":"assistant"}]}}"#,
+            #"{"id":6,"method":"thread/inject_items","params":{"threadId":"\#(threadID)","items":[{"role":"assistant"}]}}"#,
             codexHome: temp.url
         )
         let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
@@ -5287,7 +5332,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((invalidError["message"] as? String)?.hasPrefix("items[0] is not a valid response item:") == true)
 
         let missing = try appServerResponse(
-            #"{"id":3,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid but missing thread"}]}]}}"#,
+            #"{"id":7,"method":"thread/inject_items","params":{"threadId":"\#(missingID)","items":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid but missing thread"}]}]}}"#,
             codexHome: temp.url
         )
         let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
