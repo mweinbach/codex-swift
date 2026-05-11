@@ -8701,6 +8701,53 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(uninstalledSummary["installed"] as? Bool, false)
     }
 
+    func testPluginInstallAndUninstallQueueMcpRefreshForLoadedThreads() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        [mcp_servers.docs]
+        command = "docs-install"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"plugin/install","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#.utf8
+        )))
+
+        var refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(installServers) = refresh.mcpServers,
+              case let .object(installDocs)? = installServers["docs"]
+        else {
+            return XCTFail("expected install MCP refresh config")
+        }
+        XCTAssertEqual(installDocs["command"], .string("docs-install"))
+
+        try """
+        [mcp_servers.docs]
+        command = "docs-uninstall"
+
+        [plugins."weather@debug"]
+        enabled = true
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        _ = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"plugin/uninstall","params":{"pluginId":"weather@debug"}}"#.utf8
+        )))
+
+        refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(uninstallServers) = refresh.mcpServers,
+              case let .object(uninstallDocs)? = uninstallServers["docs"]
+        else {
+            return XCTFail("expected uninstall MCP refresh config")
+        }
+        XCTAssertEqual(uninstallDocs["command"], .string("docs-uninstall"))
+    }
+
     func testPluginInstallReturnsDirectoryAppsNeedingAuth() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)

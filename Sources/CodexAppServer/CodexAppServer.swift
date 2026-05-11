@@ -11072,7 +11072,7 @@ public enum CodexAppServer {
         return [:]
     }
 
-    private static func mcpServerRefreshConfig(runtimeConfig: CodexRuntimeConfig) -> McpServerRefreshConfig {
+    fileprivate static func mcpServerRefreshConfig(runtimeConfig: CodexRuntimeConfig) -> McpServerRefreshConfig {
         McpServerRefreshConfig(
             mcpServers: mcpServersRefreshJSONValue(runtimeConfig.mcpServers),
             mcpOAuthCredentialsStoreMode: .string(runtimeConfig.mcpOAuthCredentialsStoreMode.rawValue)
@@ -20810,6 +20810,29 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
+    private func queueBestEffortMcpServerRefresh() {
+        let threadIDs = listLoadedThreadIDs()
+        guard !threadIDs.isEmpty else {
+            return
+        }
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                overrides: configuration.cliConfigOverrides,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            return
+        }
+        let refreshConfig = CodexAppServer.mcpServerRefreshConfig(runtimeConfig: runtimeConfig)
+        for threadID in threadIDs {
+            try? queueMcpServerRefresh(threadID: threadID, config: refreshConfig)
+        }
+    }
+
     func pendingMcpServerRefreshConfig(threadID: String) throws -> McpServerRefreshConfig? {
         let manager = threadStateManager
         return try CodexAppServer.runAsyncBlocking {
@@ -21823,11 +21846,13 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.pluginInstallResult(params: params, configuration: configuration)
                     )
+                    queueBestEffortMcpServerRefresh()
                 case "plugin/uninstall":
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginUninstallResult(params: params, configuration: configuration)
                     )
+                    queueBestEffortMcpServerRefresh()
                 case "marketplace/add":
                     response = CodexAppServer.responseObject(
                         id: id,
