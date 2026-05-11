@@ -2552,7 +2552,7 @@ private struct ParsedCodexConfigToml {
             try merge(managedConfig.managedConfig)
         }
         if let managedConfigFromMDM = layers.managedConfigFromMDM {
-            try merge(managedConfigFromMDM)
+            try merge(managedConfigFromMDM.managedConfig)
         }
     }
 

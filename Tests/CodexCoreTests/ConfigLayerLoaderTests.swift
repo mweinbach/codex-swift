@@ -140,6 +140,8 @@ final class ConfigLayerLoaderTests: XCTestCase {
 
     func testManagedPreferencesBase64DecodesTomlTable() throws {
         let payload = """
+        # managed profile
+
         [nested]
         value = "managed"
         enabled = false
@@ -155,7 +157,19 @@ final class ConfigLayerLoaderTests: XCTestCase {
                 ])
             ])
         )
+        let layer = try CodexConfigLayerLoader.parseManagedPreferencesBase64Layer(encoded)
+        XCTAssertEqual(layer.rawToml, payload)
+        XCTAssertEqual(
+            layer.managedConfig,
+            .table([
+                "nested": .table([
+                    "value": .string("managed"),
+                    "enabled": .bool(false)
+                ])
+            ])
+        )
         XCTAssertNil(try CodexConfigLayerLoader.loadManagedAdminConfigLayer(overrideBase64: "   "))
+        XCTAssertNil(try CodexConfigLayerLoader.loadManagedAdminConfig(overrideBase64: "   "))
     }
 
     func testLayerStackMergesManagedConfigAboveCLIAndUser() throws {
@@ -266,6 +280,8 @@ final class ConfigLayerLoaderTests: XCTestCase {
             encoding: .utf8
         )
         let managedPreferences = Data("""
+        experimental_instructions_file = "./managed.md"
+
         [nested]
         value = "mdm"
         flag = false
@@ -284,6 +300,7 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertEqual(
             stack.effectiveConfig(),
             .table([
+                "experimental_instructions_file": .string(home.appendingPathComponent("managed.md").path),
                 "nested": .table([
                     "value": .string("mdm"),
                     "flag": .bool(false)
@@ -291,6 +308,13 @@ final class ConfigLayerLoaderTests: XCTestCase {
             ])
         )
         XCTAssertEqual(stack.layersHighToLow().first?.name, .legacyManagedConfigTomlFromMdm)
+        XCTAssertEqual(stack.layersHighToLow().first?.rawToml, """
+        experimental_instructions_file = "./managed.md"
+
+        [nested]
+        value = "mdm"
+        flag = false
+        """)
     }
 
     func testThreadConfigSourceTranslatesSessionToSessionFlagsLayerLikeRust() throws {

@@ -147,18 +147,28 @@ public struct ConfigLayer: Equatable, Codable, Sendable {
 public struct ConfigLayerEntry: Equatable, Sendable {
     public var name: ConfigLayerSource
     public var config: ConfigValue
+    public var rawToml: String?
     public var version: String
 
     public init(name: ConfigLayerSource, config: ConfigValue) {
         self.name = name
         self.config = config
+        rawToml = nil
         version = ConfigFingerprint.version(for: config)
     }
 
     public init(name: ConfigLayerSource, config: ConfigValue, version: String) {
         self.name = name
         self.config = config
+        rawToml = nil
         self.version = version
+    }
+
+    public init(name: ConfigLayerSource, config: ConfigValue, rawToml: String) {
+        self.name = name
+        self.config = config
+        self.rawToml = rawToml
+        version = ConfigFingerprint.version(for: config)
     }
 
     public func metadata() -> ConfigLayerMetadata {

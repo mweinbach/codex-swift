@@ -256,7 +256,10 @@ final class ExecServerTests: XCTestCase {
         _ = try await server.receiveLine(#"{"id":1,"method":"initialize","params":{"clientName":"client"}}"#)
         _ = try await server.receiveLine(#"{"method":"initialized","params":{}}"#)
 
-        let responseLines = try await server.receiveLine(#"{"id":2,"method":"http/request","params":{"method":"GET","url":"https://example.test/mcp","requestId":"stream-stdio","streamResponse":true}}"#)
+        let responseLines = try await server.receiveLine(
+            #"{"id":2,"method":"http/request","params":{"method":"GET","url":"https://example.test/mcp","requestId":"stream-stdio","streamResponse":true}}"#,
+            drainMode: .directOnly
+        )
 
         XCTAssertEqual(responseLines.count, 1)
         XCTAssertEqual(try decodeLine(responseLines[0]), ExecServerRPC.response(

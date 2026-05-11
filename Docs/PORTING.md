@@ -47,6 +47,7 @@ Source baseline inspected for this scaffold:
   - lock-backed LRU helper, fallible get-or-insert behavior, SHA-1 content digest helper, and local-image content cache integration
 - `codex-rs/core/src/config_loader/layer_io.rs` and `codex-rs/core/src/config_loader/macos.rs`
   - legacy managed-config file loading, `CODEX_MANAGED_CONFIG_PATH`, managed preferences base64 parsing, config-layer stack loading, project-layer inclusion, and managed-layer precedence over CLI/user/project config
+  - preserved Rust's raw TOML sidecar for MDM-managed config layers, kept it off the public layer JSON projection, and resolved MDM-managed relative config path fields against `codex_home` before inserting the layer
 - `codex-rs/core/src/features.rs`
   - known feature keys, stages, defaults, `[features]` and `[profiles.<name>.features]` config state, and `--enable`/`--disable` override generation
 - `codex-rs/protocol/src/conversation_id.rs`

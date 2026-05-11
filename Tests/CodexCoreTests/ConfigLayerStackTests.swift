@@ -49,6 +49,15 @@ final class ConfigLayerStackTests: XCTestCase {
                 version: entry.version
             )
         )
+
+        let managedEntry = ConfigLayerEntry(
+            name: .legacyManagedConfigTomlFromMdm,
+            config: .table(["model": .string("gpt-5")]),
+            rawToml: "# managed profile\nmodel = \"gpt-5\"\n"
+        )
+        XCTAssertEqual(managedEntry.rawToml, "# managed profile\nmodel = \"gpt-5\"\n")
+        XCTAssertNil(ConfigLayerEntry(name: .sessionFlags, config: .table([:])).rawToml)
+
         try XCTAssertJSONObjectEqual(
             entry.asLayer(),
             [

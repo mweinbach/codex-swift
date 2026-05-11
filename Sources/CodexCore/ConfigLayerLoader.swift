@@ -34,11 +34,21 @@ public struct ManagedConfigFromFile: Equatable, Sendable {
 
 public struct LoadedConfigLayers: Equatable, Sendable {
     public var managedConfig: ManagedConfigFromFile?
-    public var managedConfigFromMDM: ConfigValue?
+    public var managedConfigFromMDM: ManagedConfigFromMDM?
 
-    public init(managedConfig: ManagedConfigFromFile? = nil, managedConfigFromMDM: ConfigValue? = nil) {
+    public init(managedConfig: ManagedConfigFromFile? = nil, managedConfigFromMDM: ManagedConfigFromMDM? = nil) {
         self.managedConfig = managedConfig
         self.managedConfigFromMDM = managedConfigFromMDM
+    }
+}
+
+public struct ManagedConfigFromMDM: Equatable, Sendable {
+    public var managedConfig: ConfigValue
+    public var rawToml: String
+
+    public init(managedConfig: ConfigValue, rawToml: String) {
+        self.managedConfig = managedConfig
+        self.rawToml = rawToml
     }
 }
 
@@ -108,7 +118,7 @@ public enum CodexConfigLayerLoader {
             ManagedConfigFromFile(managedConfig: $0, file: managedConfigPath)
         }
 
-        let managedPreferences = try loadManagedAdminConfigLayer(
+        let managedPreferences = try loadManagedAdminConfig(
             overrideBase64: overrides.managedPreferencesBase64
         )
 
@@ -205,9 +215,14 @@ public enum CodexConfigLayerLoader {
         }
 
         if let managedConfigFromMDM = loadedConfigLayers.managedConfigFromMDM {
+            let managedConfig = try resolveRelativePaths(
+                in: managedConfigFromMDM.managedConfig,
+                baseDirectory: codexHome
+            )
             layers.append(ConfigLayerEntry(
                 name: .legacyManagedConfigTomlFromMdm,
-                config: managedConfigFromMDM
+                config: managedConfig,
+                rawToml: managedConfigFromMDM.rawToml
             ))
         }
 
@@ -253,9 +268,13 @@ public enum CodexConfigLayerLoader {
     }
 
     public static func loadManagedAdminConfigLayer(overrideBase64: String?) throws -> ConfigValue? {
+        try loadManagedAdminConfig(overrideBase64: overrideBase64)?.managedConfig
+    }
+
+    public static func loadManagedAdminConfig(overrideBase64: String?) throws -> ManagedConfigFromMDM? {
         if let overrideBase64 {
             let trimmed = overrideBase64.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : try parseManagedPreferencesBase64(trimmed)
+            return trimmed.isEmpty ? nil : try parseManagedPreferencesBase64Layer(trimmed)
         }
 
         guard let encoded = UserDefaults(suiteName: managedPreferencesApplicationID)?
@@ -265,10 +284,14 @@ public enum CodexConfigLayerLoader {
         else {
             return nil
         }
-        return try parseManagedPreferencesBase64(encoded)
+        return try parseManagedPreferencesBase64Layer(encoded)
     }
 
     public static func parseManagedPreferencesBase64(_ encoded: String) throws -> ConfigValue {
+        try parseManagedPreferencesBase64Layer(encoded).managedConfig
+    }
+
+    public static func parseManagedPreferencesBase64Layer(_ encoded: String) throws -> ManagedConfigFromMDM {
         guard let decoded = Data(base64Encoded: encoded) else {
             throw ConfigLayerLoadError.invalidData("Failed to decode managed preferences as base64")
         }
@@ -286,7 +309,7 @@ public enum CodexConfigLayerLoader {
         guard case .table = value else {
             throw ConfigLayerLoadError.invalidData("managed preferences root must be a table")
         }
-        return value
+        return ManagedConfigFromMDM(managedConfig: value, rawToml: decodedString)
     }
 
     public static func loadRequirementsToml(
@@ -323,7 +346,7 @@ public enum CodexConfigLayerLoader {
         loadedConfigLayers: LoadedConfigLayers
     ) throws {
         for config in [
-            loadedConfigLayers.managedConfigFromMDM,
+            loadedConfigLayers.managedConfigFromMDM?.managedConfig,
             loadedConfigLayers.managedConfig.map(\.managedConfig)
         ].compactMap({ $0 }) {
             requirementsToml.mergeUnsetFields(from: try legacyRequirements(from: config))
@@ -364,7 +387,7 @@ public enum CodexConfigLayerLoader {
     ]
 
     private static func resolveConfigPath(_ path: String, baseDirectory: URL) throws -> String {
-        if path.hasPrefix("/") {
+        if path.hasPrefix("/") || path.hasPrefix("~/") {
             return try AbsolutePath(absolutePath: path).path
         }
         return try AbsolutePath.resolve(path, against: baseDirectory.standardizedFileURL.path).path
