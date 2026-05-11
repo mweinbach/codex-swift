@@ -1259,6 +1259,31 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.memoryTool))
     }
 
+    func testRuntimeMcpConfigIncludesBuiltinMemoriesWhenFeatureFlagsEnableIt() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features]
+        builtin_mcp = true
+        memories = true
+
+        [mcp_servers.memories]
+        command = "user-memories"
+
+        [mcp_servers.docs]
+        command = "docs-mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        let mcpConfig = config.runtimeMcpConfig
+
+        XCTAssertEqual(mcpConfig.builtinMcpServers, [.memories])
+        XCTAssertNil(mcpConfig.configuredMcpServers[memoriesMcpServerName])
+        XCTAssertEqual(
+            mcpConfig.configuredMcpServers["docs"],
+            McpServerConfig(transport: .stdio(command: "docs-mcp", args: [], env: nil, envVars: [], cwd: nil))
+        )
+    }
+
     func testWebSearchModePrefersProfileOverLegacyFlags() throws {
         let dir = try CoreTemporaryDirectory()
         try """

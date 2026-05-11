@@ -134,6 +134,20 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelAutoCompactTokenLimit: Int64?
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
+    public var runtimeMcpConfig: RuntimeMcpConfig {
+        let builtinMcpServers = enabledBuiltinMcpServers(options: BuiltinMcpServerOptions(
+            memoriesEnabled: features.isEnabled(.builtInMcp) && features.isEnabled(.memoryTool)
+        ))
+        var configuredMcpServers = mcpServers
+        for builtinServer in builtinMcpServers {
+            configuredMcpServers.removeValue(forKey: builtinServer.name)
+        }
+        return RuntimeMcpConfig(
+            configuredMcpServers: configuredMcpServers,
+            builtinMcpServers: builtinMcpServers
+        )
+    }
+
     public init(
         model: String? = nil,
         modelProvider: String? = nil,
