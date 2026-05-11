@@ -5736,8 +5736,8 @@ public enum CodexAppServer {
         guard params?["pluginPath"] != nil else {
             throw AppServerError.invalidParams("missing field `pluginPath`")
         }
-        let pluginPath = URL(fileURLWithPath: try absolutePathParam(params?["pluginPath"], name: "pluginPath"))
-        let remotePluginID = stringParam(params?["remotePluginId"])
+        let pluginPath = URL(fileURLWithPath: try rustRequiredAbsolutePathParam(params?["pluginPath"], field: "pluginPath"))
+        let remotePluginID = try rustOptionalStringParam(params?["remotePluginId"])
         let discoverability = try pluginShareSaveDiscoverability(params?["discoverability"])
         let shareTargets = params?["shareTargets"]
         let shareTargetsProvided = shareTargets != nil && !(shareTargets is NSNull)
@@ -6035,7 +6035,7 @@ public enum CodexAppServer {
         guard params?["discoverability"] != nil else {
             throw AppServerError.invalidParams("missing field `discoverability`")
         }
-        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
+        let remotePluginID = try rustRequiredStringParam(params?["remotePluginId"], field: "remotePluginId")
         if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
@@ -6125,7 +6125,7 @@ public enum CodexAppServer {
         guard params?["remotePluginId"] != nil else {
             throw AppServerError.invalidParams("missing field `remotePluginId`")
         }
-        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
+        let remotePluginID = try rustRequiredStringParam(params?["remotePluginId"], field: "remotePluginId")
         if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
@@ -7241,7 +7241,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let pluginID = stringParam(params?["pluginId"]) ?? ""
+        let pluginID = try rustRequiredStringParam(params?["pluginId"], field: "pluginId")
         guard isValidRemotePluginID(pluginID) || isLikelyLocalPluginID(pluginID) else {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
@@ -15636,6 +15636,14 @@ public enum CodexAppServer {
         guard let path = try rustOptionalStringParam(value) else {
             return nil
         }
+        guard path.hasPrefix("/") else {
+            throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
+        }
+        return path
+    }
+
+    private static func rustRequiredAbsolutePathParam(_ value: Any?, field: String) throws -> String {
+        let path = try rustRequiredStringParam(value, field: field)
         guard path.hasPrefix("/") else {
             throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
         }

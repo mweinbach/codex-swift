@@ -7201,6 +7201,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidDeleteIDError["code"] as? Int, -32600)
         XCTAssertEqual(invalidDeleteIDError["message"] as? String, "invalid remote plugin id")
 
+        let invalidSavePathType = try appServerResponse(
+            #"{"id":17,"method":"plugin/share/save","params":{"pluginPath":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidSavePathTypeError = try XCTUnwrap(invalidSavePathType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSavePathTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSavePathTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidSaveIDType = try appServerResponse(
+            #"{"id":18,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","remotePluginId":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidSaveIDTypeError = try XCTUnwrap(invalidSaveIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSaveIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSaveIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidUpdateIDType = try appServerResponse(
+            #"{"id":19,"method":"plugin/share/updateTargets","params":{"remotePluginId":1,"discoverability":"UNLISTED","shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let invalidUpdateIDTypeError = try XCTUnwrap(invalidUpdateIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidUpdateIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidUpdateIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidDeleteIDType = try appServerResponse(
+            #"{"id":20,"method":"plugin/share/delete","params":{"remotePluginId":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidDeleteIDTypeError = try XCTUnwrap(invalidDeleteIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidDeleteIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidDeleteIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let unknownSaveDiscoverability = try appServerResponse(
             #"{"id":10,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"PUBLIC"}}"#,
             codexHome: temp.url
@@ -8959,6 +9003,17 @@ final class CodexAppServerTests: XCTestCase {
         let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
         XCTAssertEqual(invalidError["code"] as? Int, -32600)
         XCTAssertEqual(invalidError["message"] as? String, "invalid remote plugin id")
+
+        let invalidType = try appServerResponse(
+            #"{"id":3,"method":"plugin/uninstall","params":{"pluginId":1,"forceRemoteSync":true}}"#,
+            codexHome: temp.url
+        )
+        let invalidTypeError = try XCTUnwrap(invalidType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
 
         try """
         [features]
