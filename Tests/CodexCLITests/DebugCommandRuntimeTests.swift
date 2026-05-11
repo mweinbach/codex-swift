@@ -584,6 +584,40 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionRoot.path), [])
     }
 
+    func testClearMemoriesUsesConfiguredSQLiteHomeForStateDB() async throws {
+        let temp = try TemporaryDirectory()
+        let sqliteHome = temp.url.appendingPathComponent("sqlite-home", isDirectory: true)
+        try FileManager.default.createDirectory(at: sqliteHome, withIntermediateDirectories: true)
+        let statePath = sqliteHome.appendingPathComponent("state_5.sqlite", isDirectory: false)
+        try createMemoryTables(databaseURL: statePath)
+        try insertMemoryRows(databaseURL: statePath)
+
+        let codexHomeStatePath = temp.url.appendingPathComponent("state_5.sqlite", isDirectory: false)
+        try createMemoryTables(databaseURL: codexHomeStatePath)
+        try insertMemoryRows(databaseURL: codexHomeStatePath)
+
+        var config = CodexRuntimeConfig(
+            modelProvider: "test-provider",
+            projectDocMaxBytes: 0
+        )
+        config.sqliteHome = sqliteHome.path
+
+        // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
+        await Task.yield()
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .clearMemories),
+            dependencies: testDependencies(codexHome: temp.url, config: config)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(
+            result.stdoutMessage,
+            "Cleared memory state from \(statePath.path). Cleared memory directories under \(temp.url.path).\n"
+        )
+        XCTAssertEqual(try sqliteCount(databaseURL: statePath, query: "SELECT COUNT(*) FROM stage1_outputs"), 0)
+        XCTAssertEqual(try sqliteCount(databaseURL: codexHomeStatePath, query: "SELECT COUNT(*) FROM stage1_outputs"), 1)
+    }
+
     func testTraceReduceWritesRustShapedLifecycleStateToDefaultOutput() async throws {
         let temp = try TemporaryDirectory()
         let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)

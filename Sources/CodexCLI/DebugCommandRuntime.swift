@@ -485,7 +485,7 @@ public enum DebugCommandRuntime {
     ) async throws -> CodexCLI.CommandExecutionResult {
         let codexHome = try dependencies.findCodexHome()
         let config = try dependencies.loadConfig(codexHome, configOverrides)
-        let statePath = stateDatabasePath(codexHome: codexHome)
+        let statePath = stateDatabasePath(codexHome: codexHome, config: config)
 
         let clearedStateDB: Bool
         if FileManager.default.fileExists(atPath: statePath.path) {
@@ -507,8 +507,11 @@ public enum DebugCommandRuntime {
         )
     }
 
-    private static func stateDatabasePath(codexHome: URL) -> URL {
-        codexHome.appendingPathComponent("state_5.sqlite", isDirectory: false)
+    private static func stateDatabasePath(codexHome: URL, config: CodexRuntimeConfig) -> URL {
+        let sqliteHome = config.sqliteHome.map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? codexHome
+        return sqliteHome.appendingPathComponent("state_5.sqlite", isDirectory: false)
     }
 
     private static func clearMemoryRootsContents(codexHome: URL) throws {
