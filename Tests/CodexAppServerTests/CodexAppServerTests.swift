@@ -174,6 +174,109 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(activePermissionProfile["modifications"])
     }
 
+    func testThreadLifecyclePermissionsSelectionAppliesProfileLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let extra = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        retainedTemporaryDirectories.append(extra)
+        try """
+        default_permissions = "limited"
+
+        [permissions.limited.filesystem]
+        "\(cwd.url.path)" = "read"
+
+        [permissions.limited.network]
+        enabled = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let permissions = #""permissions":{"type":"profile","id":"limited","modifications":[{"type":"additionalWritableRoot","path":"\#(extra.url.path)"}]}"#
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)",\#(permissions)}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        assertPermissionSelection(startResult, activeID: "limited", extraPath: extra.url.path)
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)",\#(permissions)}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        assertPermissionSelection(resumeResult, activeID: "limited", extraPath: extra.url.path)
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)",\#(permissions)}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        assertPermissionSelection(forkResult, activeID: "limited", extraPath: extra.url.path)
+    }
+
+    func testTurnStartPermissionsSelectionPersistsTurnContextLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let extra = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        retainedTemporaryDirectories.append(extra)
+        try """
+        default_permissions = "limited"
+
+        [permissions.limited.filesystem]
+        "\(cwd.url.path)" = "read"
+
+        [permissions.limited.network]
+        enabled = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"permissions":{"type":"profile","id":"limited","modifications":[{"type":"additionalWritableRoot","path":"\#(extra.url.path)"}]}}}"#.utf8
+        )))
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        guard case let .resumed(history) = try RolloutRecorder.getRolloutHistory(
+            path: URL(fileURLWithPath: rolloutPath)
+        ) else {
+            return XCTFail("expected resumed rollout history")
+        }
+        let turnContext = try XCTUnwrap(history.history.compactMap { item -> TurnContextItem? in
+            if case let .turnContext(context) = item {
+                return context
+            }
+            return nil
+        }.last)
+        XCTAssertEqual(turnContext.activePermissionProfile, ActivePermissionProfile(
+            id: "limited",
+            modifications: [.additionalWritableRoot(path: extra.url.path)]
+        ))
+        XCTAssertNotNil(turnContext.permissionProfile)
+    }
+
     func testThreadStartEphemeralRemainsPathlessLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -17442,6 +17545,34 @@ final class CodexAppServerTests: XCTestCase {
         ]
         _ = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
         return processor
+    }
+
+    private func assertPermissionSelection(
+        _ result: [String: Any],
+        activeID: String,
+        extraPath: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let permissionProfile = result["permissionProfile"] as? [String: Any],
+              permissionProfile["type"] as? String == "managed",
+              let fileSystem = permissionProfile["file_system"] as? [String: Any],
+              let entries = fileSystem["entries"] as? [[String: Any]],
+              let activePermissionProfile = result["activePermissionProfile"] as? [String: Any]
+        else {
+            XCTFail("missing permission profile selection", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(permissionProfile["network"] as? String, "restricted", file: file, line: line)
+        XCTAssertTrue(entries.contains { entry in
+            (entry["path"] as? [String: Any])?["path"] as? String == extraPath
+                && entry["access"] as? String == "write"
+        }, file: file, line: line)
+        XCTAssertEqual(activePermissionProfile["id"] as? String, activeID, file: file, line: line)
+        let modifications = activePermissionProfile["modifications"] as? [[String: Any]]
+        XCTAssertEqual(modifications?.count, 1, file: file, line: line)
+        XCTAssertEqual(modifications?.first?["type"] as? String, "additional_writable_root", file: file, line: line)
+        XCTAssertEqual(modifications?.first?["path"] as? String, extraPath, file: file, line: line)
     }
 
     private func nextNotificationPayload(

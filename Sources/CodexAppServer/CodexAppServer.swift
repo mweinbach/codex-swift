@@ -951,7 +951,14 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerStartedConversation {
-        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
+        let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: cwd,
+            permissionSelection: permissionSelection
+        )
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
@@ -966,7 +973,7 @@ public enum CodexAppServer {
             serviceTierParam(params?["serviceTier"]),
             fallback: runtimeConfig.serviceTier
         )
-        let sandbox = sandboxModeParam(params?["sandbox"])
+        let baseSandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
         let dynamicTools = try dynamicToolsParam(params?["dynamicTools"]) ?? []
@@ -975,11 +982,14 @@ public enum CodexAppServer {
         } catch let error as DynamicToolValidationError {
             throw AppServerError.invalidRequest(error.description)
         }
-        let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
-            sandbox,
+            baseSandbox,
             cwd: cwd.path
+        )
+        let sandbox = responseSandboxPolicy(
+            for: permissionProfile,
+            cwd: cwd.path,
+            fallback: baseSandbox
         )
         try persistTrustedProjectForThreadStartIfNeeded(
             params: params,
@@ -1041,6 +1051,56 @@ public enum CodexAppServer {
         let dynamicTools: [DynamicToolSpec]
     }
 
+    private struct PermissionProfileSelection {
+        let id: String
+        let modifications: [ActivePermissionProfileModification]
+        let additionalWritableRoots: [AbsolutePath]
+    }
+
+    private static func permissionProfileSelectionParam(_ raw: Any?) throws -> PermissionProfileSelection? {
+        guard let raw, !(raw is NSNull) else {
+            return nil
+        }
+        guard let object = raw as? [String: Any],
+              stringParam(object["type"]) == "profile",
+              let id = try strictStringParam(object["id"], fieldName: "permissions.id")
+        else {
+            throw AppServerError.invalidRequest("invalid permissions")
+        }
+        guard let rawModifications = object["modifications"], !(rawModifications is NSNull) else {
+            return PermissionProfileSelection(id: id, modifications: [], additionalWritableRoots: [])
+        }
+        guard let rawModificationObjects = rawModifications as? [[String: Any]] else {
+            throw AppServerError.invalidRequest("invalid permissions")
+        }
+
+        var modifications: [ActivePermissionProfileModification] = []
+        var additionalWritableRoots: [AbsolutePath] = []
+        for modificationObject in rawModificationObjects {
+            guard stringParam(modificationObject["type"]) == "additionalWritableRoot",
+                  let path = try strictStringParam(
+                    modificationObject["path"],
+                    fieldName: "permissions.modifications.path"
+                  )
+            else {
+                throw AppServerError.invalidRequest("invalid permissions")
+            }
+            let absolutePath: AbsolutePath
+            do {
+                absolutePath = try AbsolutePath(absolutePath: path)
+            } catch {
+                throw AppServerError.invalidRequest("invalid permissions")
+            }
+            modifications.append(.additionalWritableRoot(path: absolutePath.path))
+            additionalWritableRoots.append(absolutePath)
+        }
+        return PermissionProfileSelection(
+            id: id,
+            modifications: modifications,
+            additionalWritableRoots: additionalWritableRoots
+        )
+    }
+
     private static func dynamicToolsParam(_ raw: Any?) throws -> [DynamicToolSpec]? {
         guard let raw, !(raw is NSNull) else {
             return nil
@@ -1057,9 +1117,48 @@ public enum CodexAppServer {
     }
 
     private static func loadRuntimeConfigForThreadStartup(
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        cwd: URL? = nil,
+        permissionSelection: PermissionProfileSelection? = nil
     ) throws -> CodexRuntimeConfig {
-        let runtimeConfig = try CodexConfigLoader.load(codexHome: configuration.codexHome)
+        var overrides = configuration.cliConfigOverrides
+        if let permissionSelection {
+            overrides.rawOverrides.append("default_permissions=\(tomlQuotedString(permissionSelection.id))")
+        }
+        var runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            overrides: overrides,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        if let permissionSelection, !permissionSelection.additionalWritableRoots.isEmpty {
+            let cwdPath = (cwd ?? configuration.codexHome).standardizedFileURL.path
+            let baseProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+                runtimeConfig.legacySandboxPolicy(),
+                cwd: cwdPath
+            )
+            let fileSystemPolicy = baseProfile.fileSystemSandboxPolicy.withAdditionalWritableRoots(
+                permissionSelection.additionalWritableRoots,
+                cwd: cwdPath
+            )
+            let effectiveProfile = PermissionProfile.fromRuntimePermissionsWithEnforcement(
+                baseProfile.enforcement,
+                fileSystem: fileSystemPolicy,
+                network: baseProfile.networkSandboxPolicy
+            )
+            runtimeConfig.permissionProfile = effectiveProfile
+            runtimeConfig.activePermissionProfile = ActivePermissionProfile(
+                id: permissionSelection.id,
+                modifications: permissionSelection.modifications
+            )
+            if let sandbox = try? fileSystemPolicy.toLegacySandboxPolicy(
+                networkPolicy: effectiveProfile.networkSandboxPolicy,
+                cwd: cwdPath
+            ) {
+                runtimeConfig.sandboxPolicy = sandbox
+            }
+        }
         if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
             mcpServers: runtimeConfig.mcpServers,
             environment: configuration.environment
@@ -1067,6 +1166,24 @@ public enum CodexAppServer {
             throw AppServerError.internalError(message)
         }
         return runtimeConfig
+    }
+
+    private static func responseSandboxPolicy(
+        for permissionProfile: PermissionProfile,
+        cwd: String,
+        fallback: SandboxPolicy
+    ) -> SandboxPolicy {
+        (try? permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+            networkPolicy: permissionProfile.networkSandboxPolicy,
+            cwd: cwd
+        )) ?? fallback
+    }
+
+    private static func tomlQuotedString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     private static func persistTrustedProjectForThreadStartIfNeeded(
@@ -1206,8 +1323,17 @@ public enum CodexAppServer {
             defaultProvider: configuration.defaultModelProvider,
             turns: buildTurnsFromRolloutEvents(at: rolloutPath)
         )
-        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
         let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let resumeCwd = URL(
+            fileURLWithPath: stringParam(params?["cwd"]) ?? thread["cwd"] as? String ?? summary.cwd,
+            isDirectory: true
+        )
+        let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: resumeCwd,
+            permissionSelection: permissionSelection
+        )
         let requestedModel = stringParam(params?["model"])
         let requestedModelProvider = stringParam(params?["modelProvider"])
             ?? stringParam(params?["model_provider"])
@@ -1228,10 +1354,15 @@ public enum CodexAppServer {
             serviceTierParam(params?["serviceTier"]),
             fallback: runtimeConfig.serviceTier
         )
-        let sandbox = runtimeConfig.legacySandboxPolicy()
+        let baseSandbox = runtimeConfig.legacySandboxPolicy()
         let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
-            sandbox,
-            cwd: thread["cwd"] as? String ?? "/"
+            baseSandbox,
+            cwd: resumeCwd.path
+        )
+        let sandbox = responseSandboxPolicy(
+            for: permissionProfile,
+            cwd: resumeCwd.path,
+            fallback: baseSandbox
         )
 
         return [
@@ -1239,7 +1370,7 @@ public enum CodexAppServer {
             "model": model,
             "modelProvider": modelProvider,
             "serviceTier": nullable(serviceTier),
-            "cwd": thread["cwd"] ?? "/",
+            "cwd": resumeCwd.path,
             "instructionSources": [],
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
@@ -1298,11 +1429,20 @@ public enum CodexAppServer {
             )
         }
         let sourceSummary = try RolloutSummary(path: sourceRolloutPath, defaultProvider: configuration.defaultModelProvider)
-        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
         let requestedModel = stringParam(params?["model"])
         let requestedModelProvider = stringParam(params?["modelProvider"])
             ?? stringParam(params?["model_provider"])
         let hasModelResumeOverride = requestedModel != nil || requestedModelProvider != nil
+        let cwd = URL(
+            fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
+            isDirectory: true
+        )
+        let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: cwd,
+            permissionSelection: permissionSelection
+        )
         let model = requestedModel
             ?? (hasModelResumeOverride ? nil : sourceSummary.model)
             ?? runtimeConfig.model
@@ -1321,16 +1461,17 @@ public enum CodexAppServer {
             serviceTierParam(params?["serviceTier"]),
             fallback: runtimeConfig.serviceTier
         )
-        let sandbox = sandboxModeParam(params?["sandbox"])
+        let baseSandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
-        let cwd = URL(
-            fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
-            isDirectory: true
-        )
         let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
-            sandbox,
+            baseSandbox,
             cwd: cwd.path
+        )
+        let sandbox = responseSandboxPolicy(
+            for: permissionProfile,
+            cwd: cwd.path,
+            fallback: baseSandbox
         )
         let threadSource = threadSourceParam(params?["threadSource"])
         let conversationID = ConversationId()
@@ -1704,6 +1845,7 @@ public enum CodexAppServer {
         let personality = try turnStartPersonalityParam(params?["personality"])
         let outputSchema = try jsonValueParam(params?["outputSchema"], fieldName: "outputSchema")
         let collaborationMode = try turnStartCollaborationModeParam(params?["collaborationMode"])
+        let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
         guard cwd != nil
             || approvalPolicy != nil
             || sandboxPolicy != nil
@@ -1713,19 +1855,37 @@ public enum CodexAppServer {
             || personality != nil
             || outputSchema != nil
             || collaborationMode != nil
+            || permissionSelection != nil
         else {
             return nil
         }
 
         let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
-        let runtimeConfig = try loadRuntimeConfigForThreadStartup(configuration: configuration)
+        let contextCwd = cwd ?? existing.cwd
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
+            permissionSelection: permissionSelection
+        )
+        let baseSandboxPolicy = sandboxPolicy ?? runtimeConfig.legacySandboxPolicy()
+        let permissionProfile = permissionSelection == nil
+            ? nil
+            : runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+                baseSandboxPolicy,
+                cwd: contextCwd
+            )
+        let contextSandboxPolicy = permissionProfile.map {
+            responseSandboxPolicy(for: $0, cwd: contextCwd, fallback: baseSandboxPolicy)
+        } ?? baseSandboxPolicy
         let contextModel = collaborationMode?.settings.model ?? model ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
         let contextEffort = collaborationMode?.settings.reasoningEffort ?? effort ?? runtimeConfig.modelReasoningEffort
         return TurnContextItem(
-            cwd: cwd ?? existing.cwd,
+            cwd: contextCwd,
             approvalPolicy: approvalPolicy ?? runtimeConfig.approvalPolicy ?? .unlessTrusted,
-            sandboxPolicy: sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
+            sandboxPolicy: contextSandboxPolicy,
+            permissionProfile: permissionProfile,
+            activePermissionProfile: permissionSelection == nil ? nil : runtimeConfig.activePermissionProfile,
             model: contextModel,
             personality: personality,
             collaborationMode: collaborationMode,
@@ -21718,6 +21878,7 @@ private extension TurnContextItem {
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             permissionProfile: permissionProfile,
+            activePermissionProfile: activePermissionProfile,
             network: network,
             fileSystemSandboxPolicy: fileSystemSandboxPolicy,
             model: model,

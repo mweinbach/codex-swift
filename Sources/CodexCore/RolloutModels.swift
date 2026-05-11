@@ -248,6 +248,7 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
     public let approvalPolicy: AskForApproval
     public let sandboxPolicy: SandboxPolicy
     public let permissionProfile: PermissionProfile?
+    public let activePermissionProfile: ActivePermissionProfile?
     public let network: TurnContextNetworkItem?
     public let fileSystemSandboxPolicy: FileSystemSandboxPolicy?
     public let model: String
@@ -270,6 +271,7 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         case approvalPolicy = "approval_policy"
         case sandboxPolicy = "sandbox_policy"
         case permissionProfile = "permission_profile"
+        case activePermissionProfile = "active_permission_profile"
         case network
         case fileSystemSandboxPolicy = "file_system_sandbox_policy"
         case model
@@ -293,6 +295,7 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
         permissionProfile: PermissionProfile? = nil,
+        activePermissionProfile: ActivePermissionProfile? = nil,
         network: TurnContextNetworkItem? = nil,
         fileSystemSandboxPolicy: FileSystemSandboxPolicy? = nil,
         model: String,
@@ -314,6 +317,7 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
         self.approvalPolicy = approvalPolicy
         self.sandboxPolicy = sandboxPolicy
         self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
         self.network = network
         self.fileSystemSandboxPolicy = fileSystemSandboxPolicy
         self.model = model
@@ -349,6 +353,7 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             permissionProfile: nil,
+            activePermissionProfile: nil,
             network: nil,
             fileSystemSandboxPolicy: nil,
             model: model,
