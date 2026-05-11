@@ -44,6 +44,7 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(help.contains("exec [alias: e]"))
         XCTAssertTrue(help.contains("app-server"))
         XCTAssertTrue(help.contains("exec-server"))
+        XCTAssertFalse(help.contains("--full-auto"))
         XCTAssertFalse(help.contains("execpolicy"))
         XCTAssertFalse(help.contains("responses-api-proxy"))
     }
@@ -68,6 +69,7 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(stdout[0].contains("_codex()"))
         XCTAssertTrue(stdout[0].contains("complete -F _codex codex"))
         XCTAssertTrue(stdout[0].contains("exec e computer-use cu review"))
+        XCTAssertFalse(stdout[0].contains("--full-auto"))
         XCTAssertFalse(stdout[0].contains("execpolicy"))
     }
 
@@ -87,7 +89,32 @@ final class CodexCLITests: XCTestCase {
             XCTAssertEqual(stdout.count, 1, shell)
             XCTAssertTrue(stdout[0].contains("codex"), shell)
             XCTAssertTrue(stdout[0].contains("exec"), shell)
+            XCTAssertFalse(stdout[0].contains("full-auto"), shell)
             XCTAssertFalse(stdout[0].contains("responses-api-proxy"), shell)
+        }
+    }
+
+    func testRunAsyncRejectsRemovedFullAutoAtTopLevelLikeRust() async {
+        let cases = [
+            ["--full-auto"],
+            ["--full-auto", "exec", "summarize"],
+            ["--model", "gpt-5.4", "--full-auto", "exec", "summarize"]
+        ]
+
+        for arguments in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                execRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, ["codex-swift: unsupported option at top level: --full-auto"], "\(arguments)")
         }
     }
 

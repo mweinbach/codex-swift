@@ -176,6 +176,9 @@ public struct CodexCLI: Sendable {
     }
 
     public struct ExecCommandOptions: Equatable, Sendable {
+        public static let removedFullAutoWarningMessage =
+            "warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead."
+
         public let json: Bool
         public let imagePaths: [String]
         public let outputSchemaPath: String?
@@ -184,6 +187,7 @@ public struct CodexCLI: Sendable {
         public let ephemeral: Bool
         public let ignoreUserConfig: Bool
         public let ignoreRules: Bool
+        public let removedFullAuto: Bool
 
         public init(
             json: Bool = false,
@@ -193,7 +197,8 @@ public struct CodexCLI: Sendable {
             skipGitRepoCheck: Bool = false,
             ephemeral: Bool = false,
             ignoreUserConfig: Bool = false,
-            ignoreRules: Bool = false
+            ignoreRules: Bool = false,
+            removedFullAuto: Bool = false
         ) {
             self.json = json
             self.imagePaths = imagePaths
@@ -203,6 +208,11 @@ public struct CodexCLI: Sendable {
             self.ephemeral = ephemeral
             self.ignoreUserConfig = ignoreUserConfig
             self.ignoreRules = ignoreRules
+            self.removedFullAuto = removedFullAuto
+        }
+
+        public var removedFullAutoWarning: String? {
+            removedFullAuto ? Self.removedFullAutoWarningMessage : nil
         }
     }
 
@@ -645,7 +655,6 @@ public struct CodexCLI: Sendable {
           -p, --profile <PROFILE>           Configuration profile from config.toml.
           -s, --sandbox <MODE>              Sandbox policy for model-generated shell commands.
           -a, --ask-for-approval <POLICY>   Configure command approval policy.
-          --full-auto                       Use low-friction sandboxed automatic execution.
           --dangerously-bypass-approvals-and-sandbox
                                             Skip confirmations and sandboxing.
           -C, --cd <DIR>                    Working root for the session.
@@ -723,6 +732,10 @@ public struct CodexCLI: Sendable {
         updateRunner: UpdateCommandRunner? = nil
     ) async -> Int32 {
         let invocation = parseInvocation(arguments: arguments)
+        if let message = rootRemovedFullAutoRejectionMessage(invocation: invocation, arguments: arguments) {
+            stderr(message)
+            return 64
+        }
         if case let .command(spec, commandArguments) = invocation,
            let message = rootRemoteModeRejectionMessage(
                spec: spec,
@@ -813,6 +826,9 @@ public struct CodexCLI: Sendable {
             switch parseExecCommand(rawArguments, rootArguments: arguments) {
             case let .success(request):
                 do {
+                    if let warning = request.options.removedFullAutoWarning {
+                        stderr(warning)
+                    }
                     let result = try await execRunner(request)
                     emit(result, stdout: stdout, stderr: stderr)
                     return result.exitCode
@@ -1536,6 +1552,8 @@ public struct CodexCLI: Sendable {
         var ephemeral = false
         var ignoreUserConfig = false
         var ignoreRules = false
+        var removedFullAuto = false
+        var dangerouslyBypassApprovalsAndSandbox = rootDangerouslyBypassBeforeExec(in: rootArguments)
         var actionTokens: [String] = []
         var index = 0
 
@@ -1572,6 +1590,14 @@ public struct CodexCLI: Sendable {
                 continue
             case "--ignore-rules":
                 ignoreRules = true
+                index += 1
+                continue
+            case "--full-auto":
+                removedFullAuto = true
+                index += 1
+                continue
+            case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
+                dangerouslyBypassApprovalsAndSandbox = true
                 index += 1
                 continue
             case "--output-schema":
@@ -1668,6 +1694,9 @@ public struct CodexCLI: Sendable {
                 ephemeral = ephemeral || parsed.ephemeral
                 ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
                 ignoreRules = ignoreRules || parsed.ignoreRules
+                removedFullAuto = removedFullAuto || parsed.removedFullAuto
+                dangerouslyBypassApprovalsAndSandbox =
+                    dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -1682,6 +1711,9 @@ public struct CodexCLI: Sendable {
                 ephemeral = ephemeral || parsed.ephemeral
                 ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
                 ignoreRules = ignoreRules || parsed.ignoreRules
+                removedFullAuto = removedFullAuto || parsed.removedFullAuto
+                dangerouslyBypassApprovalsAndSandbox =
+                    dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -1693,6 +1725,13 @@ public struct CodexCLI: Sendable {
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
+        }
+
+        if removedFullAuto, dangerouslyBypassApprovalsAndSandbox {
+            return .failure(
+                "codex-swift: argument conflict for command 'exec': --full-auto conflicts with --dangerously-bypass-approvals-and-sandbox",
+                64
+            )
         }
 
         switch parseConfigOverrides(from: rootArguments) {
@@ -1708,7 +1747,8 @@ public struct CodexCLI: Sendable {
                     skipGitRepoCheck: skipGitRepoCheck,
                     ephemeral: ephemeral,
                     ignoreUserConfig: ignoreUserConfig,
-                    ignoreRules: ignoreRules
+                    ignoreRules: ignoreRules,
+                    removedFullAuto: removedFullAuto
                 ),
                 configOverrides: configOverrides
             ))
@@ -1736,6 +1776,8 @@ public struct CodexCLI: Sendable {
         let ephemeral: Bool
         let ignoreUserConfig: Bool
         let ignoreRules: Bool
+        let removedFullAuto: Bool
+        let dangerouslyBypassApprovalsAndSandbox: Bool
     }
 
     private func parseExecResumeCommand(
@@ -1751,6 +1793,8 @@ public struct CodexCLI: Sendable {
         var ephemeral = false
         var ignoreUserConfig = false
         var ignoreRules = false
+        var removedFullAuto = false
+        var dangerouslyBypassApprovalsAndSandbox = false
         var positionals: [String] = []
         var index = 0
 
@@ -1795,6 +1839,16 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--ignore-rules" {
                 ignoreRules = true
+                index += 1
+                continue
+            }
+            if argument == "--full-auto" {
+                removedFullAuto = true
+                index += 1
+                continue
+            }
+            if argument == "--dangerously-bypass-approvals-and-sandbox" || argument == "--yolo" {
+                dangerouslyBypassApprovalsAndSandbox = true
                 index += 1
                 continue
             }
@@ -1882,7 +1936,9 @@ public struct CodexCLI: Sendable {
             skipGitRepoCheck: skipGitRepoCheck,
             ephemeral: ephemeral,
             ignoreUserConfig: ignoreUserConfig,
-            ignoreRules: ignoreRules
+            ignoreRules: ignoreRules,
+            removedFullAuto: removedFullAuto,
+            dangerouslyBypassApprovalsAndSandbox: dangerouslyBypassApprovalsAndSandbox
         ))
     }
 
@@ -2444,6 +2500,25 @@ public struct CodexCLI: Sendable {
         rootRemoteFlagValue(named: option, beforeCommands: [spec.name] + spec.aliases, in: arguments)
     }
 
+    private func rootFlagPresent(named option: String, beforeCommands commands: [String], in arguments: [String]) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if commands.contains(argument) {
+                return false
+            }
+            if argument == option {
+                return true
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        return false
+    }
+
     private func rootRemoteFlagValue(named option: String, beforeCommands commands: [String], in arguments: [String]) -> String? {
         var index = 0
         while index < arguments.count {
@@ -2464,6 +2539,31 @@ public struct CodexCLI: Sendable {
             }
         }
         return nil
+    }
+
+    private func rootRemovedFullAutoRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
+        switch invocation {
+        case let .command(spec, _):
+            if rootFlagPresent(named: "--full-auto", beforeCommands: [spec.name] + spec.aliases, in: arguments) {
+                return "codex-swift: unsupported option at top level: --full-auto"
+            }
+            return nil
+        case .version, .help:
+            return nil
+        case .interactive, .unknown:
+            return arguments.contains("--full-auto")
+                ? "codex-swift: unsupported option at top level: --full-auto"
+                : nil
+        }
+    }
+
+    private func rootDangerouslyBypassBeforeExec(in arguments: [String]) -> Bool {
+        let execCommands = ["exec", "e"]
+        return rootFlagPresent(
+            named: "--dangerously-bypass-approvals-and-sandbox",
+            beforeCommands: execCommands,
+            in: arguments
+        ) || rootFlagPresent(named: "--yolo", beforeCommands: execCommands, in: arguments)
     }
 
     private func rootRemoteModeRejectionMessage(

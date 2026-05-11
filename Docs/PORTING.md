@@ -504,6 +504,7 @@ Source baseline inspected for this scaffold:
   - `codex exec resume ...` now resolves saved rollout targets, reconstructs persisted `ResponseItem` history including compaction replacement/fallback handling, appends the new user prompt after resume history, and continues the Responses tool loop under the saved conversation ID
 - `codex-rs/exec/src/cli.rs` exec global flag placement
   - `codex exec resume ...` now accepts Rust's global `--json`, `--model`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check`, `--ephemeral`, `--ignore-user-config`, `--ignore-rules`, and `--output-last-message`/`-o` options after the `resume` subcommand without treating them as prompt positionals
+  - `codex exec --full-auto ...` now preserves Rust's hidden removed-flag compatibility path by warning with the Rust migration text, applying through the existing workspace-write/on-failure exec policy mapping, accepting the global flag after `exec resume`, rejecting conflicts with `--dangerously-bypass-approvals-and-sandbox`/`--yolo`, and keeping top-level/completion/help `--full-auto` unavailable.
 - Initial `codex-rs/core/src/codex.rs` exec rollout persistence path
   - non-interactive exec now creates/resumes rollout JSONL files, records turn context, the new user prompt, and completed model/tool transcript items, and durably shuts down the recorder so Swift-created exec sessions become discoverable for later resume
 - Initial `codex-rs/core/src/session/mod.rs` exec initial context gates

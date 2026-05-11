@@ -173,7 +173,6 @@ public enum CompletionGenerator {
         RootOption(longName: "profile", shortName: "p", summary: "Configuration profile from config.toml.", takesValue: true),
         RootOption(longName: "sandbox", shortName: "s", summary: "Sandbox policy for model-generated shell commands.", takesValue: true),
         RootOption(longName: "ask-for-approval", shortName: "a", summary: "Configure command approval policy.", takesValue: true),
-        RootOption(longName: "full-auto", shortName: nil, summary: "Use low-friction sandboxed automatic execution.", takesValue: false),
         RootOption(longName: "dangerously-bypass-approvals-and-sandbox", shortName: nil, summary: "Skip confirmations and sandboxing.", takesValue: false),
         RootOption(longName: "cd", shortName: "C", summary: "Working root for the session.", takesValue: true),
         RootOption(longName: "search", shortName: nil, summary: "Enable web search.", takesValue: false),

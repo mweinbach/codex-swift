@@ -64,6 +64,76 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncExecFullAutoReportsRustMigrationWarning() async {
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "--full-auto", "summarize"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stderr, [CodexCLI.ExecCommandOptions.removedFullAutoWarningMessage])
+        XCTAssertEqual(receivedRequest?.action, .run(prompt: "summarize"))
+        XCTAssertEqual(receivedRequest?.options.removedFullAuto, true)
+    }
+
+    func testRunAsyncExecResumeFullAutoReportsRustMigrationWarning() async {
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "resume", "--last", "--full-auto", "follow up"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stderr, [CodexCLI.ExecCommandOptions.removedFullAutoWarningMessage])
+        XCTAssertEqual(receivedRequest?.action, .resume(CodexCLI.ExecResumeCommand(
+            sessionID: "follow up",
+            last: true,
+            prompt: nil
+        )))
+        XCTAssertEqual(receivedRequest?.options.removedFullAuto, true)
+    }
+
+    func testRunAsyncExecFullAutoRejectsNoSandboxConflictLikeRust() async {
+        let cases = [
+            ["exec", "--full-auto", "--dangerously-bypass-approvals-and-sandbox", "summarize"],
+            ["--dangerously-bypass-approvals-and-sandbox", "exec", "--full-auto", "summarize"],
+            ["exec", "resume", "--last", "--full-auto", "--yolo", "follow up"]
+        ]
+
+        for arguments in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                execRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [
+                "codex-swift: argument conflict for command 'exec': --full-auto conflicts with --dangerously-bypass-approvals-and-sandbox"
+            ], "\(arguments)")
+        }
+    }
+
     func testRunAsyncExecResumeAcceptsRustGlobalFlagsAfterSubcommand() async {
         var receivedRequest: CodexCLI.ExecCommandRequest?
 
