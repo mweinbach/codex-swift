@@ -48,6 +48,34 @@ final class SubmissionTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Submission.self, from: data), submission)
     }
 
+    func testResponsesClientMetadataMergesTraceContextLikeRust() {
+        let metadata = ResponsesClientMetadata.create(
+            clientMetadata: [
+                "origin": "app",
+                ResponsesClientMetadata.wsRequestHeaderTraceparentKey: "old-parent"
+            ],
+            trace: W3CTraceContext(
+                traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                tracestate: "vendor=value"
+            )
+        )
+
+        XCTAssertEqual(metadata?["origin"], "app")
+        XCTAssertEqual(
+            metadata?[ResponsesClientMetadata.wsRequestHeaderTraceparentKey],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+        )
+        XCTAssertEqual(metadata?[ResponsesClientMetadata.wsRequestHeaderTracestateKey], "vendor=value")
+    }
+
+    func testResponsesClientMetadataReturnsNilWhenEmptyLikeRust() {
+        XCTAssertNil(ResponsesClientMetadata.create())
+        XCTAssertEqual(
+            ResponsesClientMetadata.create(trace: W3CTraceContext(tracestate: "vendor=value")),
+            [ResponsesClientMetadata.wsRequestHeaderTracestateKey: "vendor=value"]
+        )
+    }
+
     func testUnitOperationsUseRustTagsOnly() throws {
         let cases: [(Op, [String: Any])] = [
             (.interrupt, ["type": "interrupt"]),

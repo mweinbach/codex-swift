@@ -22,6 +22,25 @@ public struct W3CTraceContext: Equatable, Codable, Sendable {
     }
 }
 
+public enum ResponsesClientMetadata {
+    public static let wsRequestHeaderTraceparentKey = "ws_request_header_traceparent"
+    public static let wsRequestHeaderTracestateKey = "ws_request_header_tracestate"
+
+    public static func create(
+        clientMetadata: [String: String]? = nil,
+        trace: W3CTraceContext? = nil
+    ) -> [String: String]? {
+        var metadata = clientMetadata ?? [:]
+        if let traceparent = trace?.traceparent {
+            metadata[wsRequestHeaderTraceparentKey] = traceparent
+        }
+        if let tracestate = trace?.tracestate {
+            metadata[wsRequestHeaderTracestateKey] = tracestate
+        }
+        return metadata.isEmpty ? nil : metadata
+    }
+}
+
 public enum ReasoningEffortOverride: Equatable, Sendable {
     case clear
     case set(ReasoningEffort)
