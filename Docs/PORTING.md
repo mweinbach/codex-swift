@@ -593,7 +593,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/catalog_processor.rs` experimental feature listing
   - `experimentalFeature/list` now returns the Rust-ordered feature catalog with app-server stage names, beta display metadata, config-derived enablement, defaults, index cursors, limit clamping, and invalid-cursor errors.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` runtime experimental feature enablement
-  - `experimentalFeature/enablement/set` now accepts the Rust allowlisted feature keys, rejects unsupported and legacy alias keys with Rust-shaped invalid-request messages, stores a connection-local runtime overlay, and reflects it through `experimentalFeature/list` and `config/read` without overriding feature values already present in config.
+  - `experimentalFeature/enablement/set` now accepts the Rust allowlisted feature keys, including `remote_control`, rejects unsupported and legacy alias keys with Rust-shaped invalid-request messages, stores a connection-local runtime overlay, preserves previously set flags when later calls update only named features, treats empty maps as no-op responses, and reflects the overlay through `experimentalFeature/list` and `config/read` without overriding feature values already present in config.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config read cwd scoping
   - `config/read` now honors the optional absolute `cwd` param when loading config layers, matching Rust's project-layer-aware effective config, origins, and included layer list.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements reviewer constraints

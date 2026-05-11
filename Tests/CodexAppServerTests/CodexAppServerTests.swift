@@ -13815,6 +13815,53 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(features["tool_search"] as? Bool, false)
     }
 
+    func testExperimentalFeatureEnablementSetPreservesPriorFlagsAndAllowsEmptyNoOpLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"apps":true}}}"#.utf8
+        )))
+        let partial = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memories":true,"plugins":true,"tool_search":true,"tool_suggest":true,"tool_call_mcp_elicitation":false}}}"#.utf8
+        )))
+        let partialEnablement = try XCTUnwrap((partial["result"] as? [String: Any])?["enablement"] as? [String: Bool])
+        XCTAssertEqual(partialEnablement, [
+            "memories": true,
+            "plugins": true,
+            "tool_search": true,
+            "tool_suggest": true,
+            "tool_call_mcp_elicitation": false
+        ])
+
+        let remoteControl = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":false}}}"#.utf8
+        )))
+        XCTAssertEqual(
+            (remoteControl["result"] as? [String: Any])?["enablement"] as? [String: Bool],
+            ["remote_control": false]
+        )
+
+        let empty = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"experimentalFeature/enablement/set","params":{"enablement":{}}}"#.utf8
+        )))
+        XCTAssertEqual((empty["result"] as? [String: Any])?["enablement"] as? [String: Bool], [:])
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":5,"method":"config/read","params":{}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(readResult["config"] as? [String: Any])
+        let features = try XCTUnwrap(config["features"] as? [String: Any])
+        XCTAssertEqual(features["apps"] as? Bool, true)
+        XCTAssertEqual(features["memories"] as? Bool, true)
+        XCTAssertEqual(features["plugins"] as? Bool, true)
+        XCTAssertEqual(features["tool_search"] as? Bool, true)
+        XCTAssertEqual(features["tool_suggest"] as? Bool, true)
+        XCTAssertEqual(features["tool_call_mcp_elicitation"] as? Bool, false)
+        XCTAssertEqual(features["remote_control"] as? Bool, false)
+    }
+
     func testExperimentalFeatureEnablementSetRefreshesAppListWhenAppsTurnOn() throws {
         let temp = try TemporaryDirectory()
         try """
