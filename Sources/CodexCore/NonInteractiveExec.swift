@@ -488,9 +488,7 @@ public enum NonInteractiveExec {
         guard !outcome.shouldStop else {
             return outcome
         }
-        prompt.input.append(contentsOf: outcome.additionalContexts.map { context in
-            ResponseInputItem(userInputs: [.text(context)]).responseItem()
-        })
+        prompt.input.append(contentsOf: hookAdditionalContextItems(outcome.additionalContexts))
         return outcome
     }
 
@@ -534,9 +532,7 @@ public enum NonInteractiveExec {
         guard !outcome.shouldStop else {
             return outcome
         }
-        prompt.input.append(contentsOf: outcome.additionalContexts.map { context in
-            ResponseInputItem(userInputs: [.text(context)]).responseItem()
-        })
+        prompt.input.append(contentsOf: hookAdditionalContextItems(outcome.additionalContexts))
         return outcome
     }
 
@@ -1504,7 +1500,7 @@ public enum NonInteractiveExec {
 
     private static func hookAdditionalContextItems(_ contexts: [String]) -> [ResponseItem] {
         contexts.map { context in
-            ResponseInputItem(userInputs: [.text(context)]).responseItem()
+            .message(role: "developer", content: [.inputText(text: context)])
         }
     }
 

@@ -510,7 +510,7 @@ final class NonInteractiveExecTests: XCTestCase {
         guard case let .message(_, role, content, _) = prompt.input[inputCountBeforeHook] else {
             return XCTFail("expected hook context message")
         }
-        XCTAssertEqual(role, "user")
+        XCTAssertEqual(role, "developer")
         XCTAssertEqual(content, [.inputText(text: "remember hook context")])
     }
 
@@ -566,7 +566,7 @@ final class NonInteractiveExecTests: XCTestCase {
         guard case let .message(_, role, content, _) = prompt.input.last else {
             return XCTFail("expected spilled hook context message")
         }
-        XCTAssertEqual(role, "user")
+        XCTAssertEqual(role, "developer")
         XCTAssertEqual(content, [.inputText(text: spilledContext)])
     }
 
@@ -610,7 +610,7 @@ final class NonInteractiveExecTests: XCTestCase {
         guard case let .message(_, role, content, _) = prompt.input[inputCountBeforeHook] else {
             return XCTFail("expected hook context message")
         }
-        XCTAssertEqual(role, "user")
+        XCTAssertEqual(role, "developer")
         XCTAssertEqual(content, [.inputText(text: "session hook context")])
     }
 
@@ -754,7 +754,7 @@ final class NonInteractiveExecTests: XCTestCase {
                         output: FunctionCallOutputPayload(content: "ok", success: true)
                     ),
                     additionalContextItems: [
-                        ResponseInputItem(userInputs: [.text("hook context")]).responseItem()
+                        .message(role: "developer", content: [.inputText(text: "hook context")])
                     ]
                 )
             }
@@ -764,14 +764,14 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(prompts.count, 2)
         XCTAssertTrue(prompts[1].input.contains {
             if case let .message(_, role, content, _) = $0 {
-                return role == "user" && content == [.inputText(text: "hook context")]
+                return role == "developer" && content == [.inputText(text: "hook context")]
             }
             return false
         })
         XCTAssertEqual(result.transcriptItems, [
             .functionCall(name: "shell_command", arguments: #"{"command":"echo hi"}"#, callID: "call-1"),
             .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok", success: true)),
-            ResponseInputItem(userInputs: [.text("hook context")]).responseItem(),
+            .message(role: "developer", content: [.inputText(text: "hook context")]),
             .message(role: "assistant", content: [.outputText(text: "done")])
         ])
     }
@@ -815,7 +815,7 @@ final class NonInteractiveExecTests: XCTestCase {
             "Command blocked by PreToolUse hook: policy. Command: printf should-not-run"
         )
         XCTAssertEqual(result.additionalContextItems, [
-            ResponseInputItem(userInputs: [.text("pre ctx")]).responseItem()
+            .message(role: "developer", content: [.inputText(text: "pre ctx")])
         ])
     }
 
@@ -855,7 +855,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.success, true)
         XCTAssertEqual(payload.content, "post feedback")
         XCTAssertEqual(result.additionalContextItems, [
-            ResponseInputItem(userInputs: [.text("post ctx")]).responseItem()
+            .message(role: "developer", content: [.inputText(text: "post ctx")])
         ])
     }
 

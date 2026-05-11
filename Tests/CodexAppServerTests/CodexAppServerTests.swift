@@ -1189,7 +1189,7 @@ final class CodexAppServerTests: XCTestCase {
             guard case let .responseItem(.message(_, role, content, _)) = $0 else {
                 return false
             }
-            return role == "user" && content == [.inputText(text: "runtime hook context")]
+            return role == "developer" && content == [.inputText(text: "runtime hook context")]
         })
         XCTAssertLessThan(userIndex, contextIndex)
     }
@@ -1277,7 +1277,7 @@ final class CodexAppServerTests: XCTestCase {
             guard case let .responseItem(.message(_, role, content, _)) = $0 else {
                 return false
             }
-            return role == "user" && content == [.inputText(text: "session hook context")]
+            return role == "developer" && content == [.inputText(text: "session hook context")]
         })
         let userIndex = try XCTUnwrap(history.history.firstIndex {
             $0 == .eventMsg(.userMessage(UserMessageEvent(message: "Hello after session")))

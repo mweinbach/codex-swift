@@ -2003,7 +2003,7 @@ public enum CodexAppServer {
                 items.append(.turnContext(turnContext.withTurnID(turnID)))
             }
             items.append(contentsOf: sessionStartContexts.map { context in
-                .responseItem(ResponseInputItem(userInputs: [.text(context)]).responseItem())
+                .responseItem(hookAdditionalContextItem(context))
             })
             if !sessionStartShouldStop,
                !hookOutcome.shouldStop,
@@ -2011,7 +2011,7 @@ public enum CodexAppServer {
                 items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
             }
             items.append(contentsOf: spilledHookContexts.map { context in
-                .responseItem(ResponseInputItem(userInputs: [.text(context)]).responseItem())
+                .responseItem(hookAdditionalContextItem(context))
             })
             try recorder.recordItems(items)
             try recorder.shutdown()
@@ -2027,6 +2027,10 @@ public enum CodexAppServer {
             hookStartedEvents: hookStartedEvents,
             hookCompletedEvents: hookCompletedEvents
         )
+    }
+
+    private static func hookAdditionalContextItem(_ context: String) -> ResponseItem {
+        .message(role: "developer", content: [.inputText(text: context)])
     }
 
     private static func turnStartContextOverrideItem(
