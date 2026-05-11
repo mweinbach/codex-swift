@@ -16230,6 +16230,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((error["message"] as? String)?.contains("Invalid request") == true)
     }
 
+    func testWindowsSandboxSetupStartRejectsMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"windowsSandbox/setupStart","params":{}}"#,
+                "missing field `mode`"
+            ),
+            (
+                #"{"id":2,"method":"windowsSandbox/setupStart","params":{"mode":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected enum WindowsSandboxSetupMode"
+            ),
+            (
+                #"{"id":3,"method":"windowsSandbox/setupStart","params":{"mode":"legacy"}}"#,
+                "Invalid request: unknown variant `legacy`, expected `elevated` or `unelevated`"
+            ),
+            (
+                #"{"id":4,"method":"windowsSandbox/setupStart","params":{"mode":"unelevated","cwd":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600, "request: \(request)")
+            XCTAssertEqual(error["message"] as? String, expectedMessage, "request: \(request)")
+        }
+    }
+
     func testExperimentalFeatureListReturnsRustV2ShapeAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -17384,6 +17414,22 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             error["message"] as? String,
             "Invalid request: unknown variant `lite`, expected `full` or `toolsAndAuthOnly`"
+        )
+    }
+
+    func testMcpServerStatusListRejectsMalformedDetailLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":1}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected enum McpServerStatusDetail"
         )
     }
 

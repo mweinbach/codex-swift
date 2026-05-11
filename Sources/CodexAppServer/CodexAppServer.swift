@@ -10939,7 +10939,7 @@ public enum CodexAppServer {
 
     fileprivate static func windowsSandboxSetupStartResult(params: [String: Any]?) throws -> (result: [String: Any], notification: [String: Any]) {
         let mode = try windowsSandboxSetupModeParam(params?["mode"])
-        _ = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+        _ = try rustOptionalAbsolutePathParam(params?["cwd"])
 
         let error: String?
         #if os(Windows)
@@ -16627,14 +16627,14 @@ public enum CodexAppServer {
     }
 
     private static func windowsSandboxSetupModeParam(_ value: Any?) throws -> String {
-        guard let mode = stringParam(value), !mode.isEmpty else {
-            throw AppServerError.invalidRequest("missing mode")
-        }
+        let mode = try rustRequiredEnumStringParam(value, field: "mode", enumName: "WindowsSandboxSetupMode")
         switch mode {
         case "elevated", "unelevated":
             return mode
         default:
-            throw AppServerError.invalidRequest("unknown windows sandbox setup mode: \(mode)")
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(mode)`, expected `elevated` or `unelevated`"
+            )
         }
     }
 
@@ -23721,8 +23721,13 @@ private enum AppServerMcpServerStatusDetail: String {
 }
 
 private func mcpServerStatusDetail(_ rawValue: Any?) throws -> AppServerMcpServerStatusDetail {
-    guard let value = CodexAppServer.stringParam(rawValue) else {
+    guard let rawValue, !(rawValue is NSNull) else {
         return .full
+    }
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        throw AppServerError.invalidRequest(
+            "Invalid request: \(CodexAppServer.rustInvalidTypeDescription(rawValue)), expected enum McpServerStatusDetail"
+        )
     }
     guard let detail = AppServerMcpServerStatusDetail(rawValue: value) else {
         throw AppServerError.invalidRequest(
