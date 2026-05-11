@@ -38,6 +38,7 @@ final class ExecEventsTests: XCTestCase {
         try XCTAssertJSONObjectEqual(event, [
             "call_id": "exec-1",
             "turn_id": "turn-1",
+            "started_at_ms": 0,
             "command": ["bash", "-lc", "cat README.md"],
             "cwd": "/repo",
             "parsed_cmd": [
@@ -94,6 +95,7 @@ final class ExecEventsTests: XCTestCase {
             "call_id": "exec-1",
             "process_id": "123",
             "turn_id": "turn-1",
+            "completed_at_ms": 0,
             "command": ["bash", "-lc", "echo hi"],
             "cwd": "/repo",
             "parsed_cmd": [
@@ -112,7 +114,8 @@ final class ExecEventsTests: XCTestCase {
                 "secs": 1,
                 "nanos": 5_000_000
             ],
-            "formatted_output": "hi"
+            "formatted_output": "hi",
+            "status": "completed"
         ])
 
         let missingDefaults = """
@@ -157,6 +160,7 @@ final class ExecEventsTests: XCTestCase {
             "type": "exec_command_begin",
             "call_id": "exec-1",
             "turn_id": "turn-1",
+            "started_at_ms": 0,
             "command": ["pwd"],
             "cwd": "/repo",
             "parsed_cmd": [],
@@ -166,6 +170,7 @@ final class ExecEventsTests: XCTestCase {
         let end = EventMessage.execCommandEnd(ExecCommandEndEvent(
             callID: "exec-1",
             turnID: "turn-1",
+            completedAtMilliseconds: 123,
             command: ["pwd"],
             cwd: "/repo",
             parsedCmd: [],
@@ -175,6 +180,27 @@ final class ExecEventsTests: XCTestCase {
             duration: ProtocolDuration(secs: 0),
             formattedOutput: "/repo"
         ))
+
+        try XCTAssertJSONObjectEqual(end, [
+            "type": "exec_command_end",
+            "call_id": "exec-1",
+            "turn_id": "turn-1",
+            "completed_at_ms": 123,
+            "command": ["pwd"],
+            "cwd": "/repo",
+            "parsed_cmd": [],
+            "source": "agent",
+            "stdout": "/repo\n",
+            "stderr": "",
+            "aggregated_output": "",
+            "exit_code": 0,
+            "duration": [
+                "secs": 0,
+                "nanos": 0
+            ],
+            "formatted_output": "/repo",
+            "status": "completed"
+        ])
 
         let data = try JSONEncoder().encode(end)
         XCTAssertEqual(try JSONDecoder().decode(EventMessage.self, from: data), end)

@@ -9,6 +9,12 @@ public enum ExecCommandSource: String, Codable, Equatable, Sendable {
     public static let `default`: ExecCommandSource = .agent
 }
 
+public enum ExecCommandStatus: String, Codable, Equatable, Sendable {
+    case completed
+    case failed
+    case declined
+}
+
 public struct ViewImageToolCallEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let path: String
@@ -54,6 +60,7 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let processID: String?
     public let turnID: String
+    public let startedAtMilliseconds: Int64
     public let command: [String]
     public let cwd: String
     public let parsedCmd: [ParsedCommand]
@@ -64,6 +71,7 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         case callID = "call_id"
         case processID = "process_id"
         case turnID = "turn_id"
+        case startedAtMilliseconds = "started_at_ms"
         case command
         case cwd
         case parsedCmd = "parsed_cmd"
@@ -75,6 +83,7 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         callID: String,
         processID: String? = nil,
         turnID: String,
+        startedAtMilliseconds: Int64 = 0,
         command: [String],
         cwd: String,
         parsedCmd: [ParsedCommand],
@@ -84,6 +93,7 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         self.callID = callID
         self.processID = processID
         self.turnID = turnID
+        self.startedAtMilliseconds = startedAtMilliseconds
         self.command = command
         self.cwd = cwd
         self.parsedCmd = parsedCmd
@@ -96,6 +106,10 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         self.callID = try container.decode(String.self, forKey: .callID)
         self.processID = try container.decodeIfPresent(String.self, forKey: .processID)
         self.turnID = try container.decode(String.self, forKey: .turnID)
+        self.startedAtMilliseconds = try container.decodeIfPresent(
+            Int64.self,
+            forKey: .startedAtMilliseconds
+        ) ?? 0
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.parsedCmd = try container.decode([ParsedCommand].self, forKey: .parsedCmd)
@@ -108,6 +122,7 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         try container.encode(callID, forKey: .callID)
         try container.encodeIfPresent(processID, forKey: .processID)
         try container.encode(turnID, forKey: .turnID)
+        try container.encode(startedAtMilliseconds, forKey: .startedAtMilliseconds)
         try container.encode(command, forKey: .command)
         try container.encode(cwd, forKey: .cwd)
         try container.encode(parsedCmd, forKey: .parsedCmd)
@@ -120,6 +135,7 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
     public let callID: String
     public let processID: String?
     public let turnID: String
+    public let completedAtMilliseconds: Int64
     public let command: [String]
     public let cwd: String
     public let parsedCmd: [ParsedCommand]
@@ -131,11 +147,13 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
     public let exitCode: Int32
     public let duration: ProtocolDuration
     public let formattedOutput: String
+    public let status: ExecCommandStatus
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
         case processID = "process_id"
         case turnID = "turn_id"
+        case completedAtMilliseconds = "completed_at_ms"
         case command
         case cwd
         case parsedCmd = "parsed_cmd"
@@ -147,12 +165,14 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         case exitCode = "exit_code"
         case duration
         case formattedOutput = "formatted_output"
+        case status
     }
 
     public init(
         callID: String,
         processID: String? = nil,
         turnID: String,
+        completedAtMilliseconds: Int64 = 0,
         command: [String],
         cwd: String,
         parsedCmd: [ParsedCommand],
@@ -163,11 +183,13 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         aggregatedOutput: String = "",
         exitCode: Int32,
         duration: ProtocolDuration,
-        formattedOutput: String
+        formattedOutput: String,
+        status: ExecCommandStatus? = nil
     ) {
         self.callID = callID
         self.processID = processID
         self.turnID = turnID
+        self.completedAtMilliseconds = completedAtMilliseconds
         self.command = command
         self.cwd = cwd
         self.parsedCmd = parsedCmd
@@ -179,6 +201,7 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         self.exitCode = exitCode
         self.duration = duration
         self.formattedOutput = formattedOutput
+        self.status = status ?? (exitCode == 0 ? .completed : .failed)
     }
 
     public init(from decoder: Decoder) throws {
@@ -186,6 +209,10 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         self.callID = try container.decode(String.self, forKey: .callID)
         self.processID = try container.decodeIfPresent(String.self, forKey: .processID)
         self.turnID = try container.decode(String.self, forKey: .turnID)
+        self.completedAtMilliseconds = try container.decodeIfPresent(
+            Int64.self,
+            forKey: .completedAtMilliseconds
+        ) ?? 0
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.parsedCmd = try container.decode([ParsedCommand].self, forKey: .parsedCmd)
@@ -197,6 +224,8 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         self.exitCode = try container.decode(Int32.self, forKey: .exitCode)
         self.duration = try container.decode(ProtocolDuration.self, forKey: .duration)
         self.formattedOutput = try container.decode(String.self, forKey: .formattedOutput)
+        self.status = try container.decodeIfPresent(ExecCommandStatus.self, forKey: .status)
+            ?? (exitCode == 0 ? .completed : .failed)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -204,6 +233,7 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         try container.encode(callID, forKey: .callID)
         try container.encodeIfPresent(processID, forKey: .processID)
         try container.encode(turnID, forKey: .turnID)
+        try container.encode(completedAtMilliseconds, forKey: .completedAtMilliseconds)
         try container.encode(command, forKey: .command)
         try container.encode(cwd, forKey: .cwd)
         try container.encode(parsedCmd, forKey: .parsedCmd)
@@ -215,6 +245,7 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         try container.encode(exitCode, forKey: .exitCode)
         try container.encode(duration, forKey: .duration)
         try container.encode(formattedOutput, forKey: .formattedOutput)
+        try container.encode(status, forKey: .status)
     }
 }
 

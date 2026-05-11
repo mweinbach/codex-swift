@@ -12594,6 +12594,156 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func commandExecutionStartedNotification(
+        threadID: String,
+        turnID: String,
+        event: ExecCommandBeginEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/started",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "item": commandExecutionItemObject(
+                    id: event.callID,
+                    command: event.command,
+                    cwd: event.cwd,
+                    processID: event.processID,
+                    source: event.source,
+                    status: "inProgress",
+                    parsedCmd: event.parsedCmd,
+                    aggregatedOutput: NSNull(),
+                    exitCode: NSNull(),
+                    durationMs: NSNull()
+                ),
+                "startedAtMs": event.startedAtMilliseconds
+            ]
+        ]
+    }
+
+    fileprivate static func commandExecutionCompletedNotification(
+        threadID: String,
+        turnID: String,
+        event: ExecCommandEndEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/completed",
+            "params": [
+                "threadId": threadID,
+                "turnId": turnID,
+                "item": commandExecutionItemObject(
+                    id: event.callID,
+                    command: event.command,
+                    cwd: event.cwd,
+                    processID: event.processID,
+                    source: event.source,
+                    status: commandExecutionStatusObject(event.status),
+                    parsedCmd: event.parsedCmd,
+                    aggregatedOutput: event.aggregatedOutput.isEmpty ? NSNull() : event.aggregatedOutput,
+                    exitCode: event.exitCode,
+                    durationMs: durationMilliseconds(event.duration)
+                ),
+                "completedAtMs": event.completedAtMilliseconds
+            ]
+        ]
+    }
+
+    private static func commandExecutionItemObject(
+        id: String,
+        command: [String],
+        cwd: String,
+        processID: String?,
+        source: ExecCommandSource,
+        status: String,
+        parsedCmd: [ParsedCommand],
+        aggregatedOutput: Any,
+        exitCode: Any,
+        durationMs: Any
+    ) -> [String: Any] {
+        [
+            "type": "commandExecution",
+            "id": id,
+            "command": CommandParser.shlexJoin(command),
+            "cwd": cwd,
+            "processId": processID as Any? ?? NSNull(),
+            "source": commandExecutionSourceObject(source),
+            "status": status,
+            "commandActions": parsedCmd.map { commandActionObject($0, cwd: cwd) },
+            "aggregatedOutput": aggregatedOutput,
+            "exitCode": exitCode,
+            "durationMs": durationMs
+        ]
+    }
+
+    private static func commandActionObject(_ command: ParsedCommand, cwd: String) -> [String: Any] {
+        switch command {
+        case let .read(cmd, name, path):
+            return [
+                "type": "read",
+                "command": cmd,
+                "name": name,
+                "path": commandActionReadPath(path, cwd: cwd)
+            ]
+        case let .listFiles(cmd, path):
+            var object: [String: Any] = [
+                "type": "listFiles",
+                "command": cmd
+            ]
+            if let path {
+                object["path"] = path
+            }
+            return object
+        case let .search(cmd, query, path):
+            var object: [String: Any] = [
+                "type": "search",
+                "command": cmd
+            ]
+            if let query {
+                object["query"] = query
+            }
+            if let path {
+                object["path"] = path
+            }
+            return object
+        case let .unknown(cmd):
+            return [
+                "type": "unknown",
+                "command": cmd
+            ]
+        }
+    }
+
+    private static func commandActionReadPath(_ path: String, cwd: String) -> String {
+        if path.hasPrefix("/") {
+            return path
+        }
+        return (cwd as NSString).appendingPathComponent(path)
+    }
+
+    private static func commandExecutionSourceObject(_ source: ExecCommandSource) -> String {
+        switch source {
+        case .agent:
+            return "agent"
+        case .userShell:
+            return "userShell"
+        case .unifiedExecStartup:
+            return "unifiedExecStartup"
+        case .unifiedExecInteraction:
+            return "unifiedExecInteraction"
+        }
+    }
+
+    private static func commandExecutionStatusObject(_ status: ExecCommandStatus) -> String {
+        switch status {
+        case .completed:
+            return "completed"
+        case .failed:
+            return "failed"
+        case .declined:
+            return "declined"
+        }
+    }
+
     fileprivate static func terminalInteractionNotification(
         threadID: String,
         turnID: String,
@@ -20902,6 +21052,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
+    private var runtimeCommandExecutionStarted: [String: Set<String>] = [:]
     private var pendingSessionStartSources: [String: HookSessionStartSource] = [:]
     private var ephemeralThreadIDs: Set<String> = []
     private var ephemeralThreadSnapshots: [String: [String: Any]] = [:]
@@ -21225,6 +21376,41 @@ final class CodexAppServerMessageProcessor {
             notifications = [
                 markRuntimeUserInputRequested(threadID: threadID)
             ].compactMap(\.self)
+        case let .execCommandBegin(event):
+            guard event.source != .unifiedExecInteraction else {
+                notifications = []
+                break
+            }
+            var started = runtimeCommandExecutionStarted[threadID, default: []]
+            let inserted = started.insert(event.callID).inserted
+            runtimeCommandExecutionStarted[threadID] = started
+            if inserted {
+                notifications = [
+                    CodexAppServer.commandExecutionStartedNotification(
+                        threadID: threadID,
+                        turnID: turnID,
+                        event: event
+                    )
+                ]
+            } else {
+                notifications = []
+            }
+        case let .execCommandEnd(event):
+            if event.source == .unifiedExecInteraction {
+                notifications = []
+                break
+            }
+            runtimeCommandExecutionStarted[threadID]?.remove(event.callID)
+            if runtimeCommandExecutionStarted[threadID]?.isEmpty == true {
+                runtimeCommandExecutionStarted[threadID] = nil
+            }
+            notifications = [
+                CodexAppServer.commandExecutionCompletedNotification(
+                    threadID: threadID,
+                    turnID: turnID,
+                    event: event
+                )
+            ]
         default:
             notifications = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
