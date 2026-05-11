@@ -296,6 +296,20 @@ private struct AppServerJSONObject: @unchecked Sendable {
 }
 
 private let appServerDefaultExecCommandTimeoutMs = 10_000
+private let appServerStandardBase64Bytes = Set(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=".utf8))
+
+private func decodeAppServerStandardBase64(
+    _ value: String,
+    error: (String) -> AppServerError
+) throws -> Data {
+    if let data = Data(base64Encoded: value) {
+        return data
+    }
+    for (offset, byte) in value.utf8.enumerated() where !appServerStandardBase64Bytes.contains(byte) {
+        throw error("Invalid byte \(byte), offset \(offset).")
+    }
+    throw error("Invalid padding")
+}
 
 private final class AppServerStdioResponseCapture: @unchecked Sendable {
     private let id: Int
@@ -2947,8 +2961,8 @@ public enum CodexAppServer {
         guard let dataBase64 = stringParam(params?["dataBase64"]) else {
             throw AppServerError.invalidRequest("missing dataBase64")
         }
-        guard let data = Data(base64Encoded: dataBase64) else {
-            throw AppServerError.invalidRequest("fs/writeFile requires valid base64 dataBase64: invalid base64 data")
+        let data = try decodeAppServerStandardBase64(dataBase64) { error in
+            AppServerError.invalidRequest("fs/writeFile requires valid base64 dataBase64: \(error)")
         }
         do {
             try data.write(to: URL(fileURLWithPath: path, isDirectory: false))
@@ -13263,15 +13277,11 @@ public enum CodexAppServer {
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("command/exec/write requires deltaBase64 or closeStdin")
         }
-        let delta: Data
-        if let deltaBase64 {
-            guard let decoded = Data(base64Encoded: deltaBase64) else {
-                throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        let delta = try deltaBase64.map {
+            try decodeAppServerStandardBase64($0) { error in
+                AppServerError.invalidParams("invalid deltaBase64: \(error)")
             }
-            delta = decoded
-        } else {
-            delta = Data()
-        }
+        } ?? Data()
         return AppServerCommandExecWriteParams(
             processID: processID,
             delta: delta,
@@ -13474,15 +13484,11 @@ public enum CodexAppServer {
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("process/writeStdin requires deltaBase64 or closeStdin")
         }
-        let delta: Data
-        if let deltaBase64 {
-            guard let decoded = Data(base64Encoded: deltaBase64) else {
-                throw AppServerError.invalidParams("invalid deltaBase64: invalid base64 data")
+        let delta = try deltaBase64.map {
+            try decodeAppServerStandardBase64($0) { error in
+                AppServerError.invalidParams("invalid deltaBase64: \(error)")
             }
-            delta = decoded
-        } else {
-            delta = Data()
-        }
+        } ?? Data()
         return AppServerProcessWriteStdinParams(
             processHandle: processHandle,
             delta: delta,

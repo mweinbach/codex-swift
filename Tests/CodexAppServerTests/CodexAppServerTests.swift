@@ -4429,7 +4429,10 @@ final class CodexAppServerTests: XCTestCase {
         )
         let error = try XCTUnwrap(invalid["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
-        XCTAssertTrue((error["message"] as? String)?.hasPrefix("fs/writeFile requires valid base64 dataBase64:") == true)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "fs/writeFile requires valid base64 dataBase64: Invalid byte 37, offset 0."
+        )
     }
 
     func testFsMethodsRejectRelativePaths() throws {
@@ -16611,7 +16614,7 @@ final class CodexAppServerTests: XCTestCase {
         )
         let badBase64Error = try XCTUnwrap(badBase64["error"] as? [String: Any])
         XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
-        XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: invalid base64 data")
+        XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: Invalid byte 37, offset 0.")
 
         let zeroSize = try appServerResponse(
             #"{"id":3,"method":"command/exec/resize","params":{"processId":"proc-1","size":{"rows":0,"cols":80}}}"#,
@@ -17161,7 +17164,7 @@ final class CodexAppServerTests: XCTestCase {
         )
         let badBase64Error = try XCTUnwrap(badBase64["error"] as? [String: Any])
         XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
-        XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: invalid base64 data")
+        XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: Invalid byte 37, offset 0.")
 
         let zeroSize = try appServerResponse(
             #"{"id":3,"method":"process/resizePty","params":{"processHandle":"proc-1","size":{"rows":0,"cols":80}}}"#,
