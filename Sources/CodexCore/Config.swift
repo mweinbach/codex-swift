@@ -688,8 +688,9 @@ public enum CodexConfigLoader {
             loadedConfigLayers: managedConfigLayers
         )
 
+        let requirements = try requirementsToml.requirements()
         var config = try parsed.resolvedConfig(environment: environment)
-        try applyRequirements(try requirementsToml.requirements(), to: &config)
+        try applyRequirements(requirements, to: &config)
         config.sandboxPolicy = try parsed.resolvedSandboxPolicy(
             codexHome: codexHome,
             fileManager: fileManager,
@@ -708,6 +709,11 @@ public enum CodexConfigLoader {
                 "config defines `[permissions]` profiles but does not set `default_permissions`"
             )
         }
+        try applyPermissionRequirements(
+            requirements,
+            to: &config,
+            cwd: cwd ?? codexHome
+        )
         return config
     }
 
@@ -733,6 +739,79 @@ public enum CodexConfigLoader {
 
         let sandboxPolicy = config.legacySandboxPolicy()
         try requirements.sandboxPolicy.canSet(sandboxPolicy).get()
+    }
+
+    private static func applyPermissionRequirements(
+        _ requirements: ConfigRequirements,
+        to config: inout CodexRuntimeConfig,
+        cwd: URL
+    ) throws {
+        guard let filesystem = requirements.filesystem,
+              !filesystem.denyRead.isEmpty
+        else {
+            return
+        }
+
+        let cwdPath = cwd.standardizedFileURL.path
+        var activeProfileWasForcedToFallback = false
+        var profile = config.permissionProfile ?? .fromLegacySandboxPolicyForCwd(
+            config.legacySandboxPolicy(),
+            cwd: cwdPath
+        )
+
+        if !profile.allowsManagedFilesystemRequirements {
+            profile = .readOnly()
+            activeProfileWasForcedToFallback = true
+        }
+
+        var fileSystemPolicy = profile.fileSystemSandboxPolicy
+        applyManagedFilesystemConstraints(filesystem, to: &fileSystemPolicy)
+        let effectiveProfile = PermissionProfile.fromRuntimePermissionsWithEnforcement(
+            profile.enforcement,
+            fileSystem: fileSystemPolicy,
+            network: profile.networkSandboxPolicy
+        )
+
+        config.permissionProfile = effectiveProfile
+        if activeProfileWasForcedToFallback {
+            config.activePermissionProfile = nil
+        }
+        if let legacyPolicy = try? fileSystemPolicy.toLegacySandboxPolicy(
+            networkPolicy: effectiveProfile.networkSandboxPolicy,
+            cwd: cwdPath
+        ) {
+            config.sandboxPolicy = legacyPolicy
+        }
+    }
+
+    private static func applyManagedFilesystemConstraints(
+        _ constraints: FilesystemConstraints,
+        to fileSystemPolicy: inout FileSystemSandboxPolicy
+    ) {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = fileSystemPolicy else {
+            return
+        }
+
+        var entries = currentEntries
+        for denyRead in constraints.denyRead {
+            let entry: FileSystemSandboxEntry
+            if denyRead.value.contains(where: isGlobMetacharacter) {
+                entry = FileSystemSandboxEntry(path: .globPattern(denyRead.value), access: .none)
+            } else {
+                guard let absolutePath = try? AbsolutePath(absolutePath: denyRead.value) else {
+                    continue
+                }
+                entry = FileSystemSandboxEntry(path: .path(absolutePath.path), access: .none)
+            }
+            if !entries.contains(entry) {
+                entries.append(entry)
+            }
+        }
+        fileSystemPolicy = .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    private static func isGlobMetacharacter(_ character: Character) -> Bool {
+        character == "*" || character == "?" || character == "["
     }
 
     private static func baseConfigLayerFiles(
@@ -2922,6 +3001,20 @@ private struct SandboxWorkspaceWriteConfig {
     var networkAccess: Bool
     var excludeTmpdirEnvVar: Bool
     var excludeSlashTmp: Bool
+}
+
+private extension PermissionProfile {
+    var allowsManagedFilesystemRequirements: Bool {
+        guard enforcement == .managed else {
+            return false
+        }
+        switch fileSystemSandboxPolicy {
+        case .restricted:
+            return true
+        case .unrestricted, .externalSandbox:
+            return false
+        }
+    }
 }
 
 private enum ConfigSection {

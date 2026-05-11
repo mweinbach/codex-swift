@@ -1537,6 +1537,83 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testRequirementsTomlAppliesFilesystemDenyReadToPermissionProfileLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let workspace = dir.url.appendingPathComponent("workspace", isDirectory: true)
+        let secret = workspace.appendingPathComponent("private", isDirectory: true)
+        try FileManager.default.createDirectory(at: secret, withIntermediateDirectories: true)
+
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [permissions.filesystem]
+        deny_read = ["\(secret.path)", "\(workspace.path)/logs/**/*.txt"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        default_permissions = ":workspace"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: workspace,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        let permissionProfile = try XCTUnwrap(config.permissionProfile)
+        let normalizedSecretPath = secret.path.hasPrefix("/var/")
+            ? "/private\(secret.path)"
+            : secret.path
+        XCTAssertEqual(config.activePermissionProfile, ActivePermissionProfile(id: ":workspace"))
+        XCTAssertEqual(
+            permissionProfile.fileSystemSandboxPolicy.getUnreadableRootsWithCwd(workspace.path),
+            [try AbsolutePath(absolutePath: normalizedSecretPath)]
+        )
+        XCTAssertEqual(
+            permissionProfile.fileSystemSandboxPolicy.getUnreadableGlobsWithCwd(workspace.path),
+            ["\(workspace.path)/logs/**/*.txt"]
+        )
+    }
+
+    func testRequirementsTomlFilesystemDenyReadFallsBackFromDangerNoSandboxLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let secret = dir.url.appendingPathComponent("private", isDirectory: true)
+        try FileManager.default.createDirectory(at: secret, withIntermediateDirectories: true)
+
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [permissions.filesystem]
+        deny_read = ["\(secret.path)"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        default_permissions = ":danger-no-sandbox"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        let permissionProfile = try XCTUnwrap(config.permissionProfile)
+        let normalizedSecretPath = secret.path.hasPrefix("/var/")
+            ? "/private\(secret.path)"
+            : secret.path
+        XCTAssertNil(config.activePermissionProfile)
+        XCTAssertEqual(config.sandboxPolicy, .readOnly)
+        XCTAssertEqual(permissionProfile.networkSandboxPolicy, .restricted)
+        XCTAssertEqual(
+            permissionProfile.fileSystemSandboxPolicy.getUnreadableRootsWithCwd(dir.url.path),
+            [try AbsolutePath(absolutePath: normalizedSecretPath)]
+        )
+    }
+
     func testProjectLayerStopsAtDetectedGitRoot() throws {
         let dir = try CoreTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)
