@@ -332,6 +332,115 @@ public enum AgentJobRuntime {
         return AgentJobSpawnPendingResult(activeItems: nextActiveItems, didProgress: didProgress)
     }
 
+    public static func runAgentJobLoop(
+        store: SQLiteAgentJobStore,
+        jobID: String,
+        maxConcurrency: Int,
+        now: @Sendable () -> Date = Date.init,
+        fileManager: FileManager = .default,
+        statusForThread: @Sendable (ThreadId) async -> AgentStatus,
+        spawnWorker: @Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult,
+        shutdownThread: @Sendable (ThreadId) async -> Void,
+        waitWhenIdle: @Sendable () async -> Void = {}
+    ) async throws -> AgentJob {
+        guard let job = try await store.getAgentJob(jobID) else {
+            throw FunctionCallError.respondToModel("agent job \(jobID) was not found")
+        }
+        let runtimeTimeout = itemTimeout(for: job)
+        var activeItems = try await recoverRunningItems(
+            store: store,
+            jobID: jobID,
+            runtimeTimeout: runtimeTimeout,
+            now: now(),
+            statusForThread: statusForThread,
+            shutdownThread: shutdownThread
+        )
+        var cancelRequested = try await store.isAgentJobCancelled(jobID)
+
+        while true {
+            var didProgress = false
+            if !cancelRequested, try await store.isAgentJobCancelled(jobID) {
+                cancelRequested = true
+            }
+
+            if !cancelRequested, activeItems.count < maxConcurrency {
+                let spawnResult = try await spawnPendingItems(
+                    store: store,
+                    job: job,
+                    activeItems: activeItems,
+                    maxConcurrency: maxConcurrency,
+                    now: now(),
+                    spawnWorker: spawnWorker,
+                    shutdownThread: shutdownThread
+                )
+                activeItems = spawnResult.activeItems
+                didProgress = spawnResult.didProgress
+            }
+
+            let reapResult = try await reapStaleActiveItems(
+                store: store,
+                jobID: jobID,
+                activeItems: activeItems,
+                runtimeTimeout: runtimeTimeout,
+                now: now(),
+                shutdownThread: shutdownThread
+            )
+            activeItems = reapResult.remainingItems
+            if reapResult.didProgress {
+                didProgress = true
+            }
+
+            let finished = await findFinishedThreads(
+                activeItems: activeItems,
+                statusForThread: statusForThread
+            )
+            if finished.isEmpty {
+                let progress = try await store.getAgentJobProgress(jobID)
+                if cancelRequested {
+                    if progress.running == 0, activeItems.isEmpty {
+                        break
+                    }
+                } else if progress.pending == 0, progress.running == 0, activeItems.isEmpty {
+                    break
+                }
+                if !didProgress {
+                    await waitWhenIdle()
+                }
+                continue
+            }
+
+            for (threadID, itemID) in finished {
+                try await finalizeFinishedItem(
+                    store: store,
+                    jobID: jobID,
+                    itemID: itemID,
+                    threadID: threadID,
+                    shutdownThread: shutdownThread
+                )
+                activeItems.removeAll { $0.threadID == threadID }
+            }
+        }
+
+        do {
+            try await exportJobCSVSnapshot(store: store, job: job, fileManager: fileManager)
+        } catch {
+            try await store.markAgentJobFailed(jobID, errorMessage: "auto-export failed: \(error)")
+            return try await store.getAgentJob(jobID) ?? job
+        }
+
+        let finalCancelRequested: Bool
+        if cancelRequested {
+            finalCancelRequested = true
+        } else {
+            finalCancelRequested = try await store.isAgentJobCancelled(jobID)
+        }
+        if finalCancelRequested {
+            return try await store.getAgentJob(jobID) ?? job
+        }
+        try await store.markAgentJobCompleted(jobID)
+        return try await store.getAgentJob(jobID) ?? job
+    }
+
     public static func decodeReportAgentJobResultArguments(
         _ argumentsJSON: String
     ) throws -> ReportAgentJobResultArguments {

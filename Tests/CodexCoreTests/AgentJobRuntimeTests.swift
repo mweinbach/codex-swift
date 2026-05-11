@@ -600,6 +600,120 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(recordedShutdownThreads, [raceThreadID])
     }
 
+    func testRunAgentJobLoopCompletesAfterWorkerReportsResultLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["row-1"])
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000051")
+        let statusStore = AgentStatusStore(statuses: [threadID: .running])
+        let shutdownThreads = ThreadRecorder()
+        let store = fixture.store
+
+        let finalJob = try await AgentJobRuntime.runAgentJobLoop(
+            store: store,
+            jobID: "job-1",
+            maxConcurrency: 1,
+            fileManager: .default,
+            statusForThread: { threadID in
+                await statusStore.status(for: threadID)
+            },
+            spawnWorker: { _ in
+                .spawned(threadID)
+            },
+            shutdownThread: { threadID in
+                await shutdownThreads.append(threadID)
+            },
+            waitWhenIdle: {
+                _ = try? await store.reportAgentJobItemResult(
+                    jobID: "job-1",
+                    itemID: "row-1",
+                    reportingThreadID: threadID.description,
+                    resultJSON: .object(["ok": .bool(true)])
+                )
+                await statusStore.set(.completed(nil), for: threadID)
+            }
+        )
+
+        XCTAssertEqual(finalJob.status, .completed)
+        let persistedItem = try await store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(persistedItem)
+        XCTAssertEqual(item.status, .completed)
+        XCTAssertEqual(item.resultJSON, .object(["ok": .bool(true)]))
+        let recordedShutdownThreads = await shutdownThreads.values()
+        XCTAssertEqual(recordedShutdownThreads, [threadID])
+        let csv = try String(contentsOfFile: finalJob.outputCSVPath, encoding: .utf8)
+        XCTAssertTrue(csv.contains(#"row-1,job-1,row-1,0,,completed,1,,"{""ok"":true}""#))
+    }
+
+    func testRunAgentJobLoopHonorsCancellationWithoutCompletingLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["row-1"])
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000052")
+        let markedRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "row-1",
+            threadID: threadID.description
+        )
+        XCTAssertTrue(markedRunning)
+        _ = try await fixture.store.markAgentJobCancelled("job-1", errorMessage: "cancelled")
+        let statusStore = AgentStatusStore(statuses: [threadID: .running])
+        let store = fixture.store
+
+        let finalJob = try await AgentJobRuntime.runAgentJobLoop(
+            store: store,
+            jobID: "job-1",
+            maxConcurrency: 1,
+            statusForThread: { threadID in
+                await statusStore.status(for: threadID)
+            },
+            spawnWorker: { _ in
+                .failed("should not spawn")
+            },
+            shutdownThread: { _ in },
+            waitWhenIdle: {
+                await statusStore.set(.completed(nil), for: threadID)
+            }
+        )
+
+        XCTAssertEqual(finalJob.status, .cancelled)
+        XCTAssertEqual(finalJob.lastError, "cancelled")
+        let persistedItem = try await store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(persistedItem)
+        XCTAssertEqual(item.status, .failed)
+        XCTAssertEqual(item.lastError, "worker finished without calling report_agent_job_result")
+    }
+
+    func testRunAgentJobLoopMarksJobFailedWhenAutoExportFailsLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["row-1"])
+        let directoryOutput = fixture.tempDirectory.url.appendingPathComponent("output-directory", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryOutput, withIntermediateDirectories: true)
+        let store = try SQLiteAgentJobStore(databaseURL: fixture.tempDirectory.url.appendingPathComponent("failing-export.sqlite3"))
+        _ = try await store.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-export-fails",
+                name: "job",
+                instruction: "do it",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id"],
+                inputCSVPath: "/tmp/input.csv",
+                outputCSVPath: directoryOutput.path,
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: []
+        )
+        try await store.markAgentJobRunning("job-export-fails")
+
+        let finalJob = try await AgentJobRuntime.runAgentJobLoop(
+            store: store,
+            jobID: "job-export-fails",
+            maxConcurrency: 1,
+            statusForThread: { _ in .notFound },
+            spawnWorker: { _ in .failed("should not spawn") },
+            shutdownThread: { _ in }
+        )
+
+        XCTAssertEqual(finalJob.status, .failed)
+        XCTAssertTrue(finalJob.lastError?.hasPrefix("auto-export failed: ") == true)
+    }
+
     func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
         let fixture = try await makeStoreWithRunningItem()
 
@@ -728,7 +842,7 @@ final class AgentJobRuntimeTests: XCTestCase {
                 outputSchemaJSON: nil,
                 inputHeaders: ["id"],
                 inputCSVPath: "/tmp/input.csv",
-                outputCSVPath: "/tmp/output.csv",
+                outputCSVPath: tempDirectory.url.appendingPathComponent("output.csv").path,
                 autoExport: true,
                 maxRuntimeSeconds: nil
             ),
@@ -762,7 +876,7 @@ final class AgentJobRuntimeTests: XCTestCase {
                 outputSchemaJSON: nil,
                 inputHeaders: ["id"],
                 inputCSVPath: "/tmp/input.csv",
-                outputCSVPath: "/tmp/output.csv",
+                outputCSVPath: tempDirectory.url.appendingPathComponent("output.csv").path,
                 autoExport: true,
                 maxRuntimeSeconds: nil
             ),
@@ -810,6 +924,22 @@ private actor SpawnRequestRecorder {
 
     func requests() -> [AgentJobWorkerSpawnRequest] {
         recordedRequests
+    }
+}
+
+private actor AgentStatusStore {
+    private var statuses: [ThreadId: AgentStatus]
+
+    init(statuses: [ThreadId: AgentStatus]) {
+        self.statuses = statuses
+    }
+
+    func set(_ status: AgentStatus, for threadID: ThreadId) {
+        statuses[threadID] = status
+    }
+
+    func status(for threadID: ThreadId) -> AgentStatus {
+        statuses[threadID] ?? .running
     }
 }
 
