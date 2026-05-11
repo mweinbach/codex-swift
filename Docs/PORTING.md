@@ -854,7 +854,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark type builtin
   - Added Swift execpolicy parser support for `type(...)` over supported policy values, returning Rust-style type-name strings for strings, integers, floats, booleans, arrays, and dictionaries used in generated rule values, hosts, paths, and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark attribute introspection builtins
-  - Added Swift execpolicy parser support for `dir(...)` and `hasattr(...)` over supported string, list, and dictionary policy values, returning Rust-style sorted attribute names for the modeled Starlark methods and enabling attribute-based policy branches.
+  - Added Swift execpolicy parser support for `dir(...)` and `hasattr(...)` over supported string, list, and dictionary policy values, returning Rust-style sorted attribute names for the modeled Starlark methods and enabling attribute-based policy branches. List introspection includes the modeled `.sort()` and `.reverse()` mutation methods so attribute checks match supported statement execution.
 - `codex-rs/execpolicy/src/parser.rs` Starlark getattr method calls
   - Added Swift execpolicy parser support for direct calls through `getattr(value, "method")(...)` for modeled string, list, and dictionary methods, matching Rust's standard Starlark globals for generated rule values, hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring

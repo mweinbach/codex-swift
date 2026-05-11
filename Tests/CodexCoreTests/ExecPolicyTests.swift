@@ -3416,7 +3416,7 @@ final class ExecPolicyTests: XCTestCase {
         if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
             prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
 
-        if "append" in LIST_ATTRS and not hasattr(COMMANDS, "keys"):
+        if "append" in LIST_ATTRS and "reverse" in LIST_ATTRS and hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "keys"):
             network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
 
         if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
@@ -3431,7 +3431,7 @@ final class ExecPolicyTests: XCTestCase {
             )
         ])
         XCTAssertEqual(policy.networkRules(), [
-            NetworkRule(host: "list-7.github.com", protocol: .https, decision: .allow)
+            NetworkRule(host: "list-9.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
     }
