@@ -274,6 +274,51 @@ final class SandboxCLITests: XCTestCase {
         XCTAssertTrue(networkAccess)
     }
 
+    func testResolveDebugSandboxConfigurationHonorsNamedPermissionProfileLikeRust() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+        let paths = try SandboxTemporaryDirectory()
+        let docs = paths.url.appendingPathComponent("docs", isDirectory: true)
+        let privateDir = docs.appendingPathComponent("private", isDirectory: true)
+        try FileManager.default.createDirectory(at: privateDir, withIntermediateDirectories: true)
+        try """
+        default_permissions = "limited-read-test"
+
+        [permissions.limited-read-test.filesystem]
+        ":minimal" = "read"
+        "\(docs.path)" = "read"
+        "\(privateDir.path)" = "none"
+
+        [permissions.limited-read-test.network]
+        enabled = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: "limited-read-test"),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+
+        XCTAssertEqual(configuration.sandboxPolicy, .readOnlyWithNetworkAccess)
+        XCTAssertEqual(
+            configuration.permissionProfile,
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .path(docs.path), access: .read),
+                    FileSystemSandboxEntry(path: .path(privateDir.path), access: .none),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
+                ]),
+                network: .enabled
+            )
+        )
+    }
+
     func testRunAsyncSandboxWindowsDelegatesToRunner() async {
         var receivedRequest: CodexCLI.SandboxCommandRequest?
 

@@ -16,10 +16,19 @@ extension CodexCLI.SandboxProfileOptions {
 extension CodexCLI {
     public struct DebugSandboxConfiguration: Equatable, Sendable {
         public let sandboxPolicy: SandboxPolicy
+        public let permissionProfile: PermissionProfile
         public let cwd: URL
 
-        public init(sandboxPolicy: SandboxPolicy, cwd: URL) {
+        public init(
+            sandboxPolicy: SandboxPolicy,
+            permissionProfile: PermissionProfile? = nil,
+            cwd: URL
+        ) {
             self.sandboxPolicy = sandboxPolicy
+            self.permissionProfile = permissionProfile ?? .fromLegacySandboxPolicyForCwd(
+                sandboxPolicy,
+                cwd: cwd.standardizedFileURL.path
+            )
             self.cwd = cwd
         }
     }
@@ -30,8 +39,8 @@ extension CodexCLI {
 
         public var description: String {
             switch self {
-            case .customProfile:
-                return "codex-swift: sandbox permission profile runtime is not complete yet."
+            case let .customProfile(profileName):
+                return "default_permissions refers to undefined profile `\(profileName)`"
             case let .unknownBuiltinProfile(profileName):
                 return "default_permissions refers to unknown built-in profile `\(profileName)`"
             }
@@ -46,30 +55,41 @@ extension CodexCLI {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> DebugSandboxConfiguration {
         let cwd = profile.resolvedCwd(relativeTo: processCwd)
-        let defaultPolicy = try debugSandboxDefaultPolicy(
+        let defaultConfig = try debugSandboxDefaultConfiguration(
             profile: profile,
             configOverrides: configOverrides,
             codexHome: codexHome,
             cwd: cwd,
             environment: environment
         )
-        switch profile.resolveBuiltInPolicy(defaultPolicy: defaultPolicy) {
+        switch profile.resolveBuiltInPolicy(defaultPolicy: defaultConfig.sandboxPolicy) {
         case let .resolved(sandboxPolicy):
-            return DebugSandboxConfiguration(sandboxPolicy: sandboxPolicy, cwd: cwd)
+            return DebugSandboxConfiguration(
+                sandboxPolicy: sandboxPolicy,
+                permissionProfile: defaultConfig.permissionProfile,
+                cwd: cwd
+            )
         case let .customProfile(profileName):
-            throw DebugSandboxConfigurationError.customProfile(profileName)
+            let config = try loadDebugSandboxConfig(
+                permissionsProfile: profileName,
+                configOverrides: configOverrides,
+                codexHome: codexHome,
+                cwd: cwd,
+                environment: environment
+            )
+            return try configuration(from: config, cwd: cwd)
         case let .unknownBuiltinProfile(profileName):
             throw DebugSandboxConfigurationError.unknownBuiltinProfile(profileName)
         }
     }
 
-    private static func debugSandboxDefaultPolicy(
+    private static func debugSandboxDefaultConfiguration(
         profile: SandboxProfileOptions,
         configOverrides: CliConfigOverrides,
         codexHome: URL,
         cwd: URL,
         environment: [String: String]
-    ) throws -> SandboxPolicy {
+    ) throws -> DebugSandboxConfiguration {
         if profile.permissionsProfile == ":workspace" {
             let workspaceOverrides = configOverrides.rawOverrides + [#"sandbox_mode="workspace-write""#]
             var config = try CodexConfigLoader.load(
@@ -88,23 +108,87 @@ extension CodexCLI {
                     environment: environment
                 )
             }
-            return config.legacySandboxPolicy(defaultMode: .readOnly)
+            return try configuration(from: config, cwd: cwd)
+        }
+
+        if let permissionsProfile = profile.permissionsProfile {
+            let config = try loadDebugSandboxConfig(
+                permissionsProfile: permissionsProfile,
+                configOverrides: configOverrides,
+                codexHome: codexHome,
+                cwd: cwd,
+                environment: environment
+            )
+            return try configuration(from: config, cwd: cwd)
+        }
+
+        let ambientConfig = try CodexConfigLoader.load(
+            codexHome: codexHome,
+            cwd: cwd,
+            overrides: configOverrides,
+            environment: environment
+        )
+        if ambientConfig.defaultPermissions != nil {
+            return try configuration(from: ambientConfig, cwd: cwd)
         }
 
         if try configOverrides.parseOverrides().contains(where: { key, _ in key == "sandbox_mode" }) {
-            return try CodexConfigLoader.load(
+            let config = try CodexConfigLoader.load(
                 codexHome: codexHome,
                 cwd: cwd,
                 overrides: configOverrides,
                 environment: environment
-            ).legacySandboxPolicy(defaultMode: .readOnly)
+            )
+            return try configuration(from: config, cwd: cwd)
         }
 
-        return .newReadOnlyPolicy()
+        return DebugSandboxConfiguration(sandboxPolicy: .newReadOnlyPolicy(), cwd: cwd)
+    }
+
+    private static func loadDebugSandboxConfig(
+        permissionsProfile: String,
+        configOverrides: CliConfigOverrides,
+        codexHome: URL,
+        cwd: URL,
+        environment: [String: String]
+    ) throws -> CodexRuntimeConfig {
+        try CodexConfigLoader.load(
+            codexHome: codexHome,
+            cwd: cwd,
+            overrides: CliConfigOverrides(
+                rawOverrides: configOverrides.rawOverrides + [
+                    #"default_permissions="\#(escapedTomlStringBody(permissionsProfile))""#
+                ]
+            ),
+            environment: environment
+        )
+    }
+
+    private static func configuration(
+        from config: CodexRuntimeConfig,
+        cwd: URL
+    ) throws -> DebugSandboxConfiguration {
+        let permissionProfile = config.permissionProfile
+            ?? .fromLegacySandboxPolicyForCwd(config.legacySandboxPolicy(defaultMode: .readOnly), cwd: cwd.path)
+        let sandboxPolicy = try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+            networkPolicy: permissionProfile.networkSandboxPolicy,
+            cwd: cwd.standardizedFileURL.path
+        )
+        return DebugSandboxConfiguration(
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile,
+            cwd: cwd
+        )
     }
 
     private static func tomlQuotedKeySegment(_ value: String) -> String {
         let data = try? JSONEncoder().encode(value)
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? #""""#
+    }
+
+    private static func escapedTomlStringBody(_ value: String) -> String {
+        let data = try? JSONEncoder().encode(value)
+        let encoded = data.flatMap { String(data: $0, encoding: .utf8) } ?? #""""#
+        return String(encoded.dropFirst().dropLast())
     }
 }

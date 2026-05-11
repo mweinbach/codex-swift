@@ -57,6 +57,20 @@ public struct RealtimeConfig: Equatable, Sendable {
     }
 }
 
+public enum TerminalResizeReflowMaxRows: Equatable, Sendable {
+    case auto
+    case disabled
+    case limit(Int)
+}
+
+public struct TerminalResizeReflowConfig: Equatable, Sendable {
+    public var maxRows: TerminalResizeReflowMaxRows
+
+    public init(maxRows: TerminalResizeReflowMaxRows = .auto) {
+        self.maxRows = maxRows
+    }
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -65,6 +79,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var approvalsReviewer: ApprovalsReviewer
     public var sandboxMode: SandboxMode?
     public var sandboxPolicy: SandboxPolicy?
+    public var defaultPermissions: String?
+    public var permissionProfile: PermissionProfile?
+    public var activePermissionProfile: ActivePermissionProfile?
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
@@ -114,6 +131,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var checkForUpdateOnStartup: Bool
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
+    public var terminalResizeReflow: TerminalResizeReflowConfig
 
     public init(
         model: String? = nil,
@@ -122,6 +140,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         approvalPolicy: AskForApproval? = nil,
         sandboxMode: SandboxMode? = nil,
         sandboxPolicy: SandboxPolicy? = nil,
+        defaultPermissions: String? = nil,
+        permissionProfile: PermissionProfile? = nil,
+        activePermissionProfile: ActivePermissionProfile? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
@@ -175,6 +196,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.approvalsReviewer = .user
         self.sandboxMode = sandboxMode
         self.sandboxPolicy = sandboxPolicy
+        self.defaultPermissions = defaultPermissions
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
@@ -224,6 +248,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.checkForUpdateOnStartup = true
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
+        self.terminalResizeReflow = TerminalResizeReflowConfig()
     }
 
     public init(
@@ -670,6 +695,15 @@ public enum CodexConfigLoader {
             fileManager: fileManager,
             sandboxMode: config.sandboxMode
         )
+        if let defaultPermissions = config.defaultPermissions {
+            config.permissionProfile = try parsed.permissionProfile(
+                named: defaultPermissions,
+                codexHome: codexHome,
+                cwd: cwd ?? codexHome,
+                fileManager: fileManager
+            )
+            config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
+        }
         return config
     }
 
@@ -762,6 +796,104 @@ public enum CodexConfigLoader {
     }
 }
 
+private struct ParsedPermissionProfileToml: Equatable, Sendable {
+    var filesystem: [String: ConfigValue] = [:]
+    var network: [String: ConfigValue] = [:]
+
+    mutating func merge(_ overlay: ParsedPermissionProfileToml) {
+        for (key, value) in overlay.filesystem {
+            filesystem[key] = value
+        }
+        for (key, value) in overlay.network {
+            network[key] = value
+        }
+    }
+
+    func permissionProfile(profileName: String, cwd: URL) throws -> PermissionProfile {
+        let entries = try filesystem.compactMap { key, value -> FileSystemSandboxEntry? in
+            guard key != "glob_scan_max_depth" else {
+                return nil
+            }
+            return FileSystemSandboxEntry(
+                path: try filesystemPath(key, cwd: cwd),
+                access: try filesystemAccess(value, key: "permissions.\(profileName).filesystem.\(key)")
+            )
+        }.sorted { left, right in
+            filesystemSortKey(left.path) < filesystemSortKey(right.path)
+        }
+        let globScanMaxDepth = try filesystem["glob_scan_max_depth"].map {
+            try nonNegativeInt($0, key: "permissions.\(profileName).filesystem.glob_scan_max_depth")
+        }
+        let networkEnabled = try network["enabled"].map {
+            try boolValue($0, key: "permissions.\(profileName).network.enabled")
+        } ?? false
+        return .managed(
+            fileSystem: .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth),
+            network: networkEnabled ? .enabled : .restricted
+        )
+    }
+
+    private func filesystemPath(_ raw: String, cwd: URL) throws -> FileSystemPath {
+        if raw == ":minimal" {
+            return .special(FileSystemSpecialPath.minimal.jsonValue)
+        }
+        if raw == ":root" {
+            return .special(FileSystemSpecialPath.root.jsonValue)
+        }
+        if raw == ":project_roots" || raw == ":cwd" {
+            return .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue)
+        }
+        if raw == ":tmpdir" {
+            return .special(FileSystemSpecialPath.tmpdir.jsonValue)
+        }
+        if raw == ":slash_tmp" {
+            return .special(FileSystemSpecialPath.slashTmp.jsonValue)
+        }
+        guard raw.hasPrefix("/") else {
+            throw CodexConfigLoadError.invalidConfigLine("filesystem path `\(raw)` must be absolute")
+        }
+        if raw.contains("*") || raw.contains("?") || raw.contains("[") {
+            let resolved = try AbsolutePath.resolve(raw, against: cwd.standardizedFileURL.path)
+            return .globPattern(resolved.path)
+        }
+        return .path(raw)
+    }
+
+    private func filesystemAccess(_ value: ConfigValue, key: String) throws -> FileSystemAccessMode {
+        guard case let .string(raw) = value,
+              let access = FileSystemAccessMode(rawValue: raw)
+        else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return access
+    }
+
+    private func boolValue(_ value: ConfigValue, key: String) throws -> Bool {
+        guard case let .bool(bool) = value else {
+            throw CodexConfigLoadError.invalidBoolValue(key)
+        }
+        return bool
+    }
+
+    private func nonNegativeInt(_ value: ConfigValue, key: String) throws -> Int {
+        guard case let .integer(integer) = value, integer > 0, integer <= Int64(Int.max) else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        return Int(integer)
+    }
+
+    private func filesystemSortKey(_ path: FileSystemPath) -> String {
+        switch path {
+        case let .path(path):
+            return "0:\(path)"
+        case let .globPattern(pattern):
+            return "1:\(pattern)"
+        case let .special(value):
+            return "2:\(String(describing: value))"
+        }
+    }
+}
+
 private struct ParsedCodexConfigToml {
     private static let webSearchToolConfigKey = "__tools_web_search_config"
 
@@ -774,10 +906,12 @@ private struct ParsedCodexConfigToml {
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
+    var tui: [String: ConfigValue] = [:]
     var shellEnvironmentPolicy: [String: ConfigValue] = [:]
     var toolSuggest: [String: ConfigValue] = [:]
     var toolSuggestDisabledToolLayers: [[ToolSuggestDisabledTool]] = []
     var skillsIncludeInstructions: Bool?
+    var permissions: [String: ParsedPermissionProfileToml] = [:]
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -861,10 +995,20 @@ private struct ParsedCodexConfigToml {
                 )
             case .sandboxWorkspaceWrite:
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .permissionFilesystem(name):
+                let filesystemKey = try parseDottedKey(key).joined(separator: ".")
+                parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .filesystem[filesystemKey] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .permissionNetwork(name):
+                let networkKey = try parseDottedKey(key).joined(separator: ".")
+                parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .network[networkKey] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .audio:
                 parsed.realtimeAudio[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .realtime:
                 parsed.realtime[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .tui:
+                parsed.tui[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .shellEnvironmentPolicy:
                 parsed.shellEnvironmentPolicy[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .shellEnvironmentPolicySet:
@@ -1025,6 +1169,21 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 1, parts[0] == "default_permissions" {
+                topLevel[parts[0]] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "permissions", parts[2] == "filesystem" {
+                permissions[parts[1], default: ParsedPermissionProfileToml()].filesystem[parts[3]] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "permissions", parts[2] == "network" {
+                permissions[parts[1], default: ParsedPermissionProfileToml()].network[parts[3]] = value
+                continue
+            }
+
             if parts.count == 2, parts[0] == "audio" {
                 realtimeAudio[parts[1]] = value
                 continue
@@ -1032,6 +1191,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "realtime" {
                 realtime[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "tui" {
+                tui[parts[1]] = value
                 continue
             }
 
@@ -1137,12 +1301,20 @@ private struct ParsedCodexConfigToml {
             sandboxWorkspaceWrite[key] = value
         }
 
+        for (profileName, profileValue) in overlay.permissions {
+            permissions[profileName, default: ParsedPermissionProfileToml()].merge(profileValue)
+        }
+
         for (key, value) in overlay.realtimeAudio {
             realtimeAudio[key] = value
         }
 
         for (key, value) in overlay.realtime {
             realtime[key] = value
+        }
+
+        for (key, value) in overlay.tui {
+            tui[key] = value
         }
 
         for (key, value) in overlay.shellEnvironmentPolicy {
@@ -1201,6 +1373,24 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(permissionTable) = table["permissions"] {
+            for (profileName, profileValue) in permissionTable {
+                guard case let .table(profileTable) = profileValue else { continue }
+                var parsedProfile = permissions[profileName] ?? ParsedPermissionProfileToml()
+                if case let .table(filesystemTable)? = profileTable["filesystem"] {
+                    for (key, value) in filesystemTable {
+                        parsedProfile.filesystem[key] = value
+                    }
+                }
+                if case let .table(networkTable)? = profileTable["network"] {
+                    for (key, value) in networkTable {
+                        parsedProfile.network[key] = value
+                    }
+                }
+                permissions[profileName] = parsedProfile
+            }
+        }
+
         if case let .table(audioTable) = table["audio"] {
             for (key, value) in audioTable {
                 realtimeAudio[key] = value
@@ -1210,6 +1400,12 @@ private struct ParsedCodexConfigToml {
         if case let .table(realtimeTable) = table["realtime"] {
             for (key, value) in realtimeTable {
                 realtime[key] = value
+            }
+        }
+
+        if case let .table(tuiTable) = table["tui"] {
+            for (key, value) in tuiTable {
+                tui[key] = value
             }
         }
 
@@ -1289,6 +1485,7 @@ private struct ParsedCodexConfigToml {
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
+        config.terminalResizeReflow = try Self.terminalResizeReflowConfigValue(tui, key: "tui")
         config.shellEnvironmentPolicy = try Self.shellEnvironmentPolicyValue(
             shellEnvironmentPolicy,
             key: "shell_environment_policy"
@@ -1465,6 +1662,40 @@ private struct ParsedCodexConfigToml {
                 try Self.boolValue($0, key: "sandbox_workspace_write.exclude_slash_tmp")
             } ?? false
         )
+    }
+
+    func permissionProfile(
+        named profileName: String,
+        codexHome: URL,
+        cwd: URL,
+        fileManager: FileManager
+    ) throws -> PermissionProfile {
+        switch profileName {
+        case ":read-only":
+            return .readOnly()
+        case ":workspace":
+            let policy = try resolvedSandboxPolicy(
+                codexHome: codexHome,
+                fileManager: fileManager,
+                sandboxMode: .workspaceWrite
+            ) ?? .newWorkspaceWritePolicy()
+            return .fromLegacySandboxPolicyForCwd(policy, cwd: cwd.standardizedFileURL.path)
+        case ":danger-no-sandbox":
+            return .disabled
+        default:
+            if profileName.hasPrefix(":") {
+                throw CodexConfigLoadError.invalidConfigLine(
+                    "default_permissions refers to unknown built-in profile `\(profileName)`"
+                )
+            }
+            guard let profile = permissions[profileName] else {
+                let message = permissions.isEmpty
+                    ? "default_permissions requires a `[permissions]` table"
+                    : "default_permissions refers to undefined profile `\(profileName)`"
+                throw CodexConfigLoadError.invalidConfigLine(message)
+            }
+            return try profile.permissionProfile(profileName: profileName, cwd: cwd)
+        }
     }
 
     func projectRootMarkersForDiscovery() throws -> [String] {
@@ -1727,6 +1958,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)sandbox_mode"
             )
         }
+        if let defaultPermissions = values["default_permissions"] {
+            config.defaultPermissions = try stringValue(
+                defaultPermissions,
+                key: "\(keyPrefix)default_permissions"
+            )
+        }
         if let effort = values["model_reasoning_effort"] {
             config.modelReasoningEffort = try stringEnumValue(
                 ReasoningEffort.self,
@@ -1895,6 +2132,7 @@ private struct ParsedCodexConfigToml {
             || key == "approval_policy"
             || key == "approvals_reviewer"
             || key == "sandbox_mode"
+            || key == "default_permissions"
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
@@ -1943,6 +2181,7 @@ private struct ParsedCodexConfigToml {
             || key == "approval_policy"
             || key == "approvals_reviewer"
             || key == "sandbox_mode"
+            || key == "default_permissions"
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
@@ -2072,6 +2311,20 @@ private struct ParsedCodexConfigToml {
                 try stringEnumValue(RealtimeVoice.self, $0, key: "\(key).voice")
             } ?? defaults.voice
         )
+    }
+
+    private static func terminalResizeReflowConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> TerminalResizeReflowConfig {
+        for field in table.keys where field != "terminal_resize_reflow_max_rows" {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        guard let maxRows = table["terminal_resize_reflow_max_rows"] else {
+            return TerminalResizeReflowConfig()
+        }
+        let rows = try nonNegativeIntValue(maxRows, key: "\(key).terminal_resize_reflow_max_rows")
+        return TerminalResizeReflowConfig(maxRows: rows == 0 ? .disabled : .limit(rows))
     }
 
     private static func shellEnvironmentPolicyValue(
@@ -2283,11 +2536,20 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "sandbox_workspace_write" {
             return .sandboxWorkspaceWrite
         }
+        if parts.count == 3, parts[0] == "permissions", parts[2] == "filesystem" {
+            return .permissionFilesystem(parts[1])
+        }
+        if parts.count == 3, parts[0] == "permissions", parts[2] == "network" {
+            return .permissionNetwork(parts[1])
+        }
         if parts.count == 1, parts[0] == "audio" {
             return .audio
         }
         if parts.count == 1, parts[0] == "realtime" {
             return .realtime
+        }
+        if parts.count == 1, parts[0] == "tui" {
+            return .tui
         }
         if parts.count == 1, parts[0] == "shell_environment_policy" {
             return .shellEnvironmentPolicy
@@ -2489,8 +2751,11 @@ private enum ConfigSection {
     case modelProviderMap(String, String)
     case features
     case sandboxWorkspaceWrite
+    case permissionFilesystem(String)
+    case permissionNetwork(String)
     case audio
     case realtime
+    case tui
     case shellEnvironmentPolicy
     case shellEnvironmentPolicySet
     case skills

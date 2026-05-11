@@ -17,6 +17,9 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.approvalPolicy)
         XCTAssertEqual(config.approvalsReviewer, .user)
         XCTAssertNil(config.sandboxMode)
+        XCTAssertNil(config.defaultPermissions)
+        XCTAssertNil(config.permissionProfile)
+        XCTAssertNil(config.activePermissionProfile)
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
         XCTAssertNil(config.modelVerbosity)
@@ -64,6 +67,78 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
         XCTAssertTrue(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
+    }
+
+    func testLoadsDefaultPermissionProfileLikeRustConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        let paths = try CoreTemporaryDirectory()
+        let docs = paths.url.appendingPathComponent("docs", isDirectory: true)
+        let privateDir = docs.appendingPathComponent("private", isDirectory: true)
+        try FileManager.default.createDirectory(at: privateDir, withIntermediateDirectories: true)
+        try """
+        default_permissions = "limited-read-test"
+
+        [permissions.limited-read-test.filesystem]
+        ":minimal" = "read"
+        "\(docs.path)" = "read"
+        "\(privateDir.path)" = "none"
+
+        [permissions.limited-read-test.network]
+        enabled = true
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.defaultPermissions, "limited-read-test")
+        XCTAssertEqual(config.activePermissionProfile, ActivePermissionProfile(id: "limited-read-test"))
+        XCTAssertEqual(
+            config.permissionProfile,
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .path(docs.path), access: .read),
+                    FileSystemSandboxEntry(path: .path(privateDir.path), access: .none),
+                    FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
+                ]),
+                network: .enabled
+            )
+        )
+    }
+
+    func testDefaultPermissionsOverrideSelectsNamedProfileLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let allowed = dir.url.appendingPathComponent("allowed", isDirectory: true)
+        try FileManager.default.createDirectory(at: allowed, withIntermediateDirectories: true)
+        try """
+        [permissions.custom.filesystem]
+        "\(allowed.path)" = "read"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [#"default_permissions="custom""#]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.defaultPermissions, "custom")
+        XCTAssertEqual(
+            config.permissionProfile,
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .path(allowed.path), access: .read)
+                ]),
+                network: .restricted
+            )
+        )
     }
 
     func testLoadsApplyRelevantTopLevelValues() throws {
@@ -123,6 +198,9 @@ final class ConfigLoaderTests: XCTestCase {
         type = "transcription"
         transport = "webrtc"
         voice = "cedar"
+
+        [tui]
+        terminal_resize_reflow_max_rows = 9000
 
         [skills]
         include_instructions = false
@@ -188,6 +266,19 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
         XCTAssertEqual(config.ossProvider, "ollama")
         XCTAssertFalse(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
+    }
+
+    func testTerminalResizeReflowZeroDisablesLimitLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tui]
+        terminal_resize_reflow_max_rows = 0
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.terminalResizeReflow.maxRows, .disabled)
     }
 
     func testPromptInstructionBlocksCanBeDisabledFromConfigAndProfilesLikeRust() throws {
