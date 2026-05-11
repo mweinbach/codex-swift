@@ -19,6 +19,32 @@ public final class ShellSnapshot: @unchecked Sendable {
         try? FileManager.default.removeItem(at: path)
     }
 
+    public static func attachSnapshotIfEnabled(
+        codexHome: URL,
+        sessionID: ThreadId,
+        sessionCwd: URL,
+        shell: Shell,
+        features: FeatureStates
+    ) -> Shell {
+        guard features.isEnabled(.shellSnapshot) else {
+            return Shell(shellType: shell.shellType, shellPath: shell.shellPath)
+        }
+        guard shell.shellSnapshot == nil else {
+            return shell
+        }
+        do {
+            let snapshot = try tryNew(
+                codexHome: codexHome,
+                sessionID: sessionID,
+                sessionCwd: sessionCwd,
+                shell: shell
+            )
+            return Shell(shellType: shell.shellType, shellPath: shell.shellPath, shellSnapshot: snapshot)
+        } catch {
+            return shell
+        }
+    }
+
     public static func tryNew(codexHome: URL, sessionID: ThreadId, sessionCwd: URL, shell: Shell) throws -> ShellSnapshot {
         let fileExtension = shell.shellType == .powerShell ? "ps1" : "sh"
         let nonce = UInt64(Date().timeIntervalSince1970 * 1_000_000_000)

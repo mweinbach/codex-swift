@@ -785,7 +785,13 @@ private func runNonInteractiveExec(
     )
     let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: arguments)
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
-    let shell = ShellResolver.defaultUserShell()
+    let shell = ShellSnapshot.attachSnapshotIfEnabled(
+        codexHome: codexHome,
+        sessionID: ThreadId(uuid: conversationID.uuid),
+        sessionCwd: cwd,
+        shell: ShellResolver.defaultUserShell(),
+        features: settings.features
+    )
     let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
     let projectInstructions = ProjectDoc.getUserInstructions(
         config: ProjectDocConfig(runtimeConfig: settings, cwd: cwd)

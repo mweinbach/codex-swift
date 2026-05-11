@@ -141,6 +141,68 @@ final class ShellSnapshotTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: refreshedPath.path))
     }
 
+    func testAttachSnapshotIfEnabledCreatesSnapshotForDefaultFeature() throws {
+        let directory = try temporaryDirectory()
+        let shell = Shell(shellType: .bash, shellPath: "/bin/bash")
+        var attachedShell: Shell? = try withSanitizedShellHome(directory) {
+            ShellSnapshot.attachSnapshotIfEnabled(
+                codexHome: directory,
+                sessionID: ThreadId(),
+                sessionCwd: directory,
+                shell: shell,
+                features: .withDefaults()
+            )
+        }
+
+        let snapshotPath: URL
+        do {
+            let snapshot = try XCTUnwrap(attachedShell?.shellSnapshot)
+            XCTAssertEqual(attachedShell?.shellType, .bash)
+            XCTAssertEqual(attachedShell?.shellPath, "/bin/bash")
+            XCTAssertEqual(snapshot.cwd, directory)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: snapshot.path.path))
+            snapshotPath = snapshot.path
+        }
+        attachedShell = nil
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotPath.path))
+    }
+
+    func testAttachSnapshotIfEnabledSkipsWhenFeatureDisabled() throws {
+        let directory = try temporaryDirectory()
+        var features = FeatureStates.withDefaults()
+        features.set(.shellSnapshot, enabled: false)
+
+        let shell = ShellSnapshot.attachSnapshotIfEnabled(
+            codexHome: directory,
+            sessionID: ThreadId(),
+            sessionCwd: directory,
+            shell: Shell(shellType: .bash, shellPath: "/bin/bash"),
+            features: features
+        )
+
+        XCTAssertNil(shell.shellSnapshot)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(ShellSnapshot.directoryName, isDirectory: true).path
+        ))
+    }
+
+    func testAttachSnapshotIfEnabledFallsBackWhenSnapshotCreationFails() throws {
+        let directory = try temporaryDirectory()
+        let originalShell = Shell(shellType: .cmd, shellPath: "cmd.exe")
+
+        let shell = ShellSnapshot.attachSnapshotIfEnabled(
+            codexHome: directory,
+            sessionID: ThreadId(),
+            sessionCwd: directory,
+            shell: originalShell,
+            features: .withDefaults()
+        )
+
+        XCTAssertEqual(shell, originalShell)
+        XCTAssertNil(shell.shellSnapshot)
+    }
+
     func testCleanupStaleSnapshotsRemovesOrphansAndKeepsLive() throws {
         let directory = try temporaryDirectory()
         let snapshotDirectory = directory.appendingPathComponent(ShellSnapshot.directoryName, isDirectory: true)
