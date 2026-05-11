@@ -42,7 +42,8 @@ public enum AgentJobRuntime {
         requestedConcurrency: Int?,
         maxThreads: Int?,
         sessionSource: SessionSource = .default,
-        maxDepth: Int32? = nil
+        maxDepth: Int32? = nil,
+        spawnConfigSource: AgentJobSpawnConfigSource? = nil
     ) throws -> AgentJobRunnerOptions {
         let childDepth = nextThreadSpawnDepth(for: sessionSource)
         if let maxDepth, exceedsThreadSpawnDepthLimit(depth: childDepth, maxDepth: maxDepth) {
@@ -57,7 +58,26 @@ public enum AgentJobRuntime {
         }
         return AgentJobRunnerOptions(
             maxConcurrency: normalizeConcurrency(requested: requestedConcurrency, maxThreads: maxThreads),
-            childDepth: childDepth
+            childDepth: childDepth,
+            spawnConfig: spawnConfigSource.map(buildAgentSpawnConfig)
+        )
+    }
+
+    public static func buildAgentSpawnConfig(
+        source: AgentJobSpawnConfigSource
+    ) -> AgentJobSpawnConfigSnapshot {
+        AgentJobSpawnConfigSnapshot(
+            baseInstructions: source.baseInstructions,
+            model: source.model,
+            modelProviderID: source.modelProviderID ?? source.parentConfig.selectedModelProviderID,
+            modelReasoningEffort: source.reasoningEffort,
+            modelReasoningSummary: source.reasoningSummary,
+            developerInstructions: source.developerInstructions,
+            compactPrompt: source.compactPrompt,
+            cwd: source.turnContext.cwd,
+            approvalPolicy: source.turnContext.approvalPolicy,
+            sandboxPolicy: source.turnContext.sandboxPolicy,
+            shellEnvironmentPolicy: source.shellEnvironmentPolicy ?? source.parentConfig.shellEnvironmentPolicy
         )
     }
 
@@ -309,6 +329,7 @@ public enum AgentJobRuntime {
         job: AgentJob,
         activeItems: [ActiveAgentJobItem],
         maxConcurrency: Int,
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil,
         now: Date = Date(),
         spawnWorker: @Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult,
         shutdownThread: @Sendable (ThreadId) async -> Void
@@ -329,7 +350,8 @@ public enum AgentJobRuntime {
             let request = AgentJobWorkerSpawnRequest(
                 jobID: job.id,
                 itemID: item.itemID,
-                prompt: buildWorkerPrompt(job: job, item: item)
+                prompt: buildWorkerPrompt(job: job, item: item),
+                spawnConfig: spawnConfig
             )
             switch await spawnWorker(request) {
             case let .spawned(threadID):
@@ -373,6 +395,7 @@ public enum AgentJobRuntime {
         store: SQLiteAgentJobStore,
         jobID: String,
         maxConcurrency: Int,
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil,
         now: @Sendable () -> Date = Date.init,
         fileManager: FileManager = .default,
         statusForThread: @Sendable (ThreadId) async -> AgentStatus,
@@ -406,6 +429,7 @@ public enum AgentJobRuntime {
                     job: job,
                     activeItems: activeItems,
                     maxConcurrency: maxConcurrency,
+                    spawnConfig: spawnConfig,
                     now: now(),
                     spawnWorker: spawnWorker,
                     shutdownThread: shutdownThread
@@ -560,6 +584,7 @@ public enum AgentJobRuntime {
         maxThreads: Int? = nil,
         sessionSource: SessionSource = .default,
         maxDepth: Int32? = nil,
+        spawnConfigSource: AgentJobSpawnConfigSource? = nil,
         configuredMaxRuntimeSeconds: UInt64? = nil
     ) async throws -> PreparedSpawnAgentsOnCSVJob {
         let arguments = try decodeSpawnAgentsOnCSVArguments(argumentsJSON)
@@ -572,6 +597,7 @@ public enum AgentJobRuntime {
             maxThreads: maxThreads,
             sessionSource: sessionSource,
             maxDepth: maxDepth,
+            spawnConfigSource: spawnConfigSource,
             configuredMaxRuntimeSeconds: configuredMaxRuntimeSeconds
         )
     }
@@ -585,6 +611,7 @@ public enum AgentJobRuntime {
         maxThreads: Int? = nil,
         sessionSource: SessionSource = .default,
         maxDepth: Int32? = nil,
+        spawnConfigSource: AgentJobSpawnConfigSource? = nil,
         configuredMaxRuntimeSeconds: UInt64? = nil
     ) async throws -> PreparedSpawnAgentsOnCSVJob {
         guard !arguments.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -642,7 +669,8 @@ public enum AgentJobRuntime {
                 requestedConcurrency: requestedConcurrency,
                 maxThreads: maxThreads,
                 sessionSource: sessionSource,
-                maxDepth: maxDepth
+                maxDepth: maxDepth,
+                spawnConfigSource: spawnConfigSource
             )
         } catch let error as FunctionCallError {
             _ = try? await store.markAgentJobFailed(jobID, errorMessage: error.description)
@@ -664,7 +692,8 @@ public enum AgentJobRuntime {
         return PreparedSpawnAgentsOnCSVJob(
             job: runningJob,
             itemCount: items.count,
-            concurrency: runnerOptions.maxConcurrency
+            concurrency: runnerOptions.maxConcurrency,
+            spawnConfig: runnerOptions.spawnConfig
         )
     }
 
@@ -723,11 +752,18 @@ public struct AgentJobWorkerSpawnRequest: Equatable, Sendable {
     public var jobID: String
     public var itemID: String
     public var prompt: String
+    public var spawnConfig: AgentJobSpawnConfigSnapshot?
 
-    public init(jobID: String, itemID: String, prompt: String) {
+    public init(
+        jobID: String,
+        itemID: String,
+        prompt: String,
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil
+    ) {
         self.jobID = jobID
         self.itemID = itemID
         self.prompt = prompt
+        self.spawnConfig = spawnConfig
     }
 }
 
@@ -750,10 +786,93 @@ public struct AgentJobSpawnPendingResult: Equatable, Sendable {
 public struct AgentJobRunnerOptions: Equatable, Sendable {
     public var maxConcurrency: Int
     public var childDepth: Int32
+    public var spawnConfig: AgentJobSpawnConfigSnapshot?
 
-    public init(maxConcurrency: Int, childDepth: Int32) {
+    public init(
+        maxConcurrency: Int,
+        childDepth: Int32,
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil
+    ) {
         self.maxConcurrency = maxConcurrency
         self.childDepth = childDepth
+        self.spawnConfig = spawnConfig
+    }
+}
+
+public struct AgentJobSpawnConfigSource: Equatable, Sendable {
+    public var parentConfig: CodexRuntimeConfig
+    public var baseInstructions: String
+    public var model: String
+    public var modelProviderID: String?
+    public var reasoningEffort: ReasoningEffort?
+    public var reasoningSummary: ReasoningSummary?
+    public var developerInstructions: String?
+    public var compactPrompt: String?
+    public var turnContext: TurnContext
+    public var shellEnvironmentPolicy: ShellEnvironmentPolicy?
+
+    public init(
+        parentConfig: CodexRuntimeConfig,
+        baseInstructions: String,
+        model: String,
+        modelProviderID: String? = nil,
+        reasoningEffort: ReasoningEffort? = nil,
+        reasoningSummary: ReasoningSummary? = nil,
+        developerInstructions: String? = nil,
+        compactPrompt: String? = nil,
+        turnContext: TurnContext,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy? = nil
+    ) {
+        self.parentConfig = parentConfig
+        self.baseInstructions = baseInstructions
+        self.model = model
+        self.modelProviderID = modelProviderID
+        self.reasoningEffort = reasoningEffort
+        self.reasoningSummary = reasoningSummary
+        self.developerInstructions = developerInstructions
+        self.compactPrompt = compactPrompt
+        self.turnContext = turnContext
+        self.shellEnvironmentPolicy = shellEnvironmentPolicy
+    }
+}
+
+public struct AgentJobSpawnConfigSnapshot: Equatable, Sendable {
+    public var baseInstructions: String
+    public var model: String
+    public var modelProviderID: String
+    public var modelReasoningEffort: ReasoningEffort?
+    public var modelReasoningSummary: ReasoningSummary?
+    public var developerInstructions: String?
+    public var compactPrompt: String?
+    public var cwd: String
+    public var approvalPolicy: AskForApproval
+    public var sandboxPolicy: SandboxPolicy
+    public var shellEnvironmentPolicy: ShellEnvironmentPolicy
+
+    public init(
+        baseInstructions: String,
+        model: String,
+        modelProviderID: String,
+        modelReasoningEffort: ReasoningEffort? = nil,
+        modelReasoningSummary: ReasoningSummary? = nil,
+        developerInstructions: String? = nil,
+        compactPrompt: String? = nil,
+        cwd: String,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy
+    ) {
+        self.baseInstructions = baseInstructions
+        self.model = model
+        self.modelProviderID = modelProviderID
+        self.modelReasoningEffort = modelReasoningEffort
+        self.modelReasoningSummary = modelReasoningSummary
+        self.developerInstructions = developerInstructions
+        self.compactPrompt = compactPrompt
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.sandboxPolicy = sandboxPolicy
+        self.shellEnvironmentPolicy = shellEnvironmentPolicy
     }
 }
 
@@ -803,11 +922,18 @@ public struct PreparedSpawnAgentsOnCSVJob: Equatable, Sendable {
     public var job: AgentJob
     public var itemCount: Int
     public var concurrency: Int
+    public var spawnConfig: AgentJobSpawnConfigSnapshot?
 
-    public init(job: AgentJob, itemCount: Int, concurrency: Int) {
+    public init(
+        job: AgentJob,
+        itemCount: Int,
+        concurrency: Int,
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil
+    ) {
         self.job = job
         self.itemCount = itemCount
         self.concurrency = concurrency
+        self.spawnConfig = spawnConfig
     }
 }
 

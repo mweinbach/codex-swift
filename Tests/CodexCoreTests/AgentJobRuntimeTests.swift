@@ -64,6 +64,81 @@ final class AgentJobRuntimeTests: XCTestCase {
         }
     }
 
+    func testBuildRunnerOptionsBuildsRustChildSpawnConfigSnapshot() throws {
+        let parentConfig = CodexRuntimeConfig(
+            model: "stale-model",
+            modelProvider: "stale-provider",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            modelReasoningEffort: .low,
+            modelReasoningSummary: ReasoningSummary.none,
+            baseInstructions: "stale base",
+            developerInstructions: "stale developer",
+            compactPrompt: "stale compact",
+            shellEnvironmentPolicy: ShellEnvironmentPolicy(inherit: .none, set: ["STALE": "1"])
+        )
+        let liveShellPolicy = ShellEnvironmentPolicy(inherit: .core, set: ["LIVE": "1"])
+        let source = AgentJobSpawnConfigSource(
+            parentConfig: parentConfig,
+            baseInstructions: "live base",
+            model: "gpt-live",
+            modelProviderID: "live-provider",
+            reasoningEffort: .high,
+            reasoningSummary: .detailed,
+            developerInstructions: "live developer",
+            compactPrompt: "live compact",
+            turnContext: TurnContext(
+                cwd: "/work/live",
+                approvalPolicy: .onRequest,
+                sandboxPolicy: .readOnlyWithNetworkAccess
+            ),
+            shellEnvironmentPolicy: liveShellPolicy
+        )
+
+        let options = try AgentJobRuntime.buildRunnerOptions(
+            requestedConcurrency: 2,
+            maxThreads: 8,
+            spawnConfigSource: source
+        )
+        let snapshot = try XCTUnwrap(options.spawnConfig)
+
+        XCTAssertEqual(options.maxConcurrency, 2)
+        XCTAssertEqual(snapshot.baseInstructions, "live base")
+        XCTAssertEqual(snapshot.model, "gpt-live")
+        XCTAssertEqual(snapshot.modelProviderID, "live-provider")
+        XCTAssertEqual(snapshot.modelReasoningEffort, .high)
+        XCTAssertEqual(snapshot.modelReasoningSummary, .detailed)
+        XCTAssertEqual(snapshot.developerInstructions, "live developer")
+        XCTAssertEqual(snapshot.compactPrompt, "live compact")
+        XCTAssertEqual(snapshot.cwd, "/work/live")
+        XCTAssertEqual(snapshot.approvalPolicy, .onRequest)
+        XCTAssertEqual(snapshot.sandboxPolicy, .readOnlyWithNetworkAccess)
+        XCTAssertEqual(snapshot.shellEnvironmentPolicy, liveShellPolicy)
+    }
+
+    func testBuildAgentSpawnConfigFallsBackToParentProviderAndShellPolicy() {
+        let parentShellPolicy = ShellEnvironmentPolicy(inherit: .core, set: ["PARENT": "1"])
+        let parentConfig = CodexRuntimeConfig(
+            modelProvider: "parent-provider",
+            shellEnvironmentPolicy: parentShellPolicy
+        )
+        let source = AgentJobSpawnConfigSource(
+            parentConfig: parentConfig,
+            baseInstructions: "base",
+            model: "gpt-live",
+            turnContext: TurnContext(
+                cwd: "/work",
+                approvalPolicy: .onFailure,
+                sandboxPolicy: .readOnly
+            )
+        )
+
+        let snapshot = AgentJobRuntime.buildAgentSpawnConfig(source: source)
+
+        XCTAssertEqual(snapshot.modelProviderID, "parent-provider")
+        XCTAssertEqual(snapshot.shellEnvironmentPolicy, parentShellPolicy)
+    }
+
     func testBuildWorkerPromptMatchesRustInstructions() {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let job = makeJob(
@@ -183,6 +258,7 @@ final class AgentJobRuntimeTests: XCTestCase {
 
     func testCreateSpawnAgentsOnCSVJobPersistsRustFrontHalf() async throws {
         let fixture = try AgentJobRuntimeStoreFixture.make()
+        let spawnConfigSource = makeSpawnConfigSource(cwd: fixture.tempDirectory.url.path)
         let prepared = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
             arguments: SpawnAgentsOnCSVArguments(
                 csvPath: "input/jobs.csv",
@@ -199,6 +275,7 @@ final class AgentJobRuntimeTests: XCTestCase {
             store: fixture.store,
             jobID: "12345678-1234-1234-1234-123456789abc",
             maxThreads: 8,
+            spawnConfigSource: spawnConfigSource,
             configuredMaxRuntimeSeconds: 45
         )
 
@@ -213,6 +290,7 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(prepared.job.maxRuntimeSeconds, 45)
         XCTAssertEqual(prepared.itemCount, 2)
         XCTAssertEqual(prepared.concurrency, 8)
+        XCTAssertEqual(prepared.spawnConfig, AgentJobRuntime.buildAgentSpawnConfig(source: spawnConfigSource))
 
         let items = try await fixture.store.listAgentJobItems(jobID: prepared.job.id)
         XCTAssertEqual(items.map(\.itemID), ["alpha", "alpha-2"])
@@ -569,6 +647,7 @@ final class AgentJobRuntimeTests: XCTestCase {
         let fixture = try await makeStoreWithItems(["row-1", "row-2", "row-3"])
         let persistedJob = try await fixture.store.getAgentJob("job-1")
         let job = try XCTUnwrap(persistedJob)
+        let spawnConfig = AgentJobRuntime.buildAgentSpawnConfig(source: makeSpawnConfigSource(cwd: "/work/job"))
         let existingThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000031")
         let firstThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000032")
         let secondThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000033")
@@ -581,6 +660,7 @@ final class AgentJobRuntimeTests: XCTestCase {
                 ActiveAgentJobItem(threadID: existingThreadID, itemID: "existing", startedAt: Date()),
             ],
             maxConcurrency: 3,
+            spawnConfig: spawnConfig,
             spawnWorker: { request in
                 await recorder.spawn(request)
             },
@@ -592,6 +672,7 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(result.activeItems.map(\.threadID), [existingThreadID, firstThreadID, secondThreadID])
         let requests = await recorder.requests()
         XCTAssertEqual(requests.map(\.itemID), ["row-1", "row-2"])
+        XCTAssertEqual(requests.map(\.spawnConfig), [spawnConfig, spawnConfig])
         XCTAssertTrue(requests[0].prompt.contains("Job ID: job-1"))
         XCTAssertTrue(requests[0].prompt.contains("Item ID: row-1"))
 
@@ -905,6 +986,28 @@ final class AgentJobRuntimeTests: XCTestCase {
             updatedAt: date,
             completedAt: status == .running ? nil : date,
             reportedAt: nil
+        )
+    }
+
+    private func makeSpawnConfigSource(cwd: String) -> AgentJobSpawnConfigSource {
+        AgentJobSpawnConfigSource(
+            parentConfig: CodexRuntimeConfig(
+                modelProvider: "parent-provider",
+                shellEnvironmentPolicy: ShellEnvironmentPolicy(inherit: .core, set: ["PARENT": "1"])
+            ),
+            baseInstructions: "job base",
+            model: "gpt-job",
+            modelProviderID: "job-provider",
+            reasoningEffort: .medium,
+            reasoningSummary: .concise,
+            developerInstructions: "job developer",
+            compactPrompt: "job compact",
+            turnContext: TurnContext(
+                cwd: cwd,
+                approvalPolicy: .onRequest,
+                sandboxPolicy: .readOnlyWithNetworkAccess
+            ),
+            shellEnvironmentPolicy: ShellEnvironmentPolicy(inherit: .all, set: ["JOB": "1"])
         )
     }
 
