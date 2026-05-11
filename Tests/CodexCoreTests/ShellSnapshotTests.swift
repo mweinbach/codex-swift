@@ -446,6 +446,220 @@ final class ShellSnapshotTests: XCTestCase {
 
         XCTAssertEqual(output, "pip:unset\nhttp:http://user.proxy:8080\nactive:unset")
     }
+
+    func testSnapshotCommandWrapperRestoresProxyEnvFromProcessEnv() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: """
+            # Snapshot file
+            export PIP_PROXY='http://127.0.0.1:8080'
+            export HTTP_PROXY='http://127.0.0.1:8080'
+            export http_proxy='http://127.0.0.1:8080'
+            export GIT_SSH_COMMAND='ssh -o ProxyCommand=stale'
+            """
+        )
+        let command = [
+            "/bin/bash",
+            "-lc",
+            #"printf '%s\n%s\n%s\n%s' "$PIP_PROXY" "$HTTP_PROXY" "$http_proxy" "$GIT_SSH_COMMAND""#
+        ]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: [
+                "BASH_ENV": "/dev/null",
+                ShellSnapshotCommandWrapper.proxyActiveEnvKey: "1",
+                "PIP_PROXY": "http://127.0.0.1:4321",
+                "HTTP_PROXY": "http://127.0.0.1:4321",
+                "http_proxy": "http://127.0.0.1:4321",
+                ShellSnapshotCommandWrapper.proxyGitSSHCommandEnvKey: "ssh -o ProxyCommand=fresh"
+            ],
+            cwd: directory
+        )
+
+        XCTAssertEqual(
+            output,
+            "http://127.0.0.1:4321\nhttp://127.0.0.1:4321\nhttp://127.0.0.1:4321\nssh -o ProxyCommand=stale"
+        )
+    }
+
+    func testSnapshotCommandWrapperKeepsUserProxyEnvWhenProxyInactive() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport HTTP_PROXY='http://user.proxy:8080'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$HTTP_PROXY""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null"],
+            removingEnvironment: ShellSnapshotCommandWrapper.proxyEnvKeys,
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "http://user.proxy:8080")
+    }
+
+    func testSnapshotCommandWrapperKeepsSnapshotPathWithoutOverride() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport PATH='/snapshot/bin'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$PATH""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "/snapshot/bin")
+    }
+
+    func testSnapshotCommandWrapperAppliesExplicitPathOverride() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport PATH='/snapshot/bin'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$PATH""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: ["PATH": "/worktree/bin"],
+            environment: ["PATH": "/worktree/bin"]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null", "PATH": "/worktree/bin"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "/worktree/bin")
+    }
+
+    func testSnapshotCommandWrapperPreservesUnsetOverrideVariables() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport CODEX_TEST_UNSET_OVERRIDE='snapshot-value'\n"
+        )
+        let command = [
+            "/bin/bash",
+            "-lc",
+            #"if [ "${CODEX_TEST_UNSET_OVERRIDE+x}" = x ]; then printf 'set:%s' "$CODEX_TEST_UNSET_OVERRIDE"; else printf 'unset'; fi"#
+        ]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: ["CODEX_TEST_UNSET_OVERRIDE": "worktree-value"],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null"],
+            removingEnvironment: ["CODEX_TEST_UNSET_OVERRIDE"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "unset")
+    }
+
+    #if os(macOS)
+    func testSnapshotCommandWrapperRefreshesCodexProxyGitSSHCommand() throws {
+        let directory = try temporaryDirectory()
+        let staleCommand = "\(ShellSnapshotCommandWrapper.codexProxyGitSSHCommandMarker)ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
+        let freshCommand = "\(ShellSnapshotCommandWrapper.codexProxyGitSSHCommandMarker)ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:48081 %h %p'"
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport GIT_SSH_COMMAND='\(ShellSnapshotCommandWrapper.shellSingleQuote(staleCommand))'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$GIT_SSH_COMMAND""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: [
+                "BASH_ENV": "/dev/null",
+                ShellSnapshotCommandWrapper.proxyGitSSHCommandEnvKey: freshCommand
+            ],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, freshCommand)
+    }
+
+    func testSnapshotCommandWrapperClearsStaleCodexProxyGitSSHCommandWithoutLiveCommand() throws {
+        let directory = try temporaryDirectory()
+        let staleCommand = "\(ShellSnapshotCommandWrapper.codexProxyGitSSHCommandMarker)ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'"
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport GIT_SSH_COMMAND='\(ShellSnapshotCommandWrapper.shellSingleQuote(staleCommand))'\n"
+        )
+        let command = [
+            "/bin/bash",
+            "-lc",
+            #"if [ "${GIT_SSH_COMMAND+x}" = x ]; then printf 'set'; else printf 'unset'; fi"#
+        ]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null"],
+            removingEnvironment: [ShellSnapshotCommandWrapper.proxyGitSSHCommandEnvKey],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "unset")
+    }
+    #endif
     #endif
 
     private func temporaryDirectory() throws -> URL {
@@ -499,13 +713,18 @@ final class ShellSnapshotTests: XCTestCase {
         executable: String,
         arguments: [String],
         environment: [String: String],
+        removingEnvironment environmentRemovals: [String] = [],
         cwd: URL
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = cwd
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        var processEnvironment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        for key in environmentRemovals {
+            processEnvironment.removeValue(forKey: key)
+        }
+        process.environment = processEnvironment
 
         let stdout = Pipe()
         let stderr = Pipe()
