@@ -2824,6 +2824,100 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(verificationParams["verifications"] as? [String], ["trustedAccessForCyber"])
     }
 
+    func testRuntimeHookEventsEmitRustNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let sourcePath = try AbsolutePath(absolutePath: temp.url.appendingPathComponent("hooks.json").path)
+        let startedRun = HookRunSummary(
+            id: "run-1",
+            eventName: .preToolUse,
+            handlerType: .command,
+            executionMode: .sync,
+            scope: .turn,
+            sourcePath: sourcePath,
+            source: .sessionFlags,
+            displayOrder: 7,
+            status: .running,
+            statusMessage: "checking",
+            startedAt: 1_778_320_000,
+            completedAt: nil,
+            durationMs: nil,
+            entries: []
+        )
+        let completedRun = HookRunSummary(
+            id: "run-1",
+            eventName: .preToolUse,
+            handlerType: .command,
+            executionMode: .sync,
+            scope: .turn,
+            sourcePath: sourcePath,
+            source: .cloudRequirements,
+            displayOrder: 7,
+            status: .completed,
+            statusMessage: nil,
+            startedAt: 1_778_320_000,
+            completedAt: 1_778_320_002,
+            durationMs: 2_000,
+            entries: [
+                HookOutputEntry(kind: .warning, text: "careful"),
+                HookOutputEntry(kind: .context, text: "extra context")
+            ]
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .hookStarted(HookStartedEvent(turnID: "turn-1", run: startedRun))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .hookCompleted(HookCompletedEvent(turnID: nil, run: completedRun))
+        )
+
+        let started = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(started[0]["method"] as? String, "hook/started")
+        let startedParams = try XCTUnwrap(started[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["turnId"] as? String, "turn-1")
+        let startedRunObject = try XCTUnwrap(startedParams["run"] as? [String: Any])
+        XCTAssertEqual(startedRunObject["id"] as? String, "run-1")
+        XCTAssertEqual(startedRunObject["eventName"] as? String, "preToolUse")
+        XCTAssertEqual(startedRunObject["handlerType"] as? String, "command")
+        XCTAssertEqual(startedRunObject["executionMode"] as? String, "sync")
+        XCTAssertEqual(startedRunObject["scope"] as? String, "turn")
+        XCTAssertEqual(startedRunObject["sourcePath"] as? String, sourcePath.path)
+        XCTAssertEqual(startedRunObject["source"] as? String, "sessionFlags")
+        XCTAssertEqual(startedRunObject["displayOrder"] as? Int, 7)
+        XCTAssertEqual(startedRunObject["status"] as? String, "running")
+        XCTAssertEqual(startedRunObject["statusMessage"] as? String, "checking")
+        XCTAssertEqual(startedRunObject["startedAt"] as? Int, 1_778_320_000)
+        XCTAssertTrue(startedRunObject["completedAt"] is NSNull)
+        XCTAssertTrue(startedRunObject["durationMs"] is NSNull)
+        XCTAssertEqual((startedRunObject["entries"] as? [Any])?.count, 0)
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "hook/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["threadId"] as? String, "thread-1")
+        XCTAssertTrue(completedParams["turnId"] is NSNull)
+        let completedRunObject = try XCTUnwrap(completedParams["run"] as? [String: Any])
+        XCTAssertEqual(completedRunObject["source"] as? String, "cloudRequirements")
+        XCTAssertEqual(completedRunObject["status"] as? String, "completed")
+        XCTAssertTrue(completedRunObject["statusMessage"] is NSNull)
+        XCTAssertEqual(completedRunObject["completedAt"] as? Int, 1_778_320_002)
+        XCTAssertEqual(completedRunObject["durationMs"] as? Int, 2_000)
+        let entries = try XCTUnwrap(completedRunObject["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries[0]["kind"] as? String, "warning")
+        XCTAssertEqual(entries[0]["text"] as? String, "careful")
+        XCTAssertEqual(entries[1]["kind"] as? String, "context")
+        XCTAssertEqual(entries[1]["text"] as? String, "extra context")
+    }
+
     func testRuntimeRealtimeLifecycleEventsEmitNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

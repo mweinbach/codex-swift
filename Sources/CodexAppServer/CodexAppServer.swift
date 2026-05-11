@@ -12837,6 +12837,100 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func hookStartedNotification(threadID: String, event: HookStartedEvent) -> [String: Any] {
+        [
+            "method": "hook/started",
+            "params": [
+                "threadId": threadID,
+                "turnId": event.turnID as Any? ?? NSNull(),
+                "run": hookRunSummary(event.run)
+            ]
+        ]
+    }
+
+    fileprivate static func hookCompletedNotification(threadID: String, event: HookCompletedEvent) -> [String: Any] {
+        [
+            "method": "hook/completed",
+            "params": [
+                "threadId": threadID,
+                "turnId": event.turnID as Any? ?? NSNull(),
+                "run": hookRunSummary(event.run)
+            ]
+        ]
+    }
+
+    private static func hookRunSummary(_ run: HookRunSummary) -> [String: Any] {
+        [
+            "id": run.id,
+            "eventName": hookEventName(run.eventName),
+            "handlerType": run.handlerType.rawValue,
+            "executionMode": run.executionMode.rawValue,
+            "scope": run.scope.rawValue,
+            "sourcePath": run.sourcePath.path,
+            "source": hookSource(run.source),
+            "displayOrder": run.displayOrder,
+            "status": run.status.rawValue,
+            "statusMessage": run.statusMessage as Any? ?? NSNull(),
+            "startedAt": run.startedAt,
+            "completedAt": run.completedAt as Any? ?? NSNull(),
+            "durationMs": run.durationMs as Any? ?? NSNull(),
+            "entries": run.entries.map(hookOutputEntry)
+        ]
+    }
+
+    private static func hookOutputEntry(_ entry: HookOutputEntry) -> [String: Any] {
+        [
+            "kind": entry.kind.rawValue,
+            "text": entry.text
+        ]
+    }
+
+    private static func hookEventName(_ eventName: HookEventName) -> String {
+        switch eventName {
+        case .preToolUse:
+            return "preToolUse"
+        case .permissionRequest:
+            return "permissionRequest"
+        case .postToolUse:
+            return "postToolUse"
+        case .preCompact:
+            return "preCompact"
+        case .postCompact:
+            return "postCompact"
+        case .sessionStart:
+            return "sessionStart"
+        case .userPromptSubmit:
+            return "userPromptSubmit"
+        case .stop:
+            return "stop"
+        }
+    }
+
+    private static func hookSource(_ source: HookSource) -> String {
+        switch source {
+        case .system:
+            return "system"
+        case .user:
+            return "user"
+        case .project:
+            return "project"
+        case .mdm:
+            return "mdm"
+        case .sessionFlags:
+            return "sessionFlags"
+        case .plugin:
+            return "plugin"
+        case .cloudRequirements:
+            return "cloudRequirements"
+        case .legacyManagedConfigFile:
+            return "legacyManagedConfigFile"
+        case .legacyManagedConfigMdm:
+            return "legacyManagedConfigMdm"
+        case .unknown:
+            return "unknown"
+        }
+    }
+
     fileprivate static func modelReroutedNotification(
         threadID: String,
         turnID: String,
@@ -13225,6 +13319,10 @@ public enum CodexAppServer {
             return skillsChangedNotification()
         case let .deprecationNotice(event):
             return deprecationNoticeNotification(event)
+        case let .hookStarted(event):
+            return hookStartedNotification(threadID: threadID, event: event)
+        case let .hookCompleted(event):
+            return hookCompletedNotification(threadID: threadID, event: event)
         case let .modelReroute(event):
             return modelReroutedNotification(threadID: threadID, turnID: turnID, event: event)
         case let .modelVerification(event):

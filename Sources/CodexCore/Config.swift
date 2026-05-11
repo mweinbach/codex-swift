@@ -199,6 +199,22 @@ public struct AgentRuntimeConfig: Equatable, Sendable {
     }
 }
 
+public struct AgentRoleConfig: Equatable, Sendable {
+    public var description: String?
+    public var configFile: String?
+    public var nicknameCandidates: [String]?
+
+    public init(
+        description: String? = nil,
+        configFile: String? = nil,
+        nicknameCandidates: [String]? = nil
+    ) {
+        self.description = description
+        self.configFile = configFile
+        self.nicknameCandidates = nicknameCandidates
+    }
+}
+
 public enum UriBasedFileOpener: String, Codable, Equatable, Sendable {
     case vsCode = "vscode"
     case vsCodeInsiders = "vscode-insiders"
@@ -306,6 +322,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelAutoCompactTokenLimit: Int64?
     public var history: HistoryConfig
     public var agents: AgentRuntimeConfig
+    public var agentRoles: [String: AgentRoleConfig]
     public var fileOpener: UriBasedFileOpener
     public var tui: TuiRuntimeConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
@@ -486,6 +503,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelAutoCompactTokenLimit = nil
         self.history = HistoryConfig()
         self.agents = AgentRuntimeConfig()
+        self.agentRoles = [:]
         self.fileOpener = .vsCode
         self.tui = TuiRuntimeConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
@@ -1782,6 +1800,7 @@ private struct ParsedCodexConfigToml {
     var feedback: [String: ConfigValue] = [:]
     var profileAnalytics: [String: [String: ConfigValue]] = [:]
     var agents: [String: ConfigValue] = [:]
+    var agentRoles: [String: [String: ConfigValue]] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
@@ -1803,6 +1822,7 @@ private struct ParsedCodexConfigToml {
         profileAppsMcpPathOverride.removeAll()
         profileAnalytics.removeAll()
         profileTui.removeAll()
+        agentRoles.removeAll()
     }
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
@@ -1910,8 +1930,19 @@ private struct ParsedCodexConfigToml {
                     guard case let .table(table) = value else {
                         throw CodexConfigLoadError.invalidConfigLine(key)
                     }
-                    for (agentKey, agentValue) in table where Self.isRelevantAgentKey(agentKey) {
-                        parsed.agents[agentKey] = agentValue
+                    for (agentKey, agentValue) in table {
+                        if Self.isRelevantAgentKey(agentKey) {
+                            parsed.agents[agentKey] = agentValue
+                            continue
+                        }
+                        if case let .table(roleTable) = agentValue {
+                            try parsed.mergeAgentRole(
+                                name: agentKey,
+                                table: roleTable,
+                                keyPrefix: "agents.\(agentKey)",
+                                baseURL: baseURL
+                            )
+                        }
                     }
                     continue
                 }
@@ -1986,6 +2017,14 @@ private struct ParsedCodexConfigToml {
                 if Self.isRelevantAgentKey(key) {
                     parsed.agents[key] = try ConfigValueParser.parseTomlLiteral(valueText)
                 }
+            case let .agentRole(name):
+                try parsed.mergeAgentRole(
+                    name: name,
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    keyPrefix: "agents.\(name).\(key)",
+                    baseURL: baseURL
+                )
             case let .permissionFilesystem(name):
                 let filesystemKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
@@ -2172,7 +2211,8 @@ private struct ParsedCodexConfigToml {
             "zsh_path",
             "sqlite_home",
             "log_dir",
-            "model_catalog_json"
+            "model_catalog_json",
+            "config_file"
         ].contains(key),
               let baseURL,
               case let .string(path) = value,
@@ -2269,6 +2309,17 @@ private struct ParsedCodexConfigToml {
                 if Self.isRelevantAgentKey(parts[1]) {
                     agents[parts[1]] = value
                 }
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "agents" {
+                try mergeAgentRole(
+                    name: parts[1],
+                    key: parts[2],
+                    value: value,
+                    keyPrefix: path,
+                    baseURL: nil
+                )
                 continue
             }
 
@@ -2417,6 +2468,14 @@ private struct ParsedCodexConfigToml {
             agents[key] = value
         }
 
+        for (roleName, roleValues) in overlay.agentRoles {
+            var mergedRole = agentRoles[roleName] ?? [:]
+            for (key, value) in roleValues {
+                mergedRole[key] = value
+            }
+            agentRoles[roleName] = mergedRole
+        }
+
         for (profileName, profileValue) in overlay.permissions {
             permissions[profileName, default: ParsedPermissionProfileToml()].merge(profileValue)
         }
@@ -2556,8 +2615,19 @@ private struct ParsedCodexConfigToml {
         }
 
         if case let .table(agentsTable) = table["agents"] {
-            for (key, value) in agentsTable where Self.isRelevantAgentKey(key) {
-                agents[key] = value
+            for (key, value) in agentsTable {
+                if Self.isRelevantAgentKey(key) {
+                    agents[key] = value
+                    continue
+                }
+                if case let .table(roleTable) = value {
+                    try mergeAgentRole(
+                        name: key,
+                        table: roleTable,
+                        keyPrefix: "agents.\(key)",
+                        baseURL: nil
+                    )
+                }
             }
         }
 
@@ -2673,6 +2743,7 @@ private struct ParsedCodexConfigToml {
         config.analyticsEnabled = try Self.enabledConfigValue(analytics, key: "analytics") ?? config.analyticsEnabled
         config.feedbackEnabled = try Self.enabledConfigValue(feedback, key: "feedback") ?? true
         config.agents = try Self.agentRuntimeConfigValue(agents, key: "agents")
+        config.agentRoles = try Self.agentRoleConfigsValue(agentRoles)
         let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         config.tui = try Self.tuiRuntimeConfigValue(
             tui,
@@ -2960,6 +3031,40 @@ private struct ParsedCodexConfigToml {
             return
         }
         modelProviders[name] = existing.merging(overlay: overlay)
+    }
+
+    private mutating func mergeAgentRole(
+        name: String,
+        table: [String: ConfigValue],
+        keyPrefix: String,
+        baseURL: URL?
+    ) throws {
+        for (key, value) in table {
+            try mergeAgentRole(
+                name: name,
+                key: key,
+                value: value,
+                keyPrefix: "\(keyPrefix).\(key)",
+                baseURL: baseURL
+            )
+        }
+    }
+
+    private mutating func mergeAgentRole(
+        name: String,
+        key: String,
+        value: ConfigValue,
+        keyPrefix: String,
+        baseURL: URL?
+    ) throws {
+        guard Self.isRelevantAgentRoleKey(key) else {
+            throw CodexConfigLoadError.invalidConfigLine(keyPrefix)
+        }
+        agentRoles[name, default: [:]][key] = try Self.normalizePathLikeValue(
+            value,
+            key: key,
+            baseURL: baseURL
+        )
     }
 
     private mutating func mergeFeatureValue(
@@ -3901,6 +4006,194 @@ private struct ParsedCodexConfigToml {
             || key == "interrupt_message"
     }
 
+    private static func isRelevantAgentRoleKey(_ key: String) -> Bool {
+        key == "description"
+            || key == "config_file"
+            || key == "nickname_candidates"
+    }
+
+    private static func agentRoleConfigsValue(
+        _ roles: [String: [String: ConfigValue]]
+    ) throws -> [String: AgentRoleConfig] {
+        var configs: [String: AgentRoleConfig] = [:]
+        for roleName in roles.keys.sorted() {
+            guard let values = roles[roleName] else { continue }
+            var config = AgentRoleConfig(
+                description: try values["description"].flatMap {
+                    try agentRoleDescriptionValue($0, key: "agents.\(roleName).description")
+                },
+                configFile: try values["config_file"].map {
+                    try stringValue($0, key: "agents.\(roleName).config_file")
+                },
+                nicknameCandidates: try values["nickname_candidates"].map {
+                    try agentRoleNicknameCandidatesValue($0, key: "agents.\(roleName).nickname_candidates")
+                }
+            )
+
+            if let configFile = config.configFile {
+                let fileMetadata = try agentRoleFileConfigValue(
+                    path: configFile,
+                    roleNameHint: roleName
+                )
+                if let name = fileMetadata.name {
+                    if configs[name] != nil {
+                        throw CodexConfigLoadError.invalidConfig(
+                            "duplicate agent role name `\(name)` declared in config"
+                        )
+                    }
+                    config.description = fileMetadata.config.description ?? config.description
+                    config.nicknameCandidates = fileMetadata.config.nicknameCandidates ?? config.nicknameCandidates
+                    guard config.description != nil else {
+                        throw CodexConfigLoadError.invalidConfig(
+                            "agent role `\(name)` must define a description"
+                        )
+                    }
+                    configs[name] = config
+                    continue
+                }
+                config.description = fileMetadata.config.description ?? config.description
+                config.nicknameCandidates = fileMetadata.config.nicknameCandidates ?? config.nicknameCandidates
+            }
+
+            guard config.description != nil else {
+                throw CodexConfigLoadError.invalidConfig(
+                    "agent role `\(roleName)` must define a description"
+                )
+            }
+            if configs[roleName] != nil {
+                throw CodexConfigLoadError.invalidConfig(
+                    "duplicate agent role name `\(roleName)` declared in config"
+                )
+            }
+            configs[roleName] = config
+        }
+        return configs
+    }
+
+    private static func agentRoleFileConfigValue(
+        path: String,
+        roleNameHint: String?
+    ) throws -> (name: String?, config: AgentRoleConfig) {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            throw CodexConfigLoadError.invalidConfig(
+                "agents.\(roleNameHint ?? "<unknown>").config_file must point to an existing file at \(path)"
+            )
+        }
+        if isDirectory.boolValue {
+            throw CodexConfigLoadError.invalidConfig(
+                "agents.\(roleNameHint ?? "<unknown>").config_file must point to a file: \(path)"
+            )
+        }
+
+        let contents: String
+        do {
+            contents = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            throw CodexConfigLoadError.invalidConfig(
+                "failed to read agent role file at \(path): \(error)"
+            )
+        }
+
+        let values: [String: ConfigValue]
+        do {
+            values = try agentRoleFileMetadataValues(contents)
+        } catch {
+            throw CodexConfigLoadError.invalidConfig(
+                "failed to parse agent role file at \(path): \(error)"
+            )
+        }
+
+        let name = try values["name"].flatMap {
+            try agentRoleOptionalTrimmedStringValue($0, fieldLabel: "name")
+        }
+        let description = try values["description"].flatMap {
+            try agentRoleDescriptionValue($0, key: "description")
+        }
+        let nicknameCandidates = try values["nickname_candidates"].map {
+            try agentRoleNicknameCandidatesValue($0, key: "nickname_candidates")
+        }
+        if let developerInstructions = values["developer_instructions"] {
+            _ = try agentRoleDescriptionValue(developerInstructions, key: "developer_instructions")
+        }
+        return (name, AgentRoleConfig(
+            description: description,
+            configFile: path,
+            nicknameCandidates: nicknameCandidates
+        ))
+    }
+
+    private static func agentRoleFileMetadataValues(_ contents: String) throws -> [String: ConfigValue] {
+        var values: [String: ConfigValue] = [:]
+        var inTopLevel = true
+        for line in try logicalTomlLines(contents) {
+            if line.hasPrefix("[") {
+                inTopLevel = false
+                continue
+            }
+            guard inTopLevel else { continue }
+            guard let equalsIndex = firstEqualsIndex(in: line) else {
+                throw CodexConfigLoadError.invalidConfigLine(line)
+            }
+            let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueStart = line.index(after: equalsIndex)
+            let valueText = String(line[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if ["name", "description", "nickname_candidates", "developer_instructions"].contains(key) {
+                values[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            }
+        }
+        return values
+    }
+
+    private static func agentRoleDescriptionValue(_ value: ConfigValue, key: String) throws -> String? {
+        try agentRoleOptionalTrimmedStringValue(value, fieldLabel: key)
+    }
+
+    private static func agentRoleOptionalTrimmedStringValue(
+        _ value: ConfigValue,
+        fieldLabel: String
+    ) throws -> String? {
+        let trimmed = try stringValue(value, key: fieldLabel).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw CodexConfigLoadError.invalidConfig("\(fieldLabel) cannot be blank")
+        }
+        return trimmed
+    }
+
+    private static func agentRoleNicknameCandidatesValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> [String] {
+        let candidates = try stringArrayValue(value, key: key)
+        guard !candidates.isEmpty else {
+            throw CodexConfigLoadError.invalidConfig("\(key) must contain at least one name")
+        }
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw CodexConfigLoadError.invalidConfig("\(key) cannot contain blank names")
+            }
+            guard seen.insert(trimmed).inserted else {
+                throw CodexConfigLoadError.invalidConfig("\(key) cannot contain duplicates")
+            }
+            guard trimmed.unicodeScalars.allSatisfy({ scalar in
+                scalar.value < 128
+                    && (CharacterSet.alphanumerics.contains(scalar)
+                        || scalar == " "
+                        || scalar == "-"
+                        || scalar == "_")
+            }) else {
+                throw CodexConfigLoadError.invalidConfig(
+                    "\(key) may only contain ASCII letters, digits, spaces, hyphens, and underscores"
+                )
+            }
+            normalized.append(trimmed)
+        }
+        return normalized
+    }
+
     private static func tuiRuntimeConfigValue(
         _ table: [String: ConfigValue],
         modelAvailabilityNux: [String: ConfigValue],
@@ -4272,6 +4565,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "agents" {
             return .agents
         }
+        if parts.count == 2, parts[0] == "agents" {
+            return .agentRole(parts[1])
+        }
         if parts.count == 3, parts[0] == "permissions", parts[2] == "filesystem" {
             return .permissionFilesystem(parts[1])
         }
@@ -4530,6 +4826,7 @@ private enum ConfigSection {
     case feedback
     case profileAnalytics(String)
     case agents
+    case agentRole(String)
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
     case permissionNetwork(String)

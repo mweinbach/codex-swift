@@ -90,6 +90,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(config.feedbackEnabled)
         XCTAssertEqual(config.history, HistoryConfig())
         XCTAssertEqual(config.agents, AgentRuntimeConfig())
+        XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
@@ -651,6 +652,7 @@ final class ConfigLoaderTests: XCTestCase {
             jobMaxRuntimeSeconds: 900,
             interruptMessageEnabled: false
         ))
+        XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .cursor)
         XCTAssertEqual(config.tui, TuiRuntimeConfig(
             animations: false,
@@ -725,6 +727,117 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual(String(describing: error), "agents.job_max_runtime_seconds must be at least 1")
+        }
+    }
+
+    func testAgentRoleConfigFileMetadataOverridesConfigTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let rolesDir = dir.url.appendingPathComponent("roles", isDirectory: true)
+        try FileManager.default.createDirectory(at: rolesDir, withIntermediateDirectories: true)
+        let roleFile = rolesDir.appendingPathComponent("researcher.toml")
+        try """
+        name = "field-researcher"
+        description = "File researcher"
+        nickname_candidates = [" Scout ", "Analyst_2"]
+        developer_instructions = "Read primary sources."
+        """.write(to: roleFile, atomically: true, encoding: .utf8)
+        try """
+        [agents.researcher]
+        description = "Config researcher"
+        config_file = "roles/researcher.toml"
+        nickname_candidates = ["Config"]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "field-researcher": AgentRoleConfig(
+                description: "File researcher",
+                configFile: roleFile.path,
+                nicknameCandidates: ["Scout", "Analyst_2"]
+            )
+        ])
+    }
+
+    func testAgentRoleConfigAcceptsInlineAndDottedOverridesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        agents = { reviewer = { description = "Reviews code", nickname_candidates = [" Reviewer "] } }
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"agents.reviewer.description="Reviews diffs""#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.agentRoles, [
+            "reviewer": AgentRoleConfig(
+                description: "Reviews diffs",
+                nicknameCandidates: ["Reviewer"]
+            )
+        ])
+    }
+
+    func testAgentRoleConfigRejectsMissingFileLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let missing = dir.url.appendingPathComponent("missing.toml")
+        try """
+        [agents.researcher]
+        description = "Researches sources"
+        config_file = "missing.toml"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "agents.researcher.config_file must point to an existing file at \(missing.path)"
+            )
+        }
+    }
+
+    func testAgentRoleConfigRejectsInvalidNicknameCandidatesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let configFile = dir.url.appendingPathComponent("config.toml")
+        try """
+        [agents.researcher]
+        description = "Researches sources"
+        nickname_candidates = []
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "agents.researcher.nickname_candidates must contain at least one name"
+            )
+        }
+
+        try """
+        [agents.researcher]
+        description = "Researches sources"
+        nickname_candidates = ["Scout", " Scout "]
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "agents.researcher.nickname_candidates cannot contain duplicates"
+            )
+        }
+
+        try """
+        [agents.researcher]
+        description = "Researches sources"
+        nickname_candidates = ["Scout!"]
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "agents.researcher.nickname_candidates may only contain ASCII letters, digits, spaces, hyphens, and underscores"
+            )
         }
     }
 
