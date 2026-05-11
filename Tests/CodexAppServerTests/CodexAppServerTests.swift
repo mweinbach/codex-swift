@@ -18350,6 +18350,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "user""#)
     }
 
+    func testConfigLoadErrorMarksCloudRequirementsFailuresForReloginLikeRust() throws {
+        let error = NSError(
+            domain: "test",
+            code: 1,
+            userInfo: [
+                NSUnderlyingErrorKey: CloudRequirementsLoadError(
+                    code: .auth,
+                    statusCode: 401,
+                    detail: "Your authentication session could not be refreshed automatically. Please log out and sign in again."
+                )
+            ]
+        )
+
+        let response = CodexAppServer.configLoadErrorResponseObject(id: 1, error: error)
+
+        let payload = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(payload["code"] as? Int, -32600)
+        XCTAssertTrue((payload["message"] as? String)?.contains("failed to load configuration") == true)
+        let data = try XCTUnwrap(payload["data"] as? [String: Any])
+        XCTAssertEqual(data["reason"] as? String, "cloudRequirements")
+        XCTAssertEqual(data["errorCode"] as? String, "Auth")
+        XCTAssertEqual(data["action"] as? String, "relogin")
+        XCTAssertEqual(data["statusCode"] as? Int, 401)
+        XCTAssertEqual(
+            data["detail"] as? String,
+            "Your authentication session could not be refreshed automatically. Please log out and sign in again."
+        )
+    }
+
+    func testConfigLoadErrorLeavesNonCloudRequirementsFailuresUnmarkedLikeRust() throws {
+        let response = CodexAppServer.configLoadErrorResponseObject(
+            id: 1,
+            error: NSError(
+                domain: "test",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "required MCP servers failed to initialize"]
+            )
+        )
+
+        let payload = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(payload["code"] as? Int, -32600)
+        XCTAssertTrue((payload["message"] as? String)?.contains("failed to load configuration") == true)
+        XCTAssertNil(payload["data"])
+    }
+
+    func testConfigLoadErrorMarksNonAuthCloudRequirementsFailuresWithoutReloginLikeRust() throws {
+        let response = CodexAppServer.configLoadErrorResponseObject(
+            id: 1,
+            error: CloudRequirementsLoadError(
+                code: .requestFailed,
+                statusCode: nil,
+                detail: "Failed to load cloud requirements (workspace-managed policies)."
+            )
+        )
+
+        let payload = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(payload["code"] as? Int, -32600)
+        let data = try XCTUnwrap(payload["data"] as? [String: Any])
+        XCTAssertEqual(data["reason"] as? String, "cloudRequirements")
+        XCTAssertEqual(data["errorCode"] as? String, "RequestFailed")
+        XCTAssertEqual(data["detail"] as? String, "Failed to load cloud requirements (workspace-managed policies).")
+        XCTAssertNil(data["action"])
+        XCTAssertNil(data["statusCode"])
+    }
+
     func testConfigValueWriteRejectsReservedBuiltinProviderOverrideLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

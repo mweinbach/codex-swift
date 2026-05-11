@@ -1177,13 +1177,18 @@ public enum CodexAppServer {
         if let permissionSelection {
             overrides.rawOverrides.append("default_permissions=\(tomlQuotedString(permissionSelection.id))")
         }
-        var runtimeConfig = try CodexConfigLoader.load(
-            codexHome: configuration.codexHome,
-            cwd: cwd,
-            overrides: overrides,
-            managedConfigOverrides: configuration.configLayerOverrides,
-            environment: configuration.environment
-        )
+        var runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: cwd,
+                overrides: overrides,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            throw configLoadError(error)
+        }
         if let permissionSelection, !permissionSelection.additionalWritableRoots.isEmpty {
             let cwdPath = (cwd ?? configuration.codexHome).standardizedFileURL.path
             let baseProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
@@ -1218,6 +1223,49 @@ public enum CodexAppServer {
             throw AppServerError.internalError(message)
         }
         return runtimeConfig
+    }
+
+    static func configLoadErrorResponseObject(id: Any, error: Error) -> [String: Any] {
+        let appError = configLoadError(error)
+        return errorObject(
+            id: id,
+            code: -32600,
+            message: appError.description,
+            data: appError.data
+        )
+    }
+
+    private static func configLoadError(_ error: Error) -> AppServerError {
+        let data = cloudRequirementsLoadError(in: error).map { cloudError -> [String: Any] in
+            var data: [String: Any] = [
+                "reason": "cloudRequirements",
+                "errorCode": cloudError.code.rawValue,
+                "detail": cloudError.description
+            ]
+            if let statusCode = cloudError.statusCode {
+                data["statusCode"] = statusCode
+            }
+            if cloudError.code == .auth {
+                data["action"] = "relogin"
+            }
+            return data
+        }
+        let message = "failed to load configuration: \(error)"
+        if let data {
+            return .invalidRequestWithData(message, data: data)
+        }
+        return .invalidRequest(message)
+    }
+
+    private static func cloudRequirementsLoadError(in error: Error) -> CloudRequirementsLoadError? {
+        if let cloudError = error as? CloudRequirementsLoadError {
+            return cloudError
+        }
+        let nsError = error as NSError
+        guard let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error else {
+            return nil
+        }
+        return cloudRequirementsLoadError(in: underlying)
     }
 
     private static func configuredRuntimeHookHandlers(
@@ -20092,10 +20140,10 @@ private enum SkillParseError: Error, CustomStringConvertible {
     }
 }
 
-private enum AppServerError: Error, CustomStringConvertible {
+private enum AppServerError: Error, CustomStringConvertible, @unchecked Sendable {
     case invalidRequest(String)
     case invalidParams(String)
-    case invalidRequestWithData(String, data: [String: String])
+    case invalidRequestWithData(String, data: [String: Any])
     case invalidParamsWithInputTooLargeData(String, maxChars: Int, actualChars: Int)
     case methodNotFound(String)
     case internalError(String)
