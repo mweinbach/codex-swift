@@ -11691,6 +11691,95 @@ final class CodexAppServerTests: XCTestCase {
     func testMcpResourceAndToolCallsValidateThreadBeforeLiveDispatch() throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description
+        let materializedThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-11",
+            timestamp: "2025-01-02T03:04:11Z",
+            preview: "mcp validation",
+            provider: nil
+        )
+
+        let resourceMissingServer = try appServerResponse(
+            #"{"id":4,"method":"mcpServer/resource/read","params":{"uri":"file:///tmp/a"}}"#,
+            codexHome: temp.url
+        )
+        let resourceMissingServerError = try XCTUnwrap(resourceMissingServer["error"] as? [String: Any])
+        XCTAssertEqual(resourceMissingServerError["code"] as? Int, -32600)
+        XCTAssertEqual(resourceMissingServerError["message"] as? String, "missing field `server`")
+
+        let resourceInvalidServerType = try appServerResponse(
+            #"{"id":5,"method":"mcpServer/resource/read","params":{"server":1,"uri":"file:///tmp/a"}}"#,
+            codexHome: temp.url
+        )
+        let resourceInvalidServerTypeError = try XCTUnwrap(resourceInvalidServerType["error"] as? [String: Any])
+        XCTAssertEqual(resourceInvalidServerTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            resourceInvalidServerTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let resourceInvalidURIType = try appServerResponse(
+            #"{"id":6,"method":"mcpServer/resource/read","params":{"server":"filesystem","uri":null}}"#,
+            codexHome: temp.url
+        )
+        let resourceInvalidURITypeError = try XCTUnwrap(resourceInvalidURIType["error"] as? [String: Any])
+        XCTAssertEqual(resourceInvalidURITypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            resourceInvalidURITypeError["message"] as? String,
+            "Invalid request: invalid type: null, expected a string"
+        )
+
+        let resourceInvalidThreadType = try appServerResponse(
+            #"{"id":7,"method":"mcpServer/resource/read","params":{"threadId":1,"server":"filesystem","uri":"file:///tmp/a"}}"#,
+            codexHome: temp.url
+        )
+        let resourceInvalidThreadTypeError = try XCTUnwrap(resourceInvalidThreadType["error"] as? [String: Any])
+        XCTAssertEqual(resourceInvalidThreadTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            resourceInvalidThreadTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let toolMissingThread = try appServerResponse(
+            #"{"id":8,"method":"mcpServer/tool/call","params":{"server":"filesystem","tool":"read_file","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolMissingThreadError = try XCTUnwrap(toolMissingThread["error"] as? [String: Any])
+        XCTAssertEqual(toolMissingThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(toolMissingThreadError["message"] as? String, "missing field `threadId`")
+
+        let toolInvalidThreadType = try appServerResponse(
+            #"{"id":9,"method":"mcpServer/tool/call","params":{"threadId":1,"server":"filesystem","tool":"read_file","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolInvalidThreadTypeError = try XCTUnwrap(toolInvalidThreadType["error"] as? [String: Any])
+        XCTAssertEqual(toolInvalidThreadTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            toolInvalidThreadTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let toolInvalidServerType = try appServerResponse(
+            #"{"id":10,"method":"mcpServer/tool/call","params":{"threadId":"\#(materializedThreadID)","server":[],"tool":"read_file","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolInvalidServerTypeError = try XCTUnwrap(toolInvalidServerType["error"] as? [String: Any])
+        XCTAssertEqual(toolInvalidServerTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            toolInvalidServerTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected a string"
+        )
+
+        let toolInvalidToolType = try appServerResponse(
+            #"{"id":11,"method":"mcpServer/tool/call","params":{"threadId":"\#(materializedThreadID)","server":"filesystem","tool":{},"arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolInvalidToolTypeError = try XCTUnwrap(toolInvalidToolType["error"] as? [String: Any])
+        XCTAssertEqual(toolInvalidToolTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            toolInvalidToolTypeError["message"] as? String,
+            "Invalid request: invalid type: map, expected a string"
+        )
 
         let resourceInvalidThread = try appServerResponse(
             #"{"id":1,"method":"mcpServer/resource/read","params":{"threadId":"not-a-thread","server":"filesystem","uri":"file:///tmp/a"}}"#,
@@ -11708,13 +11797,13 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(resourceMissingThreadError["code"] as? Int, -32600)
         XCTAssertEqual(resourceMissingThreadError["message"] as? String, "thread not found: \(threadID)")
 
-        let toolMissingThread = try appServerResponse(
+        let toolMissingThreadRecord = try appServerResponse(
             #"{"id":3,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"filesystem","tool":"read_file","arguments":{}}}"#,
             codexHome: temp.url
         )
-        let toolMissingThreadError = try XCTUnwrap(toolMissingThread["error"] as? [String: Any])
-        XCTAssertEqual(toolMissingThreadError["code"] as? Int, -32600)
-        XCTAssertEqual(toolMissingThreadError["message"] as? String, "thread not found: \(threadID)")
+        let toolMissingThreadRecordError = try XCTUnwrap(toolMissingThreadRecord["error"] as? [String: Any])
+        XCTAssertEqual(toolMissingThreadRecordError["code"] as? Int, -32600)
+        XCTAssertEqual(toolMissingThreadRecordError["message"] as? String, "thread not found: \(threadID)")
     }
 
     func testMcpResourceAndToolCallsReportUnknownOrDisabledServersLikeRustManager() throws {

@@ -11462,13 +11462,13 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let cwdFallback = try mcpThreadCwdFallback(params: params, configuration: configuration)
-        guard let server = stringParam(params?["server"]), !server.isEmpty else {
-            throw AppServerError.invalidRequest("missing server")
-        }
-        guard let uri = stringParam(params?["uri"]), !uri.isEmpty else {
-            throw AppServerError.invalidRequest("missing uri")
-        }
+        let threadID = try rustOptionalStringParam(params?["threadId"])
+        let cwdFallback = try mcpThreadCwdFallback(
+            threadID: threadID,
+            configuration: configuration
+        )
+        let server = try rustRequiredStringParam(params?["server"], field: "server")
+        let uri = try rustRequiredStringParam(params?["uri"], field: "uri")
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -12042,14 +12042,14 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let threadID = try materializedThreadID(params: params, configuration: configuration)
-        let cwdFallback = try mcpThreadCwdFallback(params: params, configuration: configuration)
-        guard let server = stringParam(params?["server"]), !server.isEmpty else {
-            throw AppServerError.invalidRequest("missing server")
-        }
-        guard let tool = stringParam(params?["tool"]), !tool.isEmpty else {
-            throw AppServerError.invalidRequest("missing tool")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        try validateMaterializedThreadID(threadID, configuration: configuration)
+        let cwdFallback = try mcpThreadCwdFallback(
+            threadID: threadID,
+            configuration: configuration
+        )
+        let server = try rustRequiredStringParam(params?["server"], field: "server")
+        let tool = try rustRequiredStringParam(params?["tool"], field: "tool")
         let arguments = params?["arguments"]
         let meta = mcpToolCallMeta(params?["_meta"], threadID: threadID)
         let runtimeConfig: CodexRuntimeConfig
@@ -12157,12 +12157,12 @@ public enum CodexAppServer {
     }
 
     private static func mcpThreadCwdFallback(
-        params: [String: Any]?,
+        threadID: String?,
         configuration: CodexAppServerConfiguration
     ) throws -> String {
         var cwdFallback = configuration.cwd.path
-        if params?["threadId"] != nil {
-            let threadID = try materializedThreadID(params: params, configuration: configuration)
+        if let threadID {
+            try validateMaterializedThreadID(threadID, configuration: configuration)
             if let rolloutPath = try RolloutListing.findConversationPathByIDString(
                 codexHome: configuration.codexHome,
                 idString: threadID
@@ -12177,6 +12177,30 @@ public enum CodexAppServer {
             }
         }
         return cwdFallback
+    }
+
+    private static func validateMaterializedThreadID(
+        _ rawThreadID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let threadID: ConversationId
+        do {
+            threadID = try ConversationId(string: rawThreadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        do {
+            guard try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: threadID.description
+            ) != nil else {
+                throw AppServerError.invalidRequest("thread not found: \(threadID)")
+            }
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("failed to locate thread id \(threadID): \(error)")
+        }
     }
 
     private static func effectiveMcpServer(
