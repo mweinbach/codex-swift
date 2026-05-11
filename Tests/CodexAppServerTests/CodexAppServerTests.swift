@@ -19315,6 +19315,47 @@ final class CodexAppServerTests: XCTestCase {
             "Invalid request: invalid type: integer `1`, expected a string"
         )
 
+        let nullSize = try appServerResponse(
+            #"{"id":21,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","size":null}}"#,
+            codexHome: codexHome.url
+        )
+        let nullSizeResult = try XCTUnwrap(nullSize["result"] as? [String: Any])
+        XCTAssertEqual(nullSizeResult["exitCode"] as? Int, 0)
+        XCTAssertEqual(nullSizeResult["stdout"] as? String, "hi\n")
+
+        let invalidSizeType = try appServerResponse(
+            #"{"id":22,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","size":[]}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidSizeTypeError = try XCTUnwrap(invalidSizeType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected struct CommandExecTerminalSize"
+        )
+
+        let invalidSizeRowsType = try appServerResponse(
+            #"{"id":23,"method":"command/exec","params":{"command":["/bin/echo","hi"],"processId":"cmd-bad-size","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":"24","cols":80}}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidSizeRowsTypeError = try XCTUnwrap(invalidSizeRowsType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeRowsTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeRowsTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "24", expected u16"#
+        )
+
+        let invalidSizeRowsRange = try appServerResponse(
+            #"{"id":24,"method":"command/exec","params":{"command":["/bin/echo","hi"],"processId":"cmd-large-size","cwd":"\#(cwd.url.path)","tty":true,"size":{"rows":65536,"cols":80}}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidSizeRowsRangeError = try XCTUnwrap(invalidSizeRowsRange["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeRowsRangeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeRowsRangeError["message"] as? String,
+            "Invalid request: invalid value: integer `65536`, expected u16"
+        )
+
         let invalidCommandType = try appServerResponse(
             #"{"id":16,"method":"command/exec","params":{"command":"echo","cwd":"\#(cwd.url.path)"}}"#,
             codexHome: codexHome.url
@@ -20159,6 +20200,49 @@ final class CodexAppServerTests: XCTestCase {
         let sizeWithoutTtyError = try XCTUnwrap(sizeWithoutTty["error"] as? [String: Any])
         XCTAssertEqual(sizeWithoutTtyError["code"] as? Int, -32602)
         XCTAssertEqual(sizeWithoutTtyError["message"] as? String, "process/spawn size requires tty: true")
+
+        let nullSize = try appServerResponse(
+            #"{"id":18,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-null-size","cwd":"\#(temp.url.path)","size":null}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        XCTAssertEqual((nullSize["result"] as? [String: Any])?.isEmpty, true)
+
+        let invalidSizeType = try appServerResponse(
+            #"{"id":19,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-bad-size","cwd":"\#(temp.url.path)","size":[]}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidSizeTypeError = try XCTUnwrap(invalidSizeType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected struct ProcessTerminalSize"
+        )
+
+        let invalidSizeRowsType = try appServerResponse(
+            #"{"id":20,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-bad-size-row","cwd":"\#(temp.url.path)","tty":true,"size":{"rows":"24","cols":80}}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidSizeRowsTypeError = try XCTUnwrap(invalidSizeRowsType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeRowsTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeRowsTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "24", expected u16"#
+        )
+
+        let invalidSizeRowsRange = try appServerResponse(
+            #"{"id":21,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-large-size","cwd":"\#(temp.url.path)","tty":true,"size":{"rows":65536,"cols":80}}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidSizeRowsRangeError = try XCTUnwrap(invalidSizeRowsRange["error"] as? [String: Any])
+        XCTAssertEqual(invalidSizeRowsRangeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSizeRowsRangeError["message"] as? String,
+            "Invalid request: invalid value: integer `65536`, expected u16"
+        )
 
         let negativeTimeout = try appServerResponse(
             #"{"id":5,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","timeoutMs":-1}}"#,

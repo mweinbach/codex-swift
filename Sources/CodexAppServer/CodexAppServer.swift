@@ -14648,7 +14648,8 @@ public enum CodexAppServer {
         if processID == nil && (tty || streamStdin || streamStdoutStderr) {
             throw AppServerError.invalidRequest("command/exec tty or streaming requires a client-supplied processId")
         }
-        if params?["size"] != nil && !tty {
+        let size = try commandExecSize(params?["size"])
+        if size != nil && !tty {
             throw AppServerError.invalidParams("command/exec size requires tty: true")
         }
         if disableOutputCap && params?["outputBytesCap"] != nil && !(params?["outputBytesCap"] is NSNull) {
@@ -14657,7 +14658,6 @@ public enum CodexAppServer {
         if disableTimeout && params?["timeoutMs"] != nil && !(params?["timeoutMs"] is NSNull) {
             throw AppServerError.invalidParams("command/exec cannot set both timeoutMs and disableTimeout")
         }
-        let size = try commandExecSize(params?["size"])
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("command/exec timeoutMs must be non-negative, got \(timeoutMs)")
         }
@@ -14922,21 +14922,11 @@ public enum CodexAppServer {
     }
 
     private static func commandExecSize(_ value: Any?) throws -> AppServerTerminalSize? {
-        guard let value else {
-            return nil
-        }
-        guard let size = value as? [String: Any] else {
-            throw AppServerError.invalidParams("command/exec/resize requires size rows and cols")
-        }
-        guard let rows = size["rows"] as? Int,
-              let cols = size["cols"] as? Int
-        else {
-            throw AppServerError.invalidParams("command/exec/resize requires size rows and cols")
-        }
-        guard rows > 0, cols > 0 else {
-            throw AppServerError.invalidParams("command/exec size rows and cols must be greater than 0")
-        }
-        return AppServerTerminalSize(rows: rows, cols: cols)
+        try rustOptionalTerminalSizeParam(
+            value,
+            expectedStruct: "CommandExecTerminalSize",
+            zeroMessage: "command/exec size rows and cols must be greater than 0"
+        )
     }
 
     private static func commandExecSandboxPolicy(_ value: Any?) throws -> SandboxPolicy? {
@@ -15113,10 +15103,10 @@ public enum CodexAppServer {
         }
         let cwd = try absolutePathParam(params?["cwd"], name: "cwd")
         let tty = try rustDefaultedBoolParam(params?["tty"], defaultValue: false)
-        if params?["size"] != nil && !tty {
+        let size = try processSize(params?["size"])
+        if size != nil && !tty {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
         }
-        let size = try processSize(params?["size"])
         try validateRustIntegerParam(params?["outputBytesCap"], expected: "usize")
         try validateRustIntegerParam(params?["timeoutMs"], expected: "i64")
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
@@ -15165,21 +15155,11 @@ public enum CodexAppServer {
     }
 
     private static func processSize(_ value: Any?) throws -> AppServerTerminalSize? {
-        guard let value else {
-            return nil
-        }
-        guard let size = value as? [String: Any] else {
-            throw AppServerError.invalidParams("process/resizePty requires size rows and cols")
-        }
-        guard let rows = size["rows"] as? Int,
-              let cols = size["cols"] as? Int
-        else {
-            throw AppServerError.invalidParams("process/resizePty requires size rows and cols")
-        }
-        guard rows > 0, cols > 0 else {
-            throw AppServerError.invalidParams("process size rows and cols must be greater than 0")
-        }
-        return AppServerTerminalSize(rows: rows, cols: cols)
+        try rustOptionalTerminalSizeParam(
+            value,
+            expectedStruct: "ProcessTerminalSize",
+            zeroMessage: "process size rows and cols must be greater than 0"
+        )
     }
 
     fileprivate static func processHandle(params: [String: Any]?) throws -> String {
@@ -15224,13 +15204,17 @@ public enum CodexAppServer {
         guard let value, !(value is NSNull) else {
             return
         }
+        let unsignedIntegerTypes = ["u16", "u32", "usize"]
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             let bool = number.boolValue ? "true" : "false"
             throw AppServerError.invalidRequest("Invalid request: invalid type: boolean `\(bool)`, expected \(expected)")
         }
         if let int = value as? Int {
-            if ["u32", "usize"].contains(expected), int < 0 {
+            if unsignedIntegerTypes.contains(expected), int < 0 {
                 throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected \(expected)")
+            }
+            if expected == "u16", int > Int(UInt16.max) {
+                throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u16")
             }
             if expected == "u32", int > Int(UInt32.max) {
                 throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u32")
@@ -15249,8 +15233,11 @@ public enum CodexAppServer {
         if let number = value as? NSNumber {
             let int = number.int64Value
             if Double(int) == number.doubleValue {
-                if ["u32", "usize"].contains(expected), int < 0 {
+                if unsignedIntegerTypes.contains(expected), int < 0 {
                     throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected \(expected)")
+                }
+                if expected == "u16", int > Int64(UInt16.max) {
+                    throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u16")
                 }
                 if expected == "u32", int > Int64(UInt32.max) {
                     throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u32")
@@ -15260,6 +15247,35 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: invalid type: floating point `\(number)`, expected \(expected)")
         }
         throw AppServerError.invalidRequest("Invalid request: invalid type for field, expected \(expected)")
+    }
+
+    private static func rustOptionalTerminalSizeParam(
+        _ value: Any?,
+        expectedStruct: String,
+        zeroMessage: String
+    ) throws -> AppServerTerminalSize? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let object = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected struct \(expectedStruct)"
+            )
+        }
+        guard let rowsValue = object["rows"] else {
+            throw AppServerError.invalidRequest("Invalid request: missing field `rows`")
+        }
+        guard let colsValue = object["cols"] else {
+            throw AppServerError.invalidRequest("Invalid request: missing field `cols`")
+        }
+        try validateRustIntegerParam(rowsValue, expected: "u16")
+        try validateRustIntegerParam(colsValue, expected: "u16")
+        let rows = intParam(rowsValue, defaultValue: 0)
+        let cols = intParam(colsValue, defaultValue: 0)
+        guard rows > 0, cols > 0 else {
+            throw AppServerError.invalidParams(zeroMessage)
+        }
+        return AppServerTerminalSize(rows: rows, cols: cols)
     }
 
     private static func rustU32Param(_ value: Any?, defaultValue: Int) throws -> Int {
