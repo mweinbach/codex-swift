@@ -16152,6 +16152,17 @@ final class CodexAppServerTests: XCTestCase {
             "command/exec timeoutMs must be non-negative, got -1"
         )
 
+        let negativeOutputCap = try appServerResponse(
+            #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":-1}}"#,
+            codexHome: codexHome.url
+        )
+        let negativeOutputCapError = try XCTUnwrap(negativeOutputCap["error"] as? [String: Any])
+        XCTAssertEqual(negativeOutputCapError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            negativeOutputCapError["message"] as? String,
+            "Invalid request: invalid value: integer `-1`, expected usize"
+        )
+
         let streamingWithoutProcessID = try appServerResponse(
             #"{"id":7,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","streamStdoutStderr":true}}"#,
             codexHome: codexHome.url
@@ -16732,6 +16743,18 @@ final class CodexAppServerTests: XCTestCase {
         let zeroSizeError = try XCTUnwrap(zeroSize["error"] as? [String: Any])
         XCTAssertEqual(zeroSizeError["code"] as? Int, -32602)
         XCTAssertEqual(zeroSizeError["message"] as? String, "process size rows and cols must be greater than 0")
+
+        let negativeOutputCap = try appServerResponse(
+            #"{"id":7,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","outputBytesCap":-1}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let negativeOutputCapError = try XCTUnwrap(negativeOutputCap["error"] as? [String: Any])
+        XCTAssertEqual(negativeOutputCapError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            negativeOutputCapError["message"] as? String,
+            "Invalid request: invalid value: integer `-1`, expected usize"
+        )
     }
 
     func testProcessSpawnRunsProcessAndEmitsExitNotification() async throws {

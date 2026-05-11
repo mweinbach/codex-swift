@@ -13129,6 +13129,7 @@ public enum CodexAppServer {
         let disableOutputCap = boolParam(params?["disableOutputCap"], defaultValue: false)
         let disableTimeout = boolParam(params?["disableTimeout"], defaultValue: false)
         let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
+        try rejectNegativeRustUSize(params?["outputBytesCap"])
         if sandboxPolicy != nil,
            let permissionProfile = params?["permissionProfile"],
            !(permissionProfile is NSNull)
@@ -13520,6 +13521,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
         }
         let size = try processSize(params?["size"])
+        try rejectNegativeRustUSize(params?["outputBytesCap"])
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("process/spawn timeoutMs must be non-negative, got \(timeoutMs)")
         }
@@ -13615,6 +13617,23 @@ public enum CodexAppServer {
             return nil
         }
         return max(intParam(value, defaultValue: 1_048_576), 0)
+    }
+
+    private static func rejectNegativeRustUSize(_ value: Any?) throws {
+        guard let value, !(value is NSNull) else {
+            return
+        }
+        let integerValue: Int?
+        if let int = value as? Int {
+            integerValue = int
+        } else if let number = value as? NSNumber {
+            integerValue = number.intValue
+        } else {
+            integerValue = nil
+        }
+        if let integerValue, integerValue < 0 {
+            throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(integerValue)`, expected usize")
+        }
     }
 
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {
