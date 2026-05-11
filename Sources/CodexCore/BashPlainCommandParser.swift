@@ -126,7 +126,10 @@ public enum BashPlainCommandParser {
                 let nextIndex = source.index(after: index)
                 guard nextIndex < source.endIndex else { return nil }
                 let nextCharacter = source[nextIndex]
-                guard nextCharacter != "\n" else { return nil }
+                if nextCharacter == "\n" {
+                    index = source.index(after: nextIndex)
+                    continue
+                }
                 currentWord.append(character)
                 currentWord.append(nextCharacter)
                 justClosedQuote = false

@@ -939,6 +939,8 @@ Source baseline inspected for this scaffold:
   - aligned Swift `commandMightBeDangerous` with Rust's narrow generic-shell heuristic: only direct `rm -f`/`rm -rf` and `sudo` wrapping those commands are treated as dangerous here; git subcommands continue to be handled by the safe-command and execpolicy paths rather than this dangerous-command classifier.
 - `codex-rs/shell-command/src/bash.rs` word-only shell parser rejection
   - tightened Swift bash-script fallback detection so expansion and subshell constructs collapse to a whole-script unknown instead of being simplified as word-only command sequences, while preserving Rust's literal handling for escaped `$` and backtick characters inside double-quoted words.
+- `codex-rs/shell-command/src/bash.rs` word-only shell line continuations
+  - matched Rust tree-sitter handling for backslash-newline continuations in word-only shell scripts so wrapped `bash`/`zsh`/`sh` read, search, and list summaries can span continued lines without collapsing to whole-script unknowns.
 - `codex-rs/shell-command/src/bash.rs` comment-token rejection
   - matched Rust tree-sitter parser behavior for shell comments by rejecting unquoted `#` at word boundaries in Swift's word-only bash fallback, preventing comment-bearing `bash -lc` scripts from being auto-classified as safe while preserving literal `#` inside words and escaped `\#` arguments.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing

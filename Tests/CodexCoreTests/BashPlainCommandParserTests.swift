@@ -23,6 +23,21 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
     }
 
+    func testAcceptsLineContinuationsLikeRustTreeSitterParser() {
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("cat \\\nREADME.md"),
+            [["cat", "README.md"]]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("rg foo\\\nbar src"),
+            [["rg", "foobar", "src"]]
+        )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence("pwd && \\\nls -1"),
+            [["pwd"], ["ls", "-1"]]
+        )
+    }
+
     func testExtractsDoubleAndSingleQuotedStrings() {
         XCTAssertEqual(
             BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo "hello world""#),

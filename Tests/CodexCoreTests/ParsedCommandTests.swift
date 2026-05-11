@@ -109,6 +109,20 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testBashLcLineContinuationsMatchRustTreeSitterParser() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cat \\\nREADME.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg TODO \\\nSources"]), [
+            .search(cmd: "rg TODO Sources", query: "TODO", path: "Sources")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "pwd && \\\nrg --files | head -n 1"]), [
+            .unknown(cmd: "pwd && \\\nrg --files | head -n 1")
+        ])
+    }
+
     func testCdThenCatIsSingleRead() {
         XCTAssertEqual(parseCommand(["cd", "foo", "&&", "cat", "foo.txt"]), [
             .read(cmd: "cat foo.txt", name: "foo.txt", path: "foo/foo.txt")

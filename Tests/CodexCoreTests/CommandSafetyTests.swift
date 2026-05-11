@@ -124,6 +124,7 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls && pwd"]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "echo 'hi' ; ls"]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls | wc -l"]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls && \\\npwd"]))
     }
 
     func testBashLcUnsafeExamples() {

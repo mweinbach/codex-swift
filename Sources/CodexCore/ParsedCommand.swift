@@ -1135,6 +1135,11 @@ private func shellSplit(_ input: String) -> [String]? {
         }
 
         if char == "\\", !singleQuoted {
+            let next = input.index(after: index)
+            if next < input.endIndex, input[next] == "\n" {
+                index = input.index(after: next)
+                continue
+            }
             escaped = true
             index = input.index(after: index)
             continue
