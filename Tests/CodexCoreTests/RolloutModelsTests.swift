@@ -79,6 +79,46 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertNil(line.git)
     }
 
+    func testInitialHistoryReturnsFirstSessionMetaDynamicToolsLikeRust() throws {
+        let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "lookup",
+                description: "Look up things",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            )
+        ]
+        let firstMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: id,
+            timestamp: "2026-05-08T00:00:00Z",
+            cwd: "/repo",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            dynamicTools: dynamicTools
+        )))
+        let laterMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: id,
+            timestamp: "2026-05-08T00:00:01Z",
+            cwd: "/repo",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            dynamicTools: [
+                DynamicToolSpec(name: "later", description: "Later", inputSchema: .object([:]))
+            ]
+        )))
+
+        XCTAssertEqual(
+            InitialHistory.resumed(ResumedHistory(conversationID: id, history: [firstMeta, laterMeta], rolloutPath: nil))
+                .dynamicTools,
+            dynamicTools
+        )
+        XCTAssertEqual(InitialHistory.forked([firstMeta]).dynamicTools, dynamicTools)
+        XCTAssertNil(InitialHistory.new.dynamicTools)
+        XCTAssertNil(InitialHistory.cleared.dynamicTools)
+    }
+
     func testSessionMetaDecodesAgentTypeAliasForAgentRole() throws {
         let line = try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
         {

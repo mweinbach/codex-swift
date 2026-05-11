@@ -1316,7 +1316,8 @@ public enum CodexAppServer {
             threadSource: threadSource,
             originator: "codex_app_server",
             cliVersion: configuration.version,
-            modelProvider: modelProvider
+            modelProvider: modelProvider,
+            dynamicTools: history.dynamicTools
         )
         try recorder.recordItems(history.rolloutItems.filter { item in
             if case .sessionMeta = item {
@@ -1590,7 +1591,8 @@ public enum CodexAppServer {
             source: .mcp,
             originator: "codex_app_server",
             cliVersion: configuration.version,
-            modelProvider: modelProvider
+            modelProvider: modelProvider,
+            dynamicTools: history.dynamicTools
         )
         try recorder.recordItems(history.rolloutItems.filter { item in
             if case .sessionMeta = item {

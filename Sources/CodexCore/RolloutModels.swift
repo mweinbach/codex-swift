@@ -536,6 +536,26 @@ public enum InitialHistory: Equatable, Sendable {
             return items.compactMap(\.eventMessage)
         }
     }
+
+    public var dynamicTools: [DynamicToolSpec]? {
+        switch self {
+        case .new, .cleared:
+            return nil
+        case let .resumed(resumed):
+            return Self.firstDynamicTools(in: resumed.history)
+        case let .forked(items):
+            return Self.firstDynamicTools(in: items)
+        }
+    }
+
+    private static func firstDynamicTools(in items: [RolloutRecordItem]) -> [DynamicToolSpec]? {
+        items.compactMap { item -> [DynamicToolSpec]? in
+            guard case let .sessionMeta(metaLine) = item else {
+                return nil
+            }
+            return metaLine.meta.dynamicTools
+        }.first
+    }
 }
 
 extension InitialHistory: Codable {

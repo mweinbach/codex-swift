@@ -447,6 +447,79 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(inputSchema["type"] as? String, "object")
     }
 
+    func testThreadForkCarriesSourceDynamicToolsIntoNewSessionMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "lookup",
+                description: "Lookup dynamic tool",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            )
+        ]
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-35-00",
+            timestamp: "2025-01-05T12:35:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            dynamicTools: dynamicTools
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/fork","params":{"threadId":"\#(sourceID)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let forkPath = try XCTUnwrap(thread["path"] as? String)
+        let meta = try firstSessionMetaPayload(at: forkPath)
+        let forkedDynamicTools = try XCTUnwrap(meta["dynamic_tools"] as? [[String: Any]])
+        XCTAssertEqual(forkedDynamicTools.count, 1)
+        XCTAssertEqual(forkedDynamicTools[0]["namespace"] as? String, "codex_app")
+        XCTAssertEqual(forkedDynamicTools[0]["name"] as? String, "lookup")
+        XCTAssertEqual(forkedDynamicTools[0]["description"] as? String, "Lookup dynamic tool")
+        XCTAssertEqual(forkedDynamicTools[0]["deferLoading"] as? Bool, true)
+    }
+
+    func testLegacyResumeConversationCarriesSourceDynamicToolsIntoNewSessionMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "lookup",
+                description: "Lookup dynamic tool",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            )
+        ]
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-36-00",
+            timestamp: "2025-01-05T12:36:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            dynamicTools: dynamicTools
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"resumeConversation","params":{"conversationId":"\#(sourceID)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let rolloutPath = try XCTUnwrap(result["rolloutPath"] as? String)
+        let meta = try firstSessionMetaPayload(at: rolloutPath)
+        let resumedDynamicTools = try XCTUnwrap(meta["dynamic_tools"] as? [[String: Any]])
+        XCTAssertEqual(resumedDynamicTools.count, 1)
+        XCTAssertEqual(resumedDynamicTools[0]["namespace"] as? String, "codex_app")
+        XCTAssertEqual(resumedDynamicTools[0]["name"] as? String, "lookup")
+        XCTAssertEqual(resumedDynamicTools[0]["description"] as? String, "Lookup dynamic tool")
+        XCTAssertEqual(resumedDynamicTools[0]["deferLoading"] as? Bool, true)
+    }
+
     func testThreadStartRejectsUnknownEnvironmentBeforeCreatingThreadLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(
@@ -17391,7 +17464,8 @@ final class CodexAppServerTests: XCTestCase {
         source: SessionSource = .cli,
         gitInfo: GitInfo? = nil,
         archived: Bool = false,
-        cwd: String = "/"
+        cwd: String = "/",
+        dynamicTools: [DynamicToolSpec]? = nil
     ) throws -> String {
         let id = UUID().uuidString.lowercased()
         let path = codexHome
@@ -17411,7 +17485,8 @@ final class CodexAppServerTests: XCTestCase {
                 originator: "codex_cli_rs",
                 cliVersion: "0.0.0",
                 source: source,
-                modelProvider: provider
+                modelProvider: provider,
+                dynamicTools: dynamicTools
             ), git: gitInfo))
         )
         let user = RolloutLine(
@@ -17424,6 +17499,20 @@ final class CodexAppServerTests: XCTestCase {
         }.joined(separator: "\n")
         try lines.write(to: path, atomically: true, encoding: .utf8)
         return id
+    }
+
+    private func firstSessionMetaPayload(at path: String) throws -> [String: Any] {
+        let rollout = try String(contentsOfFile: path, encoding: .utf8)
+        for rawLine in rollout.split(separator: "\n") {
+            guard let object = try JSONSerialization.jsonObject(with: Data(rawLine.utf8)) as? [String: Any],
+                  object["type"] as? String == "session_meta",
+                  let payload = object["payload"] as? [String: Any]
+            else {
+                continue
+            }
+            return payload
+        }
+        return try XCTUnwrap(nil as [String: Any]?)
     }
 
     private func appendRolloutEvents(to path: String, timestamp: String, events: [EventMessage]) throws {
