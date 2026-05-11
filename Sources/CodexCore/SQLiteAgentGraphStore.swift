@@ -25,6 +25,108 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         do {
             try Self.execute(
                 """
+                CREATE TABLE IF NOT EXISTS threads (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    agent_path TEXT,
+                    memory_mode TEXT,
+                    rollout_path TEXT,
+                    created_at INTEGER,
+                    created_at_ms INTEGER,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    archived_at INTEGER,
+                    source TEXT NOT NULL DEFAULT 'cli',
+                    thread_source TEXT,
+                    agent_nickname TEXT,
+                    agent_role TEXT,
+                    model_provider TEXT NOT NULL DEFAULT 'openai',
+                    model TEXT,
+                    reasoning_effort TEXT,
+                    cwd TEXT NOT NULL DEFAULT '',
+                    cli_version TEXT NOT NULL DEFAULT '',
+                    first_user_message TEXT NOT NULL DEFAULT '',
+                    sandbox_policy TEXT NOT NULL DEFAULT '',
+                    approval_mode TEXT NOT NULL DEFAULT '',
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
+                    title TEXT,
+                    updated_at INTEGER,
+                    updated_at_ms INTEGER,
+                    git_sha TEXT,
+                    git_branch TEXT,
+                    git_origin_url TEXT
+                )
+                """,
+                database: openedDatabase
+            )
+            try Self.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_created_at ON threads(created_at_ms DESC, id DESC)",
+                database: openedDatabase
+            )
+            try Self.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at_ms DESC, id DESC)",
+                database: openedDatabase
+            )
+            try Self.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_archived ON threads(archived)",
+                database: openedDatabase
+            )
+            try Self.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_source ON threads(source)",
+                database: openedDatabase
+            )
+            try Self.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_provider ON threads(model_provider)",
+                database: openedDatabase
+            )
+            try Self.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stage1_outputs (
+                    thread_id TEXT NOT NULL PRIMARY KEY,
+                    source_updated_at INTEGER NOT NULL,
+                    raw_memory TEXT NOT NULL,
+                    rollout_summary TEXT NOT NULL,
+                    generated_at INTEGER NOT NULL,
+                    FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
+                )
+                """,
+                database: openedDatabase
+            )
+            try Self.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_stage1_outputs_source_updated_at
+                    ON stage1_outputs(source_updated_at DESC, thread_id DESC)
+                """,
+                database: openedDatabase
+            )
+            try Self.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    kind TEXT NOT NULL,
+                    job_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    worker_id TEXT,
+                    ownership_token TEXT,
+                    started_at INTEGER,
+                    finished_at INTEGER,
+                    lease_until INTEGER,
+                    retry_at INTEGER,
+                    retry_remaining INTEGER NOT NULL,
+                    last_error TEXT,
+                    input_watermark INTEGER,
+                    last_success_watermark INTEGER,
+                    PRIMARY KEY (kind, job_key)
+                )
+                """,
+                database: openedDatabase
+            )
+            try Self.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_jobs_kind_status_retry_lease
+                    ON jobs(kind, status, retry_at, lease_until)
+                """,
+                database: openedDatabase
+            )
+            try Self.execute(
+                """
                 CREATE TABLE IF NOT EXISTS thread_spawn_edges (
                     parent_thread_id TEXT NOT NULL,
                     child_thread_id TEXT NOT NULL PRIMARY KEY,

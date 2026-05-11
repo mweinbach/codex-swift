@@ -5704,6 +5704,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionsRoot.path), [])
     }
 
+    func testDefaultStateStoreUsesConfiguredSQLiteHomeLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let sqliteHome = temp.url.appendingPathComponent("sqlite-home", isDirectory: true)
+        try FileManager.default.createDirectory(at: sqliteHome, withIntermediateDirectories: true)
+        let codexHomeStatePath = temp.url.appendingPathComponent("state_5.sqlite", isDirectory: false)
+        let sqliteHomeStatePath = sqliteHome.appendingPathComponent("state_5.sqlite", isDirectory: false)
+        var runtimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0)
+        runtimeConfig.sqliteHome = sqliteHome.path
+
+        let stateStore = try CodexAppServer.defaultStateStore(codexHome: temp.url, runtimeConfig: runtimeConfig)
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: try ThreadId(string: "00000000-0000-0000-0000-000000009025"),
+            rolloutPath: temp.url.appendingPathComponent("sessions/test.jsonl", isDirectory: false).path,
+            createdAt: try appServerDate("2025-01-05T13:00:00Z"),
+            updatedAt: try appServerDate("2025-01-05T13:00:00Z"),
+            source: "cli",
+            modelProvider: "test-provider",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "state store",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "state store"
+        ))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sqliteHomeStatePath.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: codexHomeStatePath.path))
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+    }
+
     func testMemoryResetRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 
@@ -22733,6 +22771,16 @@ final class CodexAppServerTests: XCTestCase {
                 kind TEXT NOT NULL,
                 job_key TEXT NOT NULL,
                 status TEXT NOT NULL,
+                worker_id TEXT,
+                ownership_token TEXT,
+                started_at INTEGER,
+                finished_at INTEGER,
+                lease_until INTEGER,
+                retry_at INTEGER,
+                retry_remaining INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                input_watermark INTEGER,
+                last_success_watermark INTEGER,
                 PRIMARY KEY(kind, job_key)
             );
             """

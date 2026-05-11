@@ -1743,7 +1743,7 @@ final class AgentGraphStoreTests: XCTestCase {
             var statement: OpaquePointer?
             let query =
                 """
-                CREATE TABLE threads (
+                CREATE TABLE IF NOT EXISTS threads (
                     id TEXT NOT NULL PRIMARY KEY,
                     agent_path TEXT,
                     memory_mode TEXT,

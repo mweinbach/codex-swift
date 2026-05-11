@@ -670,6 +670,7 @@ public enum CodexAppServer {
     private static let defaultListLimit = 25
     private static let maxListLimit = 100
     private static let maxUserInputTextScalars = 1 << 20
+    private static let stateDatabaseFilename = "state_5.sqlite"
     private static let pluginTransportFinalURLHeader = "x-codex-plugin-transport-final-url"
     fileprivate static let persistExtendedHistoryDeprecationSummary =
         "persistExtendedHistory is deprecated and ignored"
@@ -688,6 +689,20 @@ public enum CodexAppServer {
         #else
             return "unknown"
         #endif
+    }
+
+    public static func defaultStateStore(
+        codexHome: URL,
+        runtimeConfig: CodexRuntimeConfig
+    ) throws -> SQLiteAgentGraphStore {
+        let sqliteHome = runtimeConfig.sqliteHome.map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? codexHome
+        let databaseURL = sqliteHome.appendingPathComponent(stateDatabaseFilename, isDirectory: false)
+        return try SQLiteAgentGraphStore(
+            databaseURL: databaseURL,
+            defaultProvider: runtimeConfig.selectedModelProviderID
+        )
     }
 
     public static func defaultMcpOAuthLoginStarter(

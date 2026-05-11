@@ -421,13 +421,21 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             codexHome: codexHome,
             overrides: request.configOverrides
         )
+        let stateStore: SQLiteAgentGraphStore?
+        do {
+            stateStore = try CodexAppServer.defaultStateStore(codexHome: codexHome, runtimeConfig: settings)
+        } catch {
+            fputs("failed to initialize sqlite state db: \(error)\n", stderr)
+            stateStore = nil
+        }
         try CodexAppServer.run(configuration: CodexAppServerConfiguration(
             codexHome: codexHome,
             defaultModelProvider: settings.selectedModelProviderID,
             version: CodexCLI.version,
             requiresOpenAIAuth: settings.selectedModelProvider?.requiresOpenAIAuth ?? true,
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
-            activeProfile: settings.activeProfile
+            activeProfile: settings.activeProfile,
+            stateStore: stateStore
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case let .generateTS(outDir, prettier, experimental):
