@@ -7286,6 +7286,28 @@ final class CodexAppServerTests: XCTestCase {
             "Invalid request: invalid type: integer `1`, expected a string"
         )
 
+        let invalidSaveDiscoverabilityType = try appServerResponse(
+            #"{"id":25,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidSaveDiscoverabilityTypeError = try XCTUnwrap(invalidSaveDiscoverabilityType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSaveDiscoverabilityTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSaveDiscoverabilityTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected enum PluginShareDiscoverability"
+        )
+
+        let invalidUpdateDiscoverabilityNull = try appServerResponse(
+            #"{"id":26,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":null,"shareTargets":[]}}"#,
+            codexHome: temp.url
+        )
+        let invalidUpdateDiscoverabilityNullError = try XCTUnwrap(invalidUpdateDiscoverabilityNull["error"] as? [String: Any])
+        XCTAssertEqual(invalidUpdateDiscoverabilityNullError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidUpdateDiscoverabilityNullError["message"] as? String,
+            "Invalid request: invalid type: null, expected enum PluginShareUpdateDiscoverability"
+        )
+
         let unknownSaveDiscoverability = try appServerResponse(
             #"{"id":10,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"PUBLIC"}}"#,
             codexHome: temp.url

@@ -6200,7 +6200,11 @@ public enum CodexAppServer {
     }
 
     private static func pluginShareUpdateDiscoverability(_ value: Any?) throws -> String {
-        let discoverability = stringParam(value) ?? ""
+        let discoverability = try rustRequiredEnumStringParam(
+            value,
+            field: "discoverability",
+            enumName: "PluginShareUpdateDiscoverability"
+        )
         guard discoverability == "UNLISTED" || discoverability == "PRIVATE" else {
             throw AppServerError.invalidParams("unknown variant `\(discoverability)`, expected `UNLISTED` or `PRIVATE`")
         }
@@ -6208,7 +6212,7 @@ public enum CodexAppServer {
     }
 
     private static func pluginShareSaveDiscoverability(_ value: Any?) throws -> String? {
-        guard let discoverability = stringParam(value) else {
+        guard let discoverability = try rustOptionalEnumStringParam(value, enumName: "PluginShareDiscoverability") else {
             return nil
         }
         let validDiscoverability: Set<String> = ["LISTED", "UNLISTED", "PRIVATE"]
@@ -6218,6 +6222,26 @@ public enum CodexAppServer {
             )
         }
         return discoverability
+    }
+
+    private static func rustRequiredEnumStringParam(_ value: Any?, field: String, enumName: String) throws -> String {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
+        }
+        guard !(value is NSNull), let string = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected enum \(enumName)")
+        }
+        return string
+    }
+
+    private static func rustOptionalEnumStringParam(_ value: Any?, enumName: String) throws -> String? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let string = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected enum \(enumName)")
+        }
+        return string
     }
 
     private static func validatePluginShareTargets(_ value: Any?, required: Bool = false) throws -> [[String: Any]] {
