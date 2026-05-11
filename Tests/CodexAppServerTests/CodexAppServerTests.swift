@@ -16185,6 +16185,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecProcessIDsAreConnectionScopedAndDisconnectTerminatesProcess() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let marker = "codex-command-exec-marker-\(UUID().uuidString)"
+        var firstProcessor: CodexAppServerMessageProcessor? = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url)
+        )
+        let secondProcessor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+
+        let command = "while true; do sleep 1; done"
+        let startRequest: [String: Any] = [
+            "id": 1,
+            "method": "command/exec",
+            "params": [
+                "command": ["/bin/sh", "-c", command, marker],
+                "processId": "shared-process",
+                "cwd": cwd.url.path
+            ]
+        ]
+        XCTAssertNil(firstProcessor?.processLine(try JSONSerialization.data(withJSONObject: startRequest)))
+
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        let terminateFromSecondConnection = try decode(secondProcessor.processLine(Data(
+            #"{"id":2,"method":"command/exec/terminate","params":{"processId":"shared-process"}}"#.utf8
+        )))
+        let terminateError = try XCTUnwrap(terminateFromSecondConnection["error"] as? [String: Any])
+        XCTAssertEqual(terminateError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            terminateError["message"] as? String,
+            #"no active command/exec for process id "shared-process""#
+        )
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        firstProcessor = nil
+        try await waitForCommandLineMarker(marker, shouldExist: false)
+    }
+
     func testCommandExecProcessIDSessionTimeoutReportsRustExitCode() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -16982,6 +17020,36 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func waitForCommandLineMarker(
+        _ marker: String,
+        shouldExist: Bool,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if try commandLineMarkerExists(marker) == shouldExist {
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let expectation = shouldExist ? "appear" : "exit"
+        XCTFail("process marker \(marker) did not \(expectation) before timeout")
+        throw AppServerTestTimeout()
+    }
+
+    private func commandLineMarkerExists(_ marker: String) throws -> Bool {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "command"]
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let commands = String(data: data, encoding: .utf8) ?? ""
+        return commands.split(separator: "\n").contains { $0.contains(marker) }
     }
 
     private func archivedThreadIDs(from messages: [[String: Any]]) throws -> [String] {
