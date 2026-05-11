@@ -508,6 +508,7 @@ Source baseline inspected for this scaffold:
   - `fs/writeFile`, `command/exec/write`, and `process/writeStdin` now preserve Rust's invalid-base64 decoder wording in route errors, including the byte value and offset for malformed input.
   - `fs/copy` now preserves Rust's special-file handling: top-level unsupported sources such as FIFOs are rejected with the invalid-request copy error, while unsupported special files encountered during recursive directory copies are skipped.
   - `command/exec` and `process/spawn` now reject negative or wrongly typed `outputBytesCap` and wrongly typed `timeoutMs` values with Rust's numeric protocol decode errors, including boolean, floating-point, sequence, and map JSON shapes, instead of silently clamping or defaulting them.
+  - `command/exec` process-id sessions now preserve Rust's `outputBytesCap` behavior for both buffered responses and streamed `command/exec/outputDelta` notifications, including per-stream truncation and `capReached` signaling.
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
   - app-server `initialize` now rejects `clientInfo.name` values that cannot be used as HTTP header values before mutating initialized state, preserving Rust's invalid-request code and exact error message while allowing a later valid initialize retry.
 - `codex-rs/app-server/tests/suite/conversation_summary.rs` relative rollout path lookup

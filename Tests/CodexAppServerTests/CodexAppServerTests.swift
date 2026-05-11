@@ -18388,6 +18388,63 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecProcessIDSessionRespectsOutputCapLikeRust() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf abcdef; printf uvwxyz >&2"],"processId":"cmd-cap","cwd":"\#(cwd.url.path)","outputBytesCap":5}}"#.utf8
+        )))
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        XCTAssertEqual(response["id"] as? Int, 1)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "abcde")
+        XCTAssertEqual(result["stderr"] as? String, "uvwxy")
+    }
+
+    func testCommandExecStreamingOutputCapReportsCapReachedLikeRust() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf abcdefghij; sleep 5"],"processId":"cmd-stream-cap","cwd":"\#(cwd.url.path)","streamStdoutStderr":true,"outputBytesCap":5}}"#.utf8
+        )))
+
+        let outputData = try await nextNotificationPayload(notificationCapture, timeoutNanoseconds: 1_000_000_000)
+        let output = try XCTUnwrap(decodeMessages(outputData).first)
+        XCTAssertEqual(output["method"] as? String, "command/exec/outputDelta")
+        let outputParams = try XCTUnwrap(output["params"] as? [String: Any])
+        XCTAssertEqual(outputParams["processId"] as? String, "cmd-stream-cap")
+        XCTAssertEqual(outputParams["stream"] as? String, "stdout")
+        XCTAssertEqual(outputParams["capReached"] as? Bool, true)
+        XCTAssertEqual(
+            String(data: Data(base64Encoded: try XCTUnwrap(outputParams["deltaBase64"] as? String)) ?? Data(), encoding: .utf8),
+            "abcde"
+        )
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/terminate","params":{"processId":"cmd-stream-cap"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+    }
+
     func testCommandExecStreamsOutputBeforeProcessExit() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
