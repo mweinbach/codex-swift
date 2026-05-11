@@ -19282,6 +19282,17 @@ final class CodexAppServerTests: XCTestCase {
             "Invalid request: invalid type: boolean `true`, expected i64"
         )
 
+        let invalidStreamBoolType = try appServerResponse(
+            #"{"id":13,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","streamStdoutStderr":"true"}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidStreamBoolTypeError = try XCTUnwrap(invalidStreamBoolType["error"] as? [String: Any])
+        XCTAssertEqual(invalidStreamBoolTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidStreamBoolTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "true", expected a boolean"#
+        )
+
         let negativeOutputCap = try appServerResponse(
             #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":-1}}"#,
             codexHome: codexHome.url
@@ -20140,6 +20151,18 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             invalidOutputCapMapTypeError["message"] as? String,
             "Invalid request: invalid type: map, expected usize"
+        )
+
+        let invalidTtyBoolType = try appServerResponse(
+            #"{"id":12,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","tty":1}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidTtyBoolTypeError = try XCTUnwrap(invalidTtyBoolType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTtyBoolTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidTtyBoolTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a boolean"
         )
     }
 

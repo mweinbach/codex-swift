@@ -14632,11 +14632,11 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("command must not be empty")
         }
         let processID = stringParam(params?["processId"])
-        let tty = boolParam(params?["tty"], defaultValue: false)
-        let streamStdin = boolParam(params?["streamStdin"], defaultValue: false)
-        let streamStdoutStderr = boolParam(params?["streamStdoutStderr"], defaultValue: false)
-        let disableOutputCap = boolParam(params?["disableOutputCap"], defaultValue: false)
-        let disableTimeout = boolParam(params?["disableTimeout"], defaultValue: false)
+        let tty = try rustDefaultedBoolParam(params?["tty"], defaultValue: false)
+        let streamStdin = try rustDefaultedBoolParam(params?["streamStdin"], defaultValue: false)
+        let streamStdoutStderr = try rustDefaultedBoolParam(params?["streamStdoutStderr"], defaultValue: false)
+        let disableOutputCap = try rustDefaultedBoolParam(params?["disableOutputCap"], defaultValue: false)
+        let disableTimeout = try rustDefaultedBoolParam(params?["disableTimeout"], defaultValue: false)
         let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
         try validateRustIntegerParam(params?["outputBytesCap"], expected: "usize")
         try validateRustIntegerParam(params?["timeoutMs"], expected: "i64")
@@ -15111,7 +15111,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("processHandle must not be empty")
         }
         let cwd = try absolutePathParam(params?["cwd"], name: "cwd")
-        let tty = boolParam(params?["tty"], defaultValue: false)
+        let tty = try rustDefaultedBoolParam(params?["tty"], defaultValue: false)
         if params?["size"] != nil && !tty {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
         }
@@ -15126,8 +15126,8 @@ public enum CodexAppServer {
             processHandle: processHandle,
             cwd: cwd,
             tty: tty,
-            streamStdin: boolParam(params?["streamStdin"], defaultValue: false),
-            streamStdoutStderr: boolParam(params?["streamStdoutStderr"], defaultValue: false),
+            streamStdin: try rustDefaultedBoolParam(params?["streamStdin"], defaultValue: false),
+            streamStdoutStderr: try rustDefaultedBoolParam(params?["streamStdoutStderr"], defaultValue: false),
             timeoutMs: processSpawnTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
             size: size,
@@ -15307,6 +15307,16 @@ public enum CodexAppServer {
 
     fileprivate static func rustOptionalBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
         guard let value, !(value is NSNull) else {
+            return defaultValue
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
+    }
+
+    private static func rustDefaultedBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
+        guard let value else {
             return defaultValue
         }
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
