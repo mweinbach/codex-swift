@@ -14391,14 +14391,14 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
-            cwd: try optionalAbsolutePathParam(params?["cwd"], name: "cwd").map {
+            cwd: try rustOptionalAbsolutePathParam(params?["cwd"]).map {
                 URL(fileURLWithPath: $0, isDirectory: true)
             },
             cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
-        let includeLayers = boolParam(params?["includeLayers"], defaultValue: false)
+        let includeLayers = try rustDefaultBoolParam(params?["includeLayers"], defaultValue: false)
         var response: [String: Any] = [
             "config": configReadConfigObject(
                 effectiveConfig(
@@ -14437,22 +14437,19 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let keyPath = stringParam(params?["keyPath"]) else {
-            throw AppServerError.invalidRequest("missing keyPath")
-        }
-        guard let mergeStrategy = stringParam(params?["mergeStrategy"]) else {
-            throw AppServerError.invalidRequest("missing mergeStrategy")
-        }
+        let keyPath = try rustRequiredStringParam(params?["keyPath"], field: "keyPath")
+        let rawValue = try rustRequiredJSONParam(params?["value"], field: "value")
+        let mergeStrategy = try rustRequiredStringParam(params?["mergeStrategy"], field: "mergeStrategy")
         let parsedMergeStrategy = try ConfigMergeStrategy(rawValue: mergeStrategy)
         let edit = ConfigWriteEdit(
             keyPath: keyPath,
-            value: try configWriteValue(params?["value"]),
+            value: try configWriteValue(rawValue),
             mergeStrategy: parsedMergeStrategy
         )
         return try configWriteResult(
             edits: [edit],
-            filePath: stringParam(params?["filePath"]),
-            expectedVersion: stringParam(params?["expectedVersion"]),
+            filePath: try rustOptionalStringParam(params?["filePath"]),
+            expectedVersion: try rustOptionalStringParam(params?["expectedVersion"]),
             configuration: configuration
         )
     }
@@ -14461,26 +14458,26 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let rawEdits = params?["edits"] as? [[String: Any]] else {
-            throw AppServerError.invalidRequest("missing edits")
-        }
+        let rawEdits = try rustRequiredArrayParam(params?["edits"], field: "edits")
         let edits = try rawEdits.map { rawEdit in
-            guard let keyPath = stringParam(rawEdit["keyPath"]) else {
-                throw AppServerError.invalidRequest("missing keyPath")
+            guard let rawEdit = rawEdit as? [String: Any] else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(rawEdit)), expected struct ConfigEdit"
+                )
             }
-            guard let mergeStrategy = stringParam(rawEdit["mergeStrategy"]) else {
-                throw AppServerError.invalidRequest("missing mergeStrategy")
-            }
+            let keyPath = try rustRequiredStringParam(rawEdit["keyPath"], field: "keyPath")
+            let rawValue = try rustRequiredJSONParam(rawEdit["value"], field: "value")
+            let mergeStrategy = try rustRequiredStringParam(rawEdit["mergeStrategy"], field: "mergeStrategy")
             return ConfigWriteEdit(
                 keyPath: keyPath,
-                value: try configWriteValue(rawEdit["value"]),
+                value: try configWriteValue(rawValue),
                 mergeStrategy: try ConfigMergeStrategy(rawValue: mergeStrategy)
             )
         }
         return try configWriteResult(
             edits: edits,
-            filePath: stringParam(params?["filePath"]),
-            expectedVersion: stringParam(params?["expectedVersion"]),
+            filePath: try rustOptionalStringParam(params?["filePath"]),
+            expectedVersion: try rustOptionalStringParam(params?["expectedVersion"]),
             configuration: configuration
         )
     }
@@ -23270,7 +23267,10 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.configValueWriteResult(params: params, configuration: configuration)
                     )
                 case "config/batchWrite":
-                    let reloadUserConfig = CodexAppServer.boolParam(params?["reloadUserConfig"], defaultValue: false)
+                    let reloadUserConfig = try CodexAppServer.rustDefaultBoolParam(
+                        params?["reloadUserConfig"],
+                        defaultValue: false
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.configBatchWriteResult(params: params, configuration: configuration)

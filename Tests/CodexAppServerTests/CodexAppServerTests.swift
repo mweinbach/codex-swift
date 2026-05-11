@@ -18681,6 +18681,72 @@ final class CodexAppServerTests: XCTestCase {
         })
     }
 
+    func testConfigRoutesRejectMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"config/read","params":{"includeLayers":null}}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            ),
+            (
+                #"{"id":2,"method":"config/read","params":{"cwd":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"config/value/write","params":{"value":"gpt-new","mergeStrategy":"replace"}}"#,
+                "missing field `keyPath`"
+            ),
+            (
+                #"{"id":4,"method":"config/value/write","params":{"keyPath":"model","mergeStrategy":"replace"}}"#,
+                "missing field `value`"
+            ),
+            (
+                #"{"id":5,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":6,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace","filePath":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":7,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace","expectedVersion":false}}"#,
+                "Invalid request: invalid type: boolean `false`, expected a string"
+            ),
+            (
+                #"{"id":8,"method":"config/batchWrite","params":{}}"#,
+                "missing field `edits`"
+            ),
+            (
+                #"{"id":9,"method":"config/batchWrite","params":{"edits":null}}"#,
+                "Invalid request: invalid type: null, expected a sequence"
+            ),
+            (
+                #"{"id":10,"method":"config/batchWrite","params":{"edits":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected struct ConfigEdit"
+            ),
+            (
+                #"{"id":11,"method":"config/batchWrite","params":{"edits":[{"keyPath":"model","mergeStrategy":"replace"}]}}"#,
+                "missing field `value`"
+            ),
+            (
+                #"{"id":12,"method":"config/batchWrite","params":{"edits":[{"keyPath":1,"value":"gpt-new","mergeStrategy":"replace"}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":13,"method":"config/batchWrite","params":{"edits":[{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace"}],"reloadUserConfig":null}}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try decode(processor.processLine(Data(request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["message"] as? String, expectedMessage, "request: \(request)")
+        }
+    }
+
     func testConfigRequirementsReadReturnsNullWhenUnset() throws {
         let temp = try TemporaryDirectory()
         let missingRequirements = temp.url.appendingPathComponent("missing-requirements.toml", isDirectory: false)
