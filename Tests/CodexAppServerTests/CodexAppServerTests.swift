@@ -4271,6 +4271,54 @@ final class CodexAppServerTests: XCTestCase {
         })
     }
 
+    func testThreadInjectItemsAppendsResponseItemsAfterExistingTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T09-30-00",
+            timestamp: "2025-01-06T09:30:00Z",
+            preview: "First turn",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"First turn"}]}}"#.utf8
+        )))
+        let injectedItem = #"{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Injected after first turn"}]}"#
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/inject_items","params":{"threadId":"\#(threadID)","items":[\#(injectedItem)]}}"#.utf8
+        )))
+        XCTAssertTrue(try XCTUnwrap(response["result"] as? [String: Any]).isEmpty)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Second turn"}]}}"#.utf8
+        )))
+
+        let history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: rolloutPath))
+        guard case let .resumed(resumed) = history else {
+            return XCTFail("expected resumed rollout history")
+        }
+        let firstTurnIndex = try XCTUnwrap(resumed.history.firstIndex {
+            $0 == .eventMsg(.userMessage(UserMessageEvent(message: "First turn")))
+        })
+        let injectedIndex = try XCTUnwrap(resumed.history.firstIndex {
+            guard case let .responseItem(.message(_, role, content, _)) = $0 else {
+                return false
+            }
+            return role == "assistant" && content == [.outputText(text: "Injected after first turn")]
+        })
+        let secondTurnIndex = try XCTUnwrap(resumed.history.firstIndex {
+            $0 == .eventMsg(.userMessage(UserMessageEvent(message: "Second turn")))
+        })
+        XCTAssertLessThan(firstTurnIndex, injectedIndex)
+        XCTAssertLessThan(injectedIndex, secondTurnIndex)
+    }
+
     func testThreadInjectItemsRejectsEmptyInvalidAndMissingThread() throws {
         let temp = try TemporaryDirectory()
         let missingID = UUID().uuidString.lowercased()

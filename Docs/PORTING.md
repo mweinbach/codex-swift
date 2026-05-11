@@ -557,7 +557,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread memory mode updates
   - `thread/memoryMode/set` now validates `"enabled"`/`"disabled"` modes, rejects missing rollouts, returns `{}`, and appends Rust-compatible session metadata markers with `memory_mode` while leaving thread objects unchanged.
 - `codex-rs/app-server/src/request_processors/turn_processor.rs` thread response-item injection
-  - `thread/inject_items` now validates non-empty raw Responses API items, rejects invalid item payloads, rejects missing rollouts, returns `{}`, and appends Rust-compatible `response_item` rollout records so injected context is visible to later rollout reconstruction.
+  - `thread/inject_items` now validates non-empty raw Responses API items, rejects invalid item payloads, rejects missing rollouts, returns `{}`, and appends Rust-compatible `response_item` rollout records after existing turn history so injected context is visible to later rollout reconstruction and later turns.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` memory reset
   - `memory/reset` now requires a configured Swift SQLite state store, clears `stage1_outputs` plus memory stage-1/global-consolidation job rows while preserving thread rows and `memory_mode`, returns `{}`, creates and empties `memories` and `memories_extensions`, rejects symlinked memory roots, and preserves the root directories.
 - `codex-rs/app-server/src/request_processors/fs_processor.rs` filesystem methods
