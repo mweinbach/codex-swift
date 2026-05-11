@@ -316,6 +316,54 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertEqual(skill.policy, SkillPolicy(allowImplicitInvocation: nil, products: []))
     }
 
+    func testProductRestrictedSkillsAreFilteredLikeRustManager() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let codexSkill = codexHome.appendingPathComponent("skills/codex-only/SKILL.md", isDirectory: false)
+        let chatSkill = codexHome.appendingPathComponent("skills/chat-only/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "codex-only", description: "codex skill", to: codexSkill)
+        try writeSkill(name: "chat-only", description: "chat skill", to: chatSkill)
+        try writeOpenAIMetadata(
+            """
+            policy:
+              products:
+                - codex
+            """,
+            for: codexSkill
+        )
+        try writeOpenAIMetadata(
+            """
+            policy:
+              products:
+                - CHATGPT
+            """,
+            for: chatSkill
+        )
+
+        let codexOutcome = SkillLoader.load(cwd: cwd, codexHome: codexHome, includeSystemSkills: false)
+        let chatOutcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            includeSystemSkills: false,
+            restrictionProduct: .chatgpt
+        )
+        let unrestrictedOutcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            includeSystemSkills: false,
+            restrictionProduct: nil
+        )
+
+        XCTAssertEqual(codexOutcome.skills.map(\.name), ["codex-only"])
+        XCTAssertEqual(codexOutcome.skillRootByPath.keys.sorted(), [codexOutcome.skills[0].path])
+        XCTAssertEqual(chatOutcome.skills.map(\.name), ["chat-only"])
+        XCTAssertTrue(unrestrictedOutcome.skills.isEmpty)
+        XCTAssertTrue(unrestrictedOutcome.skillRoots.isEmpty)
+        XCTAssertTrue(unrestrictedOutcome.skillRootByPath.isEmpty)
+    }
+
     func testSystemSkillParseErrorsAreSuppressedLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)

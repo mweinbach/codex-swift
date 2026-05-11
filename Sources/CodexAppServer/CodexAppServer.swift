@@ -5212,6 +5212,7 @@ public enum CodexAppServer {
         for skillsRoot in skillRoots {
             discoverSkills(root: skillsRoot, scope: .user, outcome: &outcome)
         }
+        outcome.filterSkillsForProduct(.codex)
         let rules = skillConfigRules(from: config)
         return outcome.skills.sorted {
             if $0.name != $1.name {
@@ -18822,6 +18823,7 @@ public enum CodexAppServer {
         outcome.skills = outcome.skills.filter { seen.insert($0.name).inserted }
         let retainedSkillPaths = Set(outcome.skills.map(\.path))
         outcome.skillRootByPath = outcome.skillRootByPath.filter { retainedSkillPaths.contains($0.key) }
+        outcome.filterSkillsForProduct(.codex)
         outcome.skills.sort {
             if $0.name != $1.name {
                 return $0.name < $1.name

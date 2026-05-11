@@ -296,6 +296,43 @@ final class SkillsTests: XCTestCase {
         ])
     }
 
+    func testOutcomeRenderingOmitsSkillsDisallowedForImplicitInvocationLikeRust() {
+        let root = "/tmp/skills"
+        let visible = skill(name: "visible", path: "\(root)/visible/SKILL.md")
+        let explicitOnly = skill(
+            name: "explicit-only",
+            path: "\(root)/explicit-only/SKILL.md",
+            policy: SkillPolicy(allowImplicitInvocation: false)
+        )
+        let outcome = outcome(skills: [explicitOnly, visible], roots: [root])
+
+        let rendered = Skills.buildAvailableSkills(outcome: outcome, budget: .characters(1_000))
+        let filtered = outcome.filteredForImplicitInvocation()
+
+        XCTAssertEqual(filtered.skills.map(\.name), ["visible"])
+        XCTAssertEqual(filtered.skillRoots, [root])
+        XCTAssertEqual(filtered.skillRootByPath, [visible.path: root])
+        XCTAssertEqual(rendered?.report.totalCount, 1)
+        XCTAssertEqual(rendered?.skillLines, [
+            "- visible: visible description (file: /tmp/skills/visible/SKILL.md)"
+        ])
+    }
+
+    func testExplicitSkillMentionsCanSelectImplicitlyDisabledSkillsLikeRust() {
+        let explicitOnly = skill(
+            name: "explicit-only",
+            path: "/skills/explicit-only/SKILL.md",
+            policy: SkillPolicy(allowImplicitInvocation: false)
+        )
+
+        let mentions = Skills.collectExplicitSkillMentions(
+            inputs: [.skill(name: "explicit-only", path: explicitOnly.path)],
+            skills: [explicitOnly]
+        )
+
+        XCTAssertEqual(mentions, [explicitOnly])
+    }
+
     func testCollectExplicitSkillMentionsSelectsKnownSkillOnceInInputOrder() {
         let first = skill(name: "first", path: "/skills/first/SKILL.md")
         let second = skill(name: "second", path: "/skills/second/SKILL.md")
@@ -457,11 +494,13 @@ final class SkillsTests: XCTestCase {
         name: String,
         description: String? = nil,
         path: String,
-        scope: SkillScope = .user
+        scope: SkillScope = .user,
+        policy: SkillPolicy? = nil
     ) -> SkillMetadata {
         SkillMetadata(
             name: name,
             description: description ?? "\(name) description",
+            policy: policy,
             path: path,
             scope: scope
         )

@@ -24,6 +24,7 @@ public enum SkillLoader {
         configLayerStack: ConfigLayerStack? = nil,
         pluginSkillRoots: [PluginSkillRoot] = [],
         includeSystemSkills: Bool = true,
+        restrictionProduct: Product? = .codex,
         fileManager: FileManager = .default
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
@@ -48,6 +49,7 @@ public enum SkillLoader {
         if !rules.isEmpty {
             outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: rules) }
         }
+        outcome.filterSkillsForProduct(restrictionProduct)
 
         finalize(outcome: &outcome)
         return outcome

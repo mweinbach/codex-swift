@@ -75,6 +75,17 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         try container.encode(scope, forKey: .scope)
         try container.encodeIfPresent(pluginID, forKey: .pluginID)
     }
+
+    public func allowsImplicitInvocation() -> Bool {
+        policy?.allowImplicitInvocation ?? true
+    }
+
+    public func matchesProductRestriction(for restrictionProduct: Product?) -> Bool {
+        guard let policy else {
+            return true
+        }
+        return policy.products.isEmpty || restrictionProduct.map { policy.products.contains($0) } == true
+    }
 }
 
 public struct SkillPolicy: Codable, Equatable, Sendable {
@@ -224,6 +235,29 @@ public struct SkillLoadOutcome: Codable, Equatable, Sendable {
         if !skillRootByPath.isEmpty {
             try container.encode(skillRootByPath, forKey: .skillRootByPath)
         }
+    }
+
+    public func skillsAllowedForImplicitInvocation() -> [SkillMetadata] {
+        skills.filter { $0.allowsImplicitInvocation() }
+    }
+
+    public mutating func filterSkillsForProduct(_ restrictionProduct: Product?) {
+        skills = skills.filter { $0.matchesProductRestriction(for: restrictionProduct) }
+        retainMetadataForCurrentSkills()
+    }
+
+    public func filteredForImplicitInvocation() -> SkillLoadOutcome {
+        var outcome = self
+        outcome.skills = outcome.skillsAllowedForImplicitInvocation()
+        outcome.retainMetadataForCurrentSkills()
+        return outcome
+    }
+
+    private mutating func retainMetadataForCurrentSkills() {
+        let retainedSkillPaths = Set(skills.map(\.path))
+        skillRootByPath = skillRootByPath.filter { retainedSkillPaths.contains($0.key) }
+        let retainedRoots = Set(skillRootByPath.values)
+        skillRoots = skillRoots.filter { retainedRoots.contains($0) }
     }
 }
 
@@ -424,6 +458,7 @@ public enum Skills {
         outcome: SkillLoadOutcome,
         budget: SkillMetadataBudget
     ) -> AvailableSkills? {
+        let outcome = outcome.filteredForImplicitInvocation()
         guard !outcome.skills.isEmpty else {
             return nil
         }

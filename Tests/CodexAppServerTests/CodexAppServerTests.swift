@@ -18271,6 +18271,56 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(tools.first?["description"] as? String, "GitHub access")
     }
 
+    func testSkillsListFiltersProductRestrictedSkillsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let codexSkill = codexHome.url.appendingPathComponent("skills/codex/SKILL.md", isDirectory: false)
+        let chatSkill = codexHome.url.appendingPathComponent("skills/chat/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: codexSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: chatSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "codex-skill", description: "codex skill")
+            .write(to: codexSkill, atomically: true, encoding: .utf8)
+        try skillContents(name: "chat-skill", description: "chat skill")
+            .write(to: chatSkill, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: codexSkill.deletingLastPathComponent().appendingPathComponent("agents", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: chatSkill.deletingLastPathComponent().appendingPathComponent("agents", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try """
+        policy:
+          products:
+            - codex
+        """.write(
+            to: codexSkill.deletingLastPathComponent().appendingPathComponent("agents/openai.yaml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        policy:
+          products:
+            - CHATGPT
+        """.write(
+            to: chatSkill.deletingLastPathComponent().appendingPathComponent("agents/openai.yaml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["codex-skill"])
+        XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/skills/codex/SKILL.md") == true)
+    }
+
     func testSkillsListReportsInvalidUserSkillErrors() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
