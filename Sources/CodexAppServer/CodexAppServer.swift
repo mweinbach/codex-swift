@@ -11197,22 +11197,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        var cwdFallback = configuration.cwd.path
-        if params?["threadId"] != nil {
-            let threadID = try materializedThreadID(params: params, configuration: configuration)
-            if let rolloutPath = try RolloutListing.findConversationPathByIDString(
-                codexHome: configuration.codexHome,
-                idString: threadID
-            ) {
-                let summary = try RolloutSummary(
-                    path: rolloutPath,
-                    defaultProvider: configuration.defaultModelProvider
-                )
-                if !summary.cwd.isEmpty {
-                    cwdFallback = summary.cwd
-                }
-            }
-        }
+        let cwdFallback = try mcpThreadCwdFallback(params: params, configuration: configuration)
         guard let server = stringParam(params?["server"]), !server.isEmpty else {
             throw AppServerError.invalidRequest("missing server")
         }
@@ -11370,6 +11355,7 @@ public enum CodexAppServer {
         env: [String: String]?,
         envVars: [String],
         cwd: String?,
+        cwdFallback: String,
         params: [String: Any],
         timeoutSeconds: Double?,
         configuration: CodexAppServerConfiguration
@@ -11382,8 +11368,9 @@ public enum CodexAppServer {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [command] + args
         }
-        if let cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        let effectiveCWD = cwd ?? cwdFallback
+        if !effectiveCWD.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: effectiveCWD, isDirectory: true)
         }
         var environment = configuration.environment
         for name in envVars {
@@ -11791,6 +11778,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let threadID = try materializedThreadID(params: params, configuration: configuration)
+        let cwdFallback = try mcpThreadCwdFallback(params: params, configuration: configuration)
         guard let server = stringParam(params?["server"]), !server.isEmpty else {
             throw AppServerError.invalidRequest("missing server")
         }
@@ -11832,6 +11820,7 @@ public enum CodexAppServer {
                 serverConfig: serverConfig,
                 toolCallParams: toolCallParams,
                 toolCallParamsData: toolCallParamsData,
+                cwdFallback: cwdFallback,
                 configuration: configuration
             ).object
         }
@@ -11842,6 +11831,7 @@ public enum CodexAppServer {
         serverConfig: McpServerConfig,
         toolCallParams: [String: Any],
         toolCallParamsData: Data,
+        cwdFallback: String,
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerJSONObject {
         switch serverConfig.transport {
@@ -11853,6 +11843,7 @@ public enum CodexAppServer {
                 env: env,
                 envVars: envVars,
                 cwd: cwd,
+                cwdFallback: cwdFallback,
                 params: toolCallParams,
                 timeoutSeconds: serverConfig.toolTimeoutSec ?? serverConfig.startupTimeoutSec,
                 configuration: configuration
@@ -11898,6 +11889,29 @@ public enum CodexAppServer {
             return rawMeta
         }
         return ["threadId": threadID]
+    }
+
+    private static func mcpThreadCwdFallback(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> String {
+        var cwdFallback = configuration.cwd.path
+        if params?["threadId"] != nil {
+            let threadID = try materializedThreadID(params: params, configuration: configuration)
+            if let rolloutPath = try RolloutListing.findConversationPathByIDString(
+                codexHome: configuration.codexHome,
+                idString: threadID
+            ) {
+                let summary = try RolloutSummary(
+                    path: rolloutPath,
+                    defaultProvider: configuration.defaultModelProvider
+                )
+                if !summary.cwd.isEmpty {
+                    cwdFallback = summary.cwd
+                }
+            }
+        }
+        return cwdFallback
     }
 
     private static func effectiveMcpServer(

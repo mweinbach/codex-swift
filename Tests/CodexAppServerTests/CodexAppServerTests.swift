@@ -11459,6 +11459,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((result["_meta"] as? [String: Any])?["calledBy"] as? String, "stdio")
     }
 
+    func testMcpServerToolCallStdioUsesThreadCwdFallback() throws {
+        let temp = try TemporaryDirectory()
+        let threadCwd = temp.url.appendingPathComponent("thread-tool-cwd", isDirectory: true)
+        let serverCwd = temp.url.appendingPathComponent("server-tool-cwd", isDirectory: true)
+        try FileManager.default.createDirectory(at: threadCwd, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: serverCwd, withIntermediateDirectories: true)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-10",
+            timestamp: "2025-01-02T03:04:10Z",
+            preview: "call stdio mcp with thread cwd",
+            provider: nil,
+            cwd: threadCwd.path
+        )
+        let script = temp.url.appendingPathComponent("stdio-tool-cwd-mcp.sh", isDirectory: false)
+        try """
+        #!/bin/sh
+        count=0
+        while IFS= read -r line; do
+          count=$((count + 1))
+          case "$count" in
+            1)
+              printf '%s\\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"stdio","version":"1.0.0"}}}'
+              ;;
+            2)
+              cwd=$(pwd)
+              printf '%s\\n' "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"result\\":{\\"content\\":[{\\"type\\":\\"text\\",\\"text\\":\\"$cwd\\"}],\\"isError\\":false}}"
+              exit 0
+              ;;
+          esac
+        done
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try """
+        [mcp_servers.stdio_tool_cwd]
+        command = "\(script.path)"
+        tool_timeout_sec = 10
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            cwd: serverCwd,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"stdio_tool_cwd","tool":"pwd","arguments":{}}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        func normalizedPath(_ path: String?) -> String? {
+            path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        }
+        XCTAssertEqual(
+            normalizedPath(content.first?["text"] as? String),
+            normalizedPath(threadCwd.path)
+        )
+    }
+
     func testThreadTurnsListPaginatesAndSummarizesByDefault() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
