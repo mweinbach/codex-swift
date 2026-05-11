@@ -5,6 +5,7 @@ public enum DebugCommandRuntime {
     public struct Dependencies {
         public var findCodexHome: () throws -> URL
         public var loadConfig: (URL, CliConfigOverrides) throws -> CodexRuntimeConfig
+        public var loadConfigLayerStack: (URL, CliConfigOverrides) throws -> ConfigLayerStack
         public var makeStateStore: (URL, String) throws -> SQLiteAgentGraphStore
         public var loadRawModelCatalog: (URL, CodexRuntimeConfig) async throws -> ModelsResponse
         public var currentExecutable: () throws -> URL
@@ -17,6 +18,13 @@ public enum DebugCommandRuntime {
                     codexHome: codexHome,
                     cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
                     overrides: overrides
+                )
+            },
+            loadConfigLayerStack: @escaping (URL, CliConfigOverrides) throws -> ConfigLayerStack = { codexHome, overrides in
+                try CodexConfigLayerLoader.loadConfigLayerStack(
+                    codexHome: codexHome,
+                    cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+                    cliOverrides: overrides
                 )
             },
             makeStateStore: @escaping (URL, String) throws -> SQLiteAgentGraphStore = { databaseURL, modelProvider in
@@ -51,6 +59,7 @@ public enum DebugCommandRuntime {
         ) {
             self.findCodexHome = findCodexHome
             self.loadConfig = loadConfig
+            self.loadConfigLayerStack = loadConfigLayerStack
             self.makeStateStore = makeStateStore
             self.loadRawModelCatalog = loadRawModelCatalog
             self.currentExecutable = currentExecutable
@@ -296,11 +305,13 @@ public enum DebugCommandRuntime {
     ) throws -> CodexCLI.CommandExecutionResult {
         let codexHome = try dependencies.findCodexHome()
         let config = try dependencies.loadConfig(codexHome, configOverrides)
+        let configLayerStack = try dependencies.loadConfigLayerStack(codexHome, configOverrides)
         let input = makePromptInput(
             prompt: prompt,
             imagePaths: imagePaths,
             codexHome: codexHome,
-            config: config
+            config: config,
+            configLayerStack: configLayerStack
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted]
@@ -321,7 +332,8 @@ public enum DebugCommandRuntime {
         prompt: String?,
         imagePaths: [String],
         codexHome: URL,
-        config: CodexRuntimeConfig
+        config: CodexRuntimeConfig,
+        configLayerStack: ConfigLayerStack
     ) -> [ResponseItem] {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let approvalPolicy = config.approvalPolicy ?? .onRequest
@@ -331,7 +343,7 @@ public enum DebugCommandRuntime {
         ).map { UserInstructions(directory: cwd.path, text: $0) }
         let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: config)
         let loadedSkills = config.includeSkillInstructions
-            ? SkillLoader.load(cwd: cwd, codexHome: codexHome)
+            ? SkillLoader.load(cwd: cwd, codexHome: codexHome, configLayerStack: configLayerStack)
             : nil
         let model = config.model ?? ModelsManager.openAIDefaultAPIModel
         let modelFamily = ModelsManager.constructModelFamilyOffline(

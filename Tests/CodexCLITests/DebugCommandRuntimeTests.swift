@@ -291,6 +291,57 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(skillsText.contains(skill.path))
     }
 
+    func testPromptInputAvailableSkillsHonorConfigRules() async throws {
+        let temp = try TemporaryDirectory()
+        let disabledSkill = temp.url.appendingPathComponent("skills/disabled-helper/SKILL.md", isDirectory: false)
+        let keptSkill = temp.url.appendingPathComponent("skills/kept-helper/SKILL.md", isDirectory: false)
+        try writeDebugSkill(
+            name: "disabled-helper",
+            description: "Should not be shown.",
+            to: disabledSkill
+        )
+        try writeDebugSkill(
+            name: "kept-helper",
+            description: "Should stay visible.",
+            to: keptSkill
+        )
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: temp.url.appendingPathComponent("config.toml").path)),
+                config: .table([
+                    "skills": .table([
+                        "config": .array([
+                            .table([
+                                "name": .string("disabled-helper"),
+                                "enabled": .bool(false)
+                            ])
+                        ])
+                    ])
+                ])
+            )
+        ])
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    model: "gpt-test",
+                    modelProvider: "test-provider",
+                    includeSkillInstructions: true,
+                    projectDocMaxBytes: 0
+                ),
+                configLayerStack: stack
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertTrue(output.contains("### Available skills"))
+        XCTAssertTrue(output.contains("- kept-helper: Should stay visible."))
+        XCTAssertFalse(output.contains("disabled-helper"))
+        XCTAssertFalse(output.contains("Should not be shown."))
+    }
+
     func testPromptInputOmitsAvailableSkillsWhenDisabled() async throws {
         let temp = try TemporaryDirectory()
         let skill = temp.url.appendingPathComponent("skills/debug-helper/SKILL.md", isDirectory: false)
@@ -2666,14 +2717,45 @@ final class DebugCommandRuntimeTests: XCTestCase {
 
     private func testDependencies(
         codexHome: URL,
-        config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0)
+        config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0),
+        configLayerStack: ConfigLayerStack? = nil
     ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
             loadConfig: { _, _ in
                 config
+            },
+            loadConfigLayerStack: { _, _ in
+                if let configLayerStack {
+                    return configLayerStack
+                }
+                return try self.emptyConfigLayerStack(codexHome: codexHome)
             }
         )
+    }
+
+    private func emptyConfigLayerStack(codexHome: URL) throws -> ConfigLayerStack {
+        try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                config: .table([:])
+            )
+        ])
+    }
+
+    private func writeDebugSkill(name: String, description: String, to skill: URL) throws {
+        try FileManager.default.createDirectory(
+            at: skill.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        ---
+        name: \(name)
+        description: \(description)
+        ---
+
+        Use this when checking debug prompt JSON.
+        """.write(to: skill, atomically: true, encoding: .utf8)
     }
 
     private func createMemoryTables(databaseURL: URL) throws {
