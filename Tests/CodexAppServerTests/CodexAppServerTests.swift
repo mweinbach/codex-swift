@@ -13231,6 +13231,10 @@ final class CodexAppServerTests: XCTestCase {
 
     func testAccountLoginChatGPTDeviceCodeSucceedsAndNotifies() async throws {
         let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs-device"
+        """.write(to: temp.url.appendingPathComponent("config.toml", isDirectory: false), atomically: true, encoding: .utf8)
         let notificationCapture = AppServerNotificationCapture()
         let idToken = try fakeJWT(email: "device@example.com", plan: "pro", accountID: "org-device")
         let probe = AppServerDeviceCodeProbe(scenario: .success(idToken: idToken))
@@ -13242,6 +13246,10 @@ final class CodexAppServerTests: XCTestCase {
             ),
             notificationSink: { data in await notificationCapture.append(data) }
         )
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":0,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
         let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgptDeviceCode"}}"#.utf8)))
         let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
@@ -13265,6 +13273,13 @@ final class CodexAppServerTests: XCTestCase {
         let updatedParams = try XCTUnwrap(updated[0]["params"] as? [String: Any])
         XCTAssertEqual(updatedParams["authMode"] as? String, "chatgpt")
         XCTAssertEqual(updatedParams["planType"] as? String, "pro")
+        let refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(servers) = refresh.mcpServers,
+              case let .object(docs)? = servers["docs"]
+        else {
+            return XCTFail("expected device-code login MCP refresh config")
+        }
+        XCTAssertEqual(docs["command"], .string("docs-device"))
 
         let stored = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
         XCTAssertEqual(stored.tokens?.accessToken, "access-token-123")

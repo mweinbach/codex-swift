@@ -20811,7 +20811,19 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func queueBestEffortMcpServerRefresh() {
-        let threadIDs = listLoadedThreadIDs()
+        Self.queueBestEffortMcpServerRefresh(
+            configuration: configuration,
+            threadStateManager: threadStateManager
+        )
+    }
+
+    private static func queueBestEffortMcpServerRefresh(
+        configuration: CodexAppServerConfiguration,
+        threadStateManager: AppServerThreadStateManager
+    ) {
+        let threadIDs = (try? CodexAppServer.runAsyncBlocking {
+            await threadStateManager.listLoadedThreadIDs()
+        }) ?? []
         guard !threadIDs.isEmpty else {
             return
         }
@@ -20829,7 +20841,9 @@ final class CodexAppServerMessageProcessor {
         }
         let refreshConfig = CodexAppServer.mcpServerRefreshConfig(runtimeConfig: runtimeConfig)
         for threadID in threadIDs {
-            try? queueMcpServerRefresh(threadID: threadID, config: refreshConfig)
+            _ = try? CodexAppServer.runAsyncBlocking {
+                await threadStateManager.queueMcpServerRefresh(threadID: threadID, config: refreshConfig)
+            }
         }
     }
 
@@ -21057,6 +21071,7 @@ final class CodexAppServerMessageProcessor {
         let serverConfiguration = configuration
         let notificationSink = notificationSink
         let registry = activeDeviceCodeLogins
+        let threadStateManager = threadStateManager
         let task = Task {
             let success: Bool
             let error: String?
@@ -21080,6 +21095,10 @@ final class CodexAppServerMessageProcessor {
                 notificationSink: notificationSink
             )
             if success {
+                CodexAppServerMessageProcessor.queueBestEffortMcpServerRefresh(
+                    configuration: serverConfiguration,
+                    threadStateManager: threadStateManager
+                )
                 await CodexAppServer.sendAccountUpdatedNotification(
                     configuration: serverConfiguration,
                     notificationSink: notificationSink
