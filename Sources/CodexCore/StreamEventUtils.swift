@@ -173,79 +173,25 @@ public enum StreamEventUtils {
     }
 
     private static func stripHiddenAssistantMarkup(_ text: String, planMode: Bool) -> String {
-        let (withoutCitations, _) = stripDelimitedBlocks(
-            text,
-            openTag: "<oai-mem-citation>",
-            closeTag: "</oai-mem-citation>"
-        )
+        let (withoutCitations, _) = stripAssistantCitations(text)
         guard planMode else {
             return withoutCitations
         }
-        return stripDelimitedBlocks(
-            withoutCitations,
-            openTag: "<proposed_plan>",
-            closeTag: "</proposed_plan>",
-            consumeFollowingNewline: true
-        ).visibleText
+        return stripProposedPlanBlocks(withoutCitations)
     }
 
     private static func stripHiddenAssistantMarkupAndParseMemoryCitation(
         _ text: String,
         planMode: Bool
     ) -> (String, MemoryCitation?) {
-        let (withoutCitations, citations) = stripDelimitedBlocks(
-            text,
-            openTag: "<oai-mem-citation>",
-            closeTag: "</oai-mem-citation>"
-        )
+        let (withoutCitations, citations) = stripAssistantCitations(text)
         let visibleText: String
         if planMode {
-            visibleText = stripDelimitedBlocks(
-                withoutCitations,
-                openTag: "<proposed_plan>",
-                closeTag: "</proposed_plan>",
-                consumeFollowingNewline: true
-            ).visibleText
+            visibleText = stripProposedPlanBlocks(withoutCitations)
         } else {
             visibleText = withoutCitations
         }
         return (visibleText, parseMemoryCitation(citations))
-    }
-
-    private static func stripDelimitedBlocks(
-        _ text: String,
-        openTag: String,
-        closeTag: String,
-        consumeFollowingNewline: Bool = false
-    ) -> (visibleText: String, extracted: [String]) {
-        var visibleText = ""
-        var extracted: [String] = []
-        var cursor = text.startIndex
-
-        while let openRange = text.range(of: openTag, range: cursor ..< text.endIndex) {
-            visibleText.append(contentsOf: text[cursor ..< openRange.lowerBound])
-            let bodyStart = openRange.upperBound
-            if let closeRange = text.range(of: closeTag, range: bodyStart ..< text.endIndex) {
-                extracted.append(String(text[bodyStart ..< closeRange.lowerBound]))
-                cursor = closeRange.upperBound
-                if consumeFollowingNewline, cursor < text.endIndex {
-                    if text[cursor] == "\r" {
-                        let next = text.index(after: cursor)
-                        if next < text.endIndex, text[next] == "\n" {
-                            cursor = text.index(after: next)
-                        }
-                    } else if text[cursor] == "\n" {
-                        cursor = text.index(after: cursor)
-                    }
-                }
-            } else {
-                extracted.append(String(text[bodyStart ..< text.endIndex]))
-                cursor = text.endIndex
-            }
-        }
-
-        visibleText.append(contentsOf: text[cursor ..< text.endIndex])
-        return (visibleText, extracted)
     }
 
     private static func parseMemoryCitation(_ citations: [String]) -> MemoryCitation? {
