@@ -455,13 +455,6 @@ public enum DebugCommandRuntime {
         return (formatter.string(from: now), timeZone.identifier)
     }
 
-    private static func pendingRuntime(_ command: String) -> CodexCLI.CommandExecutionResult {
-        CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: command '\(command)' runtime port is not complete yet."
-        )
-    }
-
     private static func runTraceReduce(
         traceBundle: String,
         output: String?
