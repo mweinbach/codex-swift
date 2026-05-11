@@ -109,6 +109,135 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(arguments.stop, true)
     }
 
+    func testDecodeSpawnAgentsOnCSVArgumentsUsesRustSnakeCaseFields() throws {
+        let arguments = try AgentJobRuntime.decodeSpawnAgentsOnCSVArguments(
+            """
+            {
+              "csv_path": "input.csv",
+              "instruction": "Review {path}",
+              "max_concurrency": 32,
+              "max_workers": 4,
+              "id_column": "id",
+              "output_csv_path": "out.csv",
+              "output_schema": {"type": "object"},
+              "max_runtime_seconds": 60
+            }
+            """
+        )
+
+        XCTAssertEqual(arguments.csvPath, "input.csv")
+        XCTAssertEqual(arguments.instruction, "Review {path}")
+        XCTAssertEqual(arguments.maxConcurrency, 32)
+        XCTAssertEqual(arguments.maxWorkers, 4)
+        XCTAssertEqual(arguments.idColumn, "id")
+        XCTAssertEqual(arguments.outputCSVPath, "out.csv")
+        XCTAssertEqual(arguments.outputSchemaJSON, .object(["type": .string("object")]))
+        XCTAssertEqual(arguments.maxRuntimeSeconds, 60)
+    }
+
+    func testCreateSpawnAgentsOnCSVJobPersistsRustFrontHalf() async throws {
+        let fixture = try AgentJobRuntimeStoreFixture.make()
+        let prepared = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+            arguments: SpawnAgentsOnCSVArguments(
+                csvPath: "input/jobs.csv",
+                instruction: "Review {path}",
+                maxConcurrency: 32,
+                maxWorkers: 2,
+                idColumn: "id",
+                outputCSVPath: "output/jobs.csv",
+                outputSchemaJSON: .object(["type": .string("object")]),
+                maxRuntimeSeconds: nil
+            ),
+            csvContent: "id,path\nalpha,src/lib.rs\nalpha,src/main.rs\n",
+            cwd: fixture.tempDirectory.url.path,
+            store: fixture.store,
+            jobID: "12345678-1234-1234-1234-123456789abc",
+            maxThreads: 8,
+            configuredMaxRuntimeSeconds: 45
+        )
+
+        XCTAssertEqual(prepared.job.id, "12345678-1234-1234-1234-123456789abc")
+        XCTAssertEqual(prepared.job.name, "agent-job-12345678")
+        XCTAssertEqual(prepared.job.status, .running)
+        XCTAssertEqual(prepared.job.instruction, "Review {path}")
+        XCTAssertEqual(prepared.job.outputSchemaJSON, .object(["type": .string("object")]))
+        XCTAssertEqual(prepared.job.inputHeaders, ["id", "path"])
+        XCTAssertEqual(prepared.job.inputCSVPath, fixture.tempDirectory.url.appendingPathComponent("input/jobs.csv").path)
+        XCTAssertEqual(prepared.job.outputCSVPath, fixture.tempDirectory.url.appendingPathComponent("output/jobs.csv").path)
+        XCTAssertEqual(prepared.job.maxRuntimeSeconds, 45)
+        XCTAssertEqual(prepared.itemCount, 2)
+        XCTAssertEqual(prepared.concurrency, 8)
+
+        let items = try await fixture.store.listAgentJobItems(jobID: prepared.job.id)
+        XCTAssertEqual(items.map(\.itemID), ["alpha", "alpha-2"])
+        XCTAssertEqual(items.map(\.sourceID), ["alpha", "alpha"])
+        XCTAssertEqual(items.map(\.status), [.pending, .pending])
+        XCTAssertEqual(items[0].rowJSON, .object(["id": .string("alpha"), "path": .string("src/lib.rs")]))
+    }
+
+    func testCreateSpawnAgentsOnCSVJobDerivesDefaultOutputAndUsesMaxWorkersFallback() async throws {
+        let fixture = try AgentJobRuntimeStoreFixture.make()
+        let prepared = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+            arguments: SpawnAgentsOnCSVArguments(
+                csvPath: "/tmp/input.csv",
+                instruction: "Review {path}",
+                maxWorkers: 3
+            ),
+            csvContent: "path\nsrc/lib.rs\n",
+            cwd: fixture.tempDirectory.url.path,
+            store: fixture.store,
+            jobID: "abcdef12-0000-0000-0000-000000000000"
+        )
+
+        XCTAssertEqual(prepared.job.inputCSVPath, "/tmp/input.csv")
+        XCTAssertEqual(prepared.job.outputCSVPath, "/tmp/input.agent-job-abcdef12.csv")
+        XCTAssertNil(prepared.job.maxRuntimeSeconds)
+        XCTAssertEqual(prepared.concurrency, 3)
+    }
+
+    func testCreateSpawnAgentsOnCSVJobRejectsRustValidationFailures() async throws {
+        let fixture = try AgentJobRuntimeStoreFixture.make()
+
+        do {
+            _ = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+                arguments: SpawnAgentsOnCSVArguments(csvPath: "input.csv", instruction: "   "),
+                csvContent: "id\n1\n",
+                cwd: fixture.tempDirectory.url.path,
+                store: fixture.store,
+                jobID: "job-empty-instruction"
+            )
+            XCTFail("Expected empty instruction to be rejected")
+        } catch let error as FunctionCallError {
+            XCTAssertEqual(error, .respondToModel("instruction must be non-empty"))
+        }
+
+        do {
+            _ = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+                arguments: SpawnAgentsOnCSVArguments(csvPath: "input.csv", instruction: "Review"),
+                csvContent: "",
+                cwd: fixture.tempDirectory.url.path,
+                store: fixture.store,
+                jobID: "job-empty-csv"
+            )
+            XCTFail("Expected headerless CSV to be rejected")
+        } catch let error as FunctionCallError {
+            XCTAssertEqual(error, .respondToModel("csv input must include a header row"))
+        }
+
+        do {
+            _ = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+                arguments: SpawnAgentsOnCSVArguments(csvPath: "input.csv", instruction: "Review"),
+                csvContent: "id\n\"unterminated",
+                cwd: fixture.tempDirectory.url.path,
+                store: fixture.store,
+                jobID: "job-bad-csv"
+            )
+            XCTFail("Expected malformed CSV to be rejected")
+        } catch let error as FunctionCallError {
+            XCTAssertEqual(error, .respondToModel("failed to parse csv input: unterminated quoted CSV field"))
+        }
+    }
+
     func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
         let fixture = try await makeStoreWithRunningItem()
 
@@ -264,6 +393,12 @@ final class AgentJobRuntimeTests: XCTestCase {
 private struct AgentJobRuntimeStoreFixture {
     let store: SQLiteAgentJobStore
     let tempDirectory: AgentJobRuntimeTemporaryDirectory
+
+    static func make() throws -> AgentJobRuntimeStoreFixture {
+        let tempDirectory = try AgentJobRuntimeTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: tempDirectory.url.appendingPathComponent("state.sqlite3"))
+        return AgentJobRuntimeStoreFixture(store: store, tempDirectory: tempDirectory)
+    }
 }
 
 private final class AgentJobRuntimeTemporaryDirectory {

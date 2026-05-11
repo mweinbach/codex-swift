@@ -157,6 +157,178 @@ public enum AgentJobRuntime {
         }
         return ReportAgentJobResultToolResult(accepted: accepted)
     }
+
+    public static func decodeSpawnAgentsOnCSVArguments(
+        _ argumentsJSON: String
+    ) throws -> SpawnAgentsOnCSVArguments {
+        guard let data = argumentsJSON.data(using: .utf8) else {
+            throw FunctionCallError.respondToModel("failed to parse spawn_agents_on_csv arguments")
+        }
+        do {
+            return try JSONDecoder().decode(SpawnAgentsOnCSVArguments.self, from: data)
+        } catch {
+            throw FunctionCallError.respondToModel("failed to parse spawn_agents_on_csv arguments: \(error)")
+        }
+    }
+
+    public static func createSpawnAgentsOnCSVJob(
+        argumentsJSON: String,
+        csvContent: String,
+        cwd: String,
+        store: SQLiteAgentJobStore,
+        jobID: String = UUID().uuidString,
+        maxThreads: Int? = nil,
+        configuredMaxRuntimeSeconds: UInt64? = nil
+    ) async throws -> PreparedSpawnAgentsOnCSVJob {
+        let arguments = try decodeSpawnAgentsOnCSVArguments(argumentsJSON)
+        return try await createSpawnAgentsOnCSVJob(
+            arguments: arguments,
+            csvContent: csvContent,
+            cwd: cwd,
+            store: store,
+            jobID: jobID,
+            maxThreads: maxThreads,
+            configuredMaxRuntimeSeconds: configuredMaxRuntimeSeconds
+        )
+    }
+
+    public static func createSpawnAgentsOnCSVJob(
+        arguments: SpawnAgentsOnCSVArguments,
+        csvContent: String,
+        cwd: String,
+        store: SQLiteAgentJobStore,
+        jobID: String = UUID().uuidString,
+        maxThreads: Int? = nil,
+        configuredMaxRuntimeSeconds: UInt64? = nil
+    ) async throws -> PreparedSpawnAgentsOnCSVJob {
+        guard !arguments.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw FunctionCallError.respondToModel("instruction must be non-empty")
+        }
+
+        let inputCSVPath = resolveSpawnAgentsOnCSVPath(arguments.csvPath, cwd: cwd)
+        let document: AgentJobCSVDocument
+        do {
+            document = try AgentJobCSV.parse(csvContent)
+        } catch {
+            throw FunctionCallError.respondToModel("failed to parse csv input: \(error)")
+        }
+        guard !document.headers.isEmpty else {
+            throw FunctionCallError.respondToModel("csv input must include a header row")
+        }
+        try AgentJobCSV.ensureUniqueHeaders(document.headers)
+        let items = try AgentJobCSV.makeItems(
+            headers: document.headers,
+            rows: document.rows,
+            idColumn: arguments.idColumn
+        )
+
+        let outputCSVPath = arguments.outputCSVPath.map {
+            resolveSpawnAgentsOnCSVPath($0, cwd: cwd)
+        } ?? AgentJobCSV.defaultOutputCSVPath(inputCSVPath: inputCSVPath, jobID: jobID)
+        let maxRuntimeSeconds = try normalizeMaxRuntimeSeconds(
+            arguments.maxRuntimeSeconds ?? configuredMaxRuntimeSeconds
+        )
+        let jobSuffix = String(jobID.prefix(8))
+        let job: AgentJob
+        do {
+            job = try await store.createAgentJob(
+                params: AgentJobCreateParams(
+                    id: jobID,
+                    name: "agent-job-\(jobSuffix)",
+                    instruction: arguments.instruction,
+                    outputSchemaJSON: arguments.outputSchemaJSON,
+                    inputHeaders: document.headers,
+                    inputCSVPath: inputCSVPath,
+                    outputCSVPath: outputCSVPath,
+                    autoExport: true,
+                    maxRuntimeSeconds: maxRuntimeSeconds
+                ),
+                items: items
+            )
+        } catch {
+            throw FunctionCallError.respondToModel("failed to create agent job: \(error)")
+        }
+
+        do {
+            try await store.markAgentJobRunning(jobID)
+        } catch {
+            throw FunctionCallError.respondToModel(
+                "failed to transition agent job \(jobID) to running: \(error)"
+            )
+        }
+
+        let requestedConcurrency = arguments.maxConcurrency ?? arguments.maxWorkers
+        let runningJob = try await store.getAgentJob(jobID) ?? job
+        return PreparedSpawnAgentsOnCSVJob(
+            job: runningJob,
+            itemCount: items.count,
+            concurrency: normalizeConcurrency(requested: requestedConcurrency, maxThreads: maxThreads)
+        )
+    }
+
+    private static func resolveSpawnAgentsOnCSVPath(_ path: String, cwd: String) -> String {
+        let url: URL
+        if path.hasPrefix("/") {
+            url = URL(fileURLWithPath: path)
+        } else {
+            url = URL(fileURLWithPath: cwd, isDirectory: true).appendingPathComponent(path)
+        }
+        return url.standardizedFileURL.path
+    }
+}
+
+public struct SpawnAgentsOnCSVArguments: Equatable, Codable, Sendable {
+    public var csvPath: String
+    public var instruction: String
+    public var maxConcurrency: Int?
+    public var maxWorkers: Int?
+    public var idColumn: String?
+    public var outputCSVPath: String?
+    public var outputSchemaJSON: JSONValue?
+    public var maxRuntimeSeconds: UInt64?
+
+    private enum CodingKeys: String, CodingKey {
+        case csvPath = "csv_path"
+        case instruction
+        case maxConcurrency = "max_concurrency"
+        case maxWorkers = "max_workers"
+        case idColumn = "id_column"
+        case outputCSVPath = "output_csv_path"
+        case outputSchemaJSON = "output_schema"
+        case maxRuntimeSeconds = "max_runtime_seconds"
+    }
+
+    public init(
+        csvPath: String,
+        instruction: String,
+        maxConcurrency: Int? = nil,
+        maxWorkers: Int? = nil,
+        idColumn: String? = nil,
+        outputCSVPath: String? = nil,
+        outputSchemaJSON: JSONValue? = nil,
+        maxRuntimeSeconds: UInt64? = nil
+    ) {
+        self.csvPath = csvPath
+        self.instruction = instruction
+        self.maxConcurrency = maxConcurrency
+        self.maxWorkers = maxWorkers
+        self.idColumn = idColumn
+        self.outputCSVPath = outputCSVPath
+        self.outputSchemaJSON = outputSchemaJSON
+        self.maxRuntimeSeconds = maxRuntimeSeconds
+    }
+}
+
+public struct PreparedSpawnAgentsOnCSVJob: Equatable, Sendable {
+    public var job: AgentJob
+    public var itemCount: Int
+    public var concurrency: Int
+
+    public init(job: AgentJob, itemCount: Int, concurrency: Int) {
+        self.job = job
+        self.itemCount = itemCount
+        self.concurrency = concurrency
+    }
 }
 
 public struct ReportAgentJobResultArguments: Equatable, Codable, Sendable {
