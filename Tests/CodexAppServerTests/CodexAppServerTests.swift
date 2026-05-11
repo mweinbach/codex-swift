@@ -13229,6 +13229,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(cancelAgainResult["status"] as? String, "notFound")
     }
 
+    func testAccountLoginChatGPTBrowserCancelEmitsCompletionFailure() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgpt"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+
+        let cancel = try decode(processor.processLine(Data(#"{"id":2,"method":"account/login/cancel","params":{"loginId":"\#(loginID)"}}"#.utf8)))
+        let cancelResult = try XCTUnwrap(cancel["result"] as? [String: Any])
+        XCTAssertEqual(cancelResult["status"] as? String, "canceled")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, false)
+        XCTAssertEqual(completedParams["error"] as? String, "Login server error: Login was not completed")
+        let capturedPayloads = await notificationCapture.payloadsData()
+        XCTAssertTrue(capturedPayloads.isEmpty)
+    }
+
     func testAccountLoginChatGPTBrowserCompletionNotifiesAndQueuesMcpRefresh() async throws {
         let temp = try TemporaryDirectory()
         try """
