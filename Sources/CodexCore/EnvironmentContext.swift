@@ -12,10 +12,23 @@ public struct TurnContext: Equatable, Sendable {
     }
 }
 
+public struct EnvironmentContextEnvironment: Equatable, Codable, Sendable {
+    public let id: String
+    public let cwd: String
+    public let shell: String
+
+    public init(id: String, cwd: String, shell: String) {
+        self.id = id
+        self.cwd = cwd
+        self.shell = shell
+    }
+}
+
 public struct EnvironmentContext: Equatable, Codable, Sendable {
     public static let openTag = "<environment_context>"
     public static let closeTag = "</environment_context>"
 
+    public let environments: [EnvironmentContextEnvironment]?
     public let cwd: String?
     public let approvalPolicy: AskForApproval?
     public let sandboxMode: SandboxMode?
@@ -24,6 +37,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
     public let shell: Shell
 
     private enum CodingKeys: String, CodingKey {
+        case environments
         case cwd
         case approvalPolicy = "approval_policy"
         case sandboxMode = "sandbox_mode"
@@ -36,8 +50,10 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         cwd: String?,
         approvalPolicy: AskForApproval?,
         sandboxPolicy: SandboxPolicy?,
-        shell: Shell
+        shell: Shell,
+        environments: [EnvironmentContextEnvironment]? = nil
     ) {
+        self.environments = environments
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxPolicy.map(Self.sandboxMode(for:))
@@ -52,8 +68,10 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         sandboxMode: SandboxMode?,
         networkAccess: NetworkAccess?,
         writableRoots: [AbsolutePath]?,
-        shell: Shell
+        shell: Shell,
+        environments: [EnvironmentContextEnvironment]? = nil
     ) {
+        self.environments = environments
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxMode
@@ -81,7 +99,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
     }
 
     public func equalsExceptShell(_ other: EnvironmentContext) -> Bool {
-        cwd == other.cwd
+        environmentsEqualExceptShell(environments, other.environments)
+            && cwd == other.cwd
             && approvalPolicy == other.approvalPolicy
             && sandboxMode == other.sandboxMode
             && networkAccess == other.networkAccess
@@ -90,27 +109,31 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
 
     public func serializeToXML() -> String {
         var lines = [Self.openTag]
-        if let cwd {
-            lines.append("  <cwd>\(cwd)</cwd>")
-        }
-        if let approvalPolicy {
-            lines.append("  <approval_policy>\(approvalPolicy.rawValue)</approval_policy>")
-        }
-        if let sandboxMode {
-            lines.append("  <sandbox_mode>\(sandboxMode.rawValue)</sandbox_mode>")
-        }
-        if let networkAccess {
-            lines.append("  <network_access>\(networkAccess.rawValue)</network_access>")
-        }
-        if let writableRoots {
-            lines.append("  <writable_roots>")
-            for writableRoot in writableRoots {
-                lines.append("    <root>\(writableRoot.path)</root>")
+        if let environments {
+            appendEnvironments(environments, to: &lines)
+        } else {
+            if let cwd {
+                lines.append("  <cwd>\(cwd)</cwd>")
             }
-            lines.append("  </writable_roots>")
-        }
+            if let approvalPolicy {
+                lines.append("  <approval_policy>\(approvalPolicy.rawValue)</approval_policy>")
+            }
+            if let sandboxMode {
+                lines.append("  <sandbox_mode>\(sandboxMode.rawValue)</sandbox_mode>")
+            }
+            if let networkAccess {
+                lines.append("  <network_access>\(networkAccess.rawValue)</network_access>")
+            }
+            if let writableRoots {
+                lines.append("  <writable_roots>")
+                for writableRoot in writableRoots {
+                    lines.append("    <root>\(writableRoot.path)</root>")
+                }
+                lines.append("  </writable_roots>")
+            }
 
-        lines.append("  <shell>\(shell.name)</shell>")
+            lines.append("  <shell>\(shell.name)</shell>")
+        }
         lines.append(Self.closeTag)
         return lines.joined(separator: "\n")
     }
@@ -155,5 +178,44 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             return nil
         }
         return writableRoots
+    }
+
+    private func appendEnvironments(_ environments: [EnvironmentContextEnvironment], to lines: inout [String]) {
+        switch environments.count {
+        case 0:
+            return
+        case 1:
+            guard let environment = environments.first else { return }
+            lines.append("  <cwd>\(environment.cwd)</cwd>")
+            lines.append("  <shell>\(environment.shell)</shell>")
+        default:
+            lines.append("  <environments>")
+            for environment in environments {
+                lines.append("    <environment id=\"\(environment.id)\">")
+                lines.append("      <cwd>\(environment.cwd)</cwd>")
+                lines.append("      <shell>\(environment.shell)</shell>")
+                lines.append("    </environment>")
+            }
+            lines.append("  </environments>")
+        }
+    }
+
+    private func environmentsEqualExceptShell(
+        _ lhs: [EnvironmentContextEnvironment]?,
+        _ rhs: [EnvironmentContextEnvironment]?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            guard lhs.count == rhs.count else {
+                return false
+            }
+            return zip(lhs, rhs).allSatisfy { left, right in
+                left.id == right.id && left.cwd == right.cwd
+            }
+        default:
+            return false
+        }
     }
 }

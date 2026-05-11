@@ -342,6 +342,38 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertFalse(output.contains("Should not be shown."))
     }
 
+    func testPromptInputExpandsConfiguredEnvironments() async throws {
+        let temp = try TemporaryDirectory()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                configuredEnvironments: [
+                    TurnEnvironmentSelection(environmentID: "dev", cwd: "/repo/dev"),
+                    TurnEnvironmentSelection(environmentID: "local", cwd: "/repo/local")
+                ]
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, role, content, _) = decoded[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(role, "user")
+        guard case let .inputText(environmentText) = content.first else {
+            return XCTFail("expected environment text")
+        }
+        XCTAssertTrue(environmentText.contains("<environments>"))
+        XCTAssertTrue(environmentText.contains(#"<environment id="dev">"#))
+        XCTAssertTrue(environmentText.contains("      <cwd>/repo/dev</cwd>"))
+        XCTAssertTrue(environmentText.contains(#"<environment id="local">"#))
+        XCTAssertTrue(environmentText.contains("      <cwd>/repo/local</cwd>"))
+        XCTAssertFalse(environmentText.contains("\n  <cwd>"))
+        XCTAssertFalse(environmentText.contains("\n  <shell>"))
+    }
+
     func testPromptInputOmitsAvailableSkillsWhenDisabled() async throws {
         let temp = try TemporaryDirectory()
         let skill = temp.url.appendingPathComponent("skills/debug-helper/SKILL.md", isDirectory: false)
@@ -2718,7 +2750,8 @@ final class DebugCommandRuntimeTests: XCTestCase {
     private func testDependencies(
         codexHome: URL,
         config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0),
-        configLayerStack: ConfigLayerStack? = nil
+        configLayerStack: ConfigLayerStack? = nil,
+        configuredEnvironments: [TurnEnvironmentSelection]? = nil
     ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
@@ -2730,6 +2763,9 @@ final class DebugCommandRuntimeTests: XCTestCase {
                     return configLayerStack
                 }
                 return try self.emptyConfigLayerStack(codexHome: codexHome)
+            },
+            loadConfiguredEnvironments: { _, cwd in
+                configuredEnvironments ?? [TurnEnvironmentSelection(environmentID: "local", cwd: cwd)]
             }
         )
     }

@@ -107,6 +107,34 @@ final class EnvironmentContextTests: XCTestCase {
         """)
     }
 
+    func testSerializeMultipleConfiguredEnvironments() {
+        let context = EnvironmentContext(
+            cwd: "/ignored",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: fakeShell(),
+            environments: [
+                EnvironmentContextEnvironment(id: "dev", cwd: "/repo/dev", shell: "bash"),
+                EnvironmentContextEnvironment(id: "local", cwd: "/repo/local", shell: "zsh")
+            ]
+        )
+
+        XCTAssertEqual(context.serializeToXML(), #"""
+        <environment_context>
+          <environments>
+            <environment id="dev">
+              <cwd>/repo/dev</cwd>
+              <shell>bash</shell>
+            </environment>
+            <environment id="local">
+              <cwd>/repo/local</cwd>
+              <shell>zsh</shell>
+            </environment>
+          </environments>
+        </environment_context>
+        """#)
+    }
+
     func testEqualsExceptShellComparesApprovalPolicy() throws {
         let context1 = EnvironmentContext(
             cwd: "/repo",

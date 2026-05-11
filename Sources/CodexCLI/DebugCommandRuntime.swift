@@ -6,6 +6,7 @@ public enum DebugCommandRuntime {
         public var findCodexHome: () throws -> URL
         public var loadConfig: (URL, CliConfigOverrides) throws -> CodexRuntimeConfig
         public var loadConfigLayerStack: (URL, CliConfigOverrides) throws -> ConfigLayerStack
+        public var loadConfiguredEnvironments: (URL, String) throws -> [TurnEnvironmentSelection]
         public var makeStateStore: (URL, String) throws -> SQLiteAgentGraphStore
         public var loadRawModelCatalog: (URL, CodexRuntimeConfig) async throws -> ModelsResponse
         public var currentExecutable: () throws -> URL
@@ -25,6 +26,12 @@ public enum DebugCommandRuntime {
                     codexHome: codexHome,
                     cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
                     cliOverrides: overrides
+                )
+            },
+            loadConfiguredEnvironments: @escaping (URL, String) throws -> [TurnEnvironmentSelection] = { codexHome, cwd in
+                try ConfiguredEnvironmentLoader.defaultThreadEnvironmentSelections(
+                    codexHome: codexHome,
+                    cwd: cwd
                 )
             },
             makeStateStore: @escaping (URL, String) throws -> SQLiteAgentGraphStore = { databaseURL, modelProvider in
@@ -60,6 +67,7 @@ public enum DebugCommandRuntime {
             self.findCodexHome = findCodexHome
             self.loadConfig = loadConfig
             self.loadConfigLayerStack = loadConfigLayerStack
+            self.loadConfiguredEnvironments = loadConfiguredEnvironments
             self.makeStateStore = makeStateStore
             self.loadRawModelCatalog = loadRawModelCatalog
             self.currentExecutable = currentExecutable
@@ -306,12 +314,16 @@ public enum DebugCommandRuntime {
         let codexHome = try dependencies.findCodexHome()
         let config = try dependencies.loadConfig(codexHome, configOverrides)
         let configLayerStack = try dependencies.loadConfigLayerStack(codexHome, configOverrides)
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let configuredEnvironments = try dependencies.loadConfiguredEnvironments(codexHome, cwd.path)
         let input = makePromptInput(
             prompt: prompt,
             imagePaths: imagePaths,
             codexHome: codexHome,
             config: config,
-            configLayerStack: configLayerStack
+            configLayerStack: configLayerStack,
+            cwd: cwd,
+            configuredEnvironments: configuredEnvironments
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted]
@@ -333,11 +345,13 @@ public enum DebugCommandRuntime {
         imagePaths: [String],
         codexHome: URL,
         config: CodexRuntimeConfig,
-        configLayerStack: ConfigLayerStack
+        configLayerStack: ConfigLayerStack,
+        cwd: URL,
+        configuredEnvironments: [TurnEnvironmentSelection]
     ) -> [ResponseItem] {
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let approvalPolicy = config.approvalPolicy ?? .onRequest
         let sandboxPolicy = config.legacySandboxPolicy()
+        let shell = ShellResolver.defaultUserShell()
         let projectInstructions = ProjectDoc.getUserInstructions(
             config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
         ).map { UserInstructions(directory: cwd.path, text: $0) }
@@ -360,13 +374,17 @@ public enum DebugCommandRuntime {
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            shell: ShellResolver.defaultUserShell(),
+            shell: shell,
             includeEnvironmentContext: config.includeEnvironmentContext,
             includePermissionsInstructions: config.includePermissionsInstructions,
             developerInstructions: config.developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
             availableSkills: availableSkills,
-            userInstructions: projectInstructions
+            userInstructions: projectInstructions,
+            environmentContextEnvironments: environmentContextEnvironments(
+                from: configuredEnvironments,
+                defaultShell: shell
+            )
         )
 
         var userInputs = imagePaths.map(UserInput.localImage(path:))
@@ -378,6 +396,22 @@ public enum DebugCommandRuntime {
         }
 
         return input
+    }
+
+    private static func environmentContextEnvironments(
+        from selections: [TurnEnvironmentSelection],
+        defaultShell: Shell
+    ) -> [EnvironmentContextEnvironment]? {
+        guard selections.count > 1 else {
+            return nil
+        }
+        return selections.map { selection in
+            EnvironmentContextEnvironment(
+                id: selection.environmentID,
+                cwd: selection.cwd,
+                shell: defaultShell.name
+            )
+        }
     }
 
     private static func pendingRuntime(_ command: String) -> CodexCLI.CommandExecutionResult {

@@ -52,7 +52,8 @@ public enum NonInteractiveExec {
         developerInstructions: String? = nil,
         memoryToolDeveloperInstructions: String? = nil,
         availableSkills: AvailableSkills? = nil,
-        userInstructions: UserInstructions? = nil
+        userInstructions: UserInstructions? = nil,
+        environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil
     ) -> [ResponseItem] {
         let context = TurnContext(
             cwd: cwd.path,
@@ -92,7 +93,13 @@ public enum NonInteractiveExec {
         }
         if includeEnvironmentContext {
             contextualUserContent.append(
-                .inputText(text: EnvironmentContext.fromTurnContext(context, shell: shell).serializeToXML())
+                .inputText(text: EnvironmentContext(
+                    cwd: context.cwd,
+                    approvalPolicy: context.approvalPolicy,
+                    sandboxPolicy: context.sandboxPolicy,
+                    shell: shell,
+                    environments: environmentContextEnvironments
+                ).serializeToXML())
             )
         }
         if !contextualUserContent.isEmpty {
@@ -115,6 +122,7 @@ public enum NonInteractiveExec {
         memoryToolDeveloperInstructions: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
+        environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
@@ -129,7 +137,8 @@ public enum NonInteractiveExec {
             developerInstructions: developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
             availableSkills: availableSkills,
-            userInstructions: userInstructions
+            userInstructions: userInstructions,
+            environmentContextEnvironments: environmentContextEnvironments
         )
         input.append(contentsOf: history)
 
