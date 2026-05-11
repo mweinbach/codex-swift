@@ -932,7 +932,7 @@ public enum CodexAppServer {
     fileprivate static func threadStartResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> [String: Any] {
+    ) throws -> (result: [String: Any], sessionStartSource: HookSessionStartSource) {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
         let permissionProfile = started.permissionProfile
@@ -949,7 +949,7 @@ public enum CodexAppServer {
                 defaultProvider: configuration.defaultModelProvider
             )
         }
-        return [
+        let result = [
             "thread": thread,
             "model": started.model,
             "modelProvider": started.modelProvider,
@@ -963,6 +963,7 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)
+        return (result: result, sessionStartSource: started.sessionStartSource)
     }
 
     fileprivate static func newConversationResult(
@@ -1008,6 +1009,9 @@ public enum CodexAppServer {
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
         let dynamicTools = try dynamicToolsParam(params?["dynamicTools"]) ?? []
+        let sessionStartSource = try sessionStartSourceParam(
+            params?["sessionStartSource"] ?? params?["session_start_source"]
+        )
         do {
             try DynamicToolSpec.validate(dynamicTools)
         } catch let error as DynamicToolValidationError {
@@ -1043,6 +1047,7 @@ public enum CodexAppServer {
                 permissionProfile: permissionProfile,
                 activePermissionProfile: runtimeConfig.activePermissionProfile,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
+                sessionStartSource: sessionStartSource,
                 ephemeral: true
             )
         }
@@ -1074,6 +1079,7 @@ public enum CodexAppServer {
             permissionProfile: permissionProfile,
             activePermissionProfile: runtimeConfig.activePermissionProfile,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
+            sessionStartSource: sessionStartSource,
             ephemeral: false
         )
     }
@@ -1145,6 +1151,16 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.invalidRequest("thread/start.dynamicTools is invalid: \(error)")
         }
+    }
+
+    private static func sessionStartSourceParam(_ raw: Any?) throws -> HookSessionStartSource {
+        guard let rawValue = try strictStringParam(raw, fieldName: "sessionStartSource") else {
+            return .startup
+        }
+        guard let source = HookSessionStartSource(rawValue: rawValue), source != .resume else {
+            throw unknownVariant(rawValue, expected: ["startup", "clear"])
+        }
+        return source
     }
 
     private static func loadRuntimeConfigForThreadStartup(
@@ -1847,7 +1863,10 @@ public enum CodexAppServer {
 
     fileprivate static func turnStartResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        pendingSessionStartSource: HookSessionStartSource?,
+        loadedThreadModel: String?,
+        loadedThreadApprovalPolicy: AskForApproval?
     ) throws -> (
         result: [String: Any],
         hookStartedEvents: [HookStartedEvent],
@@ -1886,20 +1905,61 @@ public enum CodexAppServer {
             permissionSelection: try permissionProfileSelectionParam(params?["permissions"])
         )
         let hookModel = turnContext?.model
-            ?? hookRuntimeConfig.model
+            ?? loadedThreadModel
             ?? existing.model
+            ?? hookRuntimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
         let hookApprovalPolicy = turnContext?.approvalPolicy
+            ?? loadedThreadApprovalPolicy
             ?? hookRuntimeConfig.approvalPolicy
             ?? .unlessTrusted
         let hookHandlers = try configuredRuntimeHookHandlers(
             configuration: configuration,
             cwd: hookCwd
         )
-        let hookStartedEvents: [HookStartedEvent]
+        var hookStartedEvents: [HookStartedEvent] = []
+        var hookCompletedEvents: [HookCompletedEvent] = []
+        var sessionStartContexts: [String] = []
+        var sessionStartShouldStop = false
+        if let pendingSessionStartSource {
+            hookStartedEvents.append(contentsOf: HookSessionStart.preview(
+                handlers: hookHandlers,
+                request: try HookSessionStartRequest(
+                    sessionID: ThreadId(uuid: conversationID.uuid),
+                    cwd: AbsolutePath(absolutePath: hookCwd.standardizedFileURL.path),
+                    model: hookModel,
+                    permissionMode: hookPermissionMode(hookApprovalPolicy),
+                    source: pendingSessionStartSource
+                )
+            ).map {
+                HookStartedEvent(turnID: turnID, run: $0)
+            })
+            let request = try HookSessionStartRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                cwd: AbsolutePath(absolutePath: hookCwd.standardizedFileURL.path),
+                model: hookModel,
+                permissionMode: hookPermissionMode(hookApprovalPolicy),
+                source: pendingSessionStartSource
+            )
+            let outcome = try runAsyncBlocking {
+                await HookSessionStart.run(
+                    handlers: hookHandlers,
+                    shell: HookCommandShell(),
+                    request: request,
+                    turnID: turnID
+                )
+            }
+            hookCompletedEvents.append(contentsOf: outcome.hookEvents)
+            sessionStartShouldStop = outcome.shouldStop
+            if !outcome.shouldStop {
+                sessionStartContexts = HookOutputSpiller().maybeSpillTexts(
+                    threadID: ThreadId(uuid: conversationID.uuid),
+                    texts: outcome.additionalContexts
+                )
+            }
+        }
         let hookOutcome: HookUserPromptSubmitOutcome
-        if input.text.isEmpty {
-            hookStartedEvents = []
+        if input.text.isEmpty || sessionStartShouldStop {
             hookOutcome = HookUserPromptSubmitOutcome(
                 hookEvents: [],
                 shouldStop: false,
@@ -1907,9 +1967,9 @@ public enum CodexAppServer {
                 additionalContexts: []
             )
         } else {
-            hookStartedEvents = HookUserPromptSubmit.preview(handlers: hookHandlers).map {
+            hookStartedEvents.append(contentsOf: HookUserPromptSubmit.preview(handlers: hookHandlers).map {
                 HookStartedEvent(turnID: turnID, run: $0)
-            }
+            })
             let request = try HookUserPromptSubmitRequest(
                 sessionID: ThreadId(uuid: conversationID.uuid),
                 turnID: turnID,
@@ -1926,17 +1986,22 @@ public enum CodexAppServer {
                 )
             }
         }
+        hookCompletedEvents.append(contentsOf: hookOutcome.hookEvents)
         let spilledHookContexts = HookOutputSpiller().maybeSpillTexts(
             threadID: ThreadId(uuid: conversationID.uuid),
             texts: hookOutcome.additionalContexts
         )
-        if turnContext != nil || !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+        if turnContext != nil || !sessionStartContexts.isEmpty || !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             var items: [RolloutRecordItem] = []
             if let turnContext {
                 items.append(.turnContext(turnContext.withTurnID(turnID)))
             }
-            if !hookOutcome.shouldStop,
+            items.append(contentsOf: sessionStartContexts.map { context in
+                .responseItem(ResponseInputItem(userInputs: [.text(context)]).responseItem())
+            })
+            if !sessionStartShouldStop,
+               !hookOutcome.shouldStop,
                (!input.text.isEmpty || !(input.images?.isEmpty ?? true)) {
                 items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
             }
@@ -1955,7 +2020,7 @@ public enum CodexAppServer {
         return (
             result: ["turn": turn],
             hookStartedEvents: hookStartedEvents,
-            hookCompletedEvents: hookOutcome.hookEvents
+            hookCompletedEvents: hookCompletedEvents
         )
     }
 
@@ -19846,6 +19911,7 @@ private struct AppServerStartedConversation {
     let permissionProfile: PermissionProfile
     let activePermissionProfile: ActivePermissionProfile?
     let reasoningEffort: String?
+    let sessionStartSource: HookSessionStartSource
     let ephemeral: Bool
 }
 
@@ -20803,6 +20869,7 @@ final class CodexAppServerMessageProcessor {
     private struct ThreadAnalyticsMetadata {
         let modelSlug: String
         let cwd: URL
+        let approvalPolicy: AskForApproval?
     }
 
     private struct FeaturedPluginIDsCache {
@@ -20835,6 +20902,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
+    private var pendingSessionStartSources: [String: HookSessionStartSource] = [:]
     private var ephemeralThreadIDs: Set<String> = []
     private var ephemeralThreadSnapshots: [String: [String: Any]] = [:]
     private var optOutNotificationMethods: Set<String> = []
@@ -20954,7 +21022,8 @@ final class CodexAppServerMessageProcessor {
         }
         threadAnalyticsMetadata[threadID] = ThreadAnalyticsMetadata(
             modelSlug: modelSlug,
-            cwd: URL(fileURLWithPath: cwd, isDirectory: true)
+            cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+            approvalPolicy: (result["approvalPolicy"] as? String).flatMap(AskForApproval.init(rawValue:))
         )
     }
 
@@ -21978,10 +22047,12 @@ final class CodexAppServerMessageProcessor {
                     if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
-                    let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
+                    let outcome = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
+                    let result = outcome.result
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
+                            pendingSessionStartSources[threadID] = outcome.sessionStartSource
                             if (thread["ephemeral"] as? Bool) == true {
                                 ephemeralThreadIDs.insert(threadID)
                                 ephemeralThreadSnapshots[threadID] = thread
@@ -22109,11 +22180,22 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireTurnStartContextOverrideCompatibility(params: params)
-                    let outcome = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
+                    let pendingSessionStartSource = (params?["threadId"] as? String)
+                        .flatMap { pendingSessionStartSources[$0] }
+                    let loadedThreadMetadata = (params?["threadId"] as? String)
+                        .flatMap { threadAnalyticsMetadata[$0] }
+                    let outcome = try CodexAppServer.turnStartResult(
+                        params: params,
+                        configuration: configuration,
+                        pendingSessionStartSource: pendingSessionStartSource,
+                        loadedThreadModel: loadedThreadMetadata?.modelSlug,
+                        loadedThreadApprovalPolicy: loadedThreadMetadata?.approvalPolicy
+                    )
                     let result = outcome.result
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,
                        let turn = result["turn"] as? [String: Any] {
+                        pendingSessionStartSources.removeValue(forKey: threadID)
                         if let turnID = turn["id"] as? String {
                             activeTurnIDs[threadID] = turnID
                         }
