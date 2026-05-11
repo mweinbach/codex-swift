@@ -139,15 +139,13 @@ public enum HookPreToolUse {
             )
         }
 
-        var parsed: [ParsedHookHandler<HookPreToolUseHandlerData>] = []
-        for handler in matched {
-            let result = await HookCommandRunner.runCommand(
-                shell: shell,
-                handler: handler,
-                inputJSON: inputJSON,
-                cwd: URL(fileURLWithPath: request.cwd.path)
-            )
-            parsed.append(parseCompleted(handler: handler, runResult: result, turnID: request.turnID))
+        let parsed = await HookDispatcher.executeHandlers(
+            handlers: matched,
+            shell: shell,
+            inputJSON: inputJSON,
+            cwd: URL(fileURLWithPath: request.cwd.path)
+        ) { handler, result in
+            parseCompleted(handler: handler, runResult: result, turnID: request.turnID)
         }
 
         let shouldBlock = parsed.contains { $0.data.shouldBlock }

@@ -218,6 +218,38 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertEqual(result.stderr, "")
         XCTAssertEqual(result.error, "hook timed out after 1s")
     }
+
+    func testExecuteHandlersRunsCommandsConcurrentlyAndPreservesDeclarationOrder() async throws {
+        let handlers = try [
+            makeHandler(eventName: .preToolUse, matcher: nil, command: "sleep 1; printf first", displayOrder: 0),
+            makeHandler(eventName: .preToolUse, matcher: nil, command: "sleep 1; printf second", displayOrder: 1)
+        ]
+        let started = DispatchTime.now()
+
+        let parsed = await HookDispatcher.executeHandlers(
+            handlers: handlers,
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            inputJSON: "{}",
+            cwd: URL(fileURLWithPath: "/tmp")
+        ) { handler, result in
+            ParsedHookHandler(
+                completed: HookCompletedEvent(
+                    turnID: nil,
+                    run: HookDispatcher.completedSummary(
+                        handler: handler,
+                        runResult: result,
+                        status: .completed,
+                        entries: []
+                    )
+                ),
+                data: result.stdout
+            )
+        }
+        let elapsedMs = (DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+
+        XCTAssertEqual(parsed.map(\.data), ["first", "second"])
+        XCTAssertLessThan(elapsedMs, 1_800)
+    }
 }
 
 private func makeHandler(

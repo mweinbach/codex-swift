@@ -110,15 +110,13 @@ public enum HookPermissionRequest {
             return HookPermissionRequestOutcome(hookEvents: hookEvents, decision: nil)
         }
 
-        var parsed: [ParsedHookHandler<HookPermissionRequestHandlerData>] = []
-        for handler in matched {
-            let result = await HookCommandRunner.runCommand(
-                shell: shell,
-                handler: handler,
-                inputJSON: inputJSON,
-                cwd: URL(fileURLWithPath: request.cwd.path)
-            )
-            parsed.append(parseCompleted(handler: handler, runResult: result, turnID: request.turnID))
+        let parsed = await HookDispatcher.executeHandlers(
+            handlers: matched,
+            shell: shell,
+            inputJSON: inputJSON,
+            cwd: URL(fileURLWithPath: request.cwd.path)
+        ) { handler, result in
+            parseCompleted(handler: handler, runResult: result, turnID: request.turnID)
         }
 
         let decision = resolveDecision(parsed.compactMap(\.data.decision))

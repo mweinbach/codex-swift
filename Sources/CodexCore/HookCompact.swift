@@ -198,7 +198,7 @@ private func runCompactHooks(
     cwd: AbsolutePath,
     inputJSON: () throws -> String,
     serializationFailureMessage: (Error) -> String,
-    parseOutput: (String) -> HookStatelessOutput?
+    parseOutput: @escaping @Sendable (String) -> HookStatelessOutput?
 ) async -> HookCompactOutcome {
     let matched = HookDispatcher.selectHandlers(handlers, eventName: eventName, matcherInput: matcherInput)
     guard !matched.isEmpty else {
@@ -223,21 +223,19 @@ private func runCompactHooks(
         return HookCompactOutcome(hookEvents: hookEvents, shouldStop: false, stopReason: nil)
     }
 
-    var parsed: [ParsedHookHandler<HookCompactHandlerData>] = []
-    for handler in matched {
-        let result = await HookCommandRunner.runCommand(
-            shell: shell,
-            handler: handler,
-            inputJSON: commandInput,
-            cwd: URL(fileURLWithPath: cwd.path)
-        )
-        parsed.append(parseCompactCompleted(
+    let parsed = await HookDispatcher.executeHandlers(
+        handlers: matched,
+        shell: shell,
+        inputJSON: commandInput,
+        cwd: URL(fileURLWithPath: cwd.path)
+    ) { handler, result in
+        parseCompactCompleted(
             handler: handler,
             runResult: result,
             turnID: turnID,
             eventLabel: eventLabel,
             parseOutput: parseOutput
-        ))
+        )
     }
 
     return HookCompactOutcome(

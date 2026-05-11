@@ -248,6 +248,39 @@ private final class HookProcessWaitState: @unchecked Sendable {
 }
 
 public enum HookDispatcher {
+    public static func executeHandlers<Data: Equatable & Sendable>(
+        handlers: [ConfiguredHookHandler],
+        shell: HookCommandShell,
+        inputJSON: String,
+        cwd: URL,
+        parse: @escaping @Sendable (ConfiguredHookHandler, HookCommandRunResult) -> ParsedHookHandler<Data>
+    ) async -> [ParsedHookHandler<Data>] {
+        let cwdPath = cwd.path
+        let indexedParsed = await withTaskGroup(of: (Int, ParsedHookHandler<Data>).self) { group in
+            for (index, handler) in handlers.enumerated() {
+                group.addTask {
+                    let result = await HookCommandRunner.runCommand(
+                        shell: shell,
+                        handler: handler,
+                        inputJSON: inputJSON,
+                        cwd: URL(fileURLWithPath: cwdPath)
+                    )
+                    return (index, parse(handler, result))
+                }
+            }
+
+            var parsed: [(Int, ParsedHookHandler<Data>)] = []
+            for await value in group {
+                parsed.append(value)
+            }
+            return parsed
+        }
+
+        return indexedParsed
+            .sorted { $0.0 < $1.0 }
+            .map { $0.1 }
+    }
+
     public static func matcherPattern(for eventName: HookEventName, matcher: String?) -> String? {
         switch eventName {
         case .preToolUse, .permissionRequest, .postToolUse, .preCompact, .postCompact, .sessionStart:

@@ -115,15 +115,13 @@ public enum HookSessionStart {
             )
         }
 
-        var parsed: [ParsedHookHandler<HookSessionStartHandlerData>] = []
-        for handler in matched {
-            let result = await HookCommandRunner.runCommand(
-                shell: shell,
-                handler: handler,
-                inputJSON: inputJSON,
-                cwd: URL(fileURLWithPath: request.cwd.path)
-            )
-            parsed.append(parseCompleted(handler: handler, runResult: result, turnID: turnID))
+        let parsed = await HookDispatcher.executeHandlers(
+            handlers: matched,
+            shell: shell,
+            inputJSON: inputJSON,
+            cwd: URL(fileURLWithPath: request.cwd.path)
+        ) { handler, result in
+            parseCompleted(handler: handler, runResult: result, turnID: turnID)
         }
 
         return HookSessionStartOutcome(
