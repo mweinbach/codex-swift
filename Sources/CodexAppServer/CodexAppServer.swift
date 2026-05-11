@@ -5741,6 +5741,7 @@ public enum CodexAppServer {
         let discoverability = try pluginShareSaveDiscoverability(params?["discoverability"])
         let shareTargets = params?["shareTargets"]
         let shareTargetsProvided = shareTargets != nil && !(shareTargets is NSNull)
+        let validatedShareTargets = try validatePluginShareTargets(shareTargets)
         if let remotePluginID, (remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID)) {
             throw AppServerError.invalidRequest("invalid remote plugin id")
         }
@@ -5754,7 +5755,7 @@ public enum CodexAppServer {
                 "discoverability LISTED is not supported for plugin/share/save; use UNLISTED or PRIVATE"
             )
         }
-        let validatedShareTargets = try validatePluginShareTargets(shareTargets)
+        try validatePluginShareTargetsDoNotIncludeWorkspace(validatedShareTargets)
         let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
             configuration: configuration,
             failurePrefix: "save remote plugin share"
@@ -6041,6 +6042,7 @@ public enum CodexAppServer {
         }
         _ = try pluginShareUpdateDiscoverability(params?["discoverability"])
         let shareTargets = try validatePluginShareTargets(params?["shareTargets"], required: true)
+        try validatePluginShareTargetsDoNotIncludeWorkspace(shareTargets)
         let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
             configuration: configuration,
             failurePrefix: "update remote plugin share targets"
@@ -6222,28 +6224,53 @@ public enum CodexAppServer {
         if value == nil, required {
             throw AppServerError.invalidParams("missing field `shareTargets`")
         }
-        guard let targets = value as? [[String: Any]] else {
+        guard let value, !(value is NSNull) else {
+            if required {
+                throw AppServerError.invalidRequest("Invalid request: invalid type: null, expected a sequence")
+            }
             return []
         }
-        let validPrincipalTypes: Set<String> = ["user", "group", "workspace"]
-        for target in targets {
-            let principalType = stringParam(target["principalType"]) ?? ""
-            guard validPrincipalTypes.contains(principalType) else {
-                throw AppServerError.invalidParams(
-                    "unknown variant `\(principalType)`, expected one of `user`, `group`, `workspace`"
+        guard let targets = value as? [Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return try targets.map { value in
+            guard let target = value as? [String: Any] else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(value)), expected struct PluginShareTarget"
                 )
             }
+            let principalType = try pluginSharePrincipalType(target["principalType"])
+            let principalID = try rustRequiredStringParam(target["principalId"], field: "principalId")
+            return [
+                "principal_type": principalType,
+                "principal_id": principalID
+            ]
         }
-        if targets.contains(where: { $0["principalType"] as? String == "workspace" }) {
+    }
+
+    private static func pluginSharePrincipalType(_ value: Any?) throws -> String {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `principalType`")
+        }
+        guard !(value is NSNull), let principalType = value as? String else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected enum PluginSharePrincipalType"
+            )
+        }
+        let validPrincipalTypes: Set<String> = ["user", "group", "workspace"]
+        guard validPrincipalTypes.contains(principalType) else {
+            throw AppServerError.invalidParams(
+                "unknown variant `\(principalType)`, expected one of `user`, `group`, `workspace`"
+            )
+        }
+        return principalType
+    }
+
+    private static func validatePluginShareTargetsDoNotIncludeWorkspace(_ targets: [[String: Any]]) throws {
+        if targets.contains(where: { $0["principal_type"] as? String == "workspace" }) {
             throw AppServerError.invalidRequest(
                 "shareTargets cannot include workspace principals; use discoverability UNLISTED for workspace link access"
             )
-        }
-        return targets.map { target in
-            [
-                "principal_type": stringParam(target["principalType"]) ?? "",
-                "principal_id": stringParam(target["principalId"]) ?? ""
-            ]
         }
     }
 

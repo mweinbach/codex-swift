@@ -7245,6 +7245,47 @@ final class CodexAppServerTests: XCTestCase {
             "Invalid request: invalid type: integer `1`, expected a string"
         )
 
+        let invalidSaveTargetsType = try appServerResponse(
+            #"{"id":21,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"UNLISTED","shareTargets":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidSaveTargetsTypeError = try XCTUnwrap(invalidSaveTargetsType["error"] as? [String: Any])
+        XCTAssertEqual(invalidSaveTargetsTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSaveTargetsTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a sequence"
+        )
+
+        let invalidUpdateTargetsNull = try appServerResponse(
+            #"{"id":22,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":null}}"#,
+            codexHome: temp.url
+        )
+        let invalidUpdateTargetsNullError = try XCTUnwrap(invalidUpdateTargetsNull["error"] as? [String: Any])
+        XCTAssertEqual(invalidUpdateTargetsNullError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidUpdateTargetsNullError["message"] as? String,
+            "Invalid request: invalid type: null, expected a sequence"
+        )
+
+        let invalidTargetMissingPrincipalType = try appServerResponse(
+            #"{"id":23,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalId":"user-1"}]}}"#,
+            codexHome: temp.url
+        )
+        let invalidTargetMissingPrincipalTypeError = try XCTUnwrap(invalidTargetMissingPrincipalType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTargetMissingPrincipalTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidTargetMissingPrincipalTypeError["message"] as? String, "missing field `principalType`")
+
+        let invalidTargetPrincipalIDType = try appServerResponse(
+            #"{"id":24,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"UNLISTED","shareTargets":[{"principalType":"user","principalId":1}]}}"#,
+            codexHome: temp.url
+        )
+        let invalidTargetPrincipalIDTypeError = try XCTUnwrap(invalidTargetPrincipalIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTargetPrincipalIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidTargetPrincipalIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let unknownSaveDiscoverability = try appServerResponse(
             #"{"id":10,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)","discoverability":"PUBLIC"}}"#,
             codexHome: temp.url
