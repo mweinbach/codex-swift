@@ -14087,9 +14087,25 @@ final class CodexAppServerTests: XCTestCase {
         bearer_token_env_var = "GITHUB_TOKEN"
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { _ in
+                URLSessionTransportResponse(
+                    statusCode: 503,
+                    body: Data(#"{"jsonrpc":"2.0","id":0,"error":{"code":-32000,"message":"offline"}}"#.utf8)
+                )
+            }
+        )
+
         let first = try appServerResponse(
             #"{"id":1,"method":"mcpServerStatus/list","params":{"limit":1}}"#,
-            codexHome: temp.url
+            configuration: configuration
         )
         let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
         let firstData = try XCTUnwrap(firstResult["data"] as? [[String: Any]])
@@ -14103,7 +14119,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let second = try appServerResponse(
             #"{"id":2,"method":"mcpServerStatus/list","params":{"cursor":"1"}}"#,
-            codexHome: temp.url
+            configuration: configuration
         )
         let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
         let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
@@ -14113,11 +14129,158 @@ final class CodexAppServerTests: XCTestCase {
 
         let toolsOnly = try appServerResponse(
             #"{"id":3,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
-            codexHome: temp.url
+            configuration: configuration
         )
         let toolsOnlyResult = try XCTUnwrap(toolsOnly["result"] as? [String: Any])
         let toolsOnlyData = try XCTUnwrap(toolsOnlyResult["data"] as? [[String: Any]])
         XCTAssertEqual(toolsOnlyData.map { $0["name"] as? String }, ["docs", "github"])
+    }
+
+    func testMcpServerStatusListReturnsRawToolNamesFromConfiguredHTTPServer() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        url = "https://mcp.example.test/mcp"
+        startup_timeout_sec = 3
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "status-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"look-up.raw","description":"Look up raw data.","inputSchema":{"type":"object","additionalProperties":false},"annotations":{"readOnlyHint":true}}]}}"#.utf8)
+                    )
+                case "resources/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":2,"result":{"resources":[{"name":"manual","uri":"test://docs/manual","mimeType":"text/markdown"}]}}"#.utf8)
+                    )
+                case "resources/templates/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":3,"result":{"resourceTemplates":[{"name":"memo","uriTemplate":"test://docs/{id}","mimeType":"text/plain"}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"full"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        let status = data[0]
+        XCTAssertEqual(status["name"] as? String, "docs")
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(tools.keys), ["look-up.raw"])
+        XCTAssertEqual(tools["look-up.raw"]?["name"] as? String, "look-up.raw")
+        XCTAssertEqual(tools["look-up.raw"]?["description"] as? String, "Look up raw data.")
+        let resources = try XCTUnwrap(status["resources"] as? [[String: Any]])
+        XCTAssertEqual(resources.first?["uri"] as? String, "test://docs/manual")
+        let templates = try XCTUnwrap(status["resourceTemplates"] as? [[String: Any]])
+        XCTAssertEqual(templates.first?["uriTemplate"] as? String, "test://docs/{id}")
+
+        let methods = try capture.requests.map { request -> String in
+            let body = try XCTUnwrap(request.httpBody)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return try XCTUnwrap(object["method"] as? String)
+        }
+        XCTAssertEqual(methods, ["initialize", "tools/list", "resources/list", "resources/templates/list"])
+        XCTAssertEqual(capture.requests.dropFirst().map { $0.value(forHTTPHeaderField: "Mcp-Session-Id") }, [
+            "status-session",
+            "status-session",
+            "status-session"
+        ])
+        XCTAssertEqual(capture.requests.map(\.timeoutInterval), [3, 3, 3, 3])
+    }
+
+    func testMcpServerStatusListToolsAndAuthOnlySkipsResourceInventory() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        url = "https://mcp.example.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "tools-only-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"slow inventory should not be called"}}"#.utf8)
+                    )
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let status = try XCTUnwrap(data.first)
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(tools.keys), ["lookup"])
+        XCTAssertEqual((status["resources"] as? [Any])?.count, 0)
+        XCTAssertEqual((status["resourceTemplates"] as? [Any])?.count, 0)
+
+        let methods = try capture.requests.map { request -> String in
+            let body = try XCTUnwrap(request.httpBody)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            return try XCTUnwrap(object["method"] as? String)
+        }
+        XCTAssertEqual(methods, ["initialize", "tools/list"])
     }
 
     func testMcpServerStatusListRejectsInvalidCursor() throws {

@@ -316,6 +316,12 @@ private struct AppServerJSONObject: @unchecked Sendable {
     let object: [String: Any]
 }
 
+private struct AppServerMcpServerStatusSnapshot: @unchecked Sendable {
+    var toolsByServer: [String: [String: Any]] = [:]
+    var resources: [String: [[String: Any]]] = [:]
+    var resourceTemplates: [String: [[String: Any]]] = [:]
+}
+
 private let appServerDefaultExecCommandTimeoutMs = 10_000
 private let appServerStandardBase64Bytes = Set(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=".utf8))
 
@@ -10513,7 +10519,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        _ = try mcpServerStatusDetail(params?["detail"])
+        let detail = try mcpServerStatusDetail(params?["detail"])
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -10535,8 +10541,19 @@ public enum CodexAppServer {
             codexHome: configuration.codexHome,
             storeMode: runtimeConfig.mcpOAuthCredentialsStoreMode
         )
+        let snapshot = mcpServerStatusSnapshot(
+            servers: runtimeConfig.mcpServers,
+            detail: detail,
+            configuration: configuration
+        )
         let data = (start < end ? Array(serverNames[start..<end]) : []).map { name in
-            mcpServerStatusObject(name: name, authStatus: statuses[name] ?? .unsupported)
+            mcpServerStatusObject(
+                name: name,
+                tools: snapshot.toolsByServer[name] ?? [:],
+                resources: snapshot.resources[name] ?? [],
+                resourceTemplates: snapshot.resourceTemplates[name] ?? [],
+                authStatus: statuses[name] ?? .unsupported
+            )
         }
 
         return [
@@ -10603,6 +10620,313 @@ public enum CodexAppServer {
                 ]
             ]
         )
+    }
+
+    fileprivate static func mcpServerStatusSnapshot(
+        servers: [String: McpServerConfig],
+        detail: AppServerMcpServerStatusDetail,
+        configuration: CodexAppServerConfiguration
+    ) -> AppServerMcpServerStatusSnapshot {
+        var snapshot = AppServerMcpServerStatusSnapshot()
+        for name in servers.keys.sorted() {
+            guard let server = servers[name], server.enabled else {
+                continue
+            }
+            do {
+                let inventory = try mcpServerInventorySnapshot(
+                    name: name,
+                    server: server,
+                    detail: detail,
+                    configuration: configuration
+                )
+                snapshot.toolsByServer[name] = inventory.toolsByServer[name] ?? [:]
+                if detail == .full {
+                    snapshot.resources[name] = inventory.resources[name] ?? []
+                    snapshot.resourceTemplates[name] = inventory.resourceTemplates[name] ?? []
+                }
+            } catch {
+                continue
+            }
+        }
+        return snapshot
+    }
+
+    fileprivate static func mcpServerInventorySnapshot(
+        name: String,
+        server: McpServerConfig,
+        detail: AppServerMcpServerStatusDetail,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerMcpServerStatusSnapshot {
+        switch server.transport {
+        case let .stdio(command, args, env, envVars, cwd):
+            return try mcpStdioInventorySnapshot(
+                server: name,
+                command: command,
+                args: args,
+                env: env,
+                envVars: envVars,
+                cwd: cwd,
+                timeoutSeconds: server.toolTimeoutSec ?? server.startupTimeoutSec,
+                detail: detail,
+                configuration: configuration
+            )
+        case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
+            return try runAsyncBlocking {
+                try await mcpStreamableHTTPInventorySnapshot(
+                    server: name,
+                    url: url,
+                    bearerTokenEnvVar: bearerTokenEnvVar,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    timeoutSeconds: server.toolTimeoutSec ?? server.startupTimeoutSec,
+                    detail: detail,
+                    configuration: configuration
+                )
+            }
+        }
+    }
+
+    fileprivate static func mcpStdioInventorySnapshot(
+        server: String,
+        command: String,
+        args: [String],
+        env: [String: String]?,
+        envVars: [String],
+        cwd: String?,
+        timeoutSeconds: Double?,
+        detail: AppServerMcpServerStatusDetail,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerMcpServerStatusSnapshot {
+        let process = Process()
+        if command.contains("/") {
+            process.executableURL = URL(fileURLWithPath: command)
+            process.arguments = args
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + args
+        }
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        var environment = configuration.environment
+        for name in envVars {
+            if let value = configuration.environment[name] {
+                environment[name] = value
+            }
+        }
+        for (name, value) in env ?? [:] {
+            environment[name] = value
+        }
+        process.environment = environment
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to start MCP server \(server): \(error)")
+        }
+        let timeout = timeoutSeconds.map { max($0, 0.1) } ?? 10
+        defer {
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+
+        try mcpWriteStdioRequest(mcpInitializeRequest(version: configuration.version), to: stdin.fileHandleForWriting, server: server)
+        try mcpWriteStdioRequest(mcpListRequest(id: 1, method: "tools/list"), to: stdin.fileHandleForWriting, server: server)
+        let toolsResponse = try mcpReadStdioResponse(
+            id: 1,
+            stdout: stdout,
+            stderr: stderr,
+            process: process,
+            timeout: timeout,
+            server: server
+        )
+
+        var snapshot = AppServerMcpServerStatusSnapshot()
+        snapshot.toolsByServer[server] = try mcpToolsByRawName(from: toolsResponse, server: server)
+
+        if detail == .full {
+            try mcpWriteStdioRequest(mcpListRequest(id: 2, method: "resources/list"), to: stdin.fileHandleForWriting, server: server)
+            let resourcesResponse = try mcpReadStdioResponse(
+                id: 2,
+                stdout: stdout,
+                stderr: stderr,
+                process: process,
+                timeout: timeout,
+                server: server
+            )
+            snapshot.resources[server] = try mcpArrayResult(
+                "resources",
+                from: resourcesResponse,
+                server: server,
+                as: McpResource.self
+            )
+
+            try mcpWriteStdioRequest(mcpListRequest(id: 3, method: "resources/templates/list"), to: stdin.fileHandleForWriting, server: server)
+            let templatesResponse = try mcpReadStdioResponse(
+                id: 3,
+                stdout: stdout,
+                stderr: stderr,
+                process: process,
+                timeout: timeout,
+                server: server
+            )
+            snapshot.resourceTemplates[server] = try mcpArrayResult(
+                "resourceTemplates",
+                from: templatesResponse,
+                server: server,
+                as: McpResourceTemplate.self
+            )
+        }
+
+        stdin.fileHandleForWriting.closeFile()
+        return snapshot
+    }
+
+    fileprivate static func mcpStreamableHTTPInventorySnapshot(
+        server: String,
+        url: String,
+        bearerTokenEnvVar: String?,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        timeoutSeconds: Double?,
+        detail: AppServerMcpServerStatusDetail,
+        configuration: CodexAppServerConfiguration
+    ) async throws -> AppServerMcpServerStatusSnapshot {
+        let headers = mcpHTTPHeaders(
+            bearerTokenEnvVar: bearerTokenEnvVar,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: configuration.environment
+        )
+        let initializeResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: headers,
+            sessionID: nil,
+            body: mcpInitializeRequest(version: configuration.version),
+            transport: configuration.mcpHTTPTransport,
+            timeoutSeconds: timeoutSeconds,
+            server: server
+        )
+        let sessionID = mcpSessionID(from: initializeResponse.headers)
+        let toolsResponse = try await mcpStreamableHTTPRequest(
+            url: url,
+            headers: headers,
+            sessionID: sessionID,
+            body: mcpListRequest(id: 1, method: "tools/list"),
+            transport: configuration.mcpHTTPTransport,
+            timeoutSeconds: timeoutSeconds,
+            server: server
+        )
+
+        var snapshot = AppServerMcpServerStatusSnapshot()
+        snapshot.toolsByServer[server] = try mcpToolsByRawName(from: toolsResponse.object, server: server)
+
+        if detail == .full {
+            let resourcesResponse = try await mcpStreamableHTTPRequest(
+                url: url,
+                headers: headers,
+                sessionID: sessionID,
+                body: mcpListRequest(id: 2, method: "resources/list"),
+                transport: configuration.mcpHTTPTransport,
+                timeoutSeconds: timeoutSeconds,
+                server: server
+            )
+            snapshot.resources[server] = try mcpArrayResult(
+                "resources",
+                from: resourcesResponse.object,
+                server: server,
+                as: McpResource.self
+            )
+            let templatesResponse = try await mcpStreamableHTTPRequest(
+                url: url,
+                headers: headers,
+                sessionID: sessionID,
+                body: mcpListRequest(id: 3, method: "resources/templates/list"),
+                transport: configuration.mcpHTTPTransport,
+                timeoutSeconds: timeoutSeconds,
+                server: server
+            )
+            snapshot.resourceTemplates[server] = try mcpArrayResult(
+                "resourceTemplates",
+                from: templatesResponse.object,
+                server: server,
+                as: McpResourceTemplate.self
+            )
+        }
+
+        return snapshot
+    }
+
+    fileprivate static func mcpInitializeRequest(version: String) -> [String: Any] {
+        [
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": [
+                "protocolVersion": "2025-06-18",
+                "capabilities": [:],
+                "clientInfo": [
+                    "name": "codex-swift",
+                    "version": version
+                ]
+            ]
+        ]
+    }
+
+    fileprivate static func mcpListRequest(id: Int, method: String) -> [String: Any] {
+        [
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": [:]
+        ]
+    }
+
+    fileprivate static func mcpToolsByRawName(from response: [String: Any], server: String) throws -> [String: Any] {
+        let tools = try mcpArrayResult("tools", from: response, server: server, as: McpTool.self)
+        var toolsByName: [String: Any] = [:]
+        for tool in tools {
+            guard let name = tool["name"] as? String else {
+                continue
+            }
+            toolsByName[name] = tool
+        }
+        return toolsByName
+    }
+
+    fileprivate static func mcpArrayResult<T: Codable>(
+        _ key: String,
+        from response: [String: Any],
+        server: String,
+        as type: T.Type
+    ) throws -> [[String: Any]] {
+        guard let result = response["result"] as? [String: Any] else {
+            if let error = response["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw AppServerError.internalError(message)
+            }
+            throw AppServerError.internalError("MCP server \(server) returned a response without result")
+        }
+        guard let values = result[key] as? [Any] else {
+            throw AppServerError.internalError("MCP server \(server) returned a \(key) result without \(key)")
+        }
+        return values.compactMap { rawValue in
+            guard JSONSerialization.isValidJSONObject(rawValue),
+                  let data = try? JSONSerialization.data(withJSONObject: rawValue),
+                  let decoded = try? JSONDecoder().decode(type, from: data),
+                  let object = encodableJSONObject(decoded) as? [String: Any] else {
+                return nil
+            }
+            return object
+        }
     }
 
     fileprivate static func mcpServerRefreshResult(
@@ -11112,6 +11436,7 @@ public enum CodexAppServer {
         sessionID: String?,
         body: [String: Any],
         transport: AppServerMcpHTTPTransport,
+        timeoutSeconds: Double? = nil,
         server: String
     ) async throws -> (object: [String: Any], headers: [String: String]) {
         guard let endpoint = URL(string: url) else {
@@ -11125,6 +11450,9 @@ public enum CodexAppServer {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let timeoutSeconds {
+            request.timeoutInterval = max(timeoutSeconds, 0.1)
+        }
         if let sessionID {
             request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
         }
@@ -16751,12 +17079,18 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func mcpServerStatusObject(name: String, authStatus: McpAuthStatus) -> [String: Any] {
+    private static func mcpServerStatusObject(
+        name: String,
+        tools: [String: Any],
+        resources: [[String: Any]],
+        resourceTemplates: [[String: Any]],
+        authStatus: McpAuthStatus
+    ) -> [String: Any] {
         [
             "name": name,
-            "tools": [String: Any](),
-            "resources": [Any](),
-            "resourceTemplates": [Any](),
+            "tools": tools,
+            "resources": resources,
+            "resourceTemplates": resourceTemplates,
             "authStatus": authStatus.rawValue
         ]
     }
