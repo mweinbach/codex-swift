@@ -3654,7 +3654,7 @@ public enum CodexAppServer {
         cachedFeaturedPluginIDs: [String]? = nil,
         cacheFeaturedPluginIDs: (([String]) -> Void)? = nil
     ) throws -> [String: Any] {
-        let cwds = stringArrayParam(params?["cwds"]) ?? []
+        let cwds = try rustStringArrayParam(params?["cwds"]) ?? []
         for cwd in cwds {
             guard URL(fileURLWithPath: cwd, isDirectory: true).path == cwd,
                   cwd.hasPrefix("/")
@@ -3662,7 +3662,8 @@ public enum CodexAppServer {
                 throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
             }
         }
-        if let kinds = stringArrayParam(params?["marketplaceKinds"]) {
+        let marketplaceKinds = try rustStringArrayParam(params?["marketplaceKinds"])
+        if let kinds = marketplaceKinds {
             let validKinds: Set<String> = ["local", "workspace-directory", "shared-with-me"]
             for kind in kinds where !validKinds.contains(kind) {
                 throw AppServerError.invalidParams("unknown variant `\(kind)`, expected one of `local`, `workspace-directory`, `shared-with-me`")
@@ -3687,7 +3688,7 @@ public enum CodexAppServer {
             return empty
         }
 
-        let kinds = stringArrayParam(params?["marketplaceKinds"]) ?? ["local"]
+        let kinds = marketplaceKinds ?? ["local"]
         var result = kinds.contains("local")
             ? try localPluginListResult(cwds: cwds, configuration: configuration)
             : empty

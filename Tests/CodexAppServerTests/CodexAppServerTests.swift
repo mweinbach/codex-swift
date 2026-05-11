@@ -5868,6 +5868,28 @@ final class CodexAppServerTests: XCTestCase {
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
+        let invalidKindsType = try appServerResponse(
+            #"{"id":0,"method":"plugin/list","params":{"marketplaceKinds":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidKindsTypeError = try XCTUnwrap(invalidKindsType["error"] as? [String: Any])
+        XCTAssertEqual(invalidKindsTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidKindsTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a sequence"
+        )
+
+        let invalidKindsElement = try appServerResponse(
+            #"{"id":0,"method":"plugin/list","params":{"marketplaceKinds":[1]}}"#,
+            codexHome: temp.url
+        )
+        let invalidKindsElementError = try XCTUnwrap(invalidKindsElement["error"] as? [String: Any])
+        XCTAssertEqual(invalidKindsElementError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidKindsElementError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let invalidKind = try appServerResponse(
             #"{"id":1,"method":"plugin/list","params":{"marketplaceKinds":["bogus"]}}"#,
             codexHome: temp.url
@@ -5877,6 +5899,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             invalidKindError["message"] as? String,
             "unknown variant `bogus`, expected one of `local`, `workspace-directory`, `shared-with-me`"
+        )
+
+        let invalidCwdsType = try appServerResponse(
+            #"{"id":2,"method":"plugin/list","params":{"cwds":"/tmp"}}"#,
+            codexHome: temp.url
+        )
+        let invalidCwdsTypeError = try XCTUnwrap(invalidCwdsType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCwdsTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCwdsTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "/tmp", expected a sequence"#
+        )
+
+        let invalidCwdElement = try appServerResponse(
+            #"{"id":2,"method":"plugin/list","params":{"cwds":[1]}}"#,
+            codexHome: temp.url
+        )
+        let invalidCwdElementError = try XCTUnwrap(invalidCwdElement["error"] as? [String: Any])
+        XCTAssertEqual(invalidCwdElementError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCwdElementError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
         )
 
         let relativeCwd = try appServerResponse(
