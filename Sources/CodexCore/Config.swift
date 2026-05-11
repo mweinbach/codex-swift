@@ -84,6 +84,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var permissionProfile: PermissionProfile?
     public var activePermissionProfile: ActivePermissionProfile?
     public var networkProxy: NetworkProxySpec?
+    public var notify: [String]?
     public var allowLoginShell: Bool
     public var hideAgentReasoning: Bool
     public var showRawAgentReasoning: Bool
@@ -172,6 +173,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         defaultPermissions: String? = nil,
         permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
+        notify: [String]? = nil,
         allowLoginShell: Bool = true,
         hideAgentReasoning: Bool = false,
         showRawAgentReasoning: Bool = false,
@@ -237,6 +239,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.networkProxy = nil
+        self.notify = notify
         self.allowLoginShell = allowLoginShell
         self.hideAgentReasoning = hideAgentReasoning
         self.showRawAgentReasoning = showRawAgentReasoning
@@ -369,6 +372,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             defaultPermissions: defaultPermissions,
             permissionProfile: permissionProfile,
             activePermissionProfile: activePermissionProfile,
+            notify: nil,
             allowLoginShell: allowLoginShell,
             hideAgentReasoning: hideAgentReasoning,
             showRawAgentReasoning: showRawAgentReasoning,
@@ -2795,6 +2799,9 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)allow_login_shell"
             )
         }
+        if let notify = values["notify"] {
+            config.notify = try stringArrayValue(notify, key: "\(keyPrefix)notify")
+        }
         if let hideAgentReasoning = values["hide_agent_reasoning"] {
             config.hideAgentReasoning = try boolValue(
                 hideAgentReasoning,
@@ -2990,6 +2997,7 @@ private struct ParsedCodexConfigToml {
             || key == "sandbox_mode"
             || key == "default_permissions"
             || key == "allow_login_shell"
+            || key == "notify"
             || key == "hide_agent_reasoning"
             || key == "show_raw_agent_reasoning"
             || key == "model_reasoning_effort"

@@ -2853,7 +2853,10 @@ final class DebugCommandRuntimeTests: XCTestCase {
             loadConfiguredEnvironments: { _, cwd in
                 configuredEnvironments ?? [TurnEnvironmentSelection(environmentID: "local", cwd: cwd)]
             },
-            currentDateAndTimezone: currentDateAndTimezone
+            currentDateAndTimezone: currentDateAndTimezone,
+            loadRawModelCatalog: { _, _ in ModelsResponse(models: []) },
+            currentExecutable: { URL(fileURLWithPath: "/tmp/codex-swift-test", isDirectory: false) },
+            sendAppServerMessageV2: { _, _, _ in CodexCLI.CommandExecutionResult(exitCode: 0) }
         )
     }
 

@@ -21,6 +21,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.permissionProfile)
         XCTAssertNil(config.activePermissionProfile)
         XCTAssertNil(config.networkProxy)
+        XCTAssertNil(config.notify)
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.planModeReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
@@ -303,6 +304,7 @@ final class ConfigLoaderTests: XCTestCase {
         approvals_reviewer = "guardian_subagent"
         sandbox_mode = "workspace-write"
         allow_login_shell = false
+        notify = ["notify-send", "Codex"]
         model_reasoning_effort = "high"
         plan_mode_reasoning_effort = "medium"
         model_reasoning_summary = "detailed"
@@ -370,6 +372,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.approvalsReviewer, .autoReview)
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertFalse(config.allowLoginShell)
+        XCTAssertEqual(config.notify, ["notify-send", "Codex"])
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.planModeReasoningEffort, .medium)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
@@ -1035,6 +1038,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_summary = "concise"
         model_verbosity = "medium"
         service_tier = "experimental-tier-id"
+        notify = ["notify-send", "top"]
         experimental_instructions_file = "top-instructions.md"
         experimental_compact_prompt_file = "top-compact.md"
         include_apply_patch_tool = true
@@ -1055,6 +1059,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_summary = "auto"
         model_verbosity = "high"
         service_tier = "flex"
+        notify = ["notify-send", "profile"]
         experimental_instructions_file = "profile-instructions.md"
         experimental_compact_prompt_file = "profile-compact.md"
         include_apply_patch_tool = false
@@ -1079,6 +1084,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelReasoningSummary, .auto)
         XCTAssertEqual(config.modelVerbosity, .high)
         XCTAssertEqual(config.serviceTier, "flex")
+        XCTAssertEqual(config.notify, ["notify-send", "top"])
         XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile-instructions.md").path)
         XCTAssertEqual(config.experimentalCompactPromptFile, dir.url.appendingPathComponent("profile-compact.md").path)
         XCTAssertEqual(config.baseInstructions, "profile-instructions.md")

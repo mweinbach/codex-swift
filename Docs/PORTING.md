@@ -485,6 +485,8 @@ Source baseline inspected for this scaffold:
   - repo-specific environment lookup, global fallback, label/single/pinned/highest-`task_count` selection order, and Rust-shaped `no environments available` failure are ported for the cloud tasks HTTP client
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path
   - executable `codex exec <prompt>` now resolves prompt/stdin, output schema, local images, git-root preflight, OpenAI/CODEX_API_KEY/auth.json auth, model/provider/reasoning/verbosity config, W3C `TRACEPARENT`/`TRACESTATE` request metadata forwarding, direct Responses streaming, human final-output routing, JSONL thread/turn/item completion envelope, Rust-shaped assistant/reasoning/web-search completed items plus turn usage/failure error shape, `--output-last-message` writes, Rust's `--ephemeral` no-rollout persistence mode for fresh exec runs, `--ignore-user-config` empty-user-layer/runtime-config skipping, `--ignore-rules` user/project execpolicy rule skipping, and `end_turn: false` continuation even when a completed response has no client-executable tool calls
+- `codex-rs/config/src/config_toml.rs` and `codex-rs/core/src/config/mod.rs`
+  - Swift runtime config now loads Rust's top-level `notify = [...]` command as an array of strings, preserves the default `nil` value, keeps it top-level-only instead of profile-scoped, and relies on the existing config-layer restriction that ignores project-local `notify` keys.
 - Initial `codex-rs/core/src/unified_exec` tool-session behavior
   - non-interactive `exec_command` can now keep long-running commands alive, return a session ID, and continue them through `write_stdin` with Rust-shaped unified exec output sections
 - Initial `codex-rs/exec/src/lib.rs` review operation dispatch
