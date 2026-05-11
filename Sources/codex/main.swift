@@ -1734,7 +1734,8 @@ private func runResponsesAPIProxyCommand(_ request: CodexCLI.ResponsesAPIProxyCo
         port: request.port,
         serverInfoPath: request.serverInfoPath.map { URL(fileURLWithPath: $0) },
         httpShutdown: request.httpShutdown,
-        upstreamURL: request.upstreamURL
+        upstreamURL: request.upstreamURL,
+        dumpDir: request.dumpDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
     ))
     return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: "server stopped unexpectedly")
 }

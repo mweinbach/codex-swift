@@ -537,17 +537,20 @@ public struct CodexCLI: Sendable {
         public let serverInfoPath: String?
         public let httpShutdown: Bool
         public let upstreamURL: String
+        public let dumpDir: String?
 
         public init(
             port: UInt16? = nil,
             serverInfoPath: String? = nil,
             httpShutdown: Bool = false,
-            upstreamURL: String = "https://api.openai.com/v1/responses"
+            upstreamURL: String = "https://api.openai.com/v1/responses",
+            dumpDir: String? = nil
         ) {
             self.port = port
             self.serverInfoPath = serverInfoPath
             self.httpShutdown = httpShutdown
             self.upstreamURL = upstreamURL
+            self.dumpDir = dumpDir
         }
     }
 
@@ -3543,6 +3546,7 @@ public struct CodexCLI: Sendable {
         var serverInfoPath: String?
         var httpShutdown = false
         var upstreamURL = "https://api.openai.com/v1/responses"
+        var dumpDir: String?
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
@@ -3594,6 +3598,17 @@ public struct CodexCLI: Sendable {
                 upstreamURL = String(argument.dropFirst("--upstream-url=".count))
                 continue
             }
+            if argument == "--dump-dir" {
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --dump-dir", 64)
+                }
+                dumpDir = value
+                continue
+            }
+            if argument.hasPrefix("--dump-dir=") {
+                dumpDir = String(argument.dropFirst("--dump-dir=".count))
+                continue
+            }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'responses-api-proxy': \(argument)", 64)
             }
@@ -3604,7 +3619,8 @@ public struct CodexCLI: Sendable {
             port: port,
             serverInfoPath: serverInfoPath,
             httpShutdown: httpShutdown,
-            upstreamURL: upstreamURL
+            upstreamURL: upstreamURL,
+            dumpDir: dumpDir
         ))
     }
 

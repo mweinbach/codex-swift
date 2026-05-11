@@ -8,17 +8,20 @@ public struct ResponsesAPIProxyOptions: Equatable, Sendable {
     public let serverInfoPath: URL?
     public let httpShutdown: Bool
     public let upstreamURL: String
+    public let dumpDir: URL?
 
     public init(
         port: UInt16? = nil,
         serverInfoPath: URL? = nil,
         httpShutdown: Bool = false,
-        upstreamURL: String = Self.defaultUpstreamURL
+        upstreamURL: String = Self.defaultUpstreamURL,
+        dumpDir: URL? = nil
     ) {
         self.port = port
         self.serverInfoPath = serverInfoPath
         self.httpShutdown = httpShutdown
         self.upstreamURL = upstreamURL
+        self.dumpDir = dumpDir
     }
 }
 
@@ -28,6 +31,7 @@ public enum ResponsesAPIProxyError: Error, Equatable, CustomStringConvertible, S
     case invalidAPIKeyCharacters
     case stdinReadFailed(String)
     case invalidUpstreamURL(String)
+    case dumpDirFailed(String)
     case bindFailed(String)
     case listenFailed(String)
     case localAddressFailed(String)
@@ -44,6 +48,8 @@ public enum ResponsesAPIProxyError: Error, Equatable, CustomStringConvertible, S
         case let .stdinReadFailed(message):
             return message
         case let .invalidUpstreamURL(message):
+            return message
+        case let .dumpDirFailed(message):
             return message
         case let .bindFailed(message):
             return message
@@ -181,6 +187,7 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
     private let hostHeader: String
     private let authHeader: String
     private let httpShutdown: Bool
+    private let exchangeDumper: ResponsesAPIExchangeDumper?
     private var stopped = false
 
     public init(options: ResponsesAPIProxyOptions, authHeader: String) throws {
@@ -200,6 +207,15 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         }
         self.authHeader = authHeader
         self.httpShutdown = options.httpShutdown
+        if let dumpDir = options.dumpDir {
+            do {
+                self.exchangeDumper = try ResponsesAPIExchangeDumper(dumpDir: dumpDir)
+            } catch {
+                throw ResponsesAPIProxyError.dumpDirFailed("creating --dump-dir: \(error)")
+            }
+        } else {
+            self.exchangeDumper = nil
+        }
 
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -274,13 +290,14 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
                 break
             }
 
-            Thread.detachNewThread { [authHeader, hostHeader, httpShutdown, upstreamURL] in
+            Thread.detachNewThread { [authHeader, hostHeader, httpShutdown, upstreamURL, exchangeDumper] in
                 Self.handleConnection(
                     fd: clientFD,
                     upstreamURL: upstreamURL,
                     hostHeader: hostHeader,
                     authHeader: authHeader,
-                    httpShutdown: httpShutdown
+                    httpShutdown: httpShutdown,
+                    exchangeDumper: exchangeDumper
                 )
             }
         }
@@ -293,7 +310,8 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         upstreamURL: URL,
         hostHeader: String,
         authHeader: String,
-        httpShutdown: Bool
+        httpShutdown: Bool,
+        exchangeDumper: ResponsesAPIExchangeDumper?
     ) {
         defer {
             Darwin.close(fd)
@@ -314,7 +332,15 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
                 return
             }
 
-            switch forward(request: request, upstreamURL: upstreamURL, hostHeader: hostHeader, authHeader: authHeader, downstreamFD: fd) {
+            let exchangeDump = try exchangeDumper?.dumpRequest(request)
+            switch forward(
+                request: request,
+                upstreamURL: upstreamURL,
+                hostHeader: hostHeader,
+                authHeader: authHeader,
+                downstreamFD: fd,
+                exchangeDump: exchangeDump
+            ) {
             case .success:
                 break
             case let .failure(error, responseStarted):
@@ -417,7 +443,8 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         upstreamURL: URL,
         hostHeader: String,
         authHeader: String,
-        downstreamFD: Int32
+        downstreamFD: Int32,
+        exchangeDump: ResponsesAPIExchangeDump?
     ) -> ProxyForwardResult {
         var upstreamRequest = URLRequest(url: upstreamURL)
         upstreamRequest.httpMethod = "POST"
@@ -435,7 +462,7 @@ public final class ResponsesAPIProxyServer: @unchecked Sendable {
         upstreamRequest.setValue(hostHeader, forHTTPHeaderField: "host")
 
         let semaphore = DispatchSemaphore(value: 0)
-        let delegate = ProxyStreamingForwarder(fd: downstreamFD, completion: semaphore)
+        let delegate = ProxyStreamingForwarder(fd: downstreamFD, completion: semaphore, exchangeDump: exchangeDump)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = .infinity
         configuration.timeoutIntervalForResource = .infinity
@@ -533,6 +560,85 @@ private struct ProxyHTTPRequest {
     let body: Data
 }
 
+private final class ResponsesAPIExchangeDumper: @unchecked Sendable {
+    private let dumpDir: URL
+    private let lock = NSLock()
+    private var nextSequence: UInt64 = 1
+
+    init(dumpDir: URL) throws {
+        self.dumpDir = dumpDir
+        try FileManager.default.createDirectory(at: dumpDir, withIntermediateDirectories: true)
+    }
+
+    func dumpRequest(_ request: ProxyHTTPRequest) throws -> ResponsesAPIExchangeDump {
+        lock.lock()
+        let sequence = nextSequence
+        nextSequence += 1
+        lock.unlock()
+
+        let timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
+        let prefix = String(format: "%06llu-%llu", sequence, timestamp)
+        let requestPath = dumpDir.appendingPathComponent("\(prefix)-request.json", isDirectory: false)
+        let responsePath = dumpDir.appendingPathComponent("\(prefix)-response.json", isDirectory: false)
+        let payload: [String: Any] = [
+            "method": request.method,
+            "url": request.path,
+            "headers": request.headers.map { headerDump(name: $0.0, value: $0.1) },
+            "body": dumpBody(request.body)
+        ]
+        try writeJSONDump(payload, to: requestPath)
+        return ResponsesAPIExchangeDump(responsePath: responsePath)
+    }
+}
+
+private final class ResponsesAPIExchangeDump: @unchecked Sendable {
+    private let responsePath: URL
+    private let lock = NSLock()
+    private var status: Int?
+    private var headers: [[String: String]] = []
+    private var body = Data()
+    private var written = false
+
+    init(responsePath: URL) {
+        self.responsePath = responsePath
+    }
+
+    func recordResponse(status: Int, headers: [(String, String)]) {
+        lock.lock()
+        self.status = status
+        self.headers = headers.map { headerDump(name: $0.0, value: $0.1) }
+        lock.unlock()
+    }
+
+    func appendResponseBody(_ data: Data) {
+        lock.lock()
+        body.append(data)
+        lock.unlock()
+    }
+
+    func writeResponseDumpIfNeeded() {
+        lock.lock()
+        guard !written, let status else {
+            lock.unlock()
+            return
+        }
+        written = true
+        let payload: [String: Any] = [
+            "status": status,
+            "headers": headers,
+            "body": dumpBody(body)
+        ]
+        let path = responsePath
+        lock.unlock()
+
+        do {
+            try writeJSONDump(payload, to: path)
+        } catch {
+            fputs("responses-api-proxy failed to write \(path.path): \(error)\n", Darwin.stderr)
+        }
+    }
+}
+
 private enum ProxyForwardResult {
     case success
     case failure(Error, responseStarted: Bool)
@@ -541,14 +647,16 @@ private enum ProxyForwardResult {
 private final class ProxyStreamingForwarder: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let fd: Int32
     private let completion: DispatchSemaphore
+    private let exchangeDump: ResponsesAPIExchangeDump?
     private let lock = NSLock()
     private(set) var result: ProxyForwardResult?
     private(set) var responseStarted = false
     private var writeFailed = false
 
-    init(fd: Int32, completion: DispatchSemaphore) {
+    init(fd: Int32, completion: DispatchSemaphore, exchangeDump: ResponsesAPIExchangeDump?) {
         self.fd = fd
         self.completion = completion
+        self.exchangeDump = exchangeDump
     }
 
     func urlSession(
@@ -573,6 +681,10 @@ private final class ProxyStreamingForwarder: NSObject, URLSessionDataDelegate, @
             headers: ResponsesAPIProxyServer.filteredResponseHeaders(httpResponse),
             contentLength: contentLength
         )
+        exchangeDump?.recordResponse(
+            status: httpResponse.statusCode,
+            headers: ResponsesAPIProxyServer.filteredResponseHeaders(httpResponse)
+        )
         setResponseStarted()
         if sentHead {
             completionHandler(.allow)
@@ -583,6 +695,7 @@ private final class ProxyStreamingForwarder: NSObject, URLSessionDataDelegate, @
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        exchangeDump?.appendResponseBody(data)
         guard ResponsesAPIProxyServer.sendAll(fd: fd, data: data) else {
             setWriteFailed()
             dataTask.cancel()
@@ -613,6 +726,7 @@ private final class ProxyStreamingForwarder: NSObject, URLSessionDataDelegate, @
     }
 
     private func finish(_ result: ProxyForwardResult) {
+        exchangeDump?.writeResponseDumpIfNeeded()
         lock.lock()
         let shouldSignal = self.result == nil
         if shouldSignal {
@@ -632,4 +746,30 @@ private extension UInt8 {
             || (UInt8(ascii: "A")...UInt8(ascii: "Z")).contains(self)
             || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(self)
     }
+}
+
+private func headerDump(name: String, value: String) -> [String: String] {
+    [
+        "name": name,
+        "value": shouldRedactHeader(name) ? "[REDACTED]" : value
+    ]
+}
+
+private func shouldRedactHeader(_ name: String) -> Bool {
+    name.caseInsensitiveCompare("authorization") == .orderedSame
+        || name.lowercased().contains("cookie")
+}
+
+private func dumpBody(_ data: Data) -> Any {
+    if let json = try? JSONSerialization.jsonObject(with: data, options: []) {
+        return json
+    }
+    return String(decoding: data, as: UTF8.self)
+}
+
+private func writeJSONDump(_ payload: [String: Any], to path: URL) throws {
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    var output = data
+    output.append(UInt8(ascii: "\n"))
+    try output.write(to: path, options: [])
 }

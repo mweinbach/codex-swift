@@ -75,6 +75,64 @@ final class ResponsesAPIProxyTests: XCTestCase {
         XCTAssertEqual(data, #"{"port":3456,"pid":99}"# + "\n")
     }
 
+    func testProxyDumpDirWritesRedactedRequestAndResponseDumps() throws {
+        let secondChunkGate = DispatchSemaphore(value: 0)
+        let upstream = try StreamingUpstreamServer(secondChunkGate: secondChunkGate)
+        defer { upstream.stop() }
+        let dumpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dumpDir) }
+
+        let proxy = try ResponsesAPIProxyServer(
+            options: ResponsesAPIProxyOptions(
+                upstreamURL: "http://127.0.0.1:\(upstream.port)/upstream",
+                dumpDir: dumpDir
+            ),
+            authHeader: "Bearer sk-test"
+        )
+        defer { proxy.stop() }
+
+        let proxyFinished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            _ = try? proxy.serveForever()
+            proxyFinished.signal()
+        }
+
+        let client = try connectToLocalhost(port: proxy.port)
+        defer { Darwin.close(client) }
+        try setReceiveTimeout(fd: client, seconds: 1)
+
+        let request = """
+        POST /v1/responses HTTP/1.1\r
+        Host: 127.0.0.1:\(proxy.port)\r
+        Authorization: Bearer incoming\r
+        Cookie: user-session=secret\r
+        X-Test: kept\r
+        Content-Length: 17\r
+        \r
+        {"model":"gpt-5"}
+        """
+        XCTAssertTrue(sendAll(fd: client, data: Data(request.utf8)))
+        _ = try readUntil(fd: client, contains: Data("one\n".utf8))
+        secondChunkGate.signal()
+        _ = try readUntilEOF(fd: client)
+
+        let requestDump = try readSingleDump(in: dumpDir, suffix: "-request.json")
+        let responseDump = try readSingleDump(in: dumpDir, suffix: "-response.json")
+        XCTAssertEqual(requestDump["method"] as? String, "POST")
+        XCTAssertEqual(requestDump["url"] as? String, "/v1/responses")
+        XCTAssertEqual((requestDump["body"] as? [String: Any])?["model"] as? String, "gpt-5")
+        XCTAssertEqual(dumpHeader("Authorization", in: requestDump), "[REDACTED]")
+        XCTAssertEqual(dumpHeader("Cookie", in: requestDump), "[REDACTED]")
+        XCTAssertEqual(dumpHeader("X-Test", in: requestDump), "kept")
+        XCTAssertEqual(responseDump["status"] as? Int, 200)
+        XCTAssertEqual(responseDump["body"] as? String, "one\ntwo\n")
+        XCTAssertEqual(dumpHeader("Content-Type", in: responseDump), "text/event-stream")
+
+        proxy.stop()
+        _ = proxyFinished.wait(timeout: .now() + 1)
+    }
+
     func testProxyStreamsUpstreamBodyBeforeUpstreamCompletes() throws {
         let secondChunkGate = DispatchSemaphore(value: 0)
         let upstream = try StreamingUpstreamServer(secondChunkGate: secondChunkGate)
@@ -192,6 +250,7 @@ private final class StreamingUpstreamServer: @unchecked Sendable {
         let responseHead = """
         HTTP/1.1 200 OK\r
         Content-Type: text/event-stream\r
+        Set-Cookie: user-session=secret\r
         Connection: close\r
         \r
         one\n
@@ -323,6 +382,22 @@ private func readHTTPRequest(fd: Int32) throws -> TestHTTPRequest {
         headers[String(parts[0]).lowercased()] = parts[1].trimmingCharacters(in: .whitespaces)
     }
     return TestHTTPRequest(headers: headers)
+}
+
+private func readSingleDump(in directory: URL, suffix: String) throws -> [String: Any] {
+    let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.lastPathComponent.hasSuffix(suffix) }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    XCTAssertEqual(urls.count, 1)
+    let data = try Data(contentsOf: try XCTUnwrap(urls.first))
+    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+}
+
+private func dumpHeader(_ name: String, in dump: [String: Any]) -> String? {
+    guard let headers = dump["headers"] as? [[String: Any]] else {
+        return nil
+    }
+    return headers.first { ($0["name"] as? String)?.caseInsensitiveCompare(name) == .orderedSame }?["value"] as? String
 }
 
 private func readUntil(fd: Int32, contains marker: Data) throws -> Data {

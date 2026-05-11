@@ -695,7 +695,8 @@ final class CodexCLITests: XCTestCase {
                 "/tmp/proxy.json",
                 "--http-shutdown",
                 "--upstream-url",
-                "https://example.test/v1/responses"
+                "https://example.test/v1/responses",
+                "--dump-dir=/tmp/proxy-dumps"
             ],
             stderr: { _ in XCTFail("stderr should not be written") },
             responsesAPIProxyRunner: { request in
@@ -709,7 +710,8 @@ final class CodexCLITests: XCTestCase {
             port: 4321,
             serverInfoPath: "/tmp/proxy.json",
             httpShutdown: true,
-            upstreamURL: "https://example.test/v1/responses"
+            upstreamURL: "https://example.test/v1/responses",
+            dumpDir: "/tmp/proxy-dumps"
         ))
     }
 
