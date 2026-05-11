@@ -14847,6 +14847,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "OAuth login is only supported for streamable HTTP servers.")
     }
 
+    func testMcpServerOAuthLoginRejectsInvalidOptionalParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"name":"github","scopes":"repo"}"#,
+                #"Invalid request: invalid type: string "repo", expected a sequence"#
+            ),
+            (
+                #"{"name":"github","scopes":["repo",1]}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"name":"github","timeoutSecs":true}"#,
+                "Invalid request: invalid type: boolean `true`, expected i64"
+            ),
+            (
+                #"{"name":"github","timeoutSecs":"soon"}"#,
+                #"Invalid request: invalid type: string "soon", expected i64"#
+            ),
+            (
+                #"{"name":"github","timeoutSecs":1.5}"#,
+                "Invalid request: invalid type: floating point `1.5`, expected i64"
+            ),
+        ]
+
+        for (params, expectedMessage) in cases {
+            let response = try appServerResponse(
+                #"{"id":1,"method":"mcpServer/oauth/login","params":\#(params)}"#,
+                codexHome: temp.url
+            )
+
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testMcpServerOAuthLoginReturnsAuthorizationURLAndEmitsCompletion() async throws {
         let temp = try TemporaryDirectory()
         try """

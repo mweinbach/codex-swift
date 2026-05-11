@@ -11668,6 +11668,13 @@ public enum CodexAppServer {
         guard let name = stringParam(params?["name"]) else {
             throw AppServerError.invalidRequest("missing name")
         }
+        let explicitScopes = try rustStringArrayParam(params?["scopes"])
+        let timeoutSeconds: Int?
+        if params?["timeoutSecs"] != nil {
+            timeoutSeconds = try rustI64Param(params?["timeoutSecs"])
+        } else {
+            timeoutSeconds = nil
+        }
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -11692,16 +11699,6 @@ public enum CodexAppServer {
             envHttpHeaders = envHeaders
         case .stdio:
             throw AppServerError.invalidRequest("OAuth login is only supported for streamable HTTP servers.")
-        }
-
-        let explicitScopes = params?["scopes"] == nil ? nil : (stringArrayParam(params?["scopes"]) ?? [])
-        let timeoutSeconds: Int?
-        if params?["timeoutSecs"] != nil {
-            timeoutSeconds = intParam(params?["timeoutSecs"], defaultValue: 0)
-        } else if params?["timeout_secs"] != nil {
-            timeoutSeconds = intParam(params?["timeout_secs"], defaultValue: 0)
-        } else {
-            timeoutSeconds = nil
         }
 
         do {
@@ -14343,6 +14340,20 @@ public enum CodexAppServer {
         return defaultValue
     }
 
+    private static func rustI64Param(_ value: Any?) throws -> Int? {
+        try validateRustIntegerParam(value, expected: "i64")
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        if let int = value as? Int {
+            return int
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {
         guard let value, !(value is NSNull) else {
             return 1_048_576
@@ -16659,6 +16670,50 @@ public enum CodexAppServer {
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
         value as? [String]
+    }
+
+    private static func rustStringArrayParam(_ value: Any?) throws -> [String]? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let values = value as? [Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return try values.map { item in
+            guard let string = item as? String else {
+                throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(item)), expected a string")
+            }
+            return string
+        }
+    }
+
+    private static func rustInvalidTypeDescription(_ value: Any) -> String {
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return "invalid type: boolean `\(number.boolValue ? "true" : "false")`"
+        }
+        if let string = value as? String {
+            return "invalid type: string \"\(string)\""
+        }
+        if value is NSNull {
+            return "invalid type: null"
+        }
+        if value is [Any] {
+            return "invalid type: sequence"
+        }
+        if value is [String: Any] {
+            return "invalid type: map"
+        }
+        if let int = value as? Int {
+            return "invalid type: integer `\(int)`"
+        }
+        if let number = value as? NSNumber {
+            let int = number.int64Value
+            if Double(int) == number.doubleValue {
+                return "invalid type: integer `\(int)`"
+            }
+            return "invalid type: floating point `\(number)`"
+        }
+        return "invalid type"
     }
 
     private static func modelProviderFilter(_ value: Any?, defaultProvider: String) -> [String]? {
