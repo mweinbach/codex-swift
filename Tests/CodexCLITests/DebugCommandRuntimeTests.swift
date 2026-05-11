@@ -2848,7 +2848,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
                 if let configLayerStack {
                     return configLayerStack
                 }
-                return try self.emptyConfigLayerStack(codexHome: codexHome)
+                return try Self.emptyConfigLayerStack(codexHome: codexHome)
             },
             loadConfiguredEnvironments: { _, cwd in
                 configuredEnvironments ?? [TurnEnvironmentSelection(environmentID: "local", cwd: cwd)]
@@ -2857,7 +2857,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         )
     }
 
-    private func emptyConfigLayerStack(codexHome: URL) throws -> ConfigLayerStack {
+    private static func emptyConfigLayerStack(codexHome: URL) throws -> ConfigLayerStack {
         try ConfigLayerStack(layers: [
             ConfigLayerEntry(
                 name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),

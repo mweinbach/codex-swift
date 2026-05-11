@@ -10635,21 +10635,29 @@ public enum CodexAppServer {
         }
 
         let runtimeMcpConfig = runtimeConfig.runtimeMcpConfig
-        let serverNames = (
-            Array(runtimeMcpConfig.configuredMcpServers.keys)
-                + runtimeMcpConfig.builtinMcpServers.map(\.name)
-        ).sorted()
+        let usesCodexBackend: Bool
+        if case .chatGPT = try currentAuth(configuration: configuration)?.kind {
+            usesCodexBackend = true
+        } else {
+            usesCodexBackend = false
+        }
+        let effectiveServers = runtimeMcpConfig.effectiveMcpServers(
+            usesCodexBackend: usesCodexBackend,
+            environment: configuration.environment
+        )
+        let serverNames = effectiveServers.keys.sorted()
         let total = serverNames.count
         let start = try mcpServerStatusStart(cursor: stringParam(params?["cursor"]), total: total)
         let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
+        let configuredEffectiveServers = effectiveServers.compactMapValues(\.configuredConfig)
         let statuses = McpAuthStatusResolver.authStatuses(
-            for: runtimeMcpConfig.configuredMcpServers,
+            for: configuredEffectiveServers,
             codexHome: configuration.codexHome,
             storeMode: runtimeConfig.mcpOAuthCredentialsStoreMode
         )
         let snapshot = mcpServerStatusSnapshot(
-            mcpConfig: runtimeMcpConfig,
+            effectiveServers: effectiveServers,
             detail: detail,
             configuration: configuration
         )
@@ -10730,37 +10738,42 @@ public enum CodexAppServer {
     }
 
     fileprivate static func mcpServerStatusSnapshot(
-        mcpConfig: RuntimeMcpConfig,
+        effectiveServers: [String: EffectiveMcpServer],
         detail: AppServerMcpServerStatusDetail,
         configuration: CodexAppServerConfiguration
     ) -> AppServerMcpServerStatusSnapshot {
         var snapshot = AppServerMcpServerStatusSnapshot()
-        for name in mcpConfig.configuredMcpServers.keys.sorted() {
-            guard let server = mcpConfig.configuredMcpServers[name], server.enabled else {
+        for name in effectiveServers.keys.sorted() {
+            guard let server = effectiveServers[name] else {
                 continue
             }
-            do {
-                let inventory = try mcpServerInventorySnapshot(
-                    name: name,
-                    server: server,
-                    detail: detail,
-                    configuration: configuration
-                )
+            switch server {
+            case let .configured(config):
+                guard config.enabled else {
+                    continue
+                }
+                do {
+                    let inventory = try mcpServerInventorySnapshot(
+                        name: name,
+                        server: config,
+                        detail: detail,
+                        configuration: configuration
+                    )
+                    snapshot.toolsByServer[name] = inventory.toolsByServer[name] ?? [:]
+                    if detail == .full {
+                        snapshot.resources[name] = inventory.resources[name] ?? []
+                        snapshot.resourceTemplates[name] = inventory.resourceTemplates[name] ?? []
+                    }
+                } catch {
+                    continue
+                }
+            case let .builtin(builtinServer):
+                let inventory = mcpBuiltinInventorySnapshot(server: builtinServer, detail: detail)
                 snapshot.toolsByServer[name] = inventory.toolsByServer[name] ?? [:]
                 if detail == .full {
                     snapshot.resources[name] = inventory.resources[name] ?? []
                     snapshot.resourceTemplates[name] = inventory.resourceTemplates[name] ?? []
                 }
-            } catch {
-                continue
-            }
-        }
-        for server in mcpConfig.builtinMcpServers.sorted(by: { $0.name < $1.name }) {
-            let inventory = mcpBuiltinInventorySnapshot(server: server, detail: detail)
-            snapshot.toolsByServer[server.name] = inventory.toolsByServer[server.name] ?? [:]
-            if detail == .full {
-                snapshot.resources[server.name] = inventory.resources[server.name] ?? []
-                snapshot.resourceTemplates[server.name] = inventory.resourceTemplates[server.name] ?? []
             }
         }
         return snapshot

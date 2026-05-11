@@ -1284,6 +1284,42 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testLoadsAppsMcpPathOverrideFromRustFeatureConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [features.apps_mcp_path_override]
+        path = "/base/mcp"
+
+        [profiles.work]
+        model = "gpt-5.4"
+
+        [profiles.work.features.apps_mcp_path_override]
+        path = "/profile/mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.features.isEnabled(.appsMcpPathOverride))
+        XCTAssertEqual(config.appsMcpPathOverride, "/profile/mcp")
+        XCTAssertEqual(config.runtimeMcpConfig.appsMcpPathOverride, "/profile/mcp")
+    }
+
+    func testAppsMcpPathOverrideHonorsExplicitDisabledConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features.apps_mcp_path_override]
+        enabled = false
+        path = "/disabled/mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertFalse(config.features.isEnabled(.appsMcpPathOverride))
+        XCTAssertNil(config.appsMcpPathOverride)
+    }
+
     func testMemoriesConfigParsesRustSettingsAndLegacyAlias() throws {
         let dir = try CoreTemporaryDirectory()
         try """

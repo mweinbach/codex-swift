@@ -88,6 +88,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
     public var chatgptBaseURL: String
+    public var appsMcpPathOverride: String?
     public var realtimeAudio: RealtimeAudioConfig
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
@@ -146,6 +147,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             configuredMcpServers.removeValue(forKey: builtinServer.name)
         }
         return RuntimeMcpConfig(
+            chatgptBaseURL: chatgptBaseURL,
+            appsMcpPathOverride: appsMcpPathOverride,
+            appsEnabled: features.isEnabled(.apps),
             configuredMcpServers: configuredMcpServers,
             builtinMcpServers: builtinMcpServers
         )
@@ -166,6 +170,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        appsMcpPathOverride: String? = nil,
         realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
@@ -224,6 +229,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
+        self.appsMcpPathOverride = appsMcpPathOverride
         self.realtimeAudio = realtimeAudio
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
@@ -1480,6 +1486,8 @@ private struct ParsedCodexConfigToml {
     var profiles: [String: [String: ConfigValue]] = [:]
     var features: [String: Bool] = [:]
     var profileFeatures: [String: [String: Bool]] = [:]
+    var appsMcpPathOverride: [String: ConfigValue] = [:]
+    var profileAppsMcpPathOverride: [String: [String: ConfigValue]] = [:]
     var memories: [String: ConfigValue] = [:]
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
@@ -1579,9 +1587,18 @@ private struct ParsedCodexConfigToml {
                     ])
                 )
             case .features:
-                parsed.features[key] = try Self.boolValue(
-                    ConfigValueParser.parseTomlLiteral(valueText),
-                    key: "features.\(key)"
+                try parsed.mergeFeatureValue(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "features.\(key)",
+                    profileName: nil
+                )
+            case .featuresAppsMcpPathOverride:
+                try parsed.mergeAppsMcpPathOverrideConfig(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "features.apps_mcp_path_override.\(key)",
+                    profileName: nil
                 )
             case .memories:
                 parsed.memories[canonicalMemoriesConfigKey(key)] = try ConfigValueParser.parseTomlLiteral(valueText)
@@ -1637,9 +1654,18 @@ private struct ParsedCodexConfigToml {
                     value: try ConfigValueParser.parseTomlLiteral(valueText)
                 )
             case let .profileFeatures(name):
-                parsed.profileFeatures[name, default: [:]][key] = try Self.boolValue(
-                    ConfigValueParser.parseTomlLiteral(valueText),
-                    key: "profiles.\(name).features.\(key)"
+                try parsed.mergeFeatureValue(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "profiles.\(name).features.\(key)",
+                    profileName: name
+                )
+            case let .profileFeaturesAppsMcpPathOverride(name):
+                try parsed.mergeAppsMcpPathOverrideConfig(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "profiles.\(name).features.apps_mcp_path_override.\(key)",
+                    profileName: name
                 )
             case .toolsWebSearch:
                 Self.mergeWebSearchToolConfigField(
@@ -1917,6 +1943,10 @@ private struct ParsedCodexConfigToml {
             features[key] = value
         }
 
+        for (key, value) in overlay.appsMcpPathOverride {
+            appsMcpPathOverride[key] = value
+        }
+
         for (key, value) in overlay.mcpServers {
             mcpServers[key] = value
         }
@@ -1968,6 +1998,14 @@ private struct ParsedCodexConfigToml {
                 mergedProfile[key] = value
             }
             profileFeatures[profileName] = mergedProfile
+        }
+
+        for (profileName, profileValues) in overlay.profileAppsMcpPathOverride {
+            var mergedProfile = profileAppsMcpPathOverride[profileName] ?? [:]
+            for (key, value) in profileValues {
+                mergedProfile[key] = value
+            }
+            profileAppsMcpPathOverride[profileName] = mergedProfile
         }
     }
 
@@ -2049,7 +2087,7 @@ private struct ParsedCodexConfigToml {
 
         if case let .table(featureTable) = table["features"] {
             for (key, value) in featureTable {
-                features[key] = try Self.boolValue(value, key: "features.\(key)")
+                try mergeFeatureValue(key: key, value: value, path: "features.\(key)", profileName: nil)
             }
         }
 
@@ -2099,9 +2137,11 @@ private struct ParsedCodexConfigToml {
 
                     if key == "features", case let .table(featuresTable) = value {
                         for (featureKey, featureValue) in featuresTable {
-                            profileFeatures[profileName, default: [:]][featureKey] = try Self.boolValue(
-                                featureValue,
-                                key: "profiles.\(profileName).features.\(featureKey)"
+                            try mergeFeatureValue(
+                                key: featureKey,
+                                value: featureValue,
+                                path: "profiles.\(profileName).features.\(featureKey)",
+                                profileName: profileName
                             )
                         }
                     }
@@ -2230,6 +2270,11 @@ private struct ParsedCodexConfigToml {
         if let activeProfile = config.activeProfile {
             featureStates.apply(featureValues: profileFeatures[activeProfile] ?? [:])
         }
+        config.appsMcpPathOverride = try Self.appsMcpPathOverrideValue(
+            base: appsMcpPathOverride,
+            profile: config.activeProfile.flatMap { profileAppsMcpPathOverride[$0] },
+            features: featureStates
+        )
         config.serviceTier = Self.normalizedServiceTier(
             config.serviceTier,
             features: featureStates
@@ -2385,6 +2430,78 @@ private struct ParsedCodexConfigToml {
             return
         }
         modelProviders[name] = existing.merging(overlay: overlay)
+    }
+
+    private mutating func mergeFeatureValue(
+        key: String,
+        value: ConfigValue,
+        path: String,
+        profileName: String?
+    ) throws {
+        if key == "apps_mcp_path_override", case let .table(table) = value {
+            try mergeAppsMcpPathOverrideFeatureConfig(table, path: path, profileName: profileName)
+            return
+        }
+
+        let enabled = try Self.boolValue(value, key: path)
+        if let profileName {
+            profileFeatures[profileName, default: [:]][key] = enabled
+        } else {
+            features[key] = enabled
+        }
+    }
+
+    private mutating func mergeAppsMcpPathOverrideConfig(
+        key: String,
+        value: ConfigValue,
+        path: String,
+        profileName: String?
+    ) throws {
+        switch key {
+        case "enabled":
+            let enabled = try Self.boolValue(value, key: path)
+            if let profileName {
+                profileFeatures[profileName, default: [:]][FeatureKey.appsMcpPathOverride.rawValue] = enabled
+            } else {
+                features[FeatureKey.appsMcpPathOverride.rawValue] = enabled
+            }
+        case "path":
+            if let profileName {
+                profileAppsMcpPathOverride[profileName, default: [:]][key] = value
+                if profileFeatures[profileName, default: [:]][FeatureKey.appsMcpPathOverride.rawValue] == nil {
+                    profileFeatures[profileName, default: [:]][FeatureKey.appsMcpPathOverride.rawValue] = true
+                }
+            } else {
+                appsMcpPathOverride[key] = value
+                if features[FeatureKey.appsMcpPathOverride.rawValue] == nil {
+                    features[FeatureKey.appsMcpPathOverride.rawValue] = true
+                }
+            }
+        default:
+            throw CodexConfigLoadError.invalidConfigLine(path)
+        }
+    }
+
+    private mutating func mergeAppsMcpPathOverrideFeatureConfig(
+        _ table: [String: ConfigValue],
+        path: String,
+        profileName: String?
+    ) throws {
+        for (key, value) in table {
+            try mergeAppsMcpPathOverrideConfig(
+                key: key,
+                value: value,
+                path: "\(path).\(key)",
+                profileName: profileName
+            )
+        }
+        if table["enabled"] == nil, table["path"] != nil {
+            if let profileName {
+                profileFeatures[profileName, default: [:]][FeatureKey.appsMcpPathOverride.rawValue] = true
+            } else {
+                features[FeatureKey.appsMcpPathOverride.rawValue] = true
+            }
+        }
     }
 
     private mutating func appendToolSuggestDisabledToolTable() {
@@ -2887,6 +3004,18 @@ private struct ParsedCodexConfigToml {
         }
     }
 
+    private static func appsMcpPathOverrideValue(
+        base: [String: ConfigValue],
+        profile: [String: ConfigValue]?,
+        features: FeatureStates
+    ) throws -> String? {
+        guard features.isEnabled(.appsMcpPathOverride) else {
+            return nil
+        }
+        let value = profile?["path"] ?? base["path"]
+        return try value.map { try stringValue($0, key: "features.apps_mcp_path_override.path") }
+    }
+
     private static func readNonEmptyFile(_ path: String?, description: String) throws -> String? {
         guard let path else {
             return nil
@@ -3257,6 +3386,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "features" {
             return .features
         }
+        if parts.count == 2, parts[0] == "features", parts[1] == "apps_mcp_path_override" {
+            return .featuresAppsMcpPathOverride
+        }
         if parts.count == 1, parts[0] == "memories" {
             return .memories
         }
@@ -3319,6 +3451,13 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
+        }
+        if parts.count == 4,
+           parts[0] == "profiles",
+           parts[2] == "features",
+           parts[3] == "apps_mcp_path_override"
+        {
+            return .profileFeaturesAppsMcpPathOverride(parts[1])
         }
         if parts.count == 4, parts[0] == "profiles", parts[2] == "tools", parts[3] == "web_search" {
             return .profileToolsWebSearch(parts[1])
@@ -3497,6 +3636,7 @@ private enum ConfigSection {
     case modelProvider(String)
     case modelProviderMap(String, String)
     case features
+    case featuresAppsMcpPathOverride
     case memories
     case sandboxWorkspaceWrite
     case permissionFilesystem(String)
@@ -3514,6 +3654,7 @@ private enum ConfigSection {
     case toolsWebSearch
     case toolsWebSearchLocation
     case profileFeatures(String)
+    case profileFeaturesAppsMcpPathOverride(String)
     case profileToolsWebSearch(String)
     case profileToolsWebSearchLocation(String)
     case ignored

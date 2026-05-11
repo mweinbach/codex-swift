@@ -15286,6 +15286,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["nextCursor"])
     }
 
+    func testMcpServerStatusListIncludesHostOwnedCodexAppsUnderChatGPTAuth() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features.apps_mcp_path_override]
+        path = "/custom/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: try fakeJWT(email: "apps@example.com", plan: "pro"),
+            chatGPTAccountID: "acct-test",
+            chatGPTPlanType: "pro"
+        )
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: ["CODEX_CONNECTORS_TOKEN": "connector-token"],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "apps-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"codex_apps","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"calendar_list_events","inputSchema":{"type":"object"}}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"unexpected inventory call"}}"#.utf8)
+                    )
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["name"] as? String }, [codexAppsMCPServerName])
+        let status = try XCTUnwrap(data.first)
+        XCTAssertEqual(status["authStatus"] as? String, "bearer_token")
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(tools.keys), ["calendar_list_events"])
+        XCTAssertEqual(capture.requests.map { $0.url?.absoluteString }, [
+            "https://chatgpt.com/backend-api/custom/mcp",
+            "https://chatgpt.com/backend-api/custom/mcp"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer connector-token",
+            "Bearer connector-token"
+        ])
+    }
+
     func testMcpServerStatusListRejectsInvalidCursor() throws {
         let temp = try TemporaryDirectory()
 
