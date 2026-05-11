@@ -177,6 +177,25 @@ final class AgentJobStoreTests: XCTestCase {
         ))
     }
 
+    func testPendingItemCanFailOnWorkerSpawnErrorLikeRust() async throws {
+        let fixture = try await makeStoreWithSingleItem()
+        let store = fixture.store
+
+        let markedFailed = try await store.markAgentJobItemFailed(
+            jobID: "job-1",
+            itemID: "row-1",
+            errorMessage: "failed to spawn worker: boom"
+        )
+        XCTAssertTrue(markedFailed)
+
+        let failedItem = try await store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(failedItem)
+        XCTAssertEqual(item.status, .failed)
+        XCTAssertEqual(item.lastError, "failed to spawn worker: boom")
+        XCTAssertNil(item.assignedThreadID)
+        XCTAssertNotNil(item.completedAt)
+    }
+
     func testItemPendingAndThreadTransitionsOnlyApplyFromRunning() async throws {
         let fixture = try await makeStoreWithSingleItem()
         let store = fixture.store

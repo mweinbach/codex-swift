@@ -488,6 +488,118 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(stale.lastError, "worker exceeded max runtime of 45s")
     }
 
+    func testSpawnPendingItemsFillsAvailableSlotsLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["row-1", "row-2", "row-3"])
+        let persistedJob = try await fixture.store.getAgentJob("job-1")
+        let job = try XCTUnwrap(persistedJob)
+        let existingThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000031")
+        let firstThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000032")
+        let secondThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000033")
+        let recorder = SpawnRequestRecorder(results: [.spawned(firstThreadID), .spawned(secondThreadID)])
+
+        let result = try await AgentJobRuntime.spawnPendingItems(
+            store: fixture.store,
+            job: job,
+            activeItems: [
+                ActiveAgentJobItem(threadID: existingThreadID, itemID: "existing", startedAt: Date()),
+            ],
+            maxConcurrency: 3,
+            spawnWorker: { request in
+                await recorder.spawn(request)
+            },
+            shutdownThread: { _ in }
+        )
+
+        XCTAssertTrue(result.didProgress)
+        XCTAssertEqual(result.activeItems.map(\.itemID), ["existing", "row-1", "row-2"])
+        XCTAssertEqual(result.activeItems.map(\.threadID), [existingThreadID, firstThreadID, secondThreadID])
+        let requests = await recorder.requests()
+        XCTAssertEqual(requests.map(\.itemID), ["row-1", "row-2"])
+        XCTAssertTrue(requests[0].prompt.contains("Job ID: job-1"))
+        XCTAssertTrue(requests[0].prompt.contains("Item ID: row-1"))
+
+        let persistedFirst = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let first = try XCTUnwrap(persistedFirst)
+        XCTAssertEqual(first.status, .running)
+        XCTAssertEqual(first.assignedThreadID, firstThreadID.description)
+        XCTAssertEqual(first.attemptCount, 1)
+        let persistedThird = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-3")
+        let third = try XCTUnwrap(persistedThird)
+        XCTAssertEqual(third.status, .pending)
+    }
+
+    func testSpawnPendingItemsStopsOnAgentLimitLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["row-1", "row-2"])
+        let persistedJob = try await fixture.store.getAgentJob("job-1")
+        let job = try XCTUnwrap(persistedJob)
+        let recorder = SpawnRequestRecorder(results: [.agentLimitReached, .failed("should not run")])
+
+        let result = try await AgentJobRuntime.spawnPendingItems(
+            store: fixture.store,
+            job: job,
+            activeItems: [],
+            maxConcurrency: 2,
+            spawnWorker: { request in
+                await recorder.spawn(request)
+            },
+            shutdownThread: { _ in }
+        )
+
+        XCTAssertFalse(result.didProgress)
+        XCTAssertEqual(result.activeItems, [])
+        let requests = await recorder.requests()
+        XCTAssertEqual(requests.map(\.itemID), ["row-1"])
+        let persistedFirst = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let first = try XCTUnwrap(persistedFirst)
+        let persistedSecond = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-2")
+        let second = try XCTUnwrap(persistedSecond)
+        XCTAssertEqual(first.status, .pending)
+        XCTAssertEqual(second.status, .pending)
+    }
+
+    func testSpawnPendingItemsHandlesFailuresAndAssignmentRacesLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["failed-spawn", "race-spawn"])
+        let persistedJob = try await fixture.store.getAgentJob("job-1")
+        let job = try XCTUnwrap(persistedJob)
+        let raceThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000041")
+        let shutdownThreads = ThreadRecorder()
+        let store = fixture.store
+
+        let result = try await AgentJobRuntime.spawnPendingItems(
+            store: fixture.store,
+            job: job,
+            activeItems: [],
+            maxConcurrency: 2,
+            spawnWorker: { request in
+                if request.itemID == "race-spawn" {
+                    _ = try? await store.markAgentJobItemFailed(
+                        jobID: "job-1",
+                        itemID: "race-spawn",
+                        errorMessage: "claimed elsewhere"
+                    )
+                    return .spawned(raceThreadID)
+                }
+                return .failed("boom")
+            },
+            shutdownThread: { threadID in
+                await shutdownThreads.append(threadID)
+            }
+        )
+
+        XCTAssertTrue(result.didProgress)
+        XCTAssertEqual(result.activeItems, [])
+        let persistedFailed = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "failed-spawn")
+        let failed = try XCTUnwrap(persistedFailed)
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(failed.lastError, "failed to spawn worker: boom")
+        let persistedRaced = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "race-spawn")
+        let raced = try XCTUnwrap(persistedRaced)
+        XCTAssertEqual(raced.status, .failed)
+        XCTAssertEqual(raced.lastError, "claimed elsewhere")
+        let recordedShutdownThreads = await shutdownThreads.values()
+        XCTAssertEqual(recordedShutdownThreads, [raceThreadID])
+    }
+
     func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
         let fixture = try await makeStoreWithRunningItem()
 
@@ -677,6 +789,27 @@ private actor ThreadRecorder {
 
     func values() -> [ThreadId] {
         recordedThreads
+    }
+}
+
+private actor SpawnRequestRecorder {
+    private var recordedRequests: [AgentJobWorkerSpawnRequest] = []
+    private var results: [AgentJobWorkerSpawnResult]
+
+    init(results: [AgentJobWorkerSpawnResult]) {
+        self.results = results
+    }
+
+    func spawn(_ request: AgentJobWorkerSpawnRequest) -> AgentJobWorkerSpawnResult {
+        recordedRequests.append(request)
+        guard !results.isEmpty else {
+            return .failed("missing test spawn result")
+        }
+        return results.removeFirst()
+    }
+
+    func requests() -> [AgentJobWorkerSpawnRequest] {
+        recordedRequests
     }
 }
 

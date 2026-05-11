@@ -540,7 +540,7 @@ public actor SQLiteAgentJobStore {
     public func markAgentJobItemPending(
         jobID: String,
         itemID: String,
-        errorMessage: String
+        errorMessage: String?
     ) throws -> Bool {
         let now = Self.currentTimestamp()
         try Self.execute(
@@ -551,7 +551,7 @@ public actor SQLiteAgentJobStore {
             """,
             bindings: [
                 .text(AgentJobItemStatus.pending.rawValue),
-                .text(errorMessage),
+                .optionalText(errorMessage),
                 .int(now),
                 .text(jobID),
                 .text(itemID),
@@ -643,7 +643,7 @@ public actor SQLiteAgentJobStore {
             """
             UPDATE agent_job_items
             SET status = ?, completed_at = ?, updated_at = ?, last_error = ?, assigned_thread_id = NULL
-            WHERE job_id = ? AND item_id = ? AND status = ?
+            WHERE job_id = ? AND item_id = ? AND status IN (?, ?)
             """,
             bindings: [
                 .text(AgentJobItemStatus.failed.rawValue),
@@ -652,6 +652,7 @@ public actor SQLiteAgentJobStore {
                 .text(errorMessage),
                 .text(jobID),
                 .text(itemID),
+                .text(AgentJobItemStatus.pending.rawValue),
                 .text(AgentJobItemStatus.running.rawValue),
             ],
             database: handle.database

@@ -267,6 +267,71 @@ public enum AgentJobRuntime {
         await shutdownThread(threadID)
     }
 
+    public static func spawnPendingItems(
+        store: SQLiteAgentJobStore,
+        job: AgentJob,
+        activeItems: [ActiveAgentJobItem],
+        maxConcurrency: Int,
+        now: Date = Date(),
+        spawnWorker: @Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult,
+        shutdownThread: @Sendable (ThreadId) async -> Void
+    ) async throws -> AgentJobSpawnPendingResult {
+        let availableSlots = max(maxConcurrency - activeItems.count, 0)
+        guard availableSlots > 0 else {
+            return AgentJobSpawnPendingResult(activeItems: activeItems, didProgress: false)
+        }
+
+        var nextActiveItems = activeItems
+        var didProgress = false
+        let pendingItems = try await store.listAgentJobItems(
+            jobID: job.id,
+            status: .pending,
+            limit: availableSlots
+        )
+        for item in pendingItems {
+            let request = AgentJobWorkerSpawnRequest(
+                jobID: job.id,
+                itemID: item.itemID,
+                prompt: buildWorkerPrompt(job: job, item: item)
+            )
+            switch await spawnWorker(request) {
+            case let .spawned(threadID):
+                let assigned = try await store.markAgentJobItemRunningWithThread(
+                    jobID: job.id,
+                    itemID: item.itemID,
+                    threadID: threadID.description
+                )
+                if !assigned {
+                    await shutdownThread(threadID)
+                    continue
+                }
+                nextActiveItems.append(ActiveAgentJobItem(
+                    threadID: threadID,
+                    itemID: item.itemID,
+                    startedAt: now
+                ))
+                didProgress = true
+
+            case .agentLimitReached:
+                _ = try await store.markAgentJobItemPending(
+                    jobID: job.id,
+                    itemID: item.itemID,
+                    errorMessage: nil
+                )
+                return AgentJobSpawnPendingResult(activeItems: nextActiveItems, didProgress: didProgress)
+
+            case let .failed(errorMessage):
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: job.id,
+                    itemID: item.itemID,
+                    errorMessage: "failed to spawn worker: \(errorMessage)"
+                )
+                didProgress = true
+            }
+        }
+        return AgentJobSpawnPendingResult(activeItems: nextActiveItems, didProgress: didProgress)
+    }
+
     public static func decodeReportAgentJobResultArguments(
         _ argumentsJSON: String
     ) throws -> ReportAgentJobResultArguments {
@@ -483,6 +548,34 @@ public struct ActiveAgentJobItem: Equatable, Sendable {
         self.threadID = threadID
         self.itemID = itemID
         self.startedAt = startedAt
+    }
+}
+
+public struct AgentJobWorkerSpawnRequest: Equatable, Sendable {
+    public var jobID: String
+    public var itemID: String
+    public var prompt: String
+
+    public init(jobID: String, itemID: String, prompt: String) {
+        self.jobID = jobID
+        self.itemID = itemID
+        self.prompt = prompt
+    }
+}
+
+public enum AgentJobWorkerSpawnResult: Equatable, Sendable {
+    case spawned(ThreadId)
+    case agentLimitReached
+    case failed(String)
+}
+
+public struct AgentJobSpawnPendingResult: Equatable, Sendable {
+    public var activeItems: [ActiveAgentJobItem]
+    public var didProgress: Bool
+
+    public init(activeItems: [ActiveAgentJobItem], didProgress: Bool) {
+        self.activeItems = activeItems
+        self.didProgress = didProgress
     }
 }
 
