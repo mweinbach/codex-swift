@@ -22282,6 +22282,7 @@ final class CodexAppServerMessageProcessor {
                         )
                         notifications.append(CodexAppServer.accountLoginCompletedNotification())
                         notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                        queueBestEffortMcpServerRefresh()
                     }
                 case "account/login/cancel":
                     response = CodexAppServer.responseObject(
@@ -22300,6 +22301,7 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.logoutResult(configuration: configuration)
                     )
                     notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
+                    queueBestEffortMcpServerRefresh()
                 case "setDefaultModel":
                     response = CodexAppServer.responseObject(
                         id: id,

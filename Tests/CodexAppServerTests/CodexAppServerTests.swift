@@ -12947,6 +12947,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(accountPayload["type"] as? String, "apiKey")
     }
 
+    func testAccountLoginAndLogoutQueueMcpRefreshForLoadedThreads() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        [mcp_servers.docs]
+        command = "docs-login"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":2,"method":"account/login/start","params":{"type":"apiKey","apiKey":"sk-test-key"}}"#.utf8)
+        ))
+
+        var refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(loginServers) = refresh.mcpServers,
+              case let .object(loginDocs)? = loginServers["docs"]
+        else {
+            return XCTFail("expected login MCP refresh config")
+        }
+        XCTAssertEqual(loginDocs["command"], .string("docs-login"))
+
+        try """
+        [mcp_servers.docs]
+        command = "docs-logout"
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        _ = try decodeMessages(processor.processLine(
+            Data(#"{"id":3,"method":"account/logout"}"#.utf8)
+        ))
+
+        refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(logoutServers) = refresh.mcpServers,
+              case let .object(logoutDocs)? = logoutServers["docs"]
+        else {
+            return XCTFail("expected logout MCP refresh config")
+        }
+        XCTAssertEqual(logoutDocs["command"], .string("docs-logout"))
+    }
+
     func testAccountLoginAPIKeyRejectedWhenForcedChatGPT() throws {
         let temp = try TemporaryDirectory()
         try #"forced_login_method = "chatgpt""#.write(
