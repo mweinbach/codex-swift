@@ -16764,6 +16764,39 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testExperimentalFeatureEnablementSetRejectsMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(request: String, message: String)] = [
+            (
+                #"{"id":1,"method":"experimentalFeature/enablement/set","params":{}}"#,
+                "missing field `enablement`"
+            ),
+            (
+                #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":null}}"#,
+                "Invalid request: invalid type: null, expected a map"
+            ),
+            (
+                #"{"id":3,"method":"experimentalFeature/enablement/set","params":{"enablement":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a map"
+            ),
+            (
+                #"{"id":4,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memories":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a boolean"
+            ),
+            (
+                #"{"id":5,"method":"experimentalFeature/enablement/set","params":{"enablement":{"plugins":"false"}}}"#,
+                #"Invalid request: invalid type: string "false", expected a boolean"#
+            )
+        ]
+
+        for testCase in cases {
+            let response = try appServerResponse(testCase.request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], testCase.request)
+            XCTAssertEqual(error["code"] as? Int, -32600, testCase.request)
+            XCTAssertEqual(error["message"] as? String, testCase.message, testCase.request)
+        }
+    }
+
     func testCollaborationModeListReturnsRustPresets() throws {
         let temp = try TemporaryDirectory()
 

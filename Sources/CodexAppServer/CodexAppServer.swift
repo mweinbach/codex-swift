@@ -14135,10 +14135,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         runtimeFeatureEnablement: inout [String: Bool]
     ) throws -> [String: Any] {
-        guard let rawEnablement = params?["enablement"] as? [String: Any] else {
-            throw AppServerError.invalidRequest("missing enablement")
-        }
-        let enablement = try featureEnablementParam(rawEnablement)
+        let enablement = try rustRequiredBoolMapParam(params?["enablement"], field: "enablement")
         for key in enablement.keys {
             guard let spec = FeatureRegistry.specs.first(where: { $0.key == key }) else {
                 if let feature = FeatureRegistry.feature(forKey: key),
@@ -16626,15 +16623,21 @@ public enum CodexAppServer {
         return defaultValue
     }
 
-    private static func featureEnablementParam(_ value: [String: Any]) throws -> [String: Bool] {
-        var enablement: [String: Bool] = [:]
-        for (key, rawValue) in value {
-            guard let boolValue = rawValue as? Bool else {
-                throw AppServerError.invalidRequest("invalid feature enablement `\(key)`")
-            }
-            enablement[key] = boolValue
+    private static func rustRequiredBoolMapParam(_ value: Any?, field: String) throws -> [String: Bool] {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
         }
-        return enablement
+        guard let rawMap = value as? [String: Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a map")
+        }
+        var map: [String: Bool] = [:]
+        for (key, rawValue) in rawMap {
+            guard let number = rawValue as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+                throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(rawValue)), expected a boolean")
+            }
+            map[key] = number.boolValue
+        }
+        return map
     }
 
     fileprivate static func stringParam(_ value: Any?) -> String? {
