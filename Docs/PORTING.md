@@ -502,6 +502,7 @@ Source baseline inspected for this scaffold:
   - `fs/writeFile`, `command/exec/write`, and `process/writeStdin` now preserve Rust's invalid-base64 decoder wording in route errors, including the byte value and offset for malformed input.
   - `command/exec` and `process/spawn` now reject negative or wrongly typed `outputBytesCap` and wrongly typed `timeoutMs` values with Rust's numeric protocol decode errors, including boolean, floating-point, sequence, and map JSON shapes, instead of silently clamping or defaulting them.
   - app-server requests now enforce the Rust initialization gate, rejecting requests before initialize and duplicate initialize requests with invalid-request errors
+  - app-server `initialize` now rejects `clientInfo.name` values that cannot be used as HTTP header values before mutating initialized state, preserving Rust's invalid-request code and exact error message while allowing a later valid initialize retry.
 - `codex-rs/app-server/tests/suite/conversation_summary.rs` relative rollout path lookup
   - legacy `getConversationSummary` now resolves relative `rolloutPath` values from the configured Codex home before loading the rollout, matching Rust's local thread-store behavior.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list filters

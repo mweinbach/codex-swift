@@ -12220,6 +12220,23 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateError["message"] as? String, "Already initialized")
     }
 
+    func testInitializeRejectsInvalidClientInfoNameLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let invalid = try decode(processor.processLine(Data(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"bad\rname","version":"0.1.0"}}}"#.utf8)))
+        let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "Invalid clientInfo.name: 'bad\rname'. Must be a valid HTTP header value."
+        )
+        XCTAssertNil(error["data"])
+
+        let valid = try decode(processor.processLine(Data(#"{"id":2,"method":"initialize","params":{"clientInfo":{"name":"codex-app-server-tests","version":"0.1.0"}}}"#.utf8)))
+        XCTAssertNotNil(valid["result"])
+    }
+
     func testGetUserAgentReturnsInitializedUserAgent() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))

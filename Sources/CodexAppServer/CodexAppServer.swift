@@ -20876,6 +20876,15 @@ final class CodexAppServerMessageProcessor {
             if initialized {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
+                if let clientName = ((params?["clientInfo"] as? [String: Any])?["name"] as? String),
+                   !CodexAppServer.isValidHTTPHeaderValue(clientName) {
+                    response = CodexAppServer.errorObject(
+                        id: id,
+                        code: -32600,
+                        message: "Invalid clientInfo.name: '\(clientName)'. Must be a valid HTTP header value."
+                    )
+                    return CodexAppServer.encodeMessages(response.map { [$0] } ?? [])
+                }
                 initialized = true
                 let capabilities = params?["capabilities"] as? [String: Any]
                 requestAttestation = (capabilities?["requestAttestation"] as? Bool) ?? false
