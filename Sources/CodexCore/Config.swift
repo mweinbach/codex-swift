@@ -83,6 +83,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var permissionProfile: PermissionProfile?
     public var activePermissionProfile: ActivePermissionProfile?
     public var networkProxy: NetworkProxySpec?
+    public var allowLoginShell: Bool
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
@@ -165,6 +166,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         defaultPermissions: String? = nil,
         permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
+        allowLoginShell: Bool = true,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
@@ -224,6 +226,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.networkProxy = nil
+        self.allowLoginShell = allowLoginShell
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
@@ -288,6 +291,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         defaultPermissions: String? = nil,
         permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
+        allowLoginShell: Bool = true,
         modelReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
@@ -344,6 +348,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             defaultPermissions: defaultPermissions,
             permissionProfile: permissionProfile,
             activePermissionProfile: activePermissionProfile,
+            allowLoginShell: allowLoginShell,
             modelReasoningEffort: modelReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
             modelVerbosity: modelVerbosity,
@@ -2740,6 +2745,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)default_permissions"
             )
         }
+        if let allowLoginShell = values["allow_login_shell"] {
+            config.allowLoginShell = try boolValue(
+                allowLoginShell,
+                key: "\(keyPrefix)allow_login_shell"
+            )
+        }
         if let effort = values["model_reasoning_effort"] {
             config.modelReasoningEffort = try stringEnumValue(
                 ReasoningEffort.self,
@@ -2909,6 +2920,7 @@ private struct ParsedCodexConfigToml {
             || key == "approvals_reviewer"
             || key == "sandbox_mode"
             || key == "default_permissions"
+            || key == "allow_login_shell"
             || key == "model_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"

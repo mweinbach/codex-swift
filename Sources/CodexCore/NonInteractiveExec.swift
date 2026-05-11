@@ -194,7 +194,8 @@ public enum NonInteractiveExec {
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch),
-            toolSuggest: config.features.isEnabled(.toolSuggest)
+            toolSuggest: config.features.isEnabled(.toolSuggest),
+            allowLoginShell: config.allowLoginShell
         )
     }
 
@@ -571,6 +572,7 @@ public enum NonInteractiveExec {
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         explicitEnvOverrides: [String: String] = [:],
+        allowLoginShell: Bool = true,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> ResponseItem {
@@ -587,6 +589,7 @@ public enum NonInteractiveExec {
                 truncationPolicy: truncationPolicy,
                 environment: environment,
                 explicitEnvOverrides: explicitEnvOverrides,
+                allowLoginShell: allowLoginShell,
                 agentJobContext: agentJobContext
             )
 
@@ -666,6 +669,7 @@ public enum NonInteractiveExec {
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         explicitEnvOverrides: [String: String] = [:],
+        allowLoginShell: Bool = true,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> FunctionCallExecutionResult {
@@ -718,6 +722,7 @@ public enum NonInteractiveExec {
                 truncationPolicy: truncationPolicy,
                 environment: environment,
                 explicitEnvOverrides: explicitEnvOverrides,
+                allowLoginShell: allowLoginShell,
                 toolSearchIndex: toolSearchIndex,
                 agentJobContext: agentJobContext
             )
@@ -752,6 +757,7 @@ public enum NonInteractiveExec {
             truncationPolicy: truncationPolicy,
             environment: environment,
             explicitEnvOverrides: explicitEnvOverrides,
+            allowLoginShell: allowLoginShell,
             toolSearchIndex: toolSearchIndex,
             agentJobContext: agentJobContext
         )
@@ -899,6 +905,7 @@ public enum NonInteractiveExec {
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         explicitEnvOverrides: [String: String],
+        allowLoginShell: Bool,
         agentJobContext: AgentJobToolContext?
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
@@ -906,10 +913,11 @@ public enum NonInteractiveExec {
             switch name {
             case "exec_command":
                 let params = try decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8))
+                let useLoginShell = try resolveUseLoginShell(params.requestedLogin, allowLoginShell: allowLoginShell)
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
                 let snapshotShell = params.shell == nil ? shell : nil
                 let command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: params.login)
+                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
                 )
                 return await executeUnifiedExecCommand(
                     command: command,
@@ -928,8 +936,9 @@ public enum NonInteractiveExec {
 
             case "shell_command":
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
+                let useLoginShell = try resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
                 let command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    shell.deriveExecArgs(command: params.command, useLoginShell: params.login ?? true)
+                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
                 )
                 return await executeShellCommand(
                     toolName: name,
@@ -1101,6 +1110,8 @@ public enum NonInteractiveExec {
                     success: false
                 )
             }
+        } catch let error as FunctionCallError {
+            return functionOutput(callID: callID, content: error.description, success: false)
         } catch {
             return functionOutput(
                 callID: callID,
@@ -1108,6 +1119,18 @@ public enum NonInteractiveExec {
                 success: false
             )
         }
+    }
+
+    private static func resolveUseLoginShell(
+        _ login: Bool?,
+        allowLoginShell: Bool
+    ) throws -> Bool {
+        if !allowLoginShell, login == true {
+            throw FunctionCallError.respondToModel(
+                "login shell is disabled by config; omit `login` or set it to false."
+            )
+        }
+        return login ?? allowLoginShell
     }
 
     private static func resolveAgentJobPath(_ path: String, cwd: URL) -> String {

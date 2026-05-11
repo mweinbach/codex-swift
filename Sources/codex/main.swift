@@ -952,7 +952,8 @@ private func runNonInteractiveExec(
                 shell: shell,
                 truncationPolicy: modelFamily.truncationPolicy,
                 environment: ExecEnvironment.createEnv(policy: settings.shellEnvironmentPolicy, environment: environment),
-                explicitEnvOverrides: settings.shellEnvironmentPolicy.set
+                explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
+                allowLoginShell: settings.allowLoginShell
             )
         }
     )

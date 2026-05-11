@@ -749,6 +749,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let namespaceTools: Bool
     public let toolSearch: Bool
     public let toolSuggest: Bool
+    public let allowLoginShell: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -761,7 +762,8 @@ public struct ToolsConfig: Equatable, Sendable {
         experimentalSupportedTools: [String] = [],
         namespaceTools: Bool = true,
         toolSearch: Bool = true,
-        toolSuggest: Bool = true
+        toolSuggest: Bool = true,
+        allowLoginShell: Bool = true
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -774,6 +776,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.namespaceTools = namespaceTools
         self.toolSearch = toolSearch
         self.toolSuggest = toolSuggest
+        self.allowLoginShell = allowLoginShell
     }
 }
 
@@ -792,12 +795,18 @@ public enum ToolSpecFactory {
         case .local:
             specs.append(ConfiguredToolSpec(spec: .localShell, supportsParallelToolCalls: false))
         case .unifiedExec:
-            specs.append(ConfiguredToolSpec(spec: createExecCommandTool(), supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(
+                spec: createExecCommandTool(allowLoginShell: config.allowLoginShell),
+                supportsParallelToolCalls: false
+            ))
             specs.append(ConfiguredToolSpec(spec: createWriteStdinTool(), supportsParallelToolCalls: false))
         case .disabled:
             break
         case .shellCommand:
-            specs.append(ConfiguredToolSpec(spec: createShellCommandTool(), supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(
+                spec: createShellCommandTool(allowLoginShell: config.allowLoginShell),
+                supportsParallelToolCalls: false
+            ))
         }
 
         specs.append(ConfiguredToolSpec(spec: createListMCPResourcesTool(), supportsParallelToolCalls: true))
@@ -924,7 +933,7 @@ public enum ToolSpecFactory {
     }
 
     public static func createRequestPluginInstallTool(entries: [RequestPluginInstallEntry]) -> ToolSpec {
-        functionTool(
+        return functionTool(
             name: requestPluginInstallToolName,
             description: requestPluginInstallToolDescription(entries: entries),
             properties: [
@@ -1022,26 +1031,29 @@ public enum ToolSpecFactory {
         ])
     }
 
-    public static func createExecCommandTool() -> ToolSpec {
-        functionTool(
+    public static func createExecCommandTool(allowLoginShell: Bool = true) -> ToolSpec {
+        var properties: [String: JSONSchema] = [
+            "cmd": .string(description: "Shell command to execute."),
+            "workdir": .string(description: "Optional working directory to run the command in; defaults to the turn cwd."),
+            "shell": .string(description: "Shell binary to launch. Defaults to /bin/bash."),
+            "yield_time_ms": .number(description: "How long to wait (in milliseconds) for output before yielding."),
+            "max_output_tokens": .number(description: "Maximum number of tokens to return. Excess output will be truncated."),
+            "sandbox_permissions": .string(description: "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."),
+            "justification": .string(description: "Only set if sandbox_permissions is \"require_escalated\". 1-sentence explanation of why we want to run this command.")
+        ]
+        if allowLoginShell {
+            properties["login"] = .boolean(description: "Whether to run the shell with -l/-i semantics. Defaults to true.")
+        }
+        return functionTool(
             name: "exec_command",
             description: "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
-            properties: [
-                "cmd": .string(description: "Shell command to execute."),
-                "workdir": .string(description: "Optional working directory to run the command in; defaults to the turn cwd."),
-                "shell": .string(description: "Shell binary to launch. Defaults to /bin/bash."),
-                "login": .boolean(description: "Whether to run the shell with -l/-i semantics. Defaults to true."),
-                "yield_time_ms": .number(description: "How long to wait (in milliseconds) for output before yielding."),
-                "max_output_tokens": .number(description: "Maximum number of tokens to return. Excess output will be truncated."),
-                "sandbox_permissions": .string(description: "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."),
-                "justification": .string(description: "Only set if sandbox_permissions is \"require_escalated\". 1-sentence explanation of why we want to run this command.")
-            ],
+            properties: properties,
             required: ["cmd"]
         )
     }
 
     public static func createWriteStdinTool() -> ToolSpec {
-        functionTool(
+        return functionTool(
             name: "write_stdin",
             description: "Writes characters to an existing unified exec session and returns recent output.",
             properties: [
@@ -1073,21 +1085,24 @@ public enum ToolSpecFactory {
         )
     }
 
-    public static func createShellCommandTool() -> ToolSpec {
-        functionTool(
+    public static func createShellCommandTool(allowLoginShell: Bool = true) -> ToolSpec {
+        var properties: [String: JSONSchema] = [
+            "command": .string(description: "The shell script to execute in the user's default shell"),
+            "workdir": .string(description: "The working directory to execute the command in"),
+            "timeout_ms": .number(description: "The timeout for the command in milliseconds"),
+            "sandbox_permissions": .string(description: "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."),
+            "justification": .string(description: "Only set if sandbox_permissions is \"require_escalated\". 1-sentence explanation of why we want to run this command.")
+        ]
+        if allowLoginShell {
+            properties["login"] = .boolean(description: "Whether to run the shell with login shell semantics. Defaults to true.")
+        }
+        return functionTool(
             name: "shell_command",
             description: """
             Runs a shell command and returns its output.
             - Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary.
             """,
-            properties: [
-                "command": .string(description: "The shell script to execute in the user's default shell"),
-                "workdir": .string(description: "The working directory to execute the command in"),
-                "login": .boolean(description: "Whether to run the shell with login shell semantics. Defaults to true."),
-                "timeout_ms": .number(description: "The timeout for the command in milliseconds"),
-                "sandbox_permissions": .string(description: "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."),
-                "justification": .string(description: "Only set if sandbox_permissions is \"require_escalated\". 1-sentence explanation of why we want to run this command.")
-            ],
+            properties: properties,
             required: ["command"]
         )
     }

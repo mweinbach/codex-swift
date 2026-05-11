@@ -815,6 +815,7 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
     public let cmd: String
     public let workdir: String?
     public let shell: String?
+    public let requestedLogin: Bool?
     public let login: Bool
     public let yieldTimeMS: UInt64
     public let maxOutputTokens: Int?
@@ -837,7 +838,8 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
         self.cmd = try container.decode(String.self, forKey: .cmd)
         self.workdir = try container.decodeIfPresent(String.self, forKey: .workdir)
         self.shell = try container.decodeIfPresent(String.self, forKey: .shell)
-        self.login = try container.decodeIfPresent(Bool.self, forKey: .login) ?? true
+        self.requestedLogin = try container.decodeIfPresent(Bool.self, forKey: .login)
+        self.login = requestedLogin ?? true
         self.yieldTimeMS = try container.decodeIfPresent(UInt64.self, forKey: .yieldTimeMS) ?? 10_000
         self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         self.sandboxPermissions = try container.decodeIfPresent(

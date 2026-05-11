@@ -749,6 +749,34 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNil(object["output_schema"], "Rust keeps MCP tool output_schema internal to ResponsesApiTool")
     }
 
+    func testShellToolSpecsOmitLoginWhenDisallowedLikeRust() throws {
+        for spec in [
+            ToolSpecFactory.createExecCommandTool(allowLoginShell: false),
+            ToolSpecFactory.createShellCommandTool(allowLoginShell: false)
+        ] {
+            guard case let .function(tool) = spec,
+                  case let .object(properties, _, _) = tool.parameters
+            else {
+                return XCTFail("expected function tool with object parameters")
+            }
+            XCTAssertNil(properties["login"])
+        }
+    }
+
+    func testToolsConfigForwardsAllowLoginShellToShellSpecsLikeRust() throws {
+        let configured = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .unifiedExec,
+            allowLoginShell: false
+        ))
+        let execSpec = try XCTUnwrap(configured.first { $0.spec.name == "exec_command" }?.spec)
+        guard case let .function(tool) = execSpec,
+              case let .object(properties, _, _) = tool.parameters
+        else {
+            return XCTFail("expected function tool with object parameters")
+        }
+        XCTAssertNil(properties["login"])
+    }
+
     func testMCPToolConversionSanitizesSchemaLikeRust() throws {
         let spec = ToolSpecFactory.createMCPTool(
             fullyQualifiedName: "mcp__docs__lookup",

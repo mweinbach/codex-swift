@@ -1206,6 +1206,130 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(modelPayload.content.contains("from-snapshot"))
     }
 
+    func testShellCommandDefaultsToNonLoginAndRejectsLoginWhenDisallowedLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let snapshotPath = temp.url.appendingPathComponent("snapshot.sh")
+        try """
+        # Snapshot file
+        export CODEX_SWIFT_LOGIN_POLICY=from-snapshot
+        """.write(to: snapshotPath, atomically: true, encoding: .utf8)
+        let snapshot = ShellSnapshot(path: snapshotPath, cwd: temp.url)
+        let shell = Shell(shellType: .sh, shellPath: "/bin/sh", shellSnapshot: snapshot)
+        let command = try Self.jsonString(#"printf '%s' "${CODEX_SWIFT_LOGIN_POLICY-unset}""#)
+        let omittedLogin = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(command)}"#,
+            callID: "call-shell-login-omitted"
+        )
+
+        let omittedOutput = await NonInteractiveExec.executeFunctionCall(
+            omittedLogin,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            allowLoginShell: false
+        )
+
+        guard case let .functionCallOutput(omittedCallID, omittedPayload) = omittedOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(omittedCallID, "call-shell-login-omitted")
+        XCTAssertEqual(omittedPayload.success, true)
+        XCTAssertTrue(omittedPayload.content.contains("Output:\nunset"), omittedPayload.content)
+        XCTAssertFalse(omittedPayload.content.contains("from-snapshot"))
+
+        let explicitLogin = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf should-not-run","login":true}"#,
+            callID: "call-shell-login-explicit"
+        )
+        let explicitOutput = await NonInteractiveExec.executeFunctionCall(
+            explicitLogin,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            allowLoginShell: false
+        )
+
+        guard case let .functionCallOutput(explicitCallID, explicitPayload) = explicitOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(explicitCallID, "call-shell-login-explicit")
+        XCTAssertEqual(explicitPayload.success, false)
+        XCTAssertEqual(
+            explicitPayload.content,
+            "login shell is disabled by config; omit `login` or set it to false."
+        )
+    }
+
+    func testUnifiedExecDefaultsToNonLoginAndRejectsLoginWhenDisallowedLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let snapshotPath = temp.url.appendingPathComponent("snapshot.sh")
+        try """
+        # Snapshot file
+        export CODEX_SWIFT_UNIFIED_LOGIN_POLICY=from-snapshot
+        """.write(to: snapshotPath, atomically: true, encoding: .utf8)
+        let snapshot = ShellSnapshot(path: snapshotPath, cwd: temp.url)
+        let shell = Shell(shellType: .sh, shellPath: "/bin/sh", shellSnapshot: snapshot)
+        let command = try Self.jsonString(#"printf '%s' "${CODEX_SWIFT_UNIFIED_LOGIN_POLICY-unset}""#)
+        let omittedLogin = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(command),"yield_time_ms":1000}"#,
+            callID: "call-exec-login-omitted"
+        )
+
+        let omittedOutput = await NonInteractiveExec.executeFunctionCall(
+            omittedLogin,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            allowLoginShell: false
+        )
+
+        guard case let .functionCallOutput(omittedCallID, omittedPayload) = omittedOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(omittedCallID, "call-exec-login-omitted")
+        XCTAssertEqual(omittedPayload.success, true)
+        XCTAssertTrue(omittedPayload.content.contains("Output:\nunset"), omittedPayload.content)
+        XCTAssertFalse(omittedPayload.content.contains("from-snapshot"))
+
+        let explicitLogin = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"printf should-not-run","login":true,"yield_time_ms":1000}"#,
+            callID: "call-exec-login-explicit"
+        )
+        let explicitOutput = await NonInteractiveExec.executeFunctionCall(
+            explicitLogin,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            allowLoginShell: false
+        )
+
+        guard case let .functionCallOutput(explicitCallID, explicitPayload) = explicitOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(explicitCallID, "call-exec-login-explicit")
+        XCTAssertEqual(explicitPayload.success, false)
+        XCTAssertEqual(
+            explicitPayload.content,
+            "login shell is disabled by config; omit `login` or set it to false."
+        )
+    }
+
     func testEscalatedSandboxRequestReturnsFailureOutput() async throws {
         let item = ResponseItem.functionCall(
             name: "exec_command",

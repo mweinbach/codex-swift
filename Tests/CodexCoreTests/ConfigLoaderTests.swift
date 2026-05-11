@@ -297,6 +297,7 @@ final class ConfigLoaderTests: XCTestCase {
         approval_policy = "on-failure"
         approvals_reviewer = "guardian_subagent"
         sandbox_mode = "workspace-write"
+        allow_login_shell = false
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
         model_verbosity = "low"
@@ -358,6 +359,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.approvalPolicy, .onFailure)
         XCTAssertEqual(config.approvalsReviewer, .autoReview)
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
+        XCTAssertFalse(config.allowLoginShell)
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
         XCTAssertEqual(config.modelVerbosity, .low)
