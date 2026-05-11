@@ -3346,10 +3346,10 @@ public enum CodexAppServer {
         } else {
             forcedAppsFeatureEnabled = nil
         }
+        let forceRefetch = try rustBoolParam(params?["forceRefetch"], defaultValue: false)
         if let cachedApps {
             return try appListPage(apps: cachedApps, params: params)
         }
-        let forceRefetch = boolParam(params?["forceRefetch"], defaultValue: false)
         let apps = try appList(
             configuration: configuration,
             runtimeFeatureEnablement: runtimeFeatureEnablement,
@@ -10525,7 +10525,7 @@ public enum CodexAppServer {
             isChatGPT: chatGPTMode,
             availableModels: availableModels
         )
-        let includeHidden = boolParam(params?["includeHidden"], defaultValue: false)
+        let includeHidden = try rustBoolParam(params?["includeHidden"], defaultValue: false)
         let models = availableModels
             .map { $0.withIsDefault($0.model == defaultModel) }
             .filter { includeHidden || $0.showInPicker }
@@ -14352,6 +14352,16 @@ public enum CodexAppServer {
             return number.intValue
         }
         return nil
+    }
+
+    private static func rustBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
+        guard let value, !(value is NSNull) else {
+            return defaultValue
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
     }
 
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {

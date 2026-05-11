@@ -14039,6 +14039,47 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testCatalogListRoutesMatchRustBoolDecoding() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(method: String, field: String, rawValue: String, expectedMessage: String)] = [
+            (
+                "app/list",
+                "forceRefetch",
+                "1",
+                "Invalid request: invalid type: integer `1`, expected a boolean"
+            ),
+            (
+                "app/list",
+                "forceRefetch",
+                #""yes""#,
+                #"Invalid request: invalid type: string "yes", expected a boolean"#
+            ),
+            (
+                "model/list",
+                "includeHidden",
+                "0",
+                "Invalid request: invalid type: integer `0`, expected a boolean"
+            ),
+            (
+                "model/list",
+                "includeHidden",
+                #""false""#,
+                #"Invalid request: invalid type: string "false", expected a boolean"#
+            ),
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(testCase.method)","params":{"\#(testCase.field)":\#(testCase.rawValue)}}"#,
+                codexHome: temp.url
+            )
+
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600, testCase.method)
+            XCTAssertEqual(error["message"] as? String, testCase.expectedMessage, testCase.method)
+        }
+    }
+
     func testExperimentalFeatureEnablementSetAppliesToFeatureListAndConfigRead() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
