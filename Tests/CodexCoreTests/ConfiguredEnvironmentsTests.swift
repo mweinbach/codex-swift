@@ -286,6 +286,80 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
             XCTAssertTrue(description.contains("unknown field `unknown`"))
         }
     }
+
+    func testEnvironmentsTomlRejectsDuplicateKeysLikeRustToml() throws {
+        let directCases: [(String, String)] = [
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                id = "other"
+                url = "ws://127.0.0.1:4512"
+                """,
+                "duplicate key `id`"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                program = "ssh"
+                [environments.env]
+                CODEX_LOG = "debug"
+                CODEX_LOG = "trace"
+                """,
+                "duplicate key `CODEX_LOG`"
+            ),
+            (
+                """
+                [[environments]]
+                id = "devbox"
+                program = "ssh"
+                env = { CODEX_LOG = "debug" }
+                [environments.env]
+                CODEX_TRACE = "1"
+                """,
+                "duplicate key `env`"
+            )
+        ]
+
+        for (toml, expected) in directCases {
+            XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: toml)) { error in
+                XCTAssertEqual(
+                    (error as? ConfiguredEnvironmentLoadError)?.description,
+                    "exec-server protocol error: \(expected)"
+                )
+            }
+        }
+
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        default = "local"
+        default = "none"
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.load(codexHome: temp.url)) { error in
+            let description = (error as? ConfiguredEnvironmentLoadError)?.description ?? ""
+            XCTAssertTrue(description.contains("failed to parse environment config"))
+            XCTAssertTrue(description.contains("duplicate key `default`"))
+        }
+    }
+
+    func testEmptyEnvironmentEnvTableRequiresProgramLikeRustSerde() throws {
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        [[environments]]
+        id = "devbox"
+        [environments.env]
+        """)) { error in
+            XCTAssertEqual(
+                (error as? ConfiguredEnvironmentLoadError)?.description,
+                "exec-server protocol error: environment `devbox` args, env, and cwd require program"
+            )
+        }
+    }
 }
 
 private final class ConfiguredEnvironmentTemporaryDirectory {

@@ -196,6 +196,28 @@ private struct EnvironmentToml {
     var args: [String]?
     var env: [String: String]?
     var cwd: String?
+    var seenFields = Set<String>()
+    var envKeys = Set<String>()
+
+    mutating func recordField(_ key: String) throws {
+        guard seenFields.insert(key).inserted else {
+            throw ConfiguredEnvironmentLoadError.protocolError("duplicate key `\(key)`")
+        }
+    }
+
+    mutating func openEnvTable() throws {
+        try recordField("env")
+        env = env ?? [:]
+    }
+
+    mutating func recordEnvValue(key: String, value: String) throws {
+        guard envKeys.insert(key).inserted else {
+            throw ConfiguredEnvironmentLoadError.protocolError("duplicate key `\(key)`")
+        }
+        var env = env ?? [:]
+        env[key] = value
+        self.env = env
+    }
 }
 
 private extension ConfiguredEnvironmentLoader {
@@ -279,6 +301,7 @@ private extension ConfiguredEnvironmentLoader {
         var defaultID: String?
         var environments: [EnvironmentToml] = []
         var currentEnvironment: EnvironmentToml?
+        var seenTopLevelKeys = Set<String>()
         var section = Section.topLevel
 
         func finishCurrentEnvironment() {
@@ -303,6 +326,7 @@ private extension ConfiguredEnvironmentLoader {
                 guard currentEnvironment != nil else {
                     throw ConfiguredEnvironmentLoadError.protocolError("environment env table requires environment")
                 }
+                try currentEnvironment!.openEnvTable()
                 section = .environmentEnv
                 continue
             }
@@ -324,6 +348,9 @@ private extension ConfiguredEnvironmentLoader {
                 guard key == "default" else {
                     throw ConfiguredEnvironmentLoadError.protocolError("unknown field `\(key)`")
                 }
+                guard seenTopLevelKeys.insert(key).inserted else {
+                    throw ConfiguredEnvironmentLoadError.protocolError("duplicate key `\(key)`")
+                }
                 defaultID = try stringValue(valueText, key: key)
 
             case .environment:
@@ -336,9 +363,10 @@ private extension ConfiguredEnvironmentLoader {
                 guard currentEnvironment != nil else {
                     throw ConfiguredEnvironmentLoadError.protocolError("environment env field outside environment table")
                 }
-                var env = currentEnvironment!.env ?? [:]
-                env[key] = try stringValue(valueText, key: key)
-                currentEnvironment!.env = env
+                try currentEnvironment!.recordEnvValue(
+                    key: key,
+                    value: try stringValue(valueText, key: key)
+                )
             }
         }
 
@@ -368,6 +396,7 @@ private extension ConfiguredEnvironmentLoader {
         valueText: String,
         to environment: inout EnvironmentToml
     ) throws {
+        try environment.recordField(key)
         switch key {
         case "id":
             environment.id = try stringValue(valueText, key: key)
