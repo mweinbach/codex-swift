@@ -97,6 +97,76 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertNil(outcome.skillRootByPath[disabledByPath.path])
     }
 
+    func testLoadsPluginSkillRootsWithManifestNamespaceAndPluginIDLikeRust() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = tmp.url.appendingPathComponent("plugins/sample", isDirectory: true)
+        let pluginSkillsRoot = pluginRoot.appendingPathComponent("skills", isDirectory: true)
+        let pluginSkill = pluginSkillsRoot.appendingPathComponent("sample-search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "sample-search", description: "search sample data", to: pluginSkill)
+        try writePluginManifest(name: "sample", to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"))
+
+        let outcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            pluginSkillRoots: [PluginSkillRoot(path: pluginSkillsRoot, pluginID: "sample@test")],
+            includeSystemSkills: false
+        )
+
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.skills, [
+            SkillMetadata(
+                name: "sample:sample-search",
+                description: "search sample data",
+                path: pluginSkill.path,
+                scope: .user,
+                pluginID: "sample@test"
+            )
+        ])
+        XCTAssertEqual(outcome.skillRoots, [pluginSkillsRoot.path])
+        XCTAssertEqual(outcome.skillRootByPath[pluginSkill.path], pluginSkillsRoot.path)
+    }
+
+    func testPluginSkillRootsHonorNameConfigRulesUsingNamespacedName() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = tmp.url.appendingPathComponent("plugins/sample", isDirectory: true)
+        let pluginSkillsRoot = pluginRoot.appendingPathComponent("skills", isDirectory: true)
+        let pluginSkill = pluginSkillsRoot.appendingPathComponent("sample-search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "sample-search", description: "search sample data", to: pluginSkill)
+        try writePluginManifest(name: "sample", to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"))
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                config: .table([
+                    "skills": .table([
+                        "config": .array([
+                            .table([
+                                "name": .string("sample:sample-search"),
+                                "enabled": .bool(false)
+                            ])
+                        ])
+                    ])
+                ])
+            )
+        ])
+
+        let outcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            configLayerStack: stack,
+            pluginSkillRoots: [PluginSkillRoot(path: pluginSkillsRoot, pluginID: "sample@test")],
+            includeSystemSkills: false
+        )
+
+        XCTAssertTrue(outcome.skills.isEmpty)
+        XCTAssertNil(outcome.skillRootByPath[pluginSkill.path])
+    }
+
     func testSystemSkillParseErrorsAreSuppressedLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
@@ -122,6 +192,11 @@ final class SkillLoaderTests: XCTestCase {
 
         # \(name)
         """.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func writePluginManifest(name: String, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"name":"\#(name)"}"#.write(to: url, atomically: true, encoding: .utf8)
     }
 }
 

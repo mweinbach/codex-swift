@@ -22,18 +22,26 @@ public enum SkillLoader {
         cwd: URL,
         codexHome: URL,
         configLayerStack: ConfigLayerStack? = nil,
+        pluginSkillRoots: [PluginSkillRoot] = [],
         includeSystemSkills: Bool = true,
         fileManager: FileManager = .default
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
-        for root in skillRoots(
+        for root in resolvedSkillRoots(
             cwd: cwd,
             codexHome: codexHome,
+            pluginSkillRoots: pluginSkillRoots,
             includeSystemSkills: includeSystemSkills,
             fileManager: fileManager
         ) {
             let standardizedRoot = root.path.resolvingSymlinksInPath().standardizedFileURL
-            discoverSkills(root: standardizedRoot, scope: root.scope, outcome: &outcome, fileManager: fileManager)
+            discoverSkills(
+                root: standardizedRoot,
+                scope: root.scope,
+                pluginID: root.pluginID,
+                outcome: &outcome,
+                fileManager: fileManager
+            )
         }
 
         let rules = configLayerStack.map(skillConfigRules) ?? []
@@ -69,6 +77,7 @@ public enum SkillLoader {
     public static func discoverSkills(
         root: URL,
         scope: SkillScope,
+        pluginID: String? = nil,
         outcome: inout SkillLoadOutcome,
         fileManager: FileManager = .default
     ) {
@@ -102,7 +111,12 @@ public enum SkillLoader {
                 }
                 if values?.isRegularFile == true, entry.lastPathComponent == "SKILL.md" {
                     do {
-                        let skill = try parseSkillFile(entry, scope: scope)
+                        let skill = try parseSkillFile(
+                            entry,
+                            scope: scope,
+                            pluginID: pluginID,
+                            fileManager: fileManager
+                        )
                         outcome.skills.append(skill)
                         outcome.skillRootByPath[skill.path] = root.path
                         if !rootAdded {
@@ -119,19 +133,25 @@ public enum SkillLoader {
         }
     }
 
-    public static func parseSkillFile(_ url: URL, scope: SkillScope) throws -> SkillMetadata {
+    public static func parseSkillFile(
+        _ url: URL,
+        scope: SkillScope,
+        pluginID: String? = nil,
+        fileManager: FileManager = .default
+    ) throws -> SkillMetadata {
         let contents = try String(contentsOf: url, encoding: .utf8)
         guard let frontmatter = extractSkillFrontmatter(contents) else {
             throw SkillParseError.missingFrontmatter
         }
         let fields = parseSkillFrontmatter(frontmatter)
-        let name = sanitizeSkillLine(fields["name"])
+        let baseName = sanitizeSkillLine(fields["name"])
         let description = sanitizeSkillLine(fields["description"])
         let shortDescription = sanitizeSkillLine(fields["metadata.short-description"])
 
-        guard let name, !name.isEmpty else {
+        guard let baseName, !baseName.isEmpty else {
             throw SkillParseError.missingField("name")
         }
+        let name = namespacedSkillName(for: url, baseName: baseName, fileManager: fileManager)
         guard name.count <= 64 else {
             throw SkillParseError.invalidField("name", "exceeds maximum length of 64 characters")
         }
@@ -153,8 +173,30 @@ public enum SkillLoader {
             description: description,
             shortDescription: shortDescription?.isEmpty == false ? shortDescription : nil,
             path: url.resolvingSymlinksInPath().standardizedFileURL.path,
-            scope: scope
+            scope: scope,
+            pluginID: pluginID
         )
+    }
+
+    private static func resolvedSkillRoots(
+        cwd: URL,
+        codexHome: URL,
+        pluginSkillRoots: [PluginSkillRoot],
+        includeSystemSkills: Bool,
+        fileManager: FileManager
+    ) -> [(path: URL, scope: SkillScope, pluginID: String?)] {
+        var roots = skillRoots(
+            cwd: cwd,
+            codexHome: codexHome,
+            includeSystemSkills: includeSystemSkills,
+            fileManager: fileManager
+        ).map { (path: $0.path, scope: $0.scope, pluginID: Optional<String>.none) }
+        roots.append(contentsOf: pluginSkillRoots.map { (path: $0.path, scope: .user, pluginID: $0.pluginID) })
+
+        var seenPaths: Set<String> = []
+        return roots.filter { root in
+            seenPaths.insert(root.path.resolvingSymlinksInPath().standardizedFileURL.path).inserted
+        }
     }
 
     private static func finalize(outcome: inout SkillLoadOutcome) {
@@ -312,6 +354,48 @@ public enum SkillLoader {
             return String(value.dropFirst().dropLast())
         }
         return value
+    }
+
+    private static func namespacedSkillName(for url: URL, baseName: String, fileManager: FileManager) -> String {
+        guard let namespace = pluginNamespace(forSkillPath: url, fileManager: fileManager) else {
+            return baseName
+        }
+        return "\(namespace):\(baseName)"
+    }
+
+    private static func pluginNamespace(forSkillPath url: URL, fileManager: FileManager) -> String? {
+        var currentPath = (url.resolvingSymlinksInPath().standardizedFileURL.path as NSString).standardizingPath
+        while true {
+            let current = URL(fileURLWithPath: currentPath)
+            if let namespace = pluginManifestName(pluginRoot: current, fileManager: fileManager) {
+                return namespace
+            }
+
+            let parent = (currentPath as NSString).deletingLastPathComponent
+            let parentPath = parent.isEmpty ? "/" : parent
+            if parentPath == currentPath {
+                return nil
+            }
+            currentPath = parentPath
+        }
+    }
+
+    private static func pluginManifestName(pluginRoot: URL, fileManager: FileManager) -> String? {
+        for relativePath in [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"] {
+            let manifest = pluginRoot.appendingPathComponent(relativePath, isDirectory: false)
+            guard fileManager.fileExists(atPath: manifest.path),
+                  let data = try? Data(contentsOf: manifest),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
+            }
+            let rawName = (object["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if rawName.isEmpty {
+                return pluginRoot.lastPathComponent
+            }
+            return rawName
+        }
+        return nil
     }
 
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {

@@ -13,6 +13,7 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
     public let shortDescription: String?
     public let path: String
     public let scope: SkillScope
+    public let pluginID: String?
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -20,6 +21,7 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         case shortDescription = "short_description"
         case path
         case scope
+        case pluginID = "plugin_id"
     }
 
     public init(
@@ -27,13 +29,15 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         description: String,
         shortDescription: String? = nil,
         path: String,
-        scope: SkillScope
+        scope: SkillScope,
+        pluginID: String? = nil
     ) {
         self.name = name
         self.description = description
         self.shortDescription = shortDescription
         self.path = path
         self.scope = scope
+        self.pluginID = pluginID
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,6 +47,7 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         self.shortDescription = try container.decodeIfPresent(String.self, forKey: .shortDescription)
         self.path = try container.decode(String.self, forKey: .path)
         self.scope = try container.decode(SkillScope.self, forKey: .scope)
+        self.pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -52,6 +57,17 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         try container.encodeIfPresent(shortDescription, forKey: .shortDescription)
         try container.encode(path, forKey: .path)
         try container.encode(scope, forKey: .scope)
+        try container.encodeIfPresent(pluginID, forKey: .pluginID)
+    }
+}
+
+public struct PluginSkillRoot: Equatable, Sendable {
+    public let path: URL
+    public let pluginID: String
+
+    public init(path: URL, pluginID: String) {
+        self.path = path
+        self.pluginID = pluginID
     }
 }
 

@@ -40,6 +40,25 @@ final class SkillsTests: XCTestCase {
         XCTAssertEqual(skill.scope, .repo)
     }
 
+    func testSkillMetadataPreservesPluginIDWhenPresent() throws {
+        try XCTAssertJSONObjectEqual(
+            SkillMetadata(
+                name: "sample:search",
+                description: "Search sample data",
+                path: "/plugins/sample/skills/search/SKILL.md",
+                scope: .user,
+                pluginID: "sample@test"
+            ),
+            [
+                "name": "sample:search",
+                "description": "Search sample data",
+                "path": "/plugins/sample/skills/search/SKILL.md",
+                "scope": "user",
+                "plugin_id": "sample@test"
+            ]
+        )
+    }
+
     func testListSkillsResponseWireShape() throws {
         try XCTAssertJSONObjectEqual(
             ListSkillsResponseEvent(skills: [
