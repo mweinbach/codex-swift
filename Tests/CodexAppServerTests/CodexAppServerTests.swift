@@ -13304,6 +13304,16 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(invalid["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+
+        let malformed = try decode(processor.processLine(
+            Data(#"{"id":5,"method":"thread/loaded/list","params":{"cursor":1}}"#.utf8)
+        ))
+        let malformedError = try XCTUnwrap(malformed["error"] as? [String: Any])
+        XCTAssertEqual(malformedError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            malformedError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
     }
 
     func testThreadUnsubscribeReportsSubscriptionStatus() throws {
@@ -16075,6 +16085,17 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+
+        let malformed = try appServerResponse(
+            #"{"id":2,"method":"model/list","params":{"cursor":1}}"#,
+            codexHome: temp.url
+        )
+        let malformedError = try XCTUnwrap(malformed["error"] as? [String: Any])
+        XCTAssertEqual(malformedError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            malformedError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
     }
 
     func testModelProviderCapabilitiesReadReturnsDefaultProviderCapabilities() throws {
@@ -16226,6 +16247,17 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             beyondError["message"] as? String,
             "cursor 9999 exceeds total feature flags \(FeatureRegistry.specs.count)"
+        )
+
+        let malformed = try appServerResponse(
+            #"{"id":3,"method":"experimentalFeature/list","params":{"cursor":1}}"#,
+            codexHome: temp.url
+        )
+        let malformedError = try XCTUnwrap(malformed["error"] as? [String: Any])
+        XCTAssertEqual(malformedError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            malformedError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
         )
     }
 
@@ -17269,6 +17301,17 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid cursor: bogus")
+
+        let malformed = try appServerResponse(
+            #"{"id":2,"method":"mcpServerStatus/list","params":{"cursor":1}}"#,
+            codexHome: temp.url
+        )
+        let malformedError = try XCTUnwrap(malformed["error"] as? [String: Any])
+        XCTAssertEqual(malformedError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            malformedError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
     }
 
     func testMcpServerStatusListRejectsUnknownDetailLikeRustProtocol() throws {

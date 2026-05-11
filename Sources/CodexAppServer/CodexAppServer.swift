@@ -1810,7 +1810,7 @@ public enum CodexAppServer {
         }
 
         let start: Int
-        if let cursor = stringParam(params?["cursor"]) {
+        if let cursor = try rustOptionalStringParam(params?["cursor"]) {
             guard let cursorID = try? ConversationId(string: cursor) else {
                 throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
             }
@@ -10840,7 +10840,7 @@ public enum CodexAppServer {
             .map { $0.withIsDefault($0.model == defaultModel) }
             .filter { includeHidden || $0.showInPicker }
         let total = models.count
-        let start = try modelListStart(cursor: stringParam(params?["cursor"]), total: total)
+        let start = try modelListStart(cursor: try rustOptionalStringParam(params?["cursor"]), total: total)
         let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         let items = start < end ? Array(models[start..<end]) : []
@@ -10880,7 +10880,7 @@ public enum CodexAppServer {
         )
         let serverNames = effectiveServers.keys.sorted()
         let total = serverNames.count
-        let start = try mcpServerStatusStart(cursor: stringParam(params?["cursor"]), total: total)
+        let start = try mcpServerStatusStart(cursor: try rustOptionalStringParam(params?["cursor"]), total: total)
         let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         let configuredEffectiveServers = effectiveServers.compactMapValues(\.configuredConfig)
@@ -14038,7 +14038,7 @@ public enum CodexAppServer {
             ]
         }
 
-        let start = try experimentalFeatureListStart(cursor: stringParam(params?["cursor"]), total: total)
+        let start = try experimentalFeatureListStart(cursor: try rustOptionalStringParam(params?["cursor"]), total: total)
         let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         return [
