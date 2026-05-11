@@ -37,6 +37,14 @@ public struct ListMemoriesResponse: Equatable, Codable, Sendable {
         case nextCursor = "next_cursor"
         case truncated
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(entries, forKey: .entries)
+        try container.encode(nextCursor, forKey: .nextCursor)
+        try container.encode(truncated, forKey: .truncated)
+    }
 }
 
 public struct ReadMemoryRequest: Equatable, Sendable {
@@ -141,6 +149,16 @@ public struct SearchMemoriesResponse: Equatable, Codable, Sendable {
         case matches
         case nextCursor = "next_cursor"
         case truncated
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(queries, forKey: .queries)
+        try container.encode(matchMode, forKey: .matchMode)
+        try container.encode(path, forKey: .path)
+        try container.encode(matches, forKey: .matches)
+        try container.encode(nextCursor, forKey: .nextCursor)
+        try container.encode(truncated, forKey: .truncated)
     }
 }
 

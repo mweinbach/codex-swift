@@ -267,6 +267,8 @@ Source baseline inspected for this scaffold:
   - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
 - `codex-rs/memories/mcp/src/local.rs`
   - local memories backend now preserves Rust's list/read/search request and response models, hidden-path and symlink filtering, root containment checks, cursor validation, line-offset/max-line validation, token-based read truncation, lexicographic ordering, scoped directory/file reads, and `any`/`all_on_same_line`/`all_within_lines` search modes. MCP tool registration for the built-in memories server remains pending with the broader built-in MCP port.
+- `codex-rs/memories/mcp/src/server.rs`
+  - added the Swift memories MCP server facade with Rust's `list`, `read`, and `search` tool names, read-only annotations, structured-content responses, argument defaulting/clamping, unknown-field rejection, backend-error to MCP-error mapping, and stdio framing over the local memories backend. Wiring this server into the product-owned built-in MCP registry remains pending.
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
   - MCP image output conversion now preserves Rust's default image detail, `_meta` image-detail override including standard `high` values, existing data URLs, and unsupported block fallback text when mixed with image content.
