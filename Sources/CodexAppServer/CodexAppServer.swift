@@ -2073,14 +2073,8 @@ public enum CodexAppServer {
             try recorder.recordItems(items)
             try recorder.shutdown()
         }
-        let turn: [String: Any] = [
-            "id": turnID,
-            "items": [],
-            "status": "inProgress",
-            "error": NSNull()
-        ]
         return (
-            result: ["turn": turn],
+            result: ["turn": inProgressTurnObject(id: turnID)],
             hookStartedEvents: hookStartedEvents,
             hookCompletedEvents: hookCompletedEvents
         )
@@ -13990,11 +13984,19 @@ public enum CodexAppServer {
                 ]]
             ]]
         }
-        return [
+        return inProgressTurnObject(id: id, items: items)
+    }
+
+    private static func inProgressTurnObject(id: String, items: [[String: Any]] = []) -> [String: Any] {
+        [
             "id": id,
             "items": items,
+            "itemsView": "notLoaded",
             "status": "inProgress",
-            "error": NSNull()
+            "error": NSNull(),
+            "startedAt": NSNull(),
+            "completedAt": NSNull(),
+            "durationMs": NSNull()
         ]
     }
 
