@@ -22,7 +22,11 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.activePermissionProfile)
         XCTAssertNil(config.networkProxy)
         XCTAssertNil(config.modelReasoningEffort)
+        XCTAssertNil(config.planModeReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
+        XCTAssertNil(config.modelSupportsReasoningSummaries)
+        XCTAssertFalse(config.hideAgentReasoning)
+        XCTAssertFalse(config.showRawAgentReasoning)
         XCTAssertNil(config.modelVerbosity)
         XCTAssertNil(config.modelContextWindow)
         XCTAssertNil(config.modelAutoCompactTokenLimit)
@@ -300,7 +304,11 @@ final class ConfigLoaderTests: XCTestCase {
         sandbox_mode = "workspace-write"
         allow_login_shell = false
         model_reasoning_effort = "high"
+        plan_mode_reasoning_effort = "medium"
         model_reasoning_summary = "detailed"
+        model_supports_reasoning_summaries = false
+        hide_agent_reasoning = true
+        show_raw_agent_reasoning = true
         model_verbosity = "low"
         model_context_window = 123456
         model_auto_compact_token_limit = 120000
@@ -363,11 +371,16 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertFalse(config.allowLoginShell)
         XCTAssertEqual(config.modelReasoningEffort, .high)
+        XCTAssertEqual(config.planModeReasoningEffort, .medium)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
+        XCTAssertEqual(config.modelSupportsReasoningSummaries, false)
+        XCTAssertTrue(config.hideAgentReasoning)
+        XCTAssertTrue(config.showRawAgentReasoning)
         XCTAssertEqual(config.modelVerbosity, .low)
         XCTAssertEqual(config.modelContextWindow, 123_456)
         XCTAssertEqual(config.modelAutoCompactTokenLimit, 120_000)
         XCTAssertEqual(config.modelFamilyConfigOverrides, ModelFamilyConfigOverrides(
+            supportsReasoningSummaries: false,
             contextWindow: 123_456,
             autoCompactTokenLimit: 120_000
         ))
@@ -1018,6 +1031,7 @@ final class ConfigLoaderTests: XCTestCase {
         approvals_reviewer = "user"
         sandbox_mode = "read-only"
         model_reasoning_effort = "low"
+        plan_mode_reasoning_effort = "minimal"
         model_reasoning_summary = "concise"
         model_verbosity = "medium"
         service_tier = "experimental-tier-id"
@@ -1037,6 +1051,7 @@ final class ConfigLoaderTests: XCTestCase {
         approvals_reviewer = "auto_review"
         sandbox_mode = "danger-full-access"
         model_reasoning_effort = "xhigh"
+        plan_mode_reasoning_effort = "high"
         model_reasoning_summary = "auto"
         model_verbosity = "high"
         service_tier = "flex"
@@ -1060,6 +1075,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.approvalsReviewer, .autoReview)
         XCTAssertEqual(config.sandboxMode, .dangerFullAccess)
         XCTAssertEqual(config.modelReasoningEffort, .xhigh)
+        XCTAssertEqual(config.planModeReasoningEffort, .high)
         XCTAssertEqual(config.modelReasoningSummary, .auto)
         XCTAssertEqual(config.modelVerbosity, .high)
         XCTAssertEqual(config.serviceTier, "flex")

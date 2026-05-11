@@ -85,8 +85,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var activePermissionProfile: ActivePermissionProfile?
     public var networkProxy: NetworkProxySpec?
     public var allowLoginShell: Bool
+    public var hideAgentReasoning: Bool
+    public var showRawAgentReasoning: Bool
     public var modelReasoningEffort: ReasoningEffort?
+    public var planModeReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
+    public var modelSupportsReasoningSummaries: Bool?
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
     public var chatgptBaseURL: String
@@ -169,8 +173,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
         allowLoginShell: Bool = true,
+        hideAgentReasoning: Bool = false,
+        showRawAgentReasoning: Bool = false,
         modelReasoningEffort: ReasoningEffort? = nil,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
+        modelSupportsReasoningSummaries: Bool? = nil,
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
@@ -230,8 +238,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.activePermissionProfile = activePermissionProfile
         self.networkProxy = nil
         self.allowLoginShell = allowLoginShell
+        self.hideAgentReasoning = hideAgentReasoning
+        self.showRawAgentReasoning = showRawAgentReasoning
         self.modelReasoningEffort = modelReasoningEffort
+        self.planModeReasoningEffort = planModeReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
+        self.modelSupportsReasoningSummaries = modelSupportsReasoningSummaries
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
@@ -296,8 +308,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         permissionProfile: PermissionProfile? = nil,
         activePermissionProfile: ActivePermissionProfile? = nil,
         allowLoginShell: Bool = true,
+        hideAgentReasoning: Bool = false,
+        showRawAgentReasoning: Bool = false,
         modelReasoningEffort: ReasoningEffort? = nil,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
+        modelSupportsReasoningSummaries: Bool? = nil,
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
@@ -354,8 +370,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             permissionProfile: permissionProfile,
             activePermissionProfile: activePermissionProfile,
             allowLoginShell: allowLoginShell,
+            hideAgentReasoning: hideAgentReasoning,
+            showRawAgentReasoning: showRawAgentReasoning,
             modelReasoningEffort: modelReasoningEffort,
+            planModeReasoningEffort: planModeReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
+            modelSupportsReasoningSummaries: modelSupportsReasoningSummaries,
             modelVerbosity: modelVerbosity,
             serviceTier: serviceTier,
             chatgptBaseURL: chatgptBaseURL,
@@ -412,7 +432,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         sandboxMode: SandboxMode? = nil,
         sandboxPolicy: SandboxPolicy? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
+        modelSupportsReasoningSummaries: Bool? = nil,
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
@@ -461,7 +483,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             sandboxMode: sandboxMode,
             sandboxPolicy: sandboxPolicy,
             modelReasoningEffort: modelReasoningEffort,
+            planModeReasoningEffort: planModeReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
+            modelSupportsReasoningSummaries: modelSupportsReasoningSummaries,
             modelVerbosity: modelVerbosity,
             serviceTier: serviceTier,
             chatgptBaseURL: chatgptBaseURL,
@@ -517,7 +541,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         sandboxMode: SandboxMode?,
         sandboxPolicy: SandboxPolicy?,
         modelReasoningEffort: ReasoningEffort?,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary?,
+        modelSupportsReasoningSummaries: Bool? = nil,
         modelVerbosity: Verbosity?,
         serviceTier: String?,
         chatgptBaseURL: String,
@@ -558,7 +584,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             sandboxMode: sandboxMode,
             sandboxPolicy: sandboxPolicy,
             modelReasoningEffort: modelReasoningEffort,
+            planModeReasoningEffort: planModeReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
+            modelSupportsReasoningSummaries: modelSupportsReasoningSummaries,
             modelVerbosity: modelVerbosity,
             serviceTier: serviceTier,
             chatgptBaseURL: chatgptBaseURL,
@@ -608,7 +636,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         sandboxMode: SandboxMode?,
         sandboxPolicy: SandboxPolicy?,
         modelReasoningEffort: ReasoningEffort?,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary?,
+        modelSupportsReasoningSummaries: Bool? = nil,
         modelVerbosity: Verbosity?,
         serviceTier: String?,
         chatgptBaseURL: String,
@@ -654,7 +684,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             sandboxMode: sandboxMode,
             sandboxPolicy: sandboxPolicy,
             modelReasoningEffort: modelReasoningEffort,
+            planModeReasoningEffort: planModeReasoningEffort,
             modelReasoningSummary: modelReasoningSummary,
+            modelSupportsReasoningSummaries: modelSupportsReasoningSummaries,
             modelVerbosity: modelVerbosity,
             serviceTier: serviceTier,
             chatgptBaseURL: chatgptBaseURL,
@@ -709,6 +741,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public var modelFamilyConfigOverrides: ModelFamilyConfigOverrides {
         ModelFamilyConfigOverrides(
+            supportsReasoningSummaries: modelSupportsReasoningSummaries,
             contextWindow: modelContextWindow,
             autoCompactTokenLimit: modelAutoCompactTokenLimit
         )
@@ -2762,6 +2795,18 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)allow_login_shell"
             )
         }
+        if let hideAgentReasoning = values["hide_agent_reasoning"] {
+            config.hideAgentReasoning = try boolValue(
+                hideAgentReasoning,
+                key: "\(keyPrefix)hide_agent_reasoning"
+            )
+        }
+        if let showRawAgentReasoning = values["show_raw_agent_reasoning"] {
+            config.showRawAgentReasoning = try boolValue(
+                showRawAgentReasoning,
+                key: "\(keyPrefix)show_raw_agent_reasoning"
+            )
+        }
         if let effort = values["model_reasoning_effort"] {
             config.modelReasoningEffort = try stringEnumValue(
                 ReasoningEffort.self,
@@ -2769,11 +2814,24 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)model_reasoning_effort"
             )
         }
+        if let planModeEffort = values["plan_mode_reasoning_effort"] {
+            config.planModeReasoningEffort = try stringEnumValue(
+                ReasoningEffort.self,
+                planModeEffort,
+                key: "\(keyPrefix)plan_mode_reasoning_effort"
+            )
+        }
         if let summary = values["model_reasoning_summary"] {
             config.modelReasoningSummary = try stringEnumValue(
                 ReasoningSummary.self,
                 summary,
                 key: "\(keyPrefix)model_reasoning_summary"
+            )
+        }
+        if let supportsReasoningSummaries = values["model_supports_reasoning_summaries"] {
+            config.modelSupportsReasoningSummaries = try boolValue(
+                supportsReasoningSummaries,
+                key: "\(keyPrefix)model_supports_reasoning_summaries"
             )
         }
         if let verbosity = values["model_verbosity"] {
@@ -2932,8 +2990,12 @@ private struct ParsedCodexConfigToml {
             || key == "sandbox_mode"
             || key == "default_permissions"
             || key == "allow_login_shell"
+            || key == "hide_agent_reasoning"
+            || key == "show_raw_agent_reasoning"
             || key == "model_reasoning_effort"
+            || key == "plan_mode_reasoning_effort"
             || key == "model_reasoning_summary"
+            || key == "model_supports_reasoning_summaries"
             || key == "model_verbosity"
             || key == "service_tier"
             || key == "chatgpt_base_url"
@@ -2983,6 +3045,7 @@ private struct ParsedCodexConfigToml {
             || key == "sandbox_mode"
             || key == "default_permissions"
             || key == "model_reasoning_effort"
+            || key == "plan_mode_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
             || key == "service_tier"

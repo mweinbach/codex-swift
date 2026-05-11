@@ -269,6 +269,8 @@ Source baseline inspected for this scaffold:
   - shell tool schemas and non-interactive shell execution now honor Rust's `allow_login_shell = false` behavior: `login` is omitted from `shell_command`/`exec_command` schemas, omitted `login` runs as a non-login shell, and explicit `login = true` returns Rust's model-facing rejection string.
 - `codex-rs/core/src/unified_exec/mod.rs`, `process_manager.rs`, and config loading
   - unified exec now applies Rust's yield-time clamping for initial `exec_command` output collection and `write_stdin`, and top-level `background_terminal_max_timeout` config is loaded as Rust's cap for empty background terminal polls with the same minimum.
+- `codex-rs/config/src/config_toml.rs`, `profile_toml.rs`, and `core/src/config/mod.rs`
+  - reasoning-related config now loads Rust's top-level `hide_agent_reasoning`, `show_raw_agent_reasoning`, `model_supports_reasoning_summaries`, and top-level/profile `plan_mode_reasoning_effort`; the model reasoning-summary support override feeds Swift's model-family config override path.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`

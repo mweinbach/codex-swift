@@ -25,6 +25,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var approvalsReviewer: ApprovalsReviewer?
     public var sandboxMode: SandboxMode?
     public var modelReasoningEffort: ReasoningEffort?
+    public var planModeReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
@@ -50,6 +51,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case approvalsReviewer = "approvals_reviewer"
         case sandboxMode = "sandbox_mode"
         case modelReasoningEffort = "model_reasoning_effort"
+        case planModeReasoningEffort = "plan_mode_reasoning_effort"
         case modelReasoningSummary = "model_reasoning_summary"
         case modelVerbosity = "model_verbosity"
         case serviceTier = "service_tier"
@@ -76,6 +78,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         approvalsReviewer: ApprovalsReviewer? = nil,
         sandboxMode: SandboxMode? = nil,
         modelReasoningEffort: ReasoningEffort? = nil,
+        planModeReasoningEffort: ReasoningEffort? = nil,
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
@@ -100,6 +103,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.approvalsReviewer = approvalsReviewer
         self.sandboxMode = sandboxMode
         self.modelReasoningEffort = modelReasoningEffort
+        self.planModeReasoningEffort = planModeReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
@@ -127,6 +131,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         self.sandboxMode = try container.decodeIfPresent(SandboxMode.self, forKey: .sandboxMode)
         self.modelReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .modelReasoningEffort)
+        self.planModeReasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .planModeReasoningEffort)
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
         self.modelVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .modelVerbosity)
         self.serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
@@ -154,6 +159,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try encodeOptional(sandboxMode, into: &container, forKey: .sandboxMode)
         try encodeOptional(modelReasoningEffort, into: &container, forKey: .modelReasoningEffort)
+        try encodeOptional(planModeReasoningEffort, into: &container, forKey: .planModeReasoningEffort)
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
         try encodeOptional(modelVerbosity, into: &container, forKey: .modelVerbosity)
         try encodeOptional(serviceTier, into: &container, forKey: .serviceTier)
