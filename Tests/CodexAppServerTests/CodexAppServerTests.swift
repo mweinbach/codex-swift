@@ -17854,7 +17854,11 @@ final class CodexAppServerTests: XCTestCase {
         args = ["--stdio"]
         startup_timeout_sec = 12
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
         let start = try decodeMessages(processor.processLine(
             Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
         ))
@@ -17876,6 +17880,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(docs["command"], .string("docs-server"))
         XCTAssertEqual(docs["args"], .array([.string("--stdio")]))
         XCTAssertEqual(docs["startup_timeout_sec"], .double(12))
+        XCTAssertEqual(capture.submissions, [
+            SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .refreshMcpServers(config: refresh))
+        ])
+    }
+
+    func testMcpServerReloadReportsLiveSubmitterFailures() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") }
+        )
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let response = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+        ))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(
+            error["message"] as? String,
+            "failed to refresh MCP servers: failed to queue MCP refresh for thread \(threadID): channel closed"
+        )
     }
 
     func testMcpServerReloadRejectsObjectParams() throws {

@@ -22053,13 +22053,21 @@ final class CodexAppServerMessageProcessor {
         }) ?? []
     }
 
-    private func queueMcpServerRefresh(threadID: String, config: McpServerRefreshConfig) throws {
+    private func queueMcpServerRefresh(
+        threadID: String,
+        config: McpServerRefreshConfig,
+        requestID rawRequestID: Any? = nil
+    ) throws {
         let manager = threadStateManager
         let queued = try CodexAppServer.runAsyncBlocking {
             await manager.queueMcpServerRefresh(threadID: threadID, config: config)
         }
         if !queued {
             throw AppServerError.invalidRequest("thread not found: \(threadID)")
+        }
+        if let coreOpSubmitter,
+           let requestID = rawRequestID.flatMap(AppServerRequestIDCodec.requestID(from:)) {
+            try coreOpSubmitter(requestID, threadID, .refreshMcpServers(config: config))
         }
     }
 
@@ -23405,7 +23413,7 @@ final class CodexAppServerMessageProcessor {
                             rawParams: object["params"],
                             configuration: configuration,
                             loadedThreadIDs: { self.listLoadedThreadIDs() },
-                            queueThreadRefresh: { try self.queueMcpServerRefresh(threadID: $0, config: $1) }
+                            queueThreadRefresh: { try self.queueMcpServerRefresh(threadID: $0, config: $1, requestID: id) }
                         )
                     )
                 case "mcpServer/resource/read":
