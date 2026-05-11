@@ -10448,11 +10448,8 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = runtimeConfig.mcpServers[server] else {
-            throw AppServerError.internalError("No MCP server named '\(server)' found.")
-        }
-        guard serverConfig.enabled else {
-            throw AppServerError.internalError("MCP server '\(server)' is disabled.")
+        guard let serverConfig = runtimeConfig.mcpServers[server], serverConfig.enabled else {
+            throw AppServerError.internalError("unknown MCP server '\(server)'")
         }
         switch serverConfig.transport {
         case let .stdio(command, args, env, envVars, cwd):
@@ -11023,11 +11020,8 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = runtimeConfig.mcpServers[server] else {
-            throw AppServerError.invalidRequest("No MCP server named '\(server)' found.")
-        }
-        guard serverConfig.enabled else {
-            throw AppServerError.internalError("MCP server '\(server)' is disabled.")
+        guard let serverConfig = runtimeConfig.mcpServers[server], serverConfig.enabled else {
+            throw AppServerError.internalError("unknown MCP server '\(server)'")
         }
         let toolCallParams = mcpToolCallRequestParams(tool: tool, arguments: arguments, meta: meta)
         let toolCallParamsData = try mcpToolCallRequestParamsData(toolCallParams, server: server)

@@ -10207,6 +10207,54 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(toolMissingThreadError["message"] as? String, "thread not found: \(threadID)")
     }
 
+    func testMcpResourceAndToolCallsReportUnknownOrDisabledServersLikeRustManager() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-07",
+            timestamp: "2025-01-02T03:04:07Z",
+            preview: "mcp unknown server",
+            provider: nil
+        )
+        try """
+        [mcp_servers.disabled]
+        command = "/bin/echo"
+        enabled = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let missingResource = try appServerResponse(
+            #"{"id":1,"method":"mcpServer/resource/read","params":{"server":"missing","uri":"test://codex/resource"}}"#,
+            codexHome: temp.url
+        )
+        let missingResourceError = try XCTUnwrap(missingResource["error"] as? [String: Any])
+        XCTAssertEqual(missingResourceError["code"] as? Int, -32603)
+        XCTAssertEqual(missingResourceError["message"] as? String, "unknown MCP server 'missing'")
+
+        let disabledResource = try appServerResponse(
+            #"{"id":2,"method":"mcpServer/resource/read","params":{"server":"disabled","uri":"test://codex/resource"}}"#,
+            codexHome: temp.url
+        )
+        let disabledResourceError = try XCTUnwrap(disabledResource["error"] as? [String: Any])
+        XCTAssertEqual(disabledResourceError["code"] as? Int, -32603)
+        XCTAssertEqual(disabledResourceError["message"] as? String, "unknown MCP server 'disabled'")
+
+        let missingTool = try appServerResponse(
+            #"{"id":3,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"missing","tool":"echo_tool","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let missingToolError = try XCTUnwrap(missingTool["error"] as? [String: Any])
+        XCTAssertEqual(missingToolError["code"] as? Int, -32603)
+        XCTAssertEqual(missingToolError["message"] as? String, "unknown MCP server 'missing'")
+
+        let disabledTool = try appServerResponse(
+            #"{"id":4,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"disabled","tool":"echo_tool","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let disabledToolError = try XCTUnwrap(disabledTool["error"] as? [String: Any])
+        XCTAssertEqual(disabledToolError["code"] as? Int, -32603)
+        XCTAssertEqual(disabledToolError["message"] as? String, "unknown MCP server 'disabled'")
+    }
+
     func testMcpResourceReadWithoutThreadCallsConfiguredStreamableHTTPServer() throws {
         let temp = try TemporaryDirectory()
         try """
