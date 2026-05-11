@@ -31,11 +31,30 @@ public enum SeatbeltSandbox {
         logDenials: Bool = false,
         fileManager: FileManager = .default
     ) throws -> Int32 {
+        try run(
+            command: command,
+            sandboxPolicy: sandboxPolicy(fullAuto: fullAuto),
+            cwd: cwd,
+            environment: environment,
+            executablePath: executablePath,
+            logDenials: logDenials,
+            fileManager: fileManager
+        )
+    }
+
+    public static func run(
+        command: [String],
+        sandboxPolicy policy: SandboxPolicy,
+        cwd: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executablePath: String = Self.executablePath,
+        logDenials: Bool = false,
+        fileManager: FileManager = .default
+    ) throws -> Int32 {
         let cwdPath = cwd.standardizedFileURL.path
         guard let absoluteCwd = try? AbsolutePath(absolutePath: cwdPath) else {
             throw SeatbeltSandboxError.invalidCurrentDirectory(cwdPath)
         }
-        let policy = sandboxPolicy(fullAuto: fullAuto)
         let args = commandArguments(
             command: command,
             sandboxPolicy: policy,

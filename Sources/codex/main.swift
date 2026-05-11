@@ -1253,16 +1253,38 @@ private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) 
 private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case let .macos(profile, allowUnixSockets, logDenials, command):
-        guard profile == CodexCLI.SandboxProfileOptions(), allowUnixSockets.isEmpty else {
+        let defaultPolicy = sandboxModeOverride(in: request.configOverrides)
+            .map(SandboxPolicy.fromSandboxMode) ?? .newReadOnlyPolicy()
+        let sandboxPolicy: SandboxPolicy
+        switch profile.resolveBuiltInPolicy(defaultPolicy: defaultPolicy) {
+        case let .resolved(resolvedPolicy):
+            sandboxPolicy = resolvedPolicy
+        case .customProfile:
             return CodexCLI.CommandExecutionResult(
                 exitCode: 78,
                 stderrMessage: "codex-swift: sandbox permission profile runtime is not complete yet."
             )
+        case let .unknownBuiltinProfile(profileName):
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "default_permissions refers to unknown built-in profile `\(profileName)`"
+            )
         }
+
+        guard allowUnixSockets.isEmpty else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 78,
+                stderrMessage: "codex-swift: sandbox Unix socket allowlist runtime is not complete yet."
+            )
+        }
+        let cwd = profile.cwd.map(resolveSandboxCwd) ?? URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        )
         let exitCode = try SeatbeltSandbox.run(
             command: command,
-            fullAuto: sandboxModeOverride(in: request.configOverrides) == "workspace-write",
-            cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+            sandboxPolicy: sandboxPolicy,
+            cwd: cwd,
             logDenials: logDenials
         )
         return CodexCLI.CommandExecutionResult(exitCode: exitCode)
@@ -1279,13 +1301,21 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
     }
 }
 
-private func sandboxModeOverride(in configOverrides: CliConfigOverrides) -> String? {
+private func resolveSandboxCwd(_ rawPath: String) -> URL {
+    if rawPath.hasPrefix("/") {
+        return URL(fileURLWithPath: rawPath, isDirectory: true)
+    }
+    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent(rawPath, isDirectory: true)
+}
+
+private func sandboxModeOverride(in configOverrides: CliConfigOverrides) -> SandboxMode? {
     guard let value = (try? configOverrides.parseOverrides().last(where: { key, _ in key == "sandbox_mode" }))?.1,
           case let .string(mode) = value
     else {
         return nil
     }
-    return mode
+    return SandboxMode(rawValue: mode)
 }
 
 private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

@@ -391,6 +391,35 @@ public struct CodexCLI: Sendable {
             self.cwd = cwd
             self.includeManagedConfig = includeManagedConfig
         }
+
+        public enum Resolution: Equatable, Sendable {
+            case resolved(SandboxPolicy)
+            case customProfile(String)
+            case unknownBuiltinProfile(String)
+        }
+
+        public func resolveBuiltInPolicy(defaultPolicy: SandboxPolicy) -> Resolution {
+            guard let permissionsProfile else {
+                return .resolved(defaultPolicy)
+            }
+
+            switch permissionsProfile {
+            case ":read-only":
+                return .resolved(.readOnly)
+            case ":workspace":
+                if case .workspaceWrite = defaultPolicy {
+                    return .resolved(defaultPolicy)
+                }
+                return .resolved(.newWorkspaceWritePolicy())
+            case ":danger-no-sandbox":
+                return .resolved(.dangerFullAccess)
+            default:
+                if permissionsProfile.hasPrefix(":") {
+                    return .unknownBuiltinProfile(permissionsProfile)
+                }
+                return .customProfile(permissionsProfile)
+            }
+        }
     }
 
     public enum SandboxCommandAction: Equatable, Sendable {

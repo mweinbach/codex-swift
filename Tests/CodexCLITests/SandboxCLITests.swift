@@ -141,6 +141,51 @@ final class SandboxCLITests: XCTestCase {
         ])
     }
 
+    func testSandboxProfileOptionsResolveBuiltInPoliciesLikeRust() throws {
+        let workspaceRoot = try AbsolutePath(absolutePath: "/tmp/workspace")
+        let configuredWorkspace = SandboxPolicy.workspaceWrite(
+            writableRoots: [workspaceRoot],
+            networkAccess: true,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true
+        )
+
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions().resolveBuiltInPolicy(defaultPolicy: configuredWorkspace),
+            .resolved(configuredWorkspace)
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":read-only")
+                .resolveBuiltInPolicy(defaultPolicy: configuredWorkspace),
+            .resolved(.readOnly)
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":workspace")
+                .resolveBuiltInPolicy(defaultPolicy: configuredWorkspace),
+            .resolved(configuredWorkspace)
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":workspace")
+                .resolveBuiltInPolicy(defaultPolicy: .readOnly),
+            .resolved(.newWorkspaceWritePolicy())
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-no-sandbox")
+                .resolveBuiltInPolicy(defaultPolicy: .readOnly),
+            .resolved(.dangerFullAccess)
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":typo")
+                .resolveBuiltInPolicy(defaultPolicy: .readOnly),
+            .unknownBuiltinProfile(":typo")
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: "limited-read-test")
+                .resolveBuiltInPolicy(defaultPolicy: .readOnly),
+            .customProfile("limited-read-test")
+        )
+    }
+
     func testRunAsyncSandboxWindowsDelegatesToRunner() async {
         var receivedRequest: CodexCLI.SandboxCommandRequest?
 
