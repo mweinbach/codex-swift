@@ -11006,6 +11006,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((readBody["params"] as? [String: Any])?["uri"] as? String, "test://codex/resource")
     }
 
+    func testMcpResourceReadWithoutThreadUsesHostOwnedCodexAppsServer() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features.apps_mcp_path_override]
+        path = "/custom/mcp"
+
+        [mcp_servers.codex_apps]
+        url = "https://user.example.test/ignored"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: try fakeJWT(email: "apps-resource@example.com", plan: "pro"),
+            chatGPTAccountID: "acct-resource",
+            chatGPTPlanType: "pro"
+        )
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: ["CODEX_CONNECTORS_TOKEN": "connector-token"],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "apps-resource-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"codex_apps","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "resources/read":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"contents":[{"uri":"app://calendar/events","mimeType":"application/json","text":"{\"ok\":true}"}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/resource/read","params":{"server":"codex_apps","uri":"app://calendar/events"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let contents = try XCTUnwrap(result["contents"] as? [[String: Any]])
+        XCTAssertEqual(contents.first?["uri"] as? String, "app://calendar/events")
+        XCTAssertEqual(contents.first?["text"] as? String, #"{"ok":true}"#)
+        XCTAssertEqual(capture.requests.map { $0.url?.absoluteString }, [
+            "https://chatgpt.com/backend-api/custom/mcp",
+            "https://chatgpt.com/backend-api/custom/mcp"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer connector-token",
+            "Bearer connector-token"
+        ])
+        XCTAssertEqual(capture.requests[1].value(forHTTPHeaderField: "Mcp-Session-Id"), "apps-resource-session")
+    }
+
     func testMcpResourceReadWithoutThreadCallsConfiguredStdioServer() throws {
         let temp = try TemporaryDirectory()
         let script = temp.url.appendingPathComponent("stdio-mcp.sh", isDirectory: false)
@@ -11210,6 +11275,84 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((params["arguments"] as? [String: Any])?["message"] as? String, "hello from app")
         XCTAssertEqual((params["_meta"] as? [String: Any])?["source"] as? String, "mcp-app")
         XCTAssertEqual((params["_meta"] as? [String: Any])?["threadId"] as? String, threadID)
+    }
+
+    func testMcpServerToolCallUsesHostOwnedCodexAppsServerForMaterializedThread() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-08",
+            timestamp: "2025-01-02T03:04:08Z",
+            preview: "call codex apps mcp",
+            provider: nil
+        )
+        try """
+        [features.apps_mcp_path_override]
+        path = "/custom/mcp"
+
+        [mcp_servers.codex_apps]
+        url = "https://user.example.test/ignored"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: try fakeJWT(email: "apps-tool@example.com", plan: "pro"),
+            chatGPTAccountID: "acct-tool",
+            chatGPTPlanType: "pro"
+        )
+
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: ["CODEX_CONNECTORS_TOKEN": "connector-token"],
+            mcpHTTPTransport: { request in
+                capture.append(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "apps-tool-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"codex_apps","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/call":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"listed"}],"structuredContent":{"count":1},"isError":false}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"codex_apps","tool":"calendar_list_events","arguments":{"limit":1},"_meta":{"source":"mcp-app"}}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["text"] as? String, "listed")
+        XCTAssertEqual((result["structuredContent"] as? [String: Any])?["count"] as? Int, 1)
+        XCTAssertEqual(capture.requests.map { $0.url?.absoluteString }, [
+            "https://chatgpt.com/backend-api/custom/mcp",
+            "https://chatgpt.com/backend-api/custom/mcp"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer connector-token",
+            "Bearer connector-token"
+        ])
+        let callBody = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(capture.requests[1].httpBody)) as? [String: Any])
+        let params = try XCTUnwrap(callBody["params"] as? [String: Any])
+        XCTAssertEqual(params["name"] as? String, "calendar_list_events")
+        XCTAssertEqual((params["arguments"] as? [String: Any])?["limit"] as? Int, 1)
+        XCTAssertEqual((params["_meta"] as? [String: Any])?["source"] as? String, "mcp-app")
+        XCTAssertEqual((params["_meta"] as? [String: Any])?["threadId"] as? String, threadID)
+        XCTAssertEqual(capture.requests[1].value(forHTTPHeaderField: "Mcp-Session-Id"), "apps-tool-session")
     }
 
     func testMcpServerToolCallCallsConfiguredStdioServer() throws {

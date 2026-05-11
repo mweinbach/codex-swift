@@ -11229,7 +11229,11 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = runtimeConfig.mcpServers[server], serverConfig.enabled else {
+        guard let serverConfig = try effectiveConfiguredMcpServer(
+            named: server,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        ) else {
             throw AppServerError.internalError("unknown MCP server '\(server)'")
         }
         switch serverConfig.transport {
@@ -11805,7 +11809,11 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = runtimeConfig.mcpServers[server], serverConfig.enabled else {
+        guard let serverConfig = try effectiveConfiguredMcpServer(
+            named: server,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        ) else {
             throw AppServerError.internalError("unknown MCP server '\(server)'")
         }
         let toolCallParams = mcpToolCallRequestParams(tool: tool, arguments: arguments, meta: meta)
@@ -11847,6 +11855,29 @@ public enum CodexAppServer {
             return rawMeta
         }
         return ["threadId": threadID]
+    }
+
+    private static func effectiveConfiguredMcpServer(
+        named name: String,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) throws -> McpServerConfig? {
+        let usesCodexBackend: Bool
+        if case .chatGPT = try currentAuth(configuration: configuration)?.kind {
+            usesCodexBackend = true
+        } else {
+            usesCodexBackend = false
+        }
+        let effectiveServers = runtimeConfig.runtimeMcpConfig.effectiveMcpServers(
+            usesCodexBackend: usesCodexBackend,
+            environment: configuration.environment
+        )
+        guard case let .configured(serverConfig)? = effectiveServers[name],
+              serverConfig.enabled
+        else {
+            return nil
+        }
+        return serverConfig
     }
 
     fileprivate static func mcpServerOAuthLoginResult(
