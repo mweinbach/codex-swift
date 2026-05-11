@@ -108,6 +108,82 @@ final class ConfigLoaderTests: XCTestCase {
                 network: .enabled
             )
         )
+        XCTAssertNil(config.networkProxy)
+    }
+
+    func testPermissionProfileProxyPolicyBuildsNetworkProxySpecLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem]
+        ":minimal" = "read"
+
+        [permissions.workspace.network]
+        enabled = true
+        proxy_url = "http://127.0.0.1:43128"
+        enable_socks5 = false
+        socks_url = "http://127.0.0.1:43129"
+        enable_socks5_udp = false
+        allow_upstream_proxy = false
+        dangerously_allow_non_loopback_proxy = true
+        dangerously_allow_all_unix_sockets = true
+        mode = "limited"
+        allow_local_binding = true
+
+        [permissions.workspace.network.domains]
+        "openai.com" = "allow"
+        "blocked.example.com" = "deny"
+
+        [permissions.workspace.network.unix_sockets]
+        "/tmp/codex.sock" = "allow"
+        "/tmp/ignored.sock" = "none"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.permissionProfile?.networkSandboxPolicy, .enabled)
+        let networkProxy = try XCTUnwrap(config.networkProxy)
+        XCTAssertTrue(networkProxy.enabled)
+        XCTAssertNil(networkProxy.requirements)
+        XCTAssertEqual(networkProxy.config.network.proxyURL, "http://127.0.0.1:43128")
+        XCTAssertEqual(networkProxy.config.network.enableSocks5, false)
+        XCTAssertEqual(networkProxy.config.network.socksURL, "http://127.0.0.1:43129")
+        XCTAssertEqual(networkProxy.config.network.enableSocks5UDP, false)
+        XCTAssertEqual(networkProxy.config.network.allowUpstreamProxy, false)
+        XCTAssertEqual(networkProxy.config.network.dangerouslyAllowNonLoopbackProxy, true)
+        XCTAssertEqual(networkProxy.config.network.dangerouslyAllowAllUnixSockets, true)
+        XCTAssertEqual(networkProxy.config.network.mode, .limited)
+        XCTAssertEqual(networkProxy.config.network.allowLocalBinding, true)
+        XCTAssertEqual(networkProxy.config.network.allowedDomains(), ["openai.com"])
+        XCTAssertEqual(networkProxy.config.network.deniedDomains(), ["blocked.example.com"])
+        XCTAssertEqual(networkProxy.config.network.allowedUnixSockets(), ["/tmp/codex.sock"])
+    }
+
+    func testPermissionProfileNetworkPolicyWithoutEnabledDoesNotStartProxyLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem]
+        ":minimal" = "read"
+
+        [permissions.workspace.network.domains]
+        "openai.com" = "allow"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.permissionProfile?.networkSandboxPolicy, .restricted)
+        XCTAssertNil(config.networkProxy)
     }
 
     func testDefaultPermissionsOverrideSelectsNamedProfileLikeRust() throws {
@@ -1660,6 +1736,49 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(networkProxy.constraints.deniedDomains, ["blocked.example.com"])
         XCTAssertEqual(networkProxy.constraints.allowlistExpansionEnabled, false)
         XCTAssertEqual(networkProxy.constraints.denylistExpansionEnabled, true)
+    }
+
+    func testRequirementsTomlLayersOverPermissionProfileNetworkProxyLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [experimental_network]
+        enabled = true
+
+        [experimental_network.domains]
+        "managed.example.com" = "allow"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem]
+        ":minimal" = "read"
+
+        [permissions.workspace.network]
+        enabled = true
+        proxy_url = "http://127.0.0.1:43128"
+
+        [permissions.workspace.network.domains]
+        "user.example.com" = "allow"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        let networkProxy = try XCTUnwrap(config.networkProxy)
+        XCTAssertTrue(networkProxy.enabled)
+        XCTAssertEqual(networkProxy.baseConfig.network.proxyURL, "http://127.0.0.1:43128")
+        XCTAssertEqual(networkProxy.config.network.proxyURL, "http://127.0.0.1:43128")
+        XCTAssertEqual(networkProxy.config.network.allowedDomains(), ["managed.example.com", "user.example.com"])
+        XCTAssertEqual(networkProxy.constraints.allowedDomains, ["managed.example.com"])
+        XCTAssertEqual(networkProxy.constraints.allowlistExpansionEnabled, true)
     }
 
     func testProjectLayerStopsAtDetectedGitRoot() throws {

@@ -706,6 +706,14 @@ public enum CodexConfigLoader {
                 fileManager: fileManager
             )
             config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
+            let networkProxyConfig = try parsed.networkProxyConfig(named: defaultPermissions)
+            if networkProxyConfig.network.enabled {
+                config.networkProxy = NetworkProxySpec.fromConfigAndRequirements(
+                    networkProxyConfig,
+                    requirements: nil,
+                    permissionProfile: config.permissionProfile ?? .readOnly()
+                )
+            }
         } else if parsed.permissions.isEmpty == false {
             throw CodexConfigLoadError.invalidConfigLine(
                 "config defines `[permissions]` profiles but does not set `default_permissions`"
@@ -826,7 +834,7 @@ public enum CodexConfigLoader {
         }
         let permissionProfile = config.permissionProfile ?? .fromLegacySandboxPolicy(config.legacySandboxPolicy())
         let spec = NetworkProxySpec.fromConfigAndRequirements(
-            NetworkProxyConfig(),
+            config.networkProxy?.config ?? NetworkProxyConfig(),
             requirements: network,
             permissionProfile: permissionProfile
         )
@@ -935,6 +943,155 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
             fileSystem: .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth),
             network: networkEnabled ? .enabled : .restricted
         )
+    }
+
+    func networkProxyConfig(profileName: String) throws -> NetworkProxyConfig {
+        var config = NetworkProxyConfig()
+        try applyNetworkFields(profileName: profileName, to: &config)
+        config.network.enabled = try networkRequiresProxy(profileName: profileName)
+        return config
+    }
+
+    private func networkRequiresProxy(profileName: String) throws -> Bool {
+        guard try network["enabled"].map({
+            try boolValue($0, key: "permissions.\(profileName).network.enabled")
+        }) == true else {
+            return false
+        }
+        if network["proxy_url"] != nil
+            || network["socks_url"] != nil
+            || network["mode"] != nil
+        {
+            return true
+        }
+        if try network["domains"].map({
+            try !tableValue($0, key: "permissions.\(profileName).network.domains").isEmpty
+        }) == true {
+            return true
+        }
+        if try network["unix_sockets"].map({
+            try !tableValue($0, key: "permissions.\(profileName).network.unix_sockets").isEmpty
+        }) == true {
+            return true
+        }
+        for key in [
+            "enable_socks5",
+            "enable_socks5_udp",
+            "allow_upstream_proxy",
+            "dangerously_allow_non_loopback_proxy",
+            "dangerously_allow_all_unix_sockets",
+            "allow_local_binding"
+        ] {
+            if try network[key].map({ try boolValue($0, key: "permissions.\(profileName).network.\(key)") }) == true {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func applyNetworkFields(profileName: String, to config: inout NetworkProxyConfig) throws {
+        if let enabled = network["enabled"] {
+            config.network.enabled = try boolValue(enabled, key: "permissions.\(profileName).network.enabled")
+        }
+        if let proxyURL = network["proxy_url"] {
+            config.network.proxyURL = try stringValue(proxyURL, key: "permissions.\(profileName).network.proxy_url")
+        }
+        if let enableSocks5 = network["enable_socks5"] {
+            config.network.enableSocks5 = try boolValue(
+                enableSocks5,
+                key: "permissions.\(profileName).network.enable_socks5"
+            )
+        }
+        if let socksURL = network["socks_url"] {
+            config.network.socksURL = try stringValue(socksURL, key: "permissions.\(profileName).network.socks_url")
+        }
+        if let enableSocks5UDP = network["enable_socks5_udp"] {
+            config.network.enableSocks5UDP = try boolValue(
+                enableSocks5UDP,
+                key: "permissions.\(profileName).network.enable_socks5_udp"
+            )
+        }
+        if let allowUpstreamProxy = network["allow_upstream_proxy"] {
+            config.network.allowUpstreamProxy = try boolValue(
+                allowUpstreamProxy,
+                key: "permissions.\(profileName).network.allow_upstream_proxy"
+            )
+        }
+        if let allowNonLoopback = network["dangerously_allow_non_loopback_proxy"] {
+            config.network.dangerouslyAllowNonLoopbackProxy = try boolValue(
+                allowNonLoopback,
+                key: "permissions.\(profileName).network.dangerously_allow_non_loopback_proxy"
+            )
+        }
+        if let allowAllUnixSockets = network["dangerously_allow_all_unix_sockets"] {
+            config.network.dangerouslyAllowAllUnixSockets = try boolValue(
+                allowAllUnixSockets,
+                key: "permissions.\(profileName).network.dangerously_allow_all_unix_sockets"
+            )
+        }
+        if let mode = network["mode"] {
+            config.network.mode = try stringEnumValue(
+                NetworkMode.self,
+                mode,
+                key: "permissions.\(profileName).network.mode"
+            )
+        }
+        if let domains = network["domains"] {
+            try applyNetworkDomainPermissions(domains, profileName: profileName, to: &config)
+        }
+        if let unixSockets = network["unix_sockets"] {
+            try applyNetworkUnixSocketPermissions(unixSockets, profileName: profileName, to: &config)
+        }
+        if let allowLocalBinding = network["allow_local_binding"] {
+            config.network.allowLocalBinding = try boolValue(
+                allowLocalBinding,
+                key: "permissions.\(profileName).network.allow_local_binding"
+            )
+        }
+    }
+
+    private func applyNetworkDomainPermissions(
+        _ value: ConfigValue,
+        profileName: String,
+        to config: inout NetworkProxyConfig
+    ) throws {
+        let table = try tableValue(value, key: "permissions.\(profileName).network.domains")
+        for pattern in table.keys.sorted() {
+            guard let rawPermission = try? stringValue(
+                table[pattern] ?? .string(""),
+                key: "permissions.\(profileName).network.domains.\(pattern)"
+            ),
+                let permission = NetworkDomainPermission(rawValue: rawPermission)
+            else {
+                throw CodexConfigLoadError.invalidStringValue(
+                    "permissions.\(profileName).network.domains.\(pattern)"
+                )
+            }
+            config.network.upsertDomainPermission(pattern, permission: permission)
+        }
+    }
+
+    private func applyNetworkUnixSocketPermissions(
+        _ value: ConfigValue,
+        profileName: String,
+        to config: inout NetworkProxyConfig
+    ) throws {
+        let table = try tableValue(value, key: "permissions.\(profileName).network.unix_sockets")
+        var sockets = config.network.unixSockets ?? [:]
+        for path in table.keys.sorted() {
+            guard let rawPermission = try? stringValue(
+                table[path] ?? .string(""),
+                key: "permissions.\(profileName).network.unix_sockets.\(path)"
+            ),
+                let permission = NetworkUnixSocketPermission(rawValue: rawPermission)
+            else {
+                throw CodexConfigLoadError.invalidStringValue(
+                    "permissions.\(profileName).network.unix_sockets.\(path)"
+                )
+            }
+            sockets[path] = permission
+        }
+        config.network.unixSockets = sockets.isEmpty ? nil : sockets
     }
 
     private func filesystemEntries(
@@ -1119,6 +1276,32 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         return bool
     }
 
+    private func stringValue(_ value: ConfigValue, key: String) throws -> String {
+        guard case let .string(string) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return string
+    }
+
+    private func tableValue(_ value: ConfigValue, key: String) throws -> [String: ConfigValue] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return table
+    }
+
+    private func stringEnumValue<T: RawRepresentable>(
+        _ type: T.Type,
+        _ value: ConfigValue,
+        key: String
+    ) throws -> T where T.RawValue == String {
+        let raw = try stringValue(value, key: key)
+        guard let parsed = T(rawValue: raw) else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        return parsed
+    }
+
     private func nonNegativeInt(_ value: ConfigValue, key: String) throws -> Int {
         guard case let .integer(integer) = value, integer > 0, integer <= Int64(Int.max) else {
             throw CodexConfigLoadError.invalidConfigLine(key)
@@ -1270,6 +1453,13 @@ private struct ParsedCodexConfigToml {
                 let networkKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
                     .network[networkKey] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .permissionNetworkMap(name, tableKey):
+                let networkKey = try parseDottedKey(key).joined(separator: ".")
+                var existing = parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .network[tableKey] ?? .table([:])
+                existing.merge(overlay: .table([networkKey: try ConfigValueParser.parseTomlLiteral(valueText)]))
+                parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .network[tableKey] = existing
             case .audio:
                 parsed.realtimeAudio[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .realtime:
@@ -1456,6 +1646,14 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 4, parts[0] == "permissions", parts[2] == "network" {
                 permissions[parts[1], default: ParsedPermissionProfileToml()].network[parts[3]] = value
+                continue
+            }
+
+            if parts.count == 5, parts[0] == "permissions", parts[2] == "network" {
+                var existing = permissions[parts[1], default: ParsedPermissionProfileToml()]
+                    .network[parts[3]] ?? .table([:])
+                existing.merge(overlay: .table([parts[4]: value]))
+                permissions[parts[1], default: ParsedPermissionProfileToml()].network[parts[3]] = existing
                 continue
             }
 
@@ -1970,6 +2168,26 @@ private struct ParsedCodexConfigToml {
                 throw CodexConfigLoadError.invalidConfigLine(message)
             }
             return try profile.permissionProfile(profileName: profileName, cwd: cwd)
+        }
+    }
+
+    func networkProxyConfig(named profileName: String) throws -> NetworkProxyConfig {
+        switch profileName {
+        case ":read-only", ":workspace", ":danger-no-sandbox":
+            return NetworkProxyConfig()
+        default:
+            if profileName.hasPrefix(":") {
+                throw CodexConfigLoadError.invalidConfigLine(
+                    "default_permissions refers to unknown built-in profile `\(profileName)`"
+                )
+            }
+            guard let profile = permissions[profileName] else {
+                let message = permissions.isEmpty
+                    ? "default_permissions requires a `[permissions]` table"
+                    : "default_permissions refers to undefined profile `\(profileName)`"
+                throw CodexConfigLoadError.invalidConfigLine(message)
+            }
+            return try profile.networkProxyConfig(profileName: profileName)
         }
     }
 
@@ -2820,6 +3038,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 3, parts[0] == "permissions", parts[2] == "network" {
             return .permissionNetwork(parts[1])
         }
+        if parts.count == 4, parts[0] == "permissions", parts[2] == "network" {
+            return .permissionNetworkMap(parts[1], parts[3])
+        }
         if parts.count == 1, parts[0] == "audio" {
             return .audio
         }
@@ -3046,6 +3267,7 @@ private enum ConfigSection {
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
     case permissionNetwork(String)
+    case permissionNetworkMap(String, String)
     case audio
     case realtime
     case tui
