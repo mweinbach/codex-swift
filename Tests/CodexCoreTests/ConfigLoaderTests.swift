@@ -369,6 +369,9 @@ final class ConfigLoaderTests: XCTestCase {
         theme = "dark-plus"
         session_picker_view = "comfortable"
         terminal_resize_reflow_max_rows = 9000
+        notifications = ["agent-turn-complete"]
+        notification_method = "bel"
+        notification_condition = "always"
 
         [tui.model_availability_nux]
         "gpt-5.4" = 2
@@ -460,9 +463,45 @@ final class ConfigLoaderTests: XCTestCase {
             modelAvailabilityNuxShownCount: [
                 "gpt-5.4": 2,
                 "gpt-oss": 4,
-            ]
+            ],
+            notifications: TuiNotificationSettings(
+                notifications: .custom(["agent-turn-complete"]),
+                method: .bel,
+                condition: .always
+            )
         ))
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
+    }
+
+    func testTuiNotificationsLoadRustBooleanAndDefaults() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tui]
+        notifications = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.tui.notifications, TuiNotificationSettings(
+            notifications: .enabled(false),
+            method: .auto,
+            condition: .unfocused
+        ))
+    }
+
+    func testTuiNotificationConditionRejectsUnknownValueLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tui]
+        notification_condition = "background"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Invalid value for tui.notification_condition: expected string"
+            )
+        }
     }
 
     func testTerminalResizeReflowZeroDisablesLimitLikeRust() throws {

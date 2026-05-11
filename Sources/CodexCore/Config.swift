@@ -83,6 +83,38 @@ public enum TuiSessionPickerViewMode: String, Codable, Equatable, Sendable {
     case dense
 }
 
+public enum TuiNotifications: Equatable, Sendable {
+    case enabled(Bool)
+    case custom([String])
+}
+
+public enum TuiNotificationMethod: String, Codable, Equatable, Sendable {
+    case auto
+    case osc9
+    case bel
+}
+
+public enum TuiNotificationCondition: String, Codable, Equatable, Sendable {
+    case unfocused
+    case always
+}
+
+public struct TuiNotificationSettings: Equatable, Sendable {
+    public var notifications: TuiNotifications
+    public var method: TuiNotificationMethod
+    public var condition: TuiNotificationCondition
+
+    public init(
+        notifications: TuiNotifications = .enabled(true),
+        method: TuiNotificationMethod = .auto,
+        condition: TuiNotificationCondition = .unfocused
+    ) {
+        self.notifications = notifications
+        self.method = method
+        self.condition = condition
+    }
+}
+
 public struct TuiRuntimeConfig: Equatable, Sendable {
     public var animations: Bool
     public var showTooltips: Bool
@@ -95,6 +127,7 @@ public struct TuiRuntimeConfig: Equatable, Sendable {
     public var theme: String?
     public var sessionPickerView: TuiSessionPickerViewMode
     public var modelAvailabilityNuxShownCount: [String: Int]
+    public var notifications: TuiNotificationSettings
 
     public init(
         animations: Bool = true,
@@ -107,7 +140,8 @@ public struct TuiRuntimeConfig: Equatable, Sendable {
         terminalTitle: [String]? = nil,
         theme: String? = nil,
         sessionPickerView: TuiSessionPickerViewMode = .dense,
-        modelAvailabilityNuxShownCount: [String: Int] = [:]
+        modelAvailabilityNuxShownCount: [String: Int] = [:],
+        notifications: TuiNotificationSettings = TuiNotificationSettings()
     ) {
         self.animations = animations
         self.showTooltips = showTooltips
@@ -120,6 +154,7 @@ public struct TuiRuntimeConfig: Equatable, Sendable {
         self.theme = theme
         self.sessionPickerView = sessionPickerView
         self.modelAvailabilityNuxShownCount = modelAvailabilityNuxShownCount
+        self.notifications = notifications
     }
 }
 
@@ -3399,7 +3434,10 @@ private struct ParsedCodexConfigToml {
             "terminal_title",
             "theme",
             "session_picker_view",
-            "terminal_resize_reflow_max_rows"
+            "terminal_resize_reflow_max_rows",
+            "notifications",
+            "notification_method",
+            "notification_condition"
         ])
         for field in table.keys where !knownFields.contains(field) {
             throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
@@ -3446,8 +3484,38 @@ private struct ParsedCodexConfigToml {
             modelAvailabilityNuxShownCount: try modelAvailabilityNuxCountValue(
                 modelAvailabilityNux,
                 key: "\(key).model_availability_nux"
-            )
+            ),
+            notifications: try tuiNotificationSettingsValue(table, key: key)
         )
+    }
+
+    private static func tuiNotificationSettingsValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> TuiNotificationSettings {
+        let defaults = TuiNotificationSettings()
+        return TuiNotificationSettings(
+            notifications: try table["notifications"].map {
+                try tuiNotificationsValue($0, key: "\(key).notifications")
+            } ?? defaults.notifications,
+            method: try table["notification_method"].map {
+                try stringEnumValue(TuiNotificationMethod.self, $0, key: "\(key).notification_method")
+            } ?? defaults.method,
+            condition: try table["notification_condition"].map {
+                try stringEnumValue(TuiNotificationCondition.self, $0, key: "\(key).notification_condition")
+            } ?? defaults.condition
+        )
+    }
+
+    private static func tuiNotificationsValue(_ value: ConfigValue, key: String) throws -> TuiNotifications {
+        switch value {
+        case let .bool(enabled):
+            return .enabled(enabled)
+        case .array:
+            return .custom(try stringArrayValue(value, key: key))
+        default:
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
     }
 
     private static func terminalResizeReflowConfigValue(
