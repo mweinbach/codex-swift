@@ -1893,8 +1893,66 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(usage["input_tokens"], .integer(3))
         XCTAssertEqual(usage["cached_input_tokens"], .integer(1))
         XCTAssertEqual(usage["output_tokens"], .integer(5))
-        XCTAssertNil(usage["reasoning_output_tokens"])
+        XCTAssertEqual(usage["reasoning_output_tokens"], .integer(2))
         XCTAssertNil(usage["total_tokens"])
+    }
+
+    func testJSONLinesReasoningItemUsesSummaryTextLikeRust() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [
+                .success(.outputItemDone(.reasoning(
+                    id: "reasoning-1",
+                    summary: [.summaryText(text: "summary one"), .summaryText(text: "summary two")],
+                    content: [.reasoningText(text: "raw hidden")],
+                    encryptedContent: nil
+                ))),
+                .success(.completed(responseID: "resp_1", tokenUsage: nil))
+            ],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 4)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects[2]["type"], .string("item.completed"))
+        guard case let .object(item)? = objects[2]["item"] else {
+            return XCTFail("expected completed item")
+        }
+        XCTAssertEqual(item["id"], .string("item_0"))
+        XCTAssertEqual(item["type"], .string("reasoning"))
+        XCTAssertEqual(item["text"], .string("summary one\nsummary two"))
+    }
+
+    func testJSONLinesReasoningItemSkipsEmptySummaryLikeRust() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [
+                .success(.outputItemDone(.reasoning(
+                    id: "reasoning-1",
+                    summary: [],
+                    content: [.reasoningText(text: "raw hidden")],
+                    encryptedContent: nil
+                ))),
+                .success(.completed(responseID: "resp_1", tokenUsage: nil))
+            ],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 3)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("turn.completed")
+        ])
     }
 
     func testJSONLinesOutputEmitsWebSearchCompletedItem() throws {
@@ -1930,6 +1988,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(usage["input_tokens"], .integer(0))
         XCTAssertEqual(usage["cached_input_tokens"], .integer(0))
         XCTAssertEqual(usage["output_tokens"], .integer(0))
+        XCTAssertEqual(usage["reasoning_output_tokens"], .integer(0))
         XCTAssertNil(result.lastAgentMessage)
     }
 

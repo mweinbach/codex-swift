@@ -271,6 +271,8 @@ Source baseline inspected for this scaffold:
   - unified exec now applies Rust's yield-time clamping for initial `exec_command` output collection and `write_stdin`, and top-level `background_terminal_max_timeout` config is loaded as Rust's cap for empty background terminal polls with the same minimum.
 - `codex-rs/config/src/config_toml.rs`, `profile_toml.rs`, and `core/src/config/mod.rs`
   - reasoning-related config now loads Rust's top-level `hide_agent_reasoning`, `show_raw_agent_reasoning`, `model_supports_reasoning_summaries`, and top-level/profile `plan_mode_reasoning_effort`; the model reasoning-summary support override feeds Swift's model-family config override path.
+- `codex-rs/exec/src/event_processor_with_jsonl_output.rs` and `exec_events.rs`
+  - exec JSONL output now maps completed reasoning items from Rust's summary-only text projection, skips empty reasoning summaries, and emits `reasoning_output_tokens` in turn usage with Rust's zero default.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`

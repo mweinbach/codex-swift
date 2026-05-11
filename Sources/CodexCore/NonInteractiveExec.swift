@@ -906,7 +906,7 @@ public enum NonInteractiveExec {
         if let message = StreamEventUtils.lastAssistantMessage(from: item) {
             return CompletedItem(id: id, type: "agent_message", text: message)
         }
-        if let reasoningText = reasoningText(from: item) {
+        if let reasoningText = reasoningSummaryText(from: item) {
             return CompletedItem(id: id, type: "reasoning", text: reasoningText)
         }
         if case let .webSearchCall(_, _, action) = item {
@@ -2006,17 +2006,17 @@ public enum NonInteractiveExec {
         text.split(whereSeparator: \.isNewline).count
     }
 
-    private static func reasoningText(from item: ResponseItem) -> String? {
-        guard case let .reasoning(_, _, content, _) = item else {
+    private static func reasoningSummaryText(from item: ResponseItem) -> String? {
+        guard case let .reasoning(_, summary, _, _) = item else {
             return nil
         }
-        let text = content?.compactMap { item -> String? in
-            if case let .reasoningText(text) = item {
+        let text = summary.compactMap { item -> String? in
+            if case let .summaryText(text) = item {
                 return text
             }
             return nil
-        }.joined()
-        return text?.isEmpty == false ? text : nil
+        }.joined(separator: "\n")
+        return text.isEmpty ? nil : text
     }
 
     private static func defaultWriteFile(path: String, contents: String) throws {
@@ -2385,16 +2385,19 @@ private struct JSONUsage: Encodable, Equatable, Sendable {
     let inputTokens: Int64
     let cachedInputTokens: Int64
     let outputTokens: Int64
+    let reasoningOutputTokens: Int64
 
     init(_ usage: TokenUsage?) {
         inputTokens = usage?.inputTokens ?? 0
         cachedInputTokens = usage?.cachedInputTokens ?? 0
         outputTokens = usage?.outputTokens ?? 0
+        reasoningOutputTokens = usage?.reasoningOutputTokens ?? 0
     }
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case cachedInputTokens = "cached_input_tokens"
         case outputTokens = "output_tokens"
+        case reasoningOutputTokens = "reasoning_output_tokens"
     }
 }
