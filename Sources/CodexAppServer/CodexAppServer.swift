@@ -2619,9 +2619,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (result: [String: Any], archivedThreadIDs: [String]) {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2680,9 +2678,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2841,18 +2837,14 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (result: [String: Any], threadID: String, threadName: String) {
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let threadID: ConversationId
         do {
             threadID = try ConversationId(string: rawThreadID)
         } catch {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
-        guard let rawName = stringParam(params?["name"]) else {
-            throw AppServerError.invalidRequest("missing name")
-        }
+        let rawName = try rustRequiredStringParam(params?["name"], field: "name")
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             throw AppServerError.invalidRequest("thread name must not be empty")

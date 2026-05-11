@@ -4269,9 +4269,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(emptyError["code"] as? Int, -32600)
         XCTAssertEqual(emptyError["message"] as? String, "thread name must not be empty")
 
+        let missingThreadID = try appServerResponse(
+            #"{"id":2,"method":"thread/name/set","params":{"name":"Name"}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let integerThreadID = try appServerResponse(
+            #"{"id":3,"method":"thread/name/set","params":{"threadId":1,"name":"Name"}}"#,
+            codexHome: temp.url
+        )
+        let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
+        XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerThreadIDError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let missingName = try appServerResponse(
+            #"{"id":4,"method":"thread/name/set","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingNameError = try XCTUnwrap(missingName["error"] as? [String: Any])
+        XCTAssertEqual(missingNameError["code"] as? Int, -32600)
+        XCTAssertEqual(missingNameError["message"] as? String, "missing field `name`")
+
+        let integerName = try appServerResponse(
+            #"{"id":5,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":1}}"#,
+            codexHome: temp.url
+        )
+        let integerNameError = try XCTUnwrap(integerName["error"] as? [String: Any])
+        XCTAssertEqual(integerNameError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerNameError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let missingID = UUID().uuidString.lowercased()
         let missing = try appServerResponse(
-            #"{"id":2,"method":"thread/name/set","params":{"threadId":"\#(missingID)","name":"Name"}}"#,
+            #"{"id":6,"method":"thread/name/set","params":{"threadId":"\#(missingID)","name":"Name"}}"#,
             codexHome: temp.url
         )
         let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
@@ -13776,6 +13814,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: archivedPath.path))
     }
 
+    func testThreadArchiveRejectsMalformedThreadIDParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+
+        let missing = try appServerResponse(
+            #"{"id":1,"method":"thread/archive","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
+        XCTAssertEqual(missingError["code"] as? Int, -32600)
+        XCTAssertEqual(missingError["message"] as? String, "missing field `threadId`")
+
+        let integer = try appServerResponse(
+            #"{"id":2,"method":"thread/archive","params":{"threadId":1}}"#,
+            codexHome: temp.url
+        )
+        let integerError = try XCTUnwrap(integer["error"] as? [String: Any])
+        XCTAssertEqual(integerError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+    }
+
     func testThreadArchiveMarksSQLiteThreadArchivedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let id = try writeRollout(
@@ -14046,8 +14107,27 @@ final class CodexAppServerTests: XCTestCase {
 
     func testThreadUnarchiveRejectsInvalidOrMissingArchivedThread() throws {
         let temp = try TemporaryDirectory()
+        let missingThreadID = try appServerResponse(
+            #"{"id":1,"method":"thread/unarchive","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let integerThreadID = try appServerResponse(
+            #"{"id":2,"method":"thread/unarchive","params":{"threadId":1}}"#,
+            codexHome: temp.url
+        )
+        let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
+        XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerThreadIDError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let invalid = try appServerResponse(
-            #"{"id":1,"method":"thread/unarchive","params":{"threadId":"not-a-uuid"}}"#,
+            #"{"id":3,"method":"thread/unarchive","params":{"threadId":"not-a-uuid"}}"#,
             codexHome: temp.url
         )
         let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
@@ -14056,7 +14136,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let missingID = UUID().uuidString.lowercased()
         let missing = try appServerResponse(
-            #"{"id":2,"method":"thread/unarchive","params":{"threadId":"\#(missingID)"}}"#,
+            #"{"id":4,"method":"thread/unarchive","params":{"threadId":"\#(missingID)"}}"#,
             codexHome: temp.url
         )
         let missingError = try XCTUnwrap(missing["error"] as? [String: Any])

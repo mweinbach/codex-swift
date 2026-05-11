@@ -565,9 +565,9 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/bespoke_event_handling.rs` MCP startup status notifications
   - Runtime `McpStartupUpdate`, warning, guardian-warning, skills-update, deprecation-notice, hook-started/completed, model-reroute, model-verification, token-count usage/rate-limit, turn start/complete/abort lifecycle, item delta/progress, item started/completed lifecycle, raw response item completion (including hook-prompt item projection), turn-diff, plan-update, thread-goal-update, error-driven system-error status transitions, turn-affecting error, and retrying stream-error events now emit Rust-shaped app-server notifications with the v2 camelCase method payloads Rust exposes; non-turn-affecting error notification payloads remain suppressed like Rust while still marking the thread `systemError`, and failed turn completions carry the recorded turn error. Wiring real app-server thread startup into the live MCP connection manager and broader error lifecycle projection remains pending with the broader running-thread runtime.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread unarchive
-  - `thread/unarchive` now restores archived rollout files into the dated sessions tree, returns the restored `thread` object, emits `thread/unarchived`, and matches invalid/missing archived-thread errors.
+  - `thread/unarchive` now validates Rust-shaped typed `threadId` params, restores archived rollout files into the dated sessions tree, returns the restored `thread` object, emits `thread/unarchived`, and matches invalid/missing archived-thread errors.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread archive notification
-  - `thread/archive` now emits `thread/archived` after successfully moving the rollout into `archived_sessions`.
+  - `thread/archive` now validates Rust-shaped typed `threadId` params and emits `thread/archived` after successfully moving the rollout into `archived_sessions`.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` spawned descendant archive
   - `thread/archive` now consults the configured SQLite thread-spawn graph and archives materialized spawned descendants after the parent, emitting Rust-ordered `thread/archived` notifications while skipping missing or failed descendant archives.
 - `codex-rs/thread-store/src/local/archive_thread.rs` / `unarchive_thread.rs` SQLite archive metadata
@@ -577,7 +577,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread fork
   - `thread/fork` now creates a new rollout from a source thread/path, preserves copied history without mutating the source rollout, records fork metadata/thread source in session meta, returns the forked thread, subscribes the connection, and emits a `thread/started` notification without hydrated turns.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread name updates
-  - `thread/name/set` now trims names, rejects empty names and missing rollouts, appends Rust-compatible `session_index.jsonl` entries, emits `thread/name/updated`, and projects indexed names back onto thread objects.
+  - `thread/name/set` now validates Rust-shaped typed `threadId` and `name` params, trims names, rejects empty names and missing rollouts, appends Rust-compatible `session_index.jsonl` entries, emits `thread/name/updated`, and projects indexed names back onto thread objects.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread metadata updates
   - `thread/metadata/update` now patches persisted rollout `gitInfo` with Rust double-option semantics: omitted fields are preserved, explicit `null` clears fields, replacement strings are trimmed and cannot be empty, all-empty patches are rejected, loaded ephemeral threads return Rust's dedicated invalid-request error, archived rollout files are resolved by thread id like Rust's `include_archived` metadata update path, and updated thread/read responses project the new Git metadata.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread rollback markers
