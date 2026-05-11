@@ -167,6 +167,50 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertNil(outcome.skillRootByPath[pluginSkill.path])
     }
 
+    func testFallsBackToDirectoryNameWhenSkillNameIsMissingLikeRust() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let skillPath = codexHome.appendingPathComponent(
+            "skills/directory-derived/SKILL.md",
+            isDirectory: false
+        )
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeRawSkill(frontmatter: "description: fallback name", to: skillPath)
+
+        let outcome = SkillLoader.load(cwd: cwd, codexHome: codexHome, includeSystemSkills: false)
+
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.skills, [
+            SkillMetadata(
+                name: "directory-derived",
+                description: "fallback name",
+                path: skillPath.path,
+                scope: .user
+            )
+        ])
+    }
+
+    func testFallsBackToDirectoryNameWhenSkillNameIsBlankLikeRust() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let skillPath = codexHome.appendingPathComponent("skills/blank-name/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeRawSkill(
+            frontmatter: """
+            name:
+            description: fallback name
+            """,
+            to: skillPath
+        )
+
+        let outcome = SkillLoader.load(cwd: cwd, codexHome: codexHome, includeSystemSkills: false)
+
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.skills.map(\.name), ["blank-name"])
+    }
+
     func testSystemSkillParseErrorsAreSuppressedLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
@@ -191,6 +235,17 @@ final class SkillLoaderTests: XCTestCase {
         ---
 
         # \(name)
+        """.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func writeRawSkill(frontmatter: String, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        ---
+        \(frontmatter)
+        ---
+
+        # Body
         """.write(to: url, atomically: true, encoding: .utf8)
     }
 

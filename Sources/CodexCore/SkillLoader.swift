@@ -144,13 +144,11 @@ public enum SkillLoader {
             throw SkillParseError.missingFrontmatter
         }
         let fields = parseSkillFrontmatter(frontmatter)
-        let baseName = sanitizeSkillLine(fields["name"])
+        let baseName = sanitizeSkillLine(fields["name"]).flatMap { $0.isEmpty ? nil : $0 } ??
+            defaultSkillName(for: url)
         let description = sanitizeSkillLine(fields["description"])
         let shortDescription = sanitizeSkillLine(fields["metadata.short-description"])
 
-        guard let baseName, !baseName.isEmpty else {
-            throw SkillParseError.missingField("name")
-        }
         let name = namespacedSkillName(for: url, baseName: baseName, fileManager: fileManager)
         guard name.count <= 64 else {
             throw SkillParseError.invalidField("name", "exceeds maximum length of 64 characters")
@@ -344,6 +342,14 @@ public enum SkillLoader {
         value?
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
+    }
+
+    private static func defaultSkillName(for url: URL) -> String {
+        let parentName = sanitizeSkillLine(url.deletingLastPathComponent().lastPathComponent)
+        guard let parentName, !parentName.isEmpty else {
+            return "skill"
+        }
+        return parentName
     }
 
     private static func trimmingMatchingQuotes(_ value: String) -> String {

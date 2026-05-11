@@ -19135,13 +19135,11 @@ public enum CodexAppServer {
             throw SkillParseError.missingFrontmatter
         }
         let fields = parseSkillFrontmatter(frontmatter)
-        let name = sanitizeSkillLine(fields["name"])
+        let name = sanitizeSkillLine(fields["name"]).flatMap { $0.isEmpty ? nil : $0 } ??
+            defaultSkillName(for: url)
         let description = sanitizeSkillLine(fields["description"])
         let shortDescription = sanitizeSkillLine(fields["metadata.short-description"])
 
-        guard let name, !name.isEmpty else {
-            throw SkillParseError.missingField("name")
-        }
         guard name.count <= 64 else {
             throw SkillParseError.invalidField("name", "exceeds maximum length of 64 characters")
         }
@@ -19217,6 +19215,14 @@ public enum CodexAppServer {
         value?
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
+    }
+
+    private static func defaultSkillName(for url: URL) -> String {
+        let parentName = sanitizeSkillLine(url.deletingLastPathComponent().lastPathComponent)
+        guard let parentName, !parentName.isEmpty else {
+            return "skill"
+        }
+        return parentName
     }
 
     private static func skillObject(_ skill: SkillMetadata) -> [String: Any] {
