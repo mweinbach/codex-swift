@@ -34,6 +34,23 @@ public enum MemoriesMCPServer {
         }
     }
 
+    public static func toolCallResponse(
+        codexHome: URL,
+        name: String,
+        arguments: [String: Any]
+    ) throws -> [String: Any] {
+        let backend = LocalMemoriesBackend(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: backend.root, withIntermediateDirectories: true)
+        return handleToolCall(
+            id: 1,
+            params: [
+                "name": name,
+                "arguments": arguments
+            ],
+            backend: backend
+        )
+    }
+
     static func processLine(
         _ data: Data,
         state: inout MemoriesMCPServerState,

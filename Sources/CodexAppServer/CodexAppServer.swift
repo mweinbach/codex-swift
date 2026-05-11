@@ -11229,7 +11229,7 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = try effectiveConfiguredMcpServer(
+        guard case let .configured(serverConfig) = try effectiveMcpServer(
             named: server,
             runtimeConfig: runtimeConfig,
             configuration: configuration
@@ -11809,7 +11809,7 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
-        guard let serverConfig = try effectiveConfiguredMcpServer(
+        guard let effectiveServer = try effectiveMcpServer(
             named: server,
             runtimeConfig: runtimeConfig,
             configuration: configuration
@@ -11817,7 +11817,33 @@ public enum CodexAppServer {
             throw AppServerError.internalError("unknown MCP server '\(server)'")
         }
         let toolCallParams = mcpToolCallRequestParams(tool: tool, arguments: arguments, meta: meta)
-        let toolCallParamsData = try mcpToolCallRequestParamsData(toolCallParams, server: server)
+        switch effectiveServer {
+        case let .builtin(builtinServer):
+            return try mcpBuiltinToolCallResult(
+                server: builtinServer,
+                name: tool,
+                arguments: arguments,
+                configuration: configuration
+            ).object
+        case let .configured(serverConfig):
+            let toolCallParamsData = try mcpToolCallRequestParamsData(toolCallParams, server: server)
+            return try mcpConfiguredToolCallResult(
+                server: server,
+                serverConfig: serverConfig,
+                toolCallParams: toolCallParams,
+                toolCallParamsData: toolCallParamsData,
+                configuration: configuration
+            ).object
+        }
+    }
+
+    fileprivate static func mcpConfiguredToolCallResult(
+        server: String,
+        serverConfig: McpServerConfig,
+        toolCallParams: [String: Any],
+        toolCallParamsData: Data,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerJSONObject {
         switch serverConfig.transport {
         case let .stdio(command, args, env, envVars, cwd):
             return try mcpStdioToolCallResult(
@@ -11830,7 +11856,7 @@ public enum CodexAppServer {
                 params: toolCallParams,
                 timeoutSeconds: serverConfig.toolTimeoutSec ?? serverConfig.startupTimeoutSec,
                 configuration: configuration
-            ).object
+            )
         case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
             return try runAsyncBlocking {
                 try await mcpStreamableHTTPToolCallResult(
@@ -11842,7 +11868,24 @@ public enum CodexAppServer {
                     envHttpHeaders: envHttpHeaders,
                     configuration: configuration
                 )
-            }.object
+            }
+        }
+    }
+
+    fileprivate static func mcpBuiltinToolCallResult(
+        server: BuiltinMcpServer,
+        name: String,
+        arguments: Any?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerJSONObject {
+        switch server {
+        case .memories:
+            let response = try MemoriesMCPServer.toolCallResponse(
+                codexHome: configuration.codexHome,
+                name: name,
+                arguments: arguments as? [String: Any] ?? [:]
+            )
+            return try mcpToolCallResult(from: response, server: server.name)
         }
     }
 
@@ -11857,11 +11900,11 @@ public enum CodexAppServer {
         return ["threadId": threadID]
     }
 
-    private static func effectiveConfiguredMcpServer(
+    private static func effectiveMcpServer(
         named name: String,
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration
-    ) throws -> McpServerConfig? {
+    ) throws -> EffectiveMcpServer? {
         let usesCodexBackend: Bool
         if case .chatGPT = try currentAuth(configuration: configuration)?.kind {
             usesCodexBackend = true
@@ -11872,12 +11915,13 @@ public enum CodexAppServer {
             usesCodexBackend: usesCodexBackend,
             environment: configuration.environment
         )
-        guard case let .configured(serverConfig)? = effectiveServers[name],
-              serverConfig.enabled
-        else {
+        guard let server = effectiveServers[name] else {
             return nil
         }
-        return serverConfig
+        if case let .configured(serverConfig) = server, !serverConfig.enabled {
+            return nil
+        }
+        return server
     }
 
     fileprivate static func mcpServerOAuthLoginResult(

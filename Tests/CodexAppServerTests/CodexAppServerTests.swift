@@ -11355,6 +11355,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(capture.requests[1].value(forHTTPHeaderField: "Mcp-Session-Id"), "apps-tool-session")
     }
 
+    func testMcpServerToolCallUsesBuiltinMemoriesServerForMaterializedThread() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T03-04-09",
+            timestamp: "2025-01-02T03:04:09Z",
+            preview: "call memories mcp",
+            provider: nil
+        )
+        let memoriesRoot = temp.url.appendingPathComponent("memories/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: memoriesRoot, withIntermediateDirectories: true)
+        try "alpha\nbeta memory\n".write(
+            to: memoriesRoot.appendingPathComponent("one.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [features]
+        builtin_mcp = true
+        memories = true
+
+        [memories]
+        use_memories = true
+
+        [mcp_servers.memories]
+        url = "https://user.example.test/ignored"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"memories","tool":"read","arguments":{"path":"notes/one.md","line_offset":2,"max_lines":1}}}"#,
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "text")
+        XCTAssertEqual(result["isError"] as? Bool, false)
+        let structured = try XCTUnwrap(result["structuredContent"] as? [String: Any])
+        XCTAssertEqual(structured["path"] as? String, "notes/one.md")
+        XCTAssertEqual(structured["start_line_number"] as? Int, 2)
+        XCTAssertEqual(structured["content"] as? String, "beta memory\n")
+    }
+
     func testMcpServerToolCallCallsConfiguredStdioServer() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
