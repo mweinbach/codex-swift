@@ -119,6 +119,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending
     public let authRefreshTransport: AppServerAuthRefreshTransport?
+    public let authLoginTransport: ChatGPTLoginTransport?
     public let authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
     public let pluginHTTPTransport: AppServerPluginHTTPTransport
@@ -144,6 +145,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        authLoginTransport: ChatGPTLoginTransport? = nil,
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
@@ -174,6 +176,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.accountRateLimitsFetcher = accountRateLimitsFetcher
         self.addCreditsNudgeEmailSender = addCreditsNudgeEmailSender
         self.authRefreshTransport = authRefreshTransport
+        self.authLoginTransport = authLoginTransport
         self.authDeviceCodeTransport = authDeviceCodeTransport
         self.mcpHTTPTransport = mcpHTTPTransport
         self.pluginHTTPTransport = pluginHTTPTransport
@@ -19265,9 +19268,6 @@ public enum CodexAppServer {
         ) else {
             return nil
         }
-        if let apiKey = auth.openAIAPIKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
-        }
         if let tokens = auth.tokens, !tokens.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AppServerAuth(
                 method: auth.authMode == .chatGPTAuthTokens ? "chatgptAuthTokens" : "chatgpt",
@@ -19275,6 +19275,9 @@ public enum CodexAppServer {
                 accountID: tokens.accountID ?? tokens.idToken.chatGPTAccountID,
                 kind: .chatGPT(tokens.idToken)
             )
+        }
+        if let apiKey = auth.openAIAPIKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return AppServerAuth(method: "apikey", token: apiKey, accountID: nil, kind: .apiKey)
         }
         return nil
     }
@@ -20326,6 +20329,39 @@ private final class AppServerProcessRegistry: @unchecked Sendable {
     }
 }
 
+private final class AppServerChatGPTLoginRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var servers: [UUID: ChatGPTLoginServer] = [:]
+
+    func replaceAll(with id: UUID, server: ChatGPTLoginServer) {
+        let previous = lock.withLock {
+            let previous = Array(servers.values)
+            servers = [id: server]
+            return previous
+        }
+        for server in previous {
+            server.cancel()
+        }
+    }
+
+    func remove(_ id: UUID) -> ChatGPTLoginServer? {
+        lock.withLock {
+            servers.removeValue(forKey: id)
+        }
+    }
+
+    func cancelAll() {
+        let previous = lock.withLock {
+            let previous = Array(servers.values)
+            servers.removeAll()
+            return previous
+        }
+        for server in previous {
+            server.cancel()
+        }
+    }
+}
+
 private final class AppServerCancellableLoginRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -20381,7 +20417,7 @@ final class CodexAppServerMessageProcessor {
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var threadAnalyticsMetadata: [String: ThreadAnalyticsMetadata] = [:]
-    private var activeChatGPTLogins: [UUID: ChatGPTLoginServer] = [:]
+    private let activeChatGPTLogins = AppServerChatGPTLoginRegistry()
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
     private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
@@ -20417,9 +20453,7 @@ final class CodexAppServerMessageProcessor {
     }
 
     deinit {
-        for server in activeChatGPTLogins.values {
-            server.cancel()
-        }
+        activeChatGPTLogins.cancelAll()
         activeDeviceCodeLogins.cancelAll()
         for watch in fsWatches.values {
             watch.cancel()
@@ -20986,7 +21020,10 @@ final class CodexAppServerMessageProcessor {
         return false
     }
 
-    private func startChatGptLogin(codexStreamlinedLogin: Bool = false) throws -> (loginID: UUID, authURL: String) {
+    private func startChatGptLogin(
+        codexStreamlinedLogin: Bool = false,
+        emitAccountNotifications: Bool = false
+    ) throws -> (loginID: UUID, authURL: String) {
         if try CodexAppServer.externalChatGPTAuthActive(configuration: configuration) {
             throw CodexAppServer.externalAuthActiveError()
         }
@@ -21003,18 +21040,80 @@ final class CodexAppServerMessageProcessor {
                 authCredentialsStoreMode: configuration.authCredentialsStoreMode,
                 originator: configuration.originator,
                 codexStreamlinedLogin: codexStreamlinedLogin
-            ))
+            ),
+                transport: configuration.authLoginTransport
+            )
         } catch {
             throw AppServerError.internalError("failed to start login server: \(error)")
         }
-        for active in activeChatGPTLogins.values {
-            active.cancel()
-        }
-        activeChatGPTLogins.removeAll()
         activeDeviceCodeLogins.cancelAll()
         let loginID = UUID()
-        activeChatGPTLogins[loginID] = server
+        activeChatGPTLogins.replaceAll(with: loginID, server: server)
+        if emitAccountNotifications {
+            let serverConfiguration = configuration
+            let notificationSink = notificationSink
+            let registry = activeChatGPTLogins
+            let threadStateManager = threadStateManager
+            Task {
+                let (success, error) = await CodexAppServerMessageProcessor.waitForChatGPTLoginCompletion(server: server)
+                await CodexAppServer.sendAccountLoginCompletedNotification(
+                    loginID: loginID.uuidString.lowercased(),
+                    success: success,
+                    error: error,
+                    notificationSink: notificationSink
+                )
+                if success {
+                    CodexAppServerMessageProcessor.queueBestEffortMcpServerRefresh(
+                        configuration: serverConfiguration,
+                        threadStateManager: threadStateManager
+                    )
+                    await CodexAppServer.sendAccountUpdatedNotification(
+                        configuration: serverConfiguration,
+                        notificationSink: notificationSink
+                    )
+                }
+                _ = registry.remove(loginID)
+            }
+        }
         return (loginID, server.authURL)
+    }
+
+    private static func waitForChatGPTLoginCompletion(server: ChatGPTLoginServer) async -> (success: Bool, error: String?) {
+        enum Completion {
+            case done(Result<Void, Error>)
+            case timeout
+        }
+        return await withTaskGroup(of: Completion.self, returning: (Bool, String?).self) { group in
+            group.addTask {
+                do {
+                    try await server.waitUntilDone()
+                    return .done(.success(()))
+                } catch {
+                    return .done(.failure(error))
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
+                return .timeout
+            }
+
+            guard let completion = await group.next() else {
+                group.cancelAll()
+                return (false, "Login server error: Login was not completed")
+            }
+            switch completion {
+            case .done(.success):
+                group.cancelAll()
+                return (true, nil)
+            case let .done(.failure(error)):
+                group.cancelAll()
+                return (false, "Login server error: \(String(describing: error))")
+            case .timeout:
+                server.cancel()
+                group.cancelAll()
+                return (false, "Login timed out")
+            }
+        }
     }
 
     private func chatGPTDeviceCodeLoginOptions() throws -> ChatGPTDeviceCodeLoginOptions {
@@ -21061,10 +21160,7 @@ final class CodexAppServerMessageProcessor {
             throw AppServerError.internalError("failed to request device code: \(error)")
         }
 
-        for active in activeChatGPTLogins.values {
-            active.cancel()
-        }
-        activeChatGPTLogins.removeAll()
+        activeChatGPTLogins.cancelAll()
 
         let loginID = UUID()
         let loginIDString = loginID.uuidString.lowercased()
@@ -21125,10 +21221,13 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func loginChatGptAccountResult(params: [String: Any]?) throws -> [String: Any] {
-        let started = try startChatGptLogin(codexStreamlinedLogin: CodexAppServer.boolParam(
-            params?["codexStreamlinedLogin"],
-            defaultValue: false
-        ))
+        let started = try startChatGptLogin(
+            codexStreamlinedLogin: CodexAppServer.boolParam(
+                params?["codexStreamlinedLogin"],
+                defaultValue: false
+            ),
+            emitAccountNotifications: true
+        )
         return [
             "type": "chatgpt",
             "loginId": started.loginID.uuidString.lowercased(),
@@ -21143,7 +21242,7 @@ final class CodexAppServerMessageProcessor {
         guard let loginID = UUID(uuidString: loginIDString) else {
             throw AppServerError.invalidRequest("invalid login id: \(loginIDString)")
         }
-        guard let server = activeChatGPTLogins.removeValue(forKey: loginID) else {
+        guard let server = activeChatGPTLogins.remove(loginID) else {
             throw AppServerError.invalidRequest("login id not found: \(loginIDString)")
         }
         server.cancel()
@@ -21151,10 +21250,7 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func cancelActiveAccountLogins() {
-        for server in activeChatGPTLogins.values {
-            server.cancel()
-        }
-        activeChatGPTLogins.removeAll()
+        activeChatGPTLogins.cancelAll()
         activeDeviceCodeLogins.cancelAll()
     }
 
@@ -21165,7 +21261,7 @@ final class CodexAppServerMessageProcessor {
         guard let loginID = UUID(uuidString: loginIDString) else {
             throw AppServerError.invalidRequest("invalid login id: \(loginIDString)")
         }
-        if let server = activeChatGPTLogins.removeValue(forKey: loginID) {
+        if let server = activeChatGPTLogins.remove(loginID) {
             server.cancel()
             return ["status": "canceled"]
         }

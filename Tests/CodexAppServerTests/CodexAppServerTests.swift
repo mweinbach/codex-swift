@@ -13229,6 +13229,72 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(cancelAgainResult["status"] as? String, "notFound")
     }
 
+    func testAccountLoginChatGPTBrowserCompletionNotifiesAndQueuesMcpRefresh() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        command = "docs-browser"
+        """.write(to: temp.url.appendingPathComponent("config.toml", isDirectory: false), atomically: true, encoding: .utf8)
+        let notificationCapture = AppServerNotificationCapture()
+        let idToken = try fakeJWT(email: "browser@example.com", plan: "pro", accountID: "org-browser")
+        let accessToken = try fakeJWT(email: "browser@example.com", plan: "pro", accountID: "org-browser")
+        let probe = AppServerBrowserLoginProbe(idToken: idToken, accessToken: accessToken)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authLoginTransport: { request in try await probe.handle(request) }
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":0,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgpt"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        XCTAssertEqual(loginResult["type"] as? String, "chatgpt")
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+        let authURL = try XCTUnwrap(loginResult["authUrl"] as? String)
+        let authComponents = try XCTUnwrap(URLComponents(string: authURL))
+        let authQuery = Dictionary(uniqueKeysWithValues: (authComponents.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let redirectURI = try XCTUnwrap(authQuery["redirect_uri"])
+        let state = try XCTUnwrap(authQuery["state"])
+        let callbackURL = try XCTUnwrap(URL(string: "\(redirectURI)?code=browser-code&state=\(state)"))
+        let (_, response) = try await URLSession.shared.data(from: callbackURL)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, true)
+        XCTAssertTrue(completedParams["error"] is NSNull)
+
+        let updated = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(updated.count, 1)
+        XCTAssertEqual(updated[0]["method"] as? String, "account/updated")
+        let updatedParams = try XCTUnwrap(updated[0]["params"] as? [String: Any])
+        XCTAssertEqual(updatedParams["authMode"] as? String, "chatgpt")
+        XCTAssertEqual(updatedParams["planType"] as? String, "pro")
+        let refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        guard case let .object(servers) = refresh.mcpServers,
+              case let .object(docs)? = servers["docs"]
+        else {
+            return XCTFail("expected browser login MCP refresh config")
+        }
+        XCTAssertEqual(docs["command"], .string("docs-browser"))
+
+        let requests = await probe.requests()
+        XCTAssertEqual(requests.map(\.url), [
+            "https://auth.openai.com/oauth/token",
+            "https://auth.openai.com/oauth/token"
+        ])
+    }
+
     func testAccountLoginChatGPTDeviceCodeSucceedsAndNotifies() async throws {
         let temp = try TemporaryDirectory()
         try """
@@ -19089,6 +19155,7 @@ final class CodexAppServerTests: XCTestCase {
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
+        authLoginTransport: ChatGPTLoginTransport? = nil,
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         environment: [String: String] = [:],
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
@@ -19116,6 +19183,7 @@ final class CodexAppServerTests: XCTestCase {
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
             authRefreshTransport: authRefreshTransport,
+            authLoginTransport: authLoginTransport,
             authDeviceCodeTransport: authDeviceCodeTransport,
             mcpHTTPTransport: mcpHTTPTransport,
             pluginHTTPTransport: pluginHTTPTransport,
@@ -20107,6 +20175,65 @@ private actor AppServerDeviceCodeProbe {
         default:
             return AuthRefreshHTTPResponse(statusCode: 404, body: Data())
         }
+    }
+}
+
+private actor AppServerBrowserLoginProbe {
+    private let idToken: String
+    private let accessToken: String
+    private var recordedRequests: [RecordedAppServerLoginRequest] = []
+
+    init(idToken: String, accessToken: String) {
+        self.idToken = idToken
+        self.accessToken = accessToken
+    }
+
+    func handle(_ request: URLRequest) throws -> AuthRefreshHTTPResponse {
+        let recorded = RecordedAppServerLoginRequest(request: request)
+        recordedRequests.append(recorded)
+        guard recorded.url == "https://auth.openai.com/oauth/token",
+              let body = recorded.body
+        else {
+            return AuthRefreshHTTPResponse(statusCode: 404, body: Data())
+        }
+
+        if body.contains("grant_type=authorization_code") {
+            return AuthRefreshHTTPResponse(
+                statusCode: 200,
+                body: Data("""
+                {
+                  "id_token": "\(idToken)",
+                  "access_token": "\(accessToken)",
+                  "refresh_token": "refresh-token"
+                }
+                """.utf8)
+            )
+        }
+
+        if body.contains("requested_token=openai-api-key") {
+            return AuthRefreshHTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"access_token":"sk-exchanged"}"#.utf8)
+            )
+        }
+
+        return AuthRefreshHTTPResponse(statusCode: 400, body: Data())
+    }
+
+    func requests() -> [RecordedAppServerLoginRequest] {
+        recordedRequests
+    }
+}
+
+private struct RecordedAppServerLoginRequest: Equatable, Sendable {
+    let method: String
+    let url: String
+    let body: String?
+
+    init(request: URLRequest) {
+        method = request.httpMethod ?? "GET"
+        url = request.url?.absoluteString ?? ""
+        body = request.httpBody.flatMap { String(data: $0, encoding: .utf8) }
     }
 }
 
