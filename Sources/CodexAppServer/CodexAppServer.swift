@@ -20061,6 +20061,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
+    private var ephemeralThreadIDs: Set<String> = []
     private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
@@ -20149,6 +20150,16 @@ final class CodexAppServerMessageProcessor {
         return (try? CodexAppServer.runAsyncBlocking {
             await manager.isThreadLoaded(threadID)
         }) ?? false
+    }
+
+    private func rejectMetadataUpdateForLoadedEphemeralThread(params: [String: Any]?) throws {
+        guard let threadID = CodexAppServer.stringParam(params?["threadId"]),
+              ephemeralThreadIDs.contains(threadID),
+              isThreadLoaded(threadID)
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("ephemeral thread does not support metadata updates: \(threadID)")
     }
 
     private func rememberThreadAnalyticsMetadata(threadID: String, result: [String: Any]) {
@@ -21047,6 +21058,9 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
+                            if (thread["ephemeral"] as? Bool) == true {
+                                ephemeralThreadIDs.insert(threadID)
+                            }
                             rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
@@ -21257,6 +21271,7 @@ final class CodexAppServerMessageProcessor {
                         threadName: result.threadName
                     ))
                 case "thread/metadata/update":
+                    try rejectMetadataUpdateForLoadedEphemeralThread(params: params)
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
