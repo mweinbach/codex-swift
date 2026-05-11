@@ -261,6 +261,8 @@ Source baseline inspected for this scaffold:
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
   - shell type detection including Rust `PathBuf` platform-native separator behavior, shell name mapping, exec argument derivation, PowerShell UTF-8 output prefixing, Unix passwd-backed default shell discovery, model-provided shell fallback, default shell fallback ordering, platform-native PATH discovery separators, PowerShell fallback paths, and Rust-matching real-file checks before accepting a detected user default shell path
+- `codex-rs/core/src/shell_snapshot.rs`
+  - added the Swift shell snapshot core for POSIX shells, including Rust's `shell_snapshots` directory naming, generation-suffixed snapshot files, temporary writes, startup-output preamble stripping from `# Snapshot file`, source validation, bash/zsh/sh section scripts, invalid/export-exclusion filtering, snapshot deletion on handle release, and stale snapshot cleanup against rollout files. Live runtime refresh/watch-channel wiring remains pending.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`
