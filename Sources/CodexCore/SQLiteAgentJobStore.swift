@@ -58,6 +58,38 @@ public struct AgentJobItem: Equatable, Sendable {
     public var updatedAt: Date
     public var completedAt: Date?
     public var reportedAt: Date?
+
+    public init(
+        jobID: String,
+        itemID: String,
+        rowIndex: Int64,
+        sourceID: String?,
+        rowJSON: JSONValue,
+        status: AgentJobItemStatus,
+        assignedThreadID: String?,
+        attemptCount: Int64,
+        resultJSON: JSONValue?,
+        lastError: String?,
+        createdAt: Date,
+        updatedAt: Date,
+        completedAt: Date?,
+        reportedAt: Date?
+    ) {
+        self.jobID = jobID
+        self.itemID = itemID
+        self.rowIndex = rowIndex
+        self.sourceID = sourceID
+        self.rowJSON = rowJSON
+        self.status = status
+        self.assignedThreadID = assignedThreadID
+        self.attemptCount = attemptCount
+        self.resultJSON = resultJSON
+        self.lastError = lastError
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.reportedAt = reportedAt
+    }
 }
 
 public struct AgentJobProgress: Equatable, Sendable {
