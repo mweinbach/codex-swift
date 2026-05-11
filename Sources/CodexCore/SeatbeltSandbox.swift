@@ -216,6 +216,7 @@ public enum SeatbeltSandbox {
         )
         let networkPolicy = networkSandboxPolicy.isEnabled ? macOSSeatbeltNetworkPolicy : ""
         let (unixSocketPolicy, unixSocketParams) = unixSocketPolicyAndParams(allowUnixSockets: allowUnixSockets)
+        let denyReadRootPolicy = unreadableRootPolicy(unreadableRoots)
         let denyReadPolicy = unreadableGlobPolicy(fileSystemSandboxPolicy: fileSystemSandboxPolicy, cwd: cwd)
         let platformDefaultsPolicy = fileSystemSandboxPolicy.includePlatformDefaults
             ? macOSRestrictedReadOnlyPlatformDefaults
@@ -224,6 +225,7 @@ public enum SeatbeltSandbox {
         \(macOSSeatbeltBasePolicy)
         \(fileReadPolicy)
         \(fileWritePolicy)
+        \(denyReadRootPolicy)
         \(denyReadPolicy)
         \(networkPolicy)
         \(unixSocketPolicy)
@@ -371,6 +373,18 @@ public enum SeatbeltSandbox {
 
         return uniqueRegexes.map { regex in
             #"(deny file-read* (regex #"\#(regex)"))"# + "\n" +
+                #"(deny file-write-unlink (regex #"\#(regex)"))"#
+        }.joined(separator: "\n")
+    }
+
+    private static func unreadableRootPolicy(_ unreadableRoots: [AbsolutePath]) -> String {
+        guard !unreadableRoots.isEmpty else {
+            return ""
+        }
+        return unreadableRoots.map { root in
+            let escapedRoot = canonicalPath(root.path).map(escapedRegexLiteral).joined()
+            let regex = "^\(escapedRoot)(/.*)?$"
+            return #"(deny file-read* (regex #"\#(regex)"))"# + "\n" +
                 #"(deny file-write-unlink (regex #"\#(regex)"))"#
         }.joined(separator: "\n")
     }

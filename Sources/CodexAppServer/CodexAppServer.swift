@@ -280,6 +280,27 @@ private struct AppServerSandboxLaunch {
     let environment: [String: String]
 }
 
+private struct AppServerCommandExecSandboxConfiguration {
+    let legacyPolicy: SandboxPolicy?
+    let permissionProfile: PermissionProfile?
+    let cwd: URL
+
+    static func legacy(policy: SandboxPolicy, cwd: URL) -> AppServerCommandExecSandboxConfiguration {
+        AppServerCommandExecSandboxConfiguration(legacyPolicy: policy, permissionProfile: nil, cwd: cwd)
+    }
+
+    static func direct(
+        permissionProfile: PermissionProfile,
+        cwd: URL
+    ) -> AppServerCommandExecSandboxConfiguration {
+        AppServerCommandExecSandboxConfiguration(
+            legacyPolicy: nil,
+            permissionProfile: permissionProfile,
+            cwd: cwd
+        )
+    }
+}
+
 private struct AppServerCommandExecWriteParams {
     let processID: String
     let delta: Data
@@ -13268,8 +13289,7 @@ public enum CodexAppServer {
         return try runOneOffCommand(
             parsed.command,
             cwd: cwd,
-            sandboxPolicy: sandbox.policy,
-            sandboxCwd: sandbox.cwd,
+            sandboxConfiguration: sandbox,
             timeoutMilliseconds: parsed.timeoutMs,
             outputBytesCap: parsed.outputBytesCap,
             environment: commandExecEnvironment(
@@ -13352,17 +13372,47 @@ public enum CodexAppServer {
         runtimeConfig: CodexRuntimeConfig,
         commandCwd: URL,
         configuration: CodexAppServerConfiguration
-    ) throws -> (policy: SandboxPolicy, cwd: URL) {
+    ) throws -> AppServerCommandExecSandboxConfiguration {
         if let permissionProfile = parsed.permissionProfile {
-            return (
-                try legacySandboxPolicy(from: permissionProfile, cwd: commandCwd),
-                commandCwd
+            let permissionProfile = permissionProfilePreservingConfiguredDenyReads(
+                permissionProfile,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration
+            )
+            if permissionProfile.fileSystemSandboxPolicy.hasDeniedReadRestrictions {
+                return .direct(permissionProfile: permissionProfile, cwd: commandCwd)
+            }
+            return .legacy(
+                policy: try legacySandboxPolicy(from: permissionProfile, cwd: commandCwd),
+                cwd: commandCwd
             )
         }
-        return (parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(), configuration.cwd)
+        return .legacy(policy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(), cwd: configuration.cwd)
     }
 
-    private static func legacySandboxPolicy(from permissionProfile: PermissionProfile, cwd: URL) throws -> SandboxPolicy {
+    private static func permissionProfilePreservingConfiguredDenyReads(
+        _ permissionProfile: PermissionProfile,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) -> PermissionProfile {
+        let configuredFileSystemPolicy = runtimeConfig.permissionProfile?.fileSystemSandboxPolicy
+            ?? FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(
+                runtimeConfig.legacySandboxPolicy(),
+                cwd: configuration.cwd.standardizedFileURL.path
+            )
+        var fileSystemPolicy = permissionProfile.fileSystemSandboxPolicy
+        fileSystemPolicy.preserveDenyReadRestrictions(from: configuredFileSystemPolicy)
+        return PermissionProfile.fromRuntimePermissionsWithEnforcement(
+            permissionProfile.enforcement,
+            fileSystem: fileSystemPolicy,
+            network: permissionProfile.networkSandboxPolicy
+        )
+    }
+
+    private static func legacySandboxPolicy(
+        from permissionProfile: PermissionProfile,
+        cwd: URL
+    ) throws -> SandboxPolicy {
         do {
             return try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
                 networkPolicy: permissionProfile.networkSandboxPolicy,
@@ -13402,6 +13452,61 @@ public enum CodexAppServer {
     }
 
     fileprivate static func sandboxedLaunch(
+        command: [String],
+        sandboxConfiguration: AppServerCommandExecSandboxConfiguration,
+        environment: [String: String]
+    ) throws -> AppServerSandboxLaunch {
+        if let permissionProfile = sandboxConfiguration.permissionProfile {
+            return try sandboxedLaunch(
+                command: command,
+                permissionProfile: permissionProfile,
+                sandboxCwd: sandboxConfiguration.cwd,
+                environment: environment
+            )
+        }
+        guard let sandboxPolicy = sandboxConfiguration.legacyPolicy else {
+            throw AppServerError.internalError("missing command/exec sandbox configuration")
+        }
+        return try sandboxedLaunch(
+            command: command,
+            sandboxPolicy: sandboxPolicy,
+            sandboxCwd: sandboxConfiguration.cwd,
+            environment: environment
+        )
+    }
+
+    private static func sandboxedLaunch(
+        command: [String],
+        permissionProfile: PermissionProfile,
+        sandboxCwd: URL,
+        environment: [String: String]
+    ) throws -> AppServerSandboxLaunch {
+        guard permissionProfile.enforcement != .disabled else {
+            return AppServerSandboxLaunch(command: command, environment: environment)
+        }
+        let absoluteCwd: AbsolutePath
+        do {
+            absoluteCwd = try AbsolutePath(absolutePath: sandboxCwd.standardizedFileURL.path)
+        } catch {
+            throw AppServerError.internalError("invalid sandbox cwd: \(sandboxCwd.path)")
+        }
+
+        var sandboxEnvironment = environment
+        sandboxEnvironment["CODEX_SANDBOX"] = SeatbeltSandbox.sandboxEnvironmentValue
+        if !permissionProfile.networkSandboxPolicy.isEnabled {
+            sandboxEnvironment["CODEX_SANDBOX_NETWORK_DISABLED"] = "1"
+        }
+        return AppServerSandboxLaunch(
+            command: [SeatbeltSandbox.executablePath] + SeatbeltSandbox.commandArguments(
+                command: command,
+                permissionProfile: permissionProfile,
+                sandboxPolicyCwd: absoluteCwd
+            ),
+            environment: sandboxEnvironment
+        )
+    }
+
+    private static func sandboxedLaunch(
         command: [String],
         sandboxPolicy: SandboxPolicy,
         sandboxCwd: URL,
@@ -16741,16 +16846,14 @@ public enum CodexAppServer {
     private static func runOneOffCommand(
         _ command: [String],
         cwd: URL?,
-        sandboxPolicy: SandboxPolicy,
-        sandboxCwd: URL,
+        sandboxConfiguration: AppServerCommandExecSandboxConfiguration,
         timeoutMilliseconds: Int?,
         outputBytesCap: Int?,
         environment: [String: String]
     ) throws -> [String: Any] {
         let launch = try sandboxedLaunch(
             command: command,
-            sandboxPolicy: sandboxPolicy,
-            sandboxCwd: sandboxCwd,
+            sandboxConfiguration: sandboxConfiguration,
             environment: environment
         )
         let process = Process()
@@ -18824,8 +18927,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         params: AppServerCommandExecParams,
         requestID: Any,
         cwd: URL,
-        sandboxPolicy: SandboxPolicy,
-        sandboxCwd: URL,
+        sandboxConfiguration: AppServerCommandExecSandboxConfiguration,
         environment: [String: String],
         notificationSink: AppServerNotificationSink?,
         onExit: @escaping @Sendable (String) -> Void
@@ -18840,8 +18942,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         )
         let launch = try CodexAppServer.sandboxedLaunch(
             command: params.command,
-            sandboxPolicy: sandboxPolicy,
-            sandboxCwd: sandboxCwd,
+            sandboxConfiguration: sandboxConfiguration,
             environment: environment
         )
         if launch.command[0].contains("/") {
@@ -20223,8 +20324,7 @@ final class CodexAppServerMessageProcessor {
             params: parsed,
             requestID: id,
             cwd: commandCwd,
-            sandboxPolicy: sandbox.policy,
-            sandboxCwd: sandbox.cwd,
+            sandboxConfiguration: sandbox,
             environment: ExecEnvironment.createEnv(
                 policy: runtimeConfig.shellEnvironmentPolicy,
                 environment: configuration.environment

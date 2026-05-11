@@ -16242,7 +16242,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "profile")
     }
 
-    func testCommandExecPermissionProfileRejectsUnbridgeableWritesLikeRust() throws {
+    func testCommandExecPermissionProfileRejectsUnbridgeableWritesUntilDirectRuntimeLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
         let outside = try TemporaryDirectory()
@@ -16260,6 +16260,47 @@ final class CodexAppServerTests: XCTestCase {
             error["message"] as? String,
             "invalid permission profile: permissions profile requests filesystem writes outside the workspace root, which is not supported until the runtime enforces FileSystemSandboxPolicy directly"
         )
+    }
+
+    func testCommandExecPermissionProfilePreservesConfiguredDenyReadsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try temporaryPrivateTmpDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: cwd)
+        }
+        let secret = cwd.appendingPathComponent("secret.env", isDirectory: false)
+        let secretGlob = "\(cwd.path)/*.env"
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try "TOKEN=hidden".write(to: secret, atomically: true, encoding: .utf8)
+        try """
+        [permissions.filesystem]
+        deny_read = ["\(secretGlob)"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        let configOverrides = ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+        let loadedConfig = try CodexConfigLoader.load(
+            codexHome: codexHome.url,
+            cwd: cwd,
+            managedConfigOverrides: configOverrides
+        )
+        XCTAssertEqual(
+            loadedConfig.permissionProfile?.fileSystemSandboxPolicy.getUnreadableGlobsWithCwd(cwd.path),
+            [secretGlob]
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: codexHome.url,
+                cwd: cwd,
+                configLayerOverrides: configOverrides
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/cat","\#(secret.path)"],"cwd":"\#(cwd.path)","permissionProfile":{"type":"managed","network":{"enabled":false},"fileSystem":{"type":"restricted","entries":[{"path":{"type":"special","value":{"kind":"root"}},"access":"read"}]}}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertNotEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
     }
 
     func testCommandExecValidatesRustOptionConflicts() throws {
@@ -17784,6 +17825,12 @@ final class CodexAppServerTests: XCTestCase {
         lines.append("---")
         lines.append("body")
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func temporaryPrivateTmpDirectory() throws -> URL {
+        let url = URL(fileURLWithPath: "/private/tmp/codex-swift-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
     private func decode(_ data: Data?) throws -> [String: Any] {

@@ -182,6 +182,8 @@ final class SeatbeltSandboxTests: XCTestCase {
         )
 
         let policyText = args[1]
+        XCTAssertTrue(policyText.contains(#"(deny file-read* (regex #"^/private/tmp/codex-unreadable(/.*)?$"))"#))
+        XCTAssertTrue(policyText.contains(#"(deny file-write-unlink (regex #"^/private/tmp/codex-unreadable(/.*)?$"))"#))
         XCTAssertTrue(policyText.contains(#"(require-not (literal (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
         XCTAssertTrue(policyText.contains(#"(require-not (subpath (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
         XCTAssertTrue(policyText.contains(#"(require-not (literal (param "WRITABLE_ROOT_0_EXCLUDED_0")))"#))
