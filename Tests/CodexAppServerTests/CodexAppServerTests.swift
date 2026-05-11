@@ -3331,6 +3331,93 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(verificationParams["verifications"] as? [String], ["trustedAccessForCyber"])
     }
 
+    func testRuntimeGuardianAssessmentEventsEmitRustAutoReviewNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let action = GuardianAssessmentAction.command(
+            source: .shell,
+            command: "rm -rf /tmp/example.sqlite",
+            cwd: "/tmp"
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-from-event",
+            event: .guardianAssessment(GuardianAssessmentEvent(
+                id: "review-1",
+                targetItemID: "item-1",
+                turnID: "",
+                startedAtMilliseconds: 1_000,
+                completedAtMilliseconds: nil,
+                status: .inProgress,
+                action: action
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-from-event",
+            event: .guardianAssessment(GuardianAssessmentEvent(
+                id: "review-2",
+                targetItemID: "item-2",
+                turnID: "turn-from-assessment",
+                startedAtMilliseconds: 1_000,
+                completedAtMilliseconds: 1_042,
+                status: .denied,
+                riskLevel: .high,
+                userAuthorization: .low,
+                rationale: "too risky",
+                decisionSource: .agent,
+                action: action
+            ))
+        )
+
+        let started = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(started[0]["method"] as? String, "item/autoApprovalReview/started")
+        let startedParams = try XCTUnwrap(started[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["turnId"] as? String, "turn-from-event")
+        XCTAssertEqual(startedParams["startedAtMs"] as? Int, 1_000)
+        XCTAssertEqual(startedParams["reviewId"] as? String, "review-1")
+        XCTAssertEqual(startedParams["targetItemId"] as? String, "item-1")
+        XCTAssertNil(startedParams["completedAtMs"])
+        XCTAssertNil(startedParams["decisionSource"])
+        let startedReview = try XCTUnwrap(startedParams["review"] as? [String: Any])
+        XCTAssertEqual(startedReview["status"] as? String, "inProgress")
+        XCTAssertTrue(startedReview["riskLevel"] is NSNull)
+        XCTAssertTrue(startedReview["userAuthorization"] is NSNull)
+        XCTAssertTrue(startedReview["rationale"] is NSNull)
+        let startedAction = try XCTUnwrap(startedParams["action"] as? [String: Any])
+        XCTAssertEqual(startedAction["type"] as? String, "command")
+        XCTAssertEqual(startedAction["source"] as? String, "shell")
+        XCTAssertEqual(startedAction["command"] as? String, "rm -rf /tmp/example.sqlite")
+        XCTAssertEqual(startedAction["cwd"] as? String, "/tmp")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "item/autoApprovalReview/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(completedParams["turnId"] as? String, "turn-from-assessment")
+        XCTAssertEqual(completedParams["startedAtMs"] as? Int, 1_000)
+        XCTAssertEqual(completedParams["completedAtMs"] as? Int, 1_042)
+        XCTAssertEqual(completedParams["reviewId"] as? String, "review-2")
+        XCTAssertEqual(completedParams["targetItemId"] as? String, "item-2")
+        XCTAssertEqual(completedParams["decisionSource"] as? String, "agent")
+        let completedReview = try XCTUnwrap(completedParams["review"] as? [String: Any])
+        XCTAssertEqual(completedReview["status"] as? String, "denied")
+        XCTAssertEqual(completedReview["riskLevel"] as? String, "high")
+        XCTAssertEqual(completedReview["userAuthorization"] as? String, "low")
+        XCTAssertEqual(completedReview["rationale"] as? String, "too risky")
+        let completedAction = try XCTUnwrap(completedParams["action"] as? [String: Any])
+        XCTAssertEqual(completedAction["type"] as? String, "command")
+        XCTAssertEqual(completedAction["source"] as? String, "shell")
+        XCTAssertEqual(completedAction["command"] as? String, "rm -rf /tmp/example.sqlite")
+        XCTAssertEqual(completedAction["cwd"] as? String, "/tmp")
+    }
+
     func testRuntimeHookEventsEmitRustNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

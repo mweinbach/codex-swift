@@ -13790,6 +13790,8 @@ public enum CodexAppServer {
             return warningNotification(threadID: threadID, event: event)
         case let .guardianWarning(event):
             return guardianWarningNotification(threadID: threadID, event: event)
+        case let .guardianAssessment(event):
+            return guardianAssessmentNotification(threadID: threadID, eventTurnID: turnID, event: event)
         case .skillsUpdateAvailable:
             return skillsChangedNotification()
         case let .deprecationNotice(event):
@@ -13833,6 +13835,130 @@ public enum CodexAppServer {
         default:
             return nil
         }
+    }
+
+    private static func guardianAssessmentNotification(
+        threadID: String,
+        eventTurnID: String,
+        event: GuardianAssessmentEvent
+    ) -> [String: Any] {
+        let turnID = event.turnID.isEmpty ? eventTurnID : event.turnID
+        let review = [
+            "status": guardianAssessmentStatusObject(event.status),
+            "riskLevel": nullable(event.riskLevel?.rawValue),
+            "userAuthorization": nullable(event.userAuthorization?.rawValue),
+            "rationale": nullable(event.rationale)
+        ].nullStripped(keepNulls: true)
+        var params: [String: Any] = [
+            "threadId": threadID,
+            "turnId": turnID,
+            "startedAtMs": event.startedAtMilliseconds,
+            "reviewId": event.id,
+            "targetItemId": nullable(event.targetItemID),
+            "review": review,
+            "action": guardianAssessmentActionObject(event.action)
+        ].nullStripped(keepNulls: true)
+        if event.status != .inProgress {
+            params["completedAtMs"] = event.completedAtMilliseconds ?? event.startedAtMilliseconds
+            params["decisionSource"] = guardianAssessmentDecisionSourceObject(event.decisionSource)
+        }
+
+        return [
+            "method": event.status == .inProgress
+                ? "item/autoApprovalReview/started"
+                : "item/autoApprovalReview/completed",
+            "params": params
+        ]
+    }
+
+    private static func guardianAssessmentStatusObject(_ status: GuardianAssessmentStatus) -> String {
+        switch status {
+        case .inProgress:
+            return "inProgress"
+        case .approved:
+            return "approved"
+        case .denied:
+            return "denied"
+        case .timedOut:
+            return "timedOut"
+        case .aborted:
+            return "aborted"
+        }
+    }
+
+    private static func guardianAssessmentDecisionSourceObject(
+        _ source: GuardianAssessmentDecisionSource?
+    ) -> String {
+        switch source {
+        case .agent, nil:
+            return "agent"
+        }
+    }
+
+    private static func guardianCommandSourceObject(_ source: GuardianCommandSource) -> String {
+        switch source {
+        case .shell:
+            return "shell"
+        case .unifiedExec:
+            return "unifiedExec"
+        }
+    }
+
+    private static func guardianAssessmentActionObject(_ action: GuardianAssessmentAction) -> [String: Any] {
+        switch action {
+        case let .command(source, command, cwd):
+            return [
+                "type": "command",
+                "source": guardianCommandSourceObject(source),
+                "command": command,
+                "cwd": cwd
+            ]
+        case let .execve(source, program, argv, cwd):
+            return [
+                "type": "execve",
+                "source": guardianCommandSourceObject(source),
+                "program": program,
+                "argv": argv,
+                "cwd": cwd
+            ]
+        case let .applyPatch(cwd, files):
+            return [
+                "type": "applyPatch",
+                "cwd": cwd,
+                "files": files
+            ]
+        case let .networkAccess(target, host, protocolValue, port):
+            return [
+                "type": "networkAccess",
+                "target": target,
+                "host": host,
+                "protocol": protocolValue.rawValue,
+                "port": Int(port)
+            ]
+        case let .mcpToolCall(server, toolName, connectorID, connectorName, toolTitle):
+            return [
+                "type": "mcpToolCall",
+                "server": server,
+                "toolName": toolName,
+                "connectorId": nullable(connectorID),
+                "connectorName": nullable(connectorName),
+                "toolTitle": nullable(toolTitle)
+            ].nullStripped(keepNulls: true)
+        case let .requestPermissions(reason, permissions):
+            return [
+                "type": "requestPermissions",
+                "reason": nullable(reason),
+                "permissions": requestPermissionProfileObject(permissions)
+            ].nullStripped(keepNulls: true)
+        }
+    }
+
+    private static func requestPermissionProfileObject(_ permissions: RequestPermissionProfile) -> [String: Any] {
+        var object = encodableJSONObject(permissions) as? [String: Any] ?? [:]
+        if let fileSystem = object.removeValue(forKey: "file_system") {
+            object["fileSystem"] = fileSystem
+        }
+        return object
     }
 
     private static func reviewTurn(id: String, displayText: String) -> [String: Any] {
