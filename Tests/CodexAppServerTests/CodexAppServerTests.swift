@@ -16867,6 +16867,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["processHandle"] as? String, "proc-kill")
     }
 
+    func testProcessHandlesAreConnectionScopedAndDisconnectTerminatesProcess() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let marker = "codex-process-spawn-marker-\(UUID().uuidString)"
+        var firstProcessor: CodexAppServerMessageProcessor? = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let secondProcessor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let command = "while true; do sleep 1; done"
+        let startRequest: [String: Any] = [
+            "id": 1,
+            "method": "process/spawn",
+            "params": [
+                "command": ["/bin/sh", "-c", command, marker],
+                "processHandle": "shared-process",
+                "cwd": cwd.url.path
+            ]
+        ]
+        let spawn = try decode(firstProcessor?.processLine(try JSONSerialization.data(withJSONObject: startRequest)))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        let killFromSecondConnection = try decode(secondProcessor.processLine(Data(
+            #"{"id":2,"method":"process/kill","params":{"processHandle":"shared-process"}}"#.utf8
+        )))
+        let killError = try XCTUnwrap(killFromSecondConnection["error"] as? [String: Any])
+        XCTAssertEqual(killError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            killError["message"] as? String,
+            #"no active process for process handle "shared-process""#
+        )
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        firstProcessor = nil
+        try await waitForCommandLineMarker(marker, shouldExist: false)
+    }
+
     func testProcessFollowUpsValidateWriteAndResizeParams() throws {
         let temp = try TemporaryDirectory()
 
