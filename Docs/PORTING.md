@@ -876,6 +876,7 @@ Source baseline inspected for this scaffold:
   - added Swift parity fixtures for plain `git grep`/`git ls-files`, grep files-with/without-matches flags, dash-leading and multi-operand `cd`, `exa -I`, Python file-walk detection, `tail -n +<offset>`, bash `-c` pipeline parsing, ignored-glob `ls`, and flag-bearing `cat` reads.
   - expanded Swift parity fixtures for direct `rg`/`rga` files-with/without-match flags, direct `rg --files | nl -ba` helper dropping, direct mutating `xargs` pipeline collapse, and direct pipelines whose later stage remains unknown.
   - ported Rust's small-formatting helper matrix into Swift parser fixtures, covering `wc`, `tr`, `cut`, `sort`, `uniq`, `tee`, `column`, non-mutating `xargs`, `awk`, and non-reading `sed` pipeline filtering while preserving file-reading `awk`/`sed -n` summaries.
+  - pinned Rust file-discovery summaries for `tree`, `du`, `fd`, and basic `find`, including `fd` query/path detection and `find -name` versus `find -type f` list/search behavior.
 - `codex-rs/shell-command/src/parse_command.rs` shell command joining
   - `shlexJoin` now returns Rust's `<command included NUL byte>` fallback when a token contains a NUL byte instead of attempting to quote an unrepresentable shell word.
 - `codex-rs/shell-command/src/shell_detect.rs` shell executable detection

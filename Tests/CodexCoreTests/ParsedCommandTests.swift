@@ -410,6 +410,32 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testFileDiscoverySummariesMatchRustParser() {
+        XCTAssertEqual(parseCommand(["tree", "-L", "2", "Sources/CodexCore"]), [
+            .listFiles(cmd: "tree -L 2 Sources/CodexCore", path: "CodexCore")
+        ])
+
+        XCTAssertEqual(parseCommand(["du", "--max-depth", "1", "Sources/CodexCore"]), [
+            .listFiles(cmd: "du --max-depth 1 Sources/CodexCore", path: "CodexCore")
+        ])
+
+        XCTAssertEqual(parseCommand(["fd", "-t", "f", "src/"]), [
+            .listFiles(cmd: "fd -t f src/", path: "src")
+        ])
+
+        XCTAssertEqual(parseCommand(["fd", "main", "src"]), [
+            .search(cmd: "fd main src", query: "main", path: "src")
+        ])
+
+        XCTAssertEqual(parseCommand(["find", ".", "-name", "*.rs"]), [
+            .search(cmd: "find . -name '*.rs'", query: "*.rs", path: ".")
+        ])
+
+        XCTAssertEqual(parseCommand(["find", "src", "-type", "f"]), [
+            .listFiles(cmd: "find src -type f", path: "src")
+        ])
+    }
+
     func testAwkPythonAndMutatingXargsParity() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "awk '{print $1}' Cargo.toml"]), [
             .read(cmd: "awk '{print $1}' Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
