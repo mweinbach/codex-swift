@@ -846,7 +846,7 @@ public enum CodexAppServer {
         let sortKey = try threadListSortKey(params?["sortKey"])
         let sortDirection = try threadListSortDirection(params?["sortDirection"])
         let cursor = try threadListCursor(params?["cursor"])
-        let pageSize = listLimit(params?["limit"])
+        let pageSize = try rustU32ListLimit(params?["limit"])
         let modelProviders = modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
         let cwdFilters = try threadListCwdFilters(params?["cwd"])
         let archivedOnly = boolParam(params?["archived"], defaultValue: false)
@@ -1614,7 +1614,7 @@ public enum CodexAppServer {
         let page = try paginateThreadTurns(
             turns,
             cursor: stringParam(params?["cursor"]),
-            limit: listLimit(params?["limit"], defaultValue: 25, maximum: 100),
+            limit: try rustU32ListLimit(params?["limit"]),
             sortDirection: try threadTurnsSortDirection(params?["sortDirection"])
         )
         return [
@@ -15477,6 +15477,10 @@ public enum CodexAppServer {
 
     private static func listLimit(_ value: Any?, defaultValue: Int, maximum: Int) -> Int {
         min(max(intParam(value, defaultValue: defaultValue), 1), maximum)
+    }
+
+    private static func rustU32ListLimit(_ value: Any?) throws -> Int {
+        min(max(try rustU32Param(value, defaultValue: defaultListLimit), 1), maxListLimit)
     }
 
     private static func modelListStart(cursor: String?, total: Int) throws -> Int {

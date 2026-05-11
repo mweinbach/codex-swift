@@ -11271,6 +11271,35 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadTurnsListMatchesRustU32LimitDecoding() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+
+        let invalidLimits: [(String, String)] = [
+            (#"true"#, "Invalid request: invalid type: boolean `true`, expected u32"),
+            (#""small""#, #"Invalid request: invalid type: string "small", expected u32"#),
+            (#"1.5"#, "Invalid request: invalid type: floating point `1.5`, expected u32"),
+            (#"-1"#, "Invalid request: invalid value: integer `-1`, expected u32")
+        ]
+
+        for (index, invalidLimit) in invalidLimits.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":\#(invalidLimit.0)}}"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, invalidLimit.1)
+        }
+    }
+
     func testThreadLoadedListPaginatesLoadedThreadIDs() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -11590,6 +11619,35 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
         XCTAssertEqual(data.map { $0["preview"] as? String }, ["Interactive session"])
+    }
+
+    func testThreadListMatchesRustU32LimitDecoding() throws {
+        let temp = try TemporaryDirectory()
+        _ = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-02T12-00-00",
+            timestamp: "2025-01-02T12:00:00Z",
+            preview: "Interactive session",
+            provider: "openai",
+            source: .cli
+        )
+
+        let invalidLimits: [(String, String)] = [
+            (#"false"#, "Invalid request: invalid type: boolean `false`, expected u32"),
+            (#""small""#, #"Invalid request: invalid type: string "small", expected u32"#),
+            (#"1.5"#, "Invalid request: invalid type: floating point `1.5`, expected u32"),
+            (#"-1"#, "Invalid request: invalid value: integer `-1`, expected u32")
+        ]
+
+        for (index, invalidLimit) in invalidLimits.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/list","params":{"limit":\#(invalidLimit.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, invalidLimit.1)
+        }
     }
 
     func testThreadListSupportsRustSourceCwdSearchAndArchiveFilters() throws {
