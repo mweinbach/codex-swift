@@ -16664,7 +16664,7 @@ public enum CodexAppServer {
         return path
     }
 
-    private static func rustRequiredStringParam(_ value: Any?, field: String) throws -> String {
+    fileprivate static func rustRequiredStringParam(_ value: Any?, field: String) throws -> String {
         guard let value else {
             throw AppServerError.invalidRequest("missing field `\(field)`")
         }
@@ -17855,7 +17855,7 @@ public enum CodexAppServer {
         return values
     }
 
-    private static func rustRequiredStringArrayParam(_ value: Any?, missingMessage: String) throws -> [String] {
+    fileprivate static func rustRequiredStringArrayParam(_ value: Any?, missingMessage: String) throws -> [String] {
         guard let value else {
             throw AppServerError.invalidRequest(missingMessage)
         }
@@ -22502,26 +22502,24 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func fuzzyFileSearchSessionStartResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
-            throw AppServerError.invalidRequest("missing sessionId")
-        }
+        let sessionID = try CodexAppServer.rustRequiredStringParam(params?["sessionId"], field: "sessionId")
         guard !sessionID.isEmpty else {
             throw AppServerError.invalidRequest("sessionId must not be empty")
         }
-        fuzzyFileSearchSessions[sessionID] = (params?["roots"] as? [String]) ?? []
+        let roots = try CodexAppServer.rustRequiredStringArrayParam(
+            params?["roots"],
+            missingMessage: "missing field `roots`"
+        )
+        fuzzyFileSearchSessions[sessionID] = roots
         return [:]
     }
 
     private func fuzzyFileSearchSessionUpdateResult(params: [String: Any]?) throws -> ([String: Any], [[String: Any]]) {
-        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
-            throw AppServerError.invalidRequest("missing sessionId")
-        }
+        let sessionID = try CodexAppServer.rustRequiredStringParam(params?["sessionId"], field: "sessionId")
         guard let roots = fuzzyFileSearchSessions[sessionID] else {
             throw AppServerError.invalidRequest("fuzzy file search session not found: \(sessionID)")
         }
-        guard let query = CodexAppServer.stringParam(params?["query"]) else {
-            throw AppServerError.invalidRequest("missing query")
-        }
+        let query = try CodexAppServer.rustRequiredStringParam(params?["query"], field: "query")
         let files: [[String: Any]]
         if query.isEmpty {
             files = []
@@ -22561,9 +22559,7 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func fuzzyFileSearchSessionStopResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let sessionID = CodexAppServer.stringParam(params?["sessionId"]) else {
-            throw AppServerError.invalidRequest("missing sessionId")
-        }
+        let sessionID = try CodexAppServer.rustRequiredStringParam(params?["sessionId"], field: "sessionId")
         fuzzyFileSearchSessions.removeValue(forKey: sessionID)
         return [:]
     }

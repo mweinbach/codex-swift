@@ -19992,6 +19992,80 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "fuzzy file search session not found: session-stop")
     }
 
+    func testFuzzyFileSearchSessionRoutesRejectMalformedParamsLikeRustProtocol() throws {
+        let codexHome = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let startCases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"fuzzyFileSearch/sessionStart","params":{"roots":[]}}"#,
+                "missing field `sessionId`"
+            ),
+            (
+                #"{"id":2,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":1,"roots":[]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-bad"}}"#,
+                "missing field `roots`"
+            ),
+            (
+                #"{"id":4,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-bad","roots":"."}}"#,
+                #"Invalid request: invalid type: string ".", expected a sequence"#
+            ),
+            (
+                #"{"id":5,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-bad","roots":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+        for (request, expectedMessage) in startCases {
+            let response = try decode(processor.processLine(Data(request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":6,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-good","roots":[]}}"#.utf8
+        )))
+
+        let followupCases: [(String, String)] = [
+            (
+                #"{"id":7,"method":"fuzzyFileSearch/sessionUpdate","params":{"query":"alp"}}"#,
+                "missing field `sessionId`"
+            ),
+            (
+                #"{"id":8,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":1,"query":"alp"}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":9,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-good"}}"#,
+                "missing field `query`"
+            ),
+            (
+                #"{"id":10,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-good","query":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":11,"method":"fuzzyFileSearch/sessionStop","params":{}}"#,
+                "missing field `sessionId`"
+            ),
+            (
+                #"{"id":12,"method":"fuzzyFileSearch/sessionStop","params":{"sessionId":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+        for (request, expectedMessage) in followupCases {
+            let response = try decode(processor.processLine(Data(request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testCommandExecReturnsStdoutStderrAndExitCode() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
