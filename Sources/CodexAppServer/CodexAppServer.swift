@@ -2789,10 +2789,12 @@ public enum CodexAppServer {
     fileprivate static func threadGoalSetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        experimentalAPIEnabled: Bool
+        experimentalAPIEnabled: Bool,
+        loadedEphemeralThreadIDs: Set<String> = []
     ) throws -> (result: [String: Any], threadID: String, goal: [String: Any]) {
         try requireExperimentalAPI(method: "thread/goal/set", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
+        try rejectLoadedEphemeralGoalThread(params: params, loadedEphemeralThreadIDs: loadedEphemeralThreadIDs)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         let thread = try ThreadId(string: threadID)
         let stateStore = try stateStoreForThreadGoals(configuration: configuration)
@@ -2863,10 +2865,12 @@ public enum CodexAppServer {
     fileprivate static func threadGoalGetResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        experimentalAPIEnabled: Bool
+        experimentalAPIEnabled: Bool,
+        loadedEphemeralThreadIDs: Set<String> = []
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "thread/goal/get", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
+        try rejectLoadedEphemeralGoalThread(params: params, loadedEphemeralThreadIDs: loadedEphemeralThreadIDs)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         let stateStore = try stateStoreForThreadGoals(configuration: configuration)
         let thread = try ThreadId(string: threadID)
@@ -2879,10 +2883,12 @@ public enum CodexAppServer {
     fileprivate static func threadGoalClearResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        experimentalAPIEnabled: Bool
+        experimentalAPIEnabled: Bool,
+        loadedEphemeralThreadIDs: Set<String> = []
     ) throws -> (result: [String: Any], threadID: String, cleared: Bool) {
         try requireExperimentalAPI(method: "thread/goal/clear", experimentalAPIEnabled: experimentalAPIEnabled)
         try requireGoalsFeature(configuration: configuration)
+        try rejectLoadedEphemeralGoalThread(params: params, loadedEphemeralThreadIDs: loadedEphemeralThreadIDs)
         let threadID = try materializedGoalThreadID(params: params, configuration: configuration)
         let stateStore = try stateStoreForThreadGoals(configuration: configuration)
         let thread = try ThreadId(string: threadID)
@@ -2942,6 +2948,19 @@ public enum CodexAppServer {
         guard runtimeConfig.features.isEnabled(.goals) else {
             throw AppServerError.invalidRequest("goals feature is disabled")
         }
+    }
+
+    private static func rejectLoadedEphemeralGoalThread(
+        params: [String: Any]?,
+        loadedEphemeralThreadIDs: Set<String>
+    ) throws {
+        guard let rawThreadID = stringParam(params?["threadId"]),
+              let threadID = try? ConversationId(string: rawThreadID).description,
+              loadedEphemeralThreadIDs.contains(threadID)
+        else {
+            return
+        }
+        throw AppServerError.invalidRequest("ephemeral thread does not support goals: \(threadID)")
     }
 
     private static func materializedGoalThreadID(
@@ -20530,6 +20549,10 @@ final class CodexAppServerMessageProcessor {
         throw AppServerError.invalidRequest("ephemeral thread does not support metadata updates: \(threadID)")
     }
 
+    private func loadedEphemeralThreadIDs() -> Set<String> {
+        Set(ephemeralThreadIDs.filter { isThreadLoaded($0) })
+    }
+
     private func rememberThreadAnalyticsMetadata(threadID: String, result: [String: Any]) {
         guard let modelSlug = CodexAppServer.stringParam(result["model"]),
               let cwd = CodexAppServer.stringParam(result["cwd"])
@@ -21820,7 +21843,8 @@ final class CodexAppServerMessageProcessor {
                     let result = try CodexAppServer.threadGoalSetResult(
                         params: params,
                         configuration: configuration,
-                        experimentalAPIEnabled: experimentalAPIEnabled
+                        experimentalAPIEnabled: experimentalAPIEnabled,
+                        loadedEphemeralThreadIDs: loadedEphemeralThreadIDs()
                     )
                     response = CodexAppServer.responseObject(
                         id: id,
@@ -21836,14 +21860,16 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadGoalGetResult(
                             params: params,
                             configuration: configuration,
-                            experimentalAPIEnabled: experimentalAPIEnabled
+                            experimentalAPIEnabled: experimentalAPIEnabled,
+                            loadedEphemeralThreadIDs: loadedEphemeralThreadIDs()
                         )
                     )
                 case "thread/goal/clear":
                     let result = try CodexAppServer.threadGoalClearResult(
                         params: params,
                         configuration: configuration,
-                        experimentalAPIEnabled: experimentalAPIEnabled
+                        experimentalAPIEnabled: experimentalAPIEnabled,
+                        loadedEphemeralThreadIDs: loadedEphemeralThreadIDs()
                     )
                     response = CodexAppServer.responseObject(id: id, result: result.result)
                     if result.cleared {

@@ -4000,6 +4000,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "sqlite state db unavailable for thread goals")
     }
 
+    func testThreadGoalMethodsRejectLoadedEphemeralThreadsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"ephemeral":true}}"#.utf8
+        )))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        for (index, method) in ["thread/goal/get", "thread/goal/set", "thread/goal/clear"].enumerated() {
+            let response = try decode(processor.processLine(Data(
+                #"{"id":\#(index + 2),"method":"\#(method)","params":{"threadId":"\#(threadID)","objective":"keep polishing"}}"#.utf8
+            )))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "ephemeral thread does not support goals: \(threadID)")
+        }
+    }
+
     func testThreadGoalMethodsPersistAndNotifyWhenFeatureEnabled() async throws {
         let temp = try TemporaryDirectory()
         try """
