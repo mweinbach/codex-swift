@@ -246,6 +246,93 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(memoryText.contains("\(memories.path)/MEMORY.md"))
     }
 
+    func testPromptInputIncludesAvailableSkillsWhenEnabled() async throws {
+        let temp = try TemporaryDirectory()
+        let skill = temp.url.appendingPathComponent("skills/debug-helper/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: skill.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        ---
+        name: debug-helper
+        description: Inspect debug prompt payloads.
+        ---
+
+        Use this when checking debug prompt JSON.
+        """.write(to: skill, atomically: true, encoding: .utf8)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    model: "gpt-test",
+                    modelProvider: "test-provider",
+                    includeSkillInstructions: true,
+                    projectDocMaxBytes: 0
+                )
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, developerRole, developerContent, _) = decoded[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(skillsText) = developerContent[1] else {
+            return XCTFail("expected skills instructions after permissions")
+        }
+        XCTAssertTrue(skillsText.contains("### Available skills"))
+        XCTAssertTrue(skillsText.contains("- debug-helper: Inspect debug prompt payloads."))
+        XCTAssertTrue(skillsText.contains("### How to use skills"))
+        XCTAssertTrue(skillsText.contains(skill.path))
+    }
+
+    func testPromptInputOmitsAvailableSkillsWhenDisabled() async throws {
+        let temp = try TemporaryDirectory()
+        let skill = temp.url.appendingPathComponent("skills/debug-helper/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: skill.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        ---
+        name: debug-helper
+        description: Inspect debug prompt payloads.
+        ---
+
+        Use this when checking debug prompt JSON.
+        """.write(to: skill, atomically: true, encoding: .utf8)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    includeSkillInstructions: false,
+                    projectDocMaxBytes: 0
+                )
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, _, developerContent, _) = decoded[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerContent.count, 1)
+        guard case let .inputText(permissionsText) = developerContent[0] else {
+            return XCTFail("expected only permissions instructions")
+        }
+        XCTAssertTrue(permissionsText.contains("<permissions instructions>"))
+        XCTAssertFalse(output.contains("### Available skills"))
+        XCTAssertFalse(output.contains("debug-helper"))
+    }
+
     func testClearMemoriesClearsStateRowsAndMemoryRoots() async throws {
         let temp = try TemporaryDirectory()
         let statePath = temp.url.appendingPathComponent("state_5.sqlite", isDirectory: false)

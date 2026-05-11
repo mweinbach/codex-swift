@@ -330,6 +330,20 @@ public enum DebugCommandRuntime {
             config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
         ).map { UserInstructions(directory: cwd.path, text: $0) }
         let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: config)
+        let loadedSkills = config.includeSkillInstructions
+            ? SkillLoader.load(cwd: cwd, codexHome: codexHome)
+            : nil
+        let model = config.model ?? ModelsManager.openAIDefaultAPIModel
+        let modelFamily = ModelsManager.constructModelFamilyOffline(
+            model: model,
+            configOverrides: config.modelFamilyConfigOverrides
+        )
+        let availableSkills = loadedSkills.flatMap {
+            Skills.buildAvailableSkills(
+                outcome: $0,
+                budget: Skills.defaultSkillMetadataBudget(contextWindow: modelFamily.contextWindow.map(Int.init))
+            )
+        }
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -339,6 +353,7 @@ public enum DebugCommandRuntime {
             includePermissionsInstructions: config.includePermissionsInstructions,
             developerInstructions: config.developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
+            availableSkills: availableSkills,
             userInstructions: projectInstructions
         )
 
