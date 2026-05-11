@@ -16804,7 +16804,11 @@ final class CodexAppServerTests: XCTestCase {
 
     func testExperimentalFeatureEnablementSetQueuesUserConfigRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
         let start = try decodeMessages(processor.processLine(
             Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
         ))
@@ -16821,6 +16825,9 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(features["memories"], .bool(true))
         XCTAssertEqual(features["plugins"], .bool(false))
+        XCTAssertEqual(capture.submissions, [
+            SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .reloadUserConfig)
+        ])
     }
 
     func testExperimentalFeatureEnablementSetPreservesPriorFlagsAndAllowsEmptyNoOpLikeRust() throws {
@@ -19351,7 +19358,11 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
         let start = try decodeMessages(processor.processLine(
             Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
         ))
@@ -19371,6 +19382,9 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected queued user config refresh")
         }
         XCTAssertEqual(config["model"], .string("gpt-reloaded"))
+        XCTAssertEqual(capture.submissions, [
+            SubmittedCoreOp(requestID: .integer(3), threadID: threadID, op: .reloadUserConfig)
+        ])
     }
 
     func testConfigValueWritePreservesCommentsAndOrderLikeRust() throws {
