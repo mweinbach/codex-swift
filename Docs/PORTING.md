@@ -267,6 +267,8 @@ Source baseline inspected for this scaffold:
   - non-interactive `codex exec` now attaches a startup shell snapshot to the session shell when `features.shell_snapshot` is enabled, preserves Rust's fail-open behavior when snapshot creation is unsupported or fails, and removes snapshot files when the shell/snapshot handle is released. Shell-like tool execution now runs under the configured `shell_environment_policy` environment and passes policy `set` values as explicit overrides so sourced snapshots cannot overwrite them. Interactive cwd-change refresh and thread-spawn inherited snapshot wiring remain pending.
 - `codex-rs/core/src/tools/handlers/shell_spec.rs`, `shell/shell_command.rs`, and `unified_exec.rs`
   - shell tool schemas and non-interactive shell execution now honor Rust's `allow_login_shell = false` behavior: `login` is omitted from `shell_command`/`exec_command` schemas, omitted `login` runs as a non-login shell, and explicit `login = true` returns Rust's model-facing rejection string.
+- `codex-rs/core/src/unified_exec/mod.rs`, `process_manager.rs`, and config loading
+  - unified exec now applies Rust's yield-time clamping for initial `exec_command` output collection and `write_stdin`, and top-level `background_terminal_max_timeout` config is loaded as Rust's cap for empty background terminal polls with the same minimum.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`

@@ -65,6 +65,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
         XCTAssertEqual(config.projectDocFallbackFilenames, [])
         XCTAssertNil(config.toolOutputTokenLimit)
+        XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, CodexConfigDefaults.backgroundTerminalMaxTimeoutMS)
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
         XCTAssertTrue(config.checkForUpdateOnStartup)
@@ -331,6 +332,7 @@ final class ConfigLoaderTests: XCTestCase {
         mcp_oauth_callback_port = 5678
         mcp_oauth_callback_url = "https://example.com/callback"
         tool_output_token_limit = 12000
+        background_terminal_max_timeout = 12345
         oss_provider = "ollama"
         check_for_update_on_startup = false
 
@@ -410,6 +412,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.mcpOAuthCallbackPort, 5678)
         XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
         XCTAssertEqual(config.toolOutputTokenLimit, 12000)
+        XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, 12_345)
         XCTAssertEqual(config.ossProvider, "ollama")
         XCTAssertFalse(config.checkForUpdateOnStartup)
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
@@ -425,6 +428,17 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .disabled)
+    }
+
+    func testBackgroundTerminalMaxTimeoutClampsToRustMinimum() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        background_terminal_max_timeout = 1
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, UnifiedExecTiming.minEmptyYieldTimeMS)
     }
 
     func testPromptInstructionBlocksCanBeDisabledFromConfigAndProfilesLikeRust() throws {

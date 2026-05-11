@@ -5,6 +5,7 @@ public enum CodexConfigDefaults {
     public static let modelProviderID = "openai"
     public static let projectRootMarkers = [".git"]
     public static let projectDocMaxBytes = 32 * 1024
+    public static let backgroundTerminalMaxTimeoutMS: UInt64 = 300_000
 }
 
 public enum WebSearchMode: String, Codable, Equatable, Sendable {
@@ -129,6 +130,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var projectDocMaxBytes: Int
     public var projectDocFallbackFilenames: [String]
     public var toolOutputTokenLimit: Int?
+    public var backgroundTerminalMaxTimeoutMS: UInt64
     public var shellEnvironmentPolicy: ShellEnvironmentPolicy
     public var ossProvider: String?
     public var toolSuggest: ToolSuggestConfig
@@ -212,6 +214,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
         projectDocFallbackFilenames: [String] = [],
         toolOutputTokenLimit: Int? = nil,
+        backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String? = nil
     ) {
@@ -272,6 +275,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectDocMaxBytes = projectDocMaxBytes
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
         self.toolOutputTokenLimit = toolOutputTokenLimit
+        self.backgroundTerminalMaxTimeoutMS = backgroundTerminalMaxTimeoutMS
         self.shellEnvironmentPolicy = shellEnvironmentPolicy
         self.ossProvider = ossProvider
         self.toolSuggest = ToolSuggestConfig()
@@ -335,6 +339,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
         projectDocFallbackFilenames: [String] = [],
         toolOutputTokenLimit: Int? = nil,
+        backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String? = nil
     ) {
@@ -393,6 +398,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             projectDocMaxBytes: projectDocMaxBytes,
             projectDocFallbackFilenames: projectDocFallbackFilenames,
             toolOutputTokenLimit: toolOutputTokenLimit,
+            backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
             shellEnvironmentPolicy: shellEnvironmentPolicy,
             ossProvider: ossProvider
         )
@@ -2218,6 +2224,11 @@ private struct ParsedCodexConfigToml {
             config.projectDocMaxBytes = try Self.nonNegativeIntValue(projectDocMaxBytes, key: "project_doc_max_bytes")
         }
 
+        if let maxTimeout = topLevel["background_terminal_max_timeout"] {
+            let parsed = try Self.nonNegativeIntValue(maxTimeout, key: "background_terminal_max_timeout")
+            config.backgroundTerminalMaxTimeoutMS = max(UInt64(parsed), UnifiedExecTiming.minEmptyYieldTimeMS)
+        }
+
         if let fallbackFilenames = topLevel["project_doc_fallback_filenames"] {
             config.projectDocFallbackFilenames = try Self.stringArrayValue(
                 fallbackFilenames,
@@ -2957,6 +2968,7 @@ private struct ParsedCodexConfigToml {
             || key == "project_root_markers"
             || key == "project_doc_max_bytes"
             || key == "project_doc_fallback_filenames"
+            || key == "background_terminal_max_timeout"
             || key == "tool_output_token_limit"
             || key == "shell_environment_policy"
             || key == "oss_provider"

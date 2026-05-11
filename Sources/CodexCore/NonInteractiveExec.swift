@@ -2,6 +2,28 @@ import CodexApplyPatch
 import Darwin
 import Foundation
 
+public enum UnifiedExecTiming {
+    public static let minYieldTimeMS: UInt64 = 250
+    public static let minEmptyYieldTimeMS: UInt64 = 5_000
+    public static let maxYieldTimeMS: UInt64 = 30_000
+
+    public static func clampInitialYieldTimeMS(_ yieldTimeMS: UInt64) -> UInt64 {
+        min(max(yieldTimeMS, minYieldTimeMS), maxYieldTimeMS)
+    }
+
+    public static func clampWriteStdinYieldTimeMS(
+        _ yieldTimeMS: UInt64,
+        inputIsEmpty: Bool,
+        maxEmptyYieldTimeMS: UInt64
+    ) -> UInt64 {
+        let timeMS = max(yieldTimeMS, minYieldTimeMS)
+        if inputIsEmpty {
+            return min(max(timeMS, minEmptyYieldTimeMS), max(maxEmptyYieldTimeMS, minEmptyYieldTimeMS))
+        }
+        return min(timeMS, maxYieldTimeMS)
+    }
+}
+
 public enum NonInteractiveExecOutputMode: Equatable, Sendable {
     case human
     case jsonLines
@@ -573,6 +595,7 @@ public enum NonInteractiveExec {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
+        backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> ResponseItem {
@@ -590,6 +613,7 @@ public enum NonInteractiveExec {
                 environment: environment,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
+                backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 agentJobContext: agentJobContext
             )
 
@@ -670,6 +694,7 @@ public enum NonInteractiveExec {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
+        backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> FunctionCallExecutionResult {
@@ -723,6 +748,7 @@ public enum NonInteractiveExec {
                 environment: environment,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
+                backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 toolSearchIndex: toolSearchIndex,
                 agentJobContext: agentJobContext
             )
@@ -758,6 +784,7 @@ public enum NonInteractiveExec {
             environment: environment,
             explicitEnvOverrides: explicitEnvOverrides,
             allowLoginShell: allowLoginShell,
+            backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
             toolSearchIndex: toolSearchIndex,
             agentJobContext: agentJobContext
         )
@@ -906,6 +933,7 @@ public enum NonInteractiveExec {
         environment: [String: String],
         explicitEnvOverrides: [String: String],
         allowLoginShell: Bool,
+        backgroundTerminalMaxTimeoutMS: UInt64,
         agentJobContext: AgentJobToolContext?
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
@@ -983,6 +1011,7 @@ public enum NonInteractiveExec {
                         sessionID: String(params.sessionID),
                         chars: params.chars,
                         yieldTimeMS: params.yieldTimeMS,
+                        maxEmptyYieldTimeMS: backgroundTerminalMaxTimeoutMS,
                         truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy
                     )
                     return functionOutput(
@@ -1274,7 +1303,7 @@ public enum NonInteractiveExec {
                 command: command,
                 cwd: commandCwd,
                 sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
-                yieldTimeMS: timeoutMS ?? 10_000,
+                yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
                 environment: environment
             )
@@ -2144,6 +2173,7 @@ private actor UnifiedExecSessionRegistry {
         sessionID: String,
         chars: String,
         yieldTimeMS: UInt64,
+        maxEmptyYieldTimeMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         truncationPolicy: TruncationPolicy
     ) throws -> UnifiedExecToolOutput {
         guard var session = sessions[sessionID] else {
@@ -2163,7 +2193,12 @@ private actor UnifiedExecSessionRegistry {
             Thread.sleep(forTimeInterval: 0.1)
         }
 
-        waitUntilDeadlineOrExit(process: session.process, startedAt: start, yieldTimeMS: yieldTimeMS)
+        let clampedYieldTimeMS = UnifiedExecTiming.clampWriteStdinYieldTimeMS(
+            yieldTimeMS,
+            inputIsEmpty: chars.isEmpty,
+            maxEmptyYieldTimeMS: maxEmptyYieldTimeMS
+        )
+        waitUntilDeadlineOrExit(process: session.process, startedAt: start, yieldTimeMS: clampedYieldTimeMS)
 
         let stdout = session.stdoutCapture.snapshot(from: session.stdoutOffset)
         let stderr = session.stderrCapture.snapshot(from: session.stderrOffset)

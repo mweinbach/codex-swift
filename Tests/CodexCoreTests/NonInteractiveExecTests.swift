@@ -3,6 +3,33 @@ import Foundation
 import XCTest
 
 final class NonInteractiveExecTests: XCTestCase {
+    func testUnifiedExecTimingMatchesRustClampRules() {
+        XCTAssertEqual(UnifiedExecTiming.clampInitialYieldTimeMS(0), 250)
+        XCTAssertEqual(UnifiedExecTiming.clampInitialYieldTimeMS(10_000), 10_000)
+        XCTAssertEqual(UnifiedExecTiming.clampInitialYieldTimeMS(60_000), 30_000)
+
+        XCTAssertEqual(
+            UnifiedExecTiming.clampWriteStdinYieldTimeMS(0, inputIsEmpty: false, maxEmptyYieldTimeMS: 300_000),
+            250
+        )
+        XCTAssertEqual(
+            UnifiedExecTiming.clampWriteStdinYieldTimeMS(60_000, inputIsEmpty: false, maxEmptyYieldTimeMS: 300_000),
+            30_000
+        )
+        XCTAssertEqual(
+            UnifiedExecTiming.clampWriteStdinYieldTimeMS(250, inputIsEmpty: true, maxEmptyYieldTimeMS: 300_000),
+            5_000
+        )
+        XCTAssertEqual(
+            UnifiedExecTiming.clampWriteStdinYieldTimeMS(600_000, inputIsEmpty: true, maxEmptyYieldTimeMS: 12_000),
+            12_000
+        )
+        XCTAssertEqual(
+            UnifiedExecTiming.clampWriteStdinYieldTimeMS(600_000, inputIsEmpty: true, maxEmptyYieldTimeMS: 1),
+            5_000
+        )
+    }
+
     func testMakePromptBuildsEnvironmentAndUserInput() {
         let schema = JSONValue.object(["type": .string("object")])
         let prompt = NonInteractiveExec.makePrompt(
