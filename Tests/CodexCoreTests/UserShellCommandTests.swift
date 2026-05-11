@@ -9,7 +9,12 @@ final class UserShellCommandTests: XCTestCase {
         XCTAssertTrue(UserShellCommand.isUserShellCommandText(
             " \n\t<USER_SHELL_COMMAND>\necho hi\n</USER_SHELL_COMMAND>"
         ))
+        XCTAssertTrue(UserShellCommand.isUserShellCommandText(
+            " \n\t<USER_SHELL_COMMAND>\necho hi\n</USER_SHELL_COMMAND>\n "
+        ))
         XCTAssertFalse(UserShellCommand.isUserShellCommandText("echo hi"))
+        XCTAssertFalse(UserShellCommand.isUserShellCommandText("<user_shell_command>\necho hi"))
+        XCTAssertFalse(UserShellCommand.isUserShellCommandText("echo hi\n</user_shell_command>"))
     }
 
     func testFormatsBasicRecordItem() throws {

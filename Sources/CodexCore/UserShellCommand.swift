@@ -50,8 +50,10 @@ public enum UserShellCommand {
     public static let closeTag = "</user_shell_command>"
 
     public static func isUserShellCommandText(_ text: String) -> Bool {
-        let trimmed = text.drop { $0.isWhitespace }
-        return trimmed.asciiLowercased().hasPrefix(openTag)
+        let leadingTrimmed = text.drop { $0.isWhitespace }
+        let trailingTrimmed = leadingTrimmed.dropLast(leadingTrimmed.reversed().prefix { $0.isWhitespace }.count)
+        let normalized = trailingTrimmed.asciiLowercased()
+        return normalized.hasPrefix(openTag) && normalized.hasSuffix(closeTag)
     }
 
     public static func formatRecord(
