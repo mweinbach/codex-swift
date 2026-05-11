@@ -117,6 +117,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
     public var features: FeatureStates
+    public var memories: MemoriesConfig
     public var mcpServers: [String: McpServerConfig]
     public var mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
     public var mcpOAuthCallbackPort: UInt16?
@@ -136,7 +137,9 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public var runtimeMcpConfig: RuntimeMcpConfig {
         let builtinMcpServers = enabledBuiltinMcpServers(options: BuiltinMcpServerOptions(
-            memoriesEnabled: features.isEnabled(.builtInMcp) && features.isEnabled(.memoryTool)
+            memoriesEnabled: features.isEnabled(.builtInMcp)
+                && features.isEnabled(.memoryTool)
+                && memories.useMemories
         ))
         var configuredMcpServers = mcpServers
         for builtinServer in builtinMcpServers {
@@ -146,6 +149,127 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             configuredMcpServers: configuredMcpServers,
             builtinMcpServers: builtinMcpServers
         )
+    }
+
+    public init(
+        model: String? = nil,
+        modelProvider: String? = nil,
+        modelProviders: [String: ModelProviderInfo] = [:],
+        approvalPolicy: AskForApproval? = nil,
+        sandboxMode: SandboxMode? = nil,
+        sandboxPolicy: SandboxPolicy? = nil,
+        defaultPermissions: String? = nil,
+        permissionProfile: PermissionProfile? = nil,
+        activePermissionProfile: ActivePermissionProfile? = nil,
+        modelReasoningEffort: ReasoningEffort? = nil,
+        modelReasoningSummary: ReasoningSummary? = nil,
+        modelVerbosity: Verbosity? = nil,
+        serviceTier: String? = nil,
+        chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
+        cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        forcedLoginMethod: ForcedLoginMethod? = nil,
+        forcedChatGPTWorkspaceID: String? = nil,
+        experimentalInstructionsFile: String? = nil,
+        experimentalCompactPromptFile: String? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        compactPrompt: String? = nil,
+        includePermissionsInstructions: Bool = true,
+        includeAppsInstructions: Bool = true,
+        includeSkillInstructions: Bool = true,
+        includeEnvironmentContext: Bool = true,
+        includeApplyPatchTool: Bool? = nil,
+        experimentalUseUnifiedExecTool: Bool? = nil,
+        experimentalUseFreeformApplyPatch: Bool? = nil,
+        experimentalRealtimeWSBaseURL: String? = nil,
+        experimentalRealtimeWSModel: String? = nil,
+        realtime: RealtimeConfig = RealtimeConfig(),
+        experimentalRealtimeWSBackendPrompt: String? = nil,
+        experimentalRealtimeWSStartupContext: String? = nil,
+        experimentalRealtimeStartInstructions: String? = nil,
+        experimentalThreadConfigEndpoint: String? = nil,
+        experimentalThreadStore: ThreadStoreConfig = .local,
+        webSearchMode: WebSearchMode? = nil,
+        webSearchConfig: WebSearchConfig? = nil,
+        toolsWebSearch: Bool? = nil,
+        toolsViewImage: Bool? = nil,
+        features: FeatureStates = .withDefaults(),
+        memories: MemoriesConfig,
+        mcpServers: [String: McpServerConfig] = [:],
+        mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
+        mcpOAuthCallbackPort: UInt16? = nil,
+        mcpOAuthCallbackURL: String? = nil,
+        activeProfile: String? = nil,
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
+        projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
+        projectDocFallbackFilenames: [String] = [],
+        toolOutputTokenLimit: Int? = nil,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
+        ossProvider: String? = nil
+    ) {
+        self.model = model
+        self.modelProvider = modelProvider
+        self.modelProviders = modelProviders
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = .user
+        self.sandboxMode = sandboxMode
+        self.sandboxPolicy = sandboxPolicy
+        self.defaultPermissions = defaultPermissions
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
+        self.networkProxy = nil
+        self.modelReasoningEffort = modelReasoningEffort
+        self.modelReasoningSummary = modelReasoningSummary
+        self.modelVerbosity = modelVerbosity
+        self.serviceTier = serviceTier
+        self.chatgptBaseURL = chatgptBaseURL
+        self.realtimeAudio = realtimeAudio
+        self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
+        self.forcedLoginMethod = forcedLoginMethod
+        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.experimentalInstructionsFile = experimentalInstructionsFile
+        self.experimentalCompactPromptFile = experimentalCompactPromptFile
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.compactPrompt = compactPrompt
+        self.includePermissionsInstructions = includePermissionsInstructions
+        self.includeAppsInstructions = includeAppsInstructions
+        self.includeSkillInstructions = includeSkillInstructions
+        self.includeEnvironmentContext = includeEnvironmentContext
+        self.includeApplyPatchTool = includeApplyPatchTool
+        self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
+        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
+        self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
+        self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
+        self.realtime = realtime
+        self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
+        self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
+        self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
+        self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
+        self.experimentalThreadStore = experimentalThreadStore
+        self.webSearchMode = webSearchMode
+        self.webSearchConfig = webSearchConfig
+        self.toolsWebSearch = toolsWebSearch
+        self.toolsViewImage = toolsViewImage
+        self.features = features
+        self.memories = memories
+        self.mcpServers = mcpServers
+        self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
+        self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
+        self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
+        self.activeProfile = activeProfile
+        self.projectRootMarkers = projectRootMarkers
+        self.projectDocMaxBytes = projectDocMaxBytes
+        self.projectDocFallbackFilenames = projectDocFallbackFilenames
+        self.toolOutputTokenLimit = toolOutputTokenLimit
+        self.shellEnvironmentPolicy = shellEnvironmentPolicy
+        self.ossProvider = ossProvider
+        self.toolSuggest = ToolSuggestConfig()
+        self.checkForUpdateOnStartup = true
+        self.modelContextWindow = nil
+        self.modelAutoCompactTokenLimit = nil
+        self.terminalResizeReflow = TerminalResizeReflowConfig()
     }
 
     public init(
@@ -204,67 +328,63 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String? = nil
     ) {
-        self.model = model
-        self.modelProvider = modelProvider
-        self.modelProviders = modelProviders
-        self.approvalPolicy = approvalPolicy
-        self.approvalsReviewer = .user
-        self.sandboxMode = sandboxMode
-        self.sandboxPolicy = sandboxPolicy
-        self.defaultPermissions = defaultPermissions
-        self.permissionProfile = permissionProfile
-        self.activePermissionProfile = activePermissionProfile
-        self.networkProxy = nil
-        self.modelReasoningEffort = modelReasoningEffort
-        self.modelReasoningSummary = modelReasoningSummary
-        self.modelVerbosity = modelVerbosity
-        self.serviceTier = serviceTier
-        self.chatgptBaseURL = chatgptBaseURL
-        self.realtimeAudio = realtimeAudio
-        self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
-        self.forcedLoginMethod = forcedLoginMethod
-        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
-        self.experimentalInstructionsFile = experimentalInstructionsFile
-        self.experimentalCompactPromptFile = experimentalCompactPromptFile
-        self.baseInstructions = baseInstructions
-        self.developerInstructions = developerInstructions
-        self.compactPrompt = compactPrompt
-        self.includePermissionsInstructions = includePermissionsInstructions
-        self.includeAppsInstructions = includeAppsInstructions
-        self.includeSkillInstructions = includeSkillInstructions
-        self.includeEnvironmentContext = includeEnvironmentContext
-        self.includeApplyPatchTool = includeApplyPatchTool
-        self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
-        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
-        self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
-        self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
-        self.realtime = realtime
-        self.experimentalRealtimeWSBackendPrompt = experimentalRealtimeWSBackendPrompt
-        self.experimentalRealtimeWSStartupContext = experimentalRealtimeWSStartupContext
-        self.experimentalRealtimeStartInstructions = experimentalRealtimeStartInstructions
-        self.experimentalThreadConfigEndpoint = experimentalThreadConfigEndpoint
-        self.experimentalThreadStore = experimentalThreadStore
-        self.webSearchMode = webSearchMode
-        self.webSearchConfig = webSearchConfig
-        self.toolsWebSearch = toolsWebSearch
-        self.toolsViewImage = toolsViewImage
-        self.features = features
-        self.mcpServers = mcpServers
-        self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
-        self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
-        self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
-        self.activeProfile = activeProfile
-        self.projectRootMarkers = projectRootMarkers
-        self.projectDocMaxBytes = projectDocMaxBytes
-        self.projectDocFallbackFilenames = projectDocFallbackFilenames
-        self.toolOutputTokenLimit = toolOutputTokenLimit
-        self.shellEnvironmentPolicy = shellEnvironmentPolicy
-        self.ossProvider = ossProvider
-        self.toolSuggest = ToolSuggestConfig()
-        self.checkForUpdateOnStartup = true
-        self.modelContextWindow = nil
-        self.modelAutoCompactTokenLimit = nil
-        self.terminalResizeReflow = TerminalResizeReflowConfig()
+        self.init(
+            model: model,
+            modelProvider: modelProvider,
+            modelProviders: modelProviders,
+            approvalPolicy: approvalPolicy,
+            sandboxMode: sandboxMode,
+            sandboxPolicy: sandboxPolicy,
+            defaultPermissions: defaultPermissions,
+            permissionProfile: permissionProfile,
+            activePermissionProfile: activePermissionProfile,
+            modelReasoningEffort: modelReasoningEffort,
+            modelReasoningSummary: modelReasoningSummary,
+            modelVerbosity: modelVerbosity,
+            serviceTier: serviceTier,
+            chatgptBaseURL: chatgptBaseURL,
+            realtimeAudio: realtimeAudio,
+            cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
+            forcedLoginMethod: forcedLoginMethod,
+            forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
+            experimentalInstructionsFile: experimentalInstructionsFile,
+            experimentalCompactPromptFile: experimentalCompactPromptFile,
+            baseInstructions: baseInstructions,
+            developerInstructions: developerInstructions,
+            compactPrompt: compactPrompt,
+            includePermissionsInstructions: includePermissionsInstructions,
+            includeAppsInstructions: includeAppsInstructions,
+            includeSkillInstructions: includeSkillInstructions,
+            includeEnvironmentContext: includeEnvironmentContext,
+            includeApplyPatchTool: includeApplyPatchTool,
+            experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
+            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
+            experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
+            experimentalRealtimeWSModel: experimentalRealtimeWSModel,
+            realtime: realtime,
+            experimentalRealtimeWSBackendPrompt: experimentalRealtimeWSBackendPrompt,
+            experimentalRealtimeWSStartupContext: experimentalRealtimeWSStartupContext,
+            experimentalRealtimeStartInstructions: experimentalRealtimeStartInstructions,
+            experimentalThreadConfigEndpoint: experimentalThreadConfigEndpoint,
+            experimentalThreadStore: experimentalThreadStore,
+            webSearchMode: webSearchMode,
+            webSearchConfig: webSearchConfig,
+            toolsWebSearch: toolsWebSearch,
+            toolsViewImage: toolsViewImage,
+            features: features,
+            memories: MemoriesConfig(),
+            mcpServers: mcpServers,
+            mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
+            mcpOAuthCallbackPort: mcpOAuthCallbackPort,
+            mcpOAuthCallbackURL: mcpOAuthCallbackURL,
+            activeProfile: activeProfile,
+            projectRootMarkers: projectRootMarkers,
+            projectDocMaxBytes: projectDocMaxBytes,
+            projectDocFallbackFilenames: projectDocFallbackFilenames,
+            toolOutputTokenLimit: toolOutputTokenLimit,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
+            ossProvider: ossProvider
+        )
     }
 
     public init(
@@ -357,6 +477,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             toolsWebSearch: toolsWebSearch,
             toolsViewImage: toolsViewImage,
             features: features,
+            memories: MemoriesConfig(),
             mcpServers: mcpServers,
             mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
             mcpOAuthCallbackPort: mcpOAuthCallbackPort,
@@ -399,6 +520,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         toolsWebSearch: Bool?,
         toolsViewImage: Bool?,
         features: FeatureStates,
+        memories: MemoriesConfig = MemoriesConfig(),
         mcpServers: [String: McpServerConfig],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode,
         mcpOAuthCallbackPort: UInt16?,
@@ -446,6 +568,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             toolsWebSearch: toolsWebSearch,
             toolsViewImage: toolsViewImage,
             features: features,
+            memories: memories,
             mcpServers: mcpServers,
             mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
             mcpOAuthCallbackPort: mcpOAuthCallbackPort,
@@ -1357,6 +1480,7 @@ private struct ParsedCodexConfigToml {
     var profiles: [String: [String: ConfigValue]] = [:]
     var features: [String: Bool] = [:]
     var profileFeatures: [String: [String: Bool]] = [:]
+    var memories: [String: ConfigValue] = [:]
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
@@ -1419,6 +1543,16 @@ private struct ParsedCodexConfigToml {
                     try parsed.mergeModelProviders(from: ConfigValueParser.parseTomlLiteral(valueText), key: key)
                     continue
                 }
+                if key == "memories" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (memoryKey, memoryValue) in table {
+                        parsed.memories[canonicalMemoriesConfigKey(memoryKey)] = memoryValue
+                    }
+                    continue
+                }
                 guard isRelevantTopLevelKey(key) else { continue }
                 parsed.topLevel[key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -1449,6 +1583,8 @@ private struct ParsedCodexConfigToml {
                     ConfigValueParser.parseTomlLiteral(valueText),
                     key: "features.\(key)"
                 )
+            case .memories:
+                parsed.memories[canonicalMemoriesConfigKey(key)] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .sandboxWorkspaceWrite:
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .permissionFilesystem(name):
@@ -1635,6 +1771,11 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "memories" {
+                memories[Self.canonicalMemoriesConfigKey(parts[1])] = value
+                continue
+            }
+
             if parts.count == 2, parts[0] == "sandbox_workspace_write" {
                 sandboxWorkspaceWrite[parts[1]] = value
                 continue
@@ -1808,6 +1949,10 @@ private struct ParsedCodexConfigToml {
             shellEnvironmentPolicy[key] = value
         }
 
+        for (key, value) in overlay.memories {
+            memories[key] = value
+        }
+
         for (key, value) in overlay.toolSuggest {
             toolSuggest[key] = value
         }
@@ -1908,6 +2053,12 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(memoriesTable) = table["memories"] {
+            for (key, value) in memoriesTable {
+                memories[Self.canonicalMemoriesConfigKey(key)] = value
+            }
+        }
+
         if case let .table(skillsTable) = table["skills"],
            let includeInstructions = skillsTable["include_instructions"]
         {
@@ -1981,6 +2132,7 @@ private struct ParsedCodexConfigToml {
             table: toolSuggest,
             disabledToolLayers: toolSuggestDisabledToolLayers
         )
+        config.memories = try Self.memoriesConfigValue(memories, key: "memories")
 
         if let authStore = topLevel["cli_auth_credentials_store"] {
             let rawMode = try Self.stringValue(authStore, key: "cli_auth_credentials_store")
@@ -2820,6 +2972,71 @@ private struct ParsedCodexConfigToml {
         )
     }
 
+    private static func canonicalMemoriesConfigKey(_ key: String) -> String {
+        key == "no_memories_if_mcp_or_web_search" ? "disable_on_external_context" : key
+    }
+
+    private static func memoriesConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> MemoriesConfig {
+        let knownFields = Set([
+            "disable_on_external_context",
+            "generate_memories",
+            "use_memories",
+            "max_raw_memories_for_consolidation",
+            "max_unused_days",
+            "max_rollout_age_days",
+            "max_rollouts_per_startup",
+            "min_rollout_idle_hours",
+            "min_rate_limit_remaining_percent",
+            "extract_model",
+            "consolidation_model"
+        ])
+        for field in table.keys where !knownFields.contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+
+        let defaults = MemoriesConfig()
+        return MemoriesConfig(
+            disableOnExternalContext: try table["disable_on_external_context"].map {
+                try boolValue($0, key: "\(key).disable_on_external_context")
+            } ?? defaults.disableOnExternalContext,
+            generateMemories: try table["generate_memories"].map {
+                try boolValue($0, key: "\(key).generate_memories")
+            } ?? defaults.generateMemories,
+            useMemories: try table["use_memories"].map {
+                try boolValue($0, key: "\(key).use_memories")
+            } ?? defaults.useMemories,
+            maxRawMemoriesForConsolidation: try table["max_raw_memories_for_consolidation"].map {
+                try nonNegativeIntValue($0, key: "\(key).max_raw_memories_for_consolidation")
+                    .clamped(to: 1...4096)
+            } ?? defaults.maxRawMemoriesForConsolidation,
+            maxUnusedDays: try table["max_unused_days"].map {
+                try int64Value($0, key: "\(key).max_unused_days").clamped(to: 0...365)
+            } ?? defaults.maxUnusedDays,
+            maxRolloutAgeDays: try table["max_rollout_age_days"].map {
+                try int64Value($0, key: "\(key).max_rollout_age_days").clamped(to: 0...90)
+            } ?? defaults.maxRolloutAgeDays,
+            maxRolloutsPerStartup: try table["max_rollouts_per_startup"].map {
+                try nonNegativeIntValue($0, key: "\(key).max_rollouts_per_startup")
+                    .clamped(to: 1...128)
+            } ?? defaults.maxRolloutsPerStartup,
+            minRolloutIdleHours: try table["min_rollout_idle_hours"].map {
+                try int64Value($0, key: "\(key).min_rollout_idle_hours").clamped(to: 1...48)
+            } ?? defaults.minRolloutIdleHours,
+            minRateLimitRemainingPercent: try table["min_rate_limit_remaining_percent"].map {
+                try int64Value($0, key: "\(key).min_rate_limit_remaining_percent").clamped(to: 0...100)
+            } ?? defaults.minRateLimitRemainingPercent,
+            extractModel: try table["extract_model"].map {
+                try stringValue($0, key: "\(key).extract_model")
+            },
+            consolidationModel: try table["consolidation_model"].map {
+                try stringValue($0, key: "\(key).consolidation_model")
+            }
+        )
+    }
+
     private static func terminalResizeReflowConfigValue(
         _ table: [String: ConfigValue],
         key: String
@@ -3039,6 +3256,9 @@ private struct ParsedCodexConfigToml {
         let parts = try parseDottedKey(body)
         if parts.count == 1, parts[0] == "features" {
             return .features
+        }
+        if parts.count == 1, parts[0] == "memories" {
+            return .memories
         }
         if parts.count == 1, parts[0] == "sandbox_workspace_write" {
             return .sandboxWorkspaceWrite
@@ -3277,6 +3497,7 @@ private enum ConfigSection {
     case modelProvider(String)
     case modelProviderMap(String, String)
     case features
+    case memories
     case sandboxWorkspaceWrite
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
@@ -3296,4 +3517,10 @@ private enum ConfigSection {
     case profileToolsWebSearch(String)
     case profileToolsWebSearchLocation(String)
     case ignored
+}
+
+private extension Comparable {
+    func clamped(to limits: ClosedRange<Self>) -> Self {
+        min(max(self, limits.lowerBound), limits.upperBound)
+    }
 }

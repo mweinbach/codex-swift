@@ -37,6 +37,16 @@ final class BuiltinMcpServerTests: XCTestCase {
         var bothFeatures = FeatureStates()
         bothFeatures.set(.builtInMcp, enabled: true)
         bothFeatures.set(.memoryTool, enabled: true)
+
+        XCTAssertEqual(
+            CodexRuntimeConfig(
+                features: bothFeatures,
+                memories: MemoriesConfig(useMemories: false),
+                mcpServers: [memoriesMcpServerName: configuredMemories]
+            ).runtimeMcpConfig,
+            RuntimeMcpConfig(configuredMcpServers: [memoriesMcpServerName: configuredMemories], builtinMcpServers: [])
+        )
+
         XCTAssertEqual(
             CodexRuntimeConfig(features: bothFeatures, mcpServers: [
                 memoriesMcpServerName: configuredMemories,

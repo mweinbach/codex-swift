@@ -1284,6 +1284,116 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testMemoriesConfigParsesRustSettingsAndLegacyAlias() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [memories]
+        no_memories_if_mcp_or_web_search = true
+        generate_memories = false
+        use_memories = false
+        max_raw_memories_for_consolidation = 512
+        max_unused_days = 21
+        max_rollout_age_days = 42
+        max_rollouts_per_startup = 9
+        min_rollout_idle_hours = 24
+        min_rate_limit_remaining_percent = 12
+        extract_model = "gpt-5-mini"
+        consolidation_model = "gpt-5.2"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(
+            config.memories,
+            MemoriesConfig(
+                disableOnExternalContext: true,
+                generateMemories: false,
+                useMemories: false,
+                maxRawMemoriesForConsolidation: 512,
+                maxUnusedDays: 21,
+                maxRolloutAgeDays: 42,
+                maxRolloutsPerStartup: 9,
+                minRolloutIdleHours: 24,
+                minRateLimitRemainingPercent: 12,
+                extractModel: "gpt-5-mini",
+                consolidationModel: "gpt-5.2"
+            )
+        )
+    }
+
+    func testMemoriesConfigClampsRustLimits() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [memories]
+        max_raw_memories_for_consolidation = 0
+        max_unused_days = -1
+        max_rollout_age_days = 91
+        max_rollouts_per_startup = 0
+        min_rollout_idle_hours = 0
+        min_rate_limit_remaining_percent = 101
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.memories.maxRawMemoriesForConsolidation, 1)
+        XCTAssertEqual(config.memories.maxUnusedDays, 0)
+        XCTAssertEqual(config.memories.maxRolloutAgeDays, 90)
+        XCTAssertEqual(config.memories.maxRolloutsPerStartup, 1)
+        XCTAssertEqual(config.memories.minRolloutIdleHours, 1)
+        XCTAssertEqual(config.memories.minRateLimitRemainingPercent, 100)
+    }
+
+    func testMemoriesUseMemoriesDisablesBuiltinMcpSelection() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features]
+        builtin_mcp = true
+        memories = true
+
+        [memories]
+        use_memories = false
+
+        [mcp_servers.memories]
+        command = "user-memories"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        let mcpConfig = config.runtimeMcpConfig
+
+        XCTAssertEqual(mcpConfig.builtinMcpServers, [])
+        XCTAssertEqual(
+            mcpConfig.configuredMcpServers[memoriesMcpServerName],
+            McpServerConfig(transport: .stdio(command: "user-memories", args: [], env: nil, envVars: [], cwd: nil))
+        )
+    }
+
+    func testMemoriesConfigAcceptsCliOverrides() throws {
+        let dir = try CoreTemporaryDirectory()
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                "memories.use_memories=false",
+                "memories.max_rollouts_per_startup=0"
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertFalse(config.memories.useMemories)
+        XCTAssertEqual(config.memories.maxRolloutsPerStartup, 1)
+    }
+
+    func testMemoriesConfigRejectsUnknownFieldsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [memories]
+        typo = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual((error as? CodexConfigLoadError)?.description, "Invalid config line: memories.typo")
+        }
+    }
+
     func testWebSearchModePrefersProfileOverLegacyFlags() throws {
         let dir = try CoreTemporaryDirectory()
         try """
