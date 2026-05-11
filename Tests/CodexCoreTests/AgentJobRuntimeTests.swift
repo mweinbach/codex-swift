@@ -98,6 +98,84 @@ final class AgentJobRuntimeTests: XCTestCase {
         ])
     }
 
+    func testDecodeReportAgentJobResultArgumentsUsesRustSnakeCaseFields() throws {
+        let arguments = try AgentJobRuntime.decodeReportAgentJobResultArguments(
+            #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true},"stop":true}"#
+        )
+
+        XCTAssertEqual(arguments.jobID, "job-1")
+        XCTAssertEqual(arguments.itemID, "row-1")
+        XCTAssertEqual(arguments.result, .object(["ok": .bool(true)]))
+        XCTAssertEqual(arguments.stop, true)
+    }
+
+    func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
+        let fixture = try await makeStoreWithRunningItem()
+
+        let arguments = ReportAgentJobResultArguments(
+            jobID: "job-1",
+            itemID: "row-1",
+            result: .string("nope")
+        )
+        do {
+            _ = try await AgentJobRuntime.recordReportAgentJobResult(
+                arguments: arguments,
+                reportingThreadID: "thread-1",
+                store: fixture.store
+            )
+            XCTFail("Expected non-object result to be rejected")
+        } catch let error as FunctionCallError {
+            XCTAssertEqual(error, .respondToModel("result must be a JSON object"))
+        }
+    }
+
+    func testRecordReportAgentJobResultAcceptsMatchingThreadAndCancelsOnStop() async throws {
+        let fixture = try await makeStoreWithRunningItem()
+
+        let result = try await AgentJobRuntime.recordReportAgentJobResult(
+            argumentsJSON: #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true},"stop":true}"#,
+            reportingThreadID: "thread-1",
+            store: fixture.store
+        )
+
+        XCTAssertEqual(result, ReportAgentJobResultToolResult(accepted: true))
+        let reportedItem = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(reportedItem)
+        XCTAssertEqual(item.status, .completed)
+        XCTAssertEqual(item.resultJSON, .object(["ok": .bool(true)]))
+        XCTAssertNil(item.assignedThreadID)
+        let cancelledJob = try await fixture.store.getAgentJob("job-1")
+        let job = try XCTUnwrap(cancelledJob)
+        XCTAssertEqual(job.status, .cancelled)
+        XCTAssertEqual(job.lastError, "cancelled by worker request")
+    }
+
+    func testRecordReportAgentJobResultRejectsWrongThreadAndDoesNotCancel() async throws {
+        let fixture = try await makeStoreWithRunningItem()
+
+        let result = try await AgentJobRuntime.recordReportAgentJobResult(
+            arguments: ReportAgentJobResultArguments(
+                jobID: "job-1",
+                itemID: "row-1",
+                result: .object(["ok": .bool(true)]),
+                stop: true
+            ),
+            reportingThreadID: "other-thread",
+            store: fixture.store
+        )
+
+        XCTAssertEqual(result, ReportAgentJobResultToolResult(accepted: false))
+        let persistedItem = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(persistedItem)
+        XCTAssertEqual(item.status, .running)
+        XCTAssertEqual(item.assignedThreadID, "thread-1")
+        XCTAssertNil(item.resultJSON)
+        let runningJob = try await fixture.store.getAgentJob("job-1")
+        let job = try XCTUnwrap(runningJob)
+        XCTAssertEqual(job.status, .running)
+        XCTAssertNil(job.lastError)
+    }
+
     private func makeJob(
         instruction: String = "Return {path}",
         outputSchemaJSON: JSONValue? = nil,
@@ -146,5 +224,58 @@ final class AgentJobRuntimeTests: XCTestCase {
             completedAt: status == .running ? nil : date,
             reportedAt: nil
         )
+    }
+
+    private func makeStoreWithRunningItem() async throws -> AgentJobRuntimeStoreFixture {
+        let tempDirectory = try AgentJobRuntimeTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: tempDirectory.url.appendingPathComponent("state.sqlite3"))
+        _ = try await store.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-1",
+                name: "job",
+                instruction: "do it",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id"],
+                inputCSVPath: "/tmp/input.csv",
+                outputCSVPath: "/tmp/output.csv",
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: [
+                AgentJobItemCreateParams(
+                    itemID: "row-1",
+                    rowIndex: 0,
+                    sourceID: nil,
+                    rowJSON: .object(["id": .string("1")])
+                ),
+            ]
+        )
+        try await store.markAgentJobRunning("job-1")
+        let markedRunning = try await store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "row-1",
+            threadID: "thread-1"
+        )
+        XCTAssertTrue(markedRunning)
+        return AgentJobRuntimeStoreFixture(store: store, tempDirectory: tempDirectory)
+    }
+}
+
+private struct AgentJobRuntimeStoreFixture {
+    let store: SQLiteAgentJobStore
+    let tempDirectory: AgentJobRuntimeTemporaryDirectory
+}
+
+private final class AgentJobRuntimeTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-agent-job-runtime-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

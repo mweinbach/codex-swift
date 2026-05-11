@@ -97,6 +97,87 @@ public enum AgentJobRuntime {
             failedItemErrors: failedItemErrors
         )
     }
+
+    public static func decodeReportAgentJobResultArguments(
+        _ argumentsJSON: String
+    ) throws -> ReportAgentJobResultArguments {
+        guard let data = argumentsJSON.data(using: .utf8) else {
+            throw FunctionCallError.respondToModel("failed to parse report_agent_job_result arguments")
+        }
+        do {
+            return try JSONDecoder().decode(ReportAgentJobResultArguments.self, from: data)
+        } catch {
+            throw FunctionCallError.respondToModel(
+                "failed to parse report_agent_job_result arguments: \(error)"
+            )
+        }
+    }
+
+    public static func recordReportAgentJobResult(
+        argumentsJSON: String,
+        reportingThreadID: String,
+        store: SQLiteAgentJobStore
+    ) async throws -> ReportAgentJobResultToolResult {
+        let arguments = try decodeReportAgentJobResultArguments(argumentsJSON)
+        return try await recordReportAgentJobResult(
+            arguments: arguments,
+            reportingThreadID: reportingThreadID,
+            store: store
+        )
+    }
+
+    public static func recordReportAgentJobResult(
+        arguments: ReportAgentJobResultArguments,
+        reportingThreadID: String,
+        store: SQLiteAgentJobStore
+    ) async throws -> ReportAgentJobResultToolResult {
+        guard case .object = arguments.result else {
+            throw FunctionCallError.respondToModel("result must be a JSON object")
+        }
+
+        let accepted: Bool
+        do {
+            accepted = try await store.reportAgentJobItemResult(
+                jobID: arguments.jobID,
+                itemID: arguments.itemID,
+                reportingThreadID: reportingThreadID,
+                resultJSON: arguments.result
+            )
+        } catch {
+            throw FunctionCallError.respondToModel(
+                "failed to record agent job result for \(arguments.jobID) / \(arguments.itemID): \(error)"
+            )
+        }
+
+        if accepted, arguments.stop == true {
+            _ = try await store.markAgentJobCancelled(
+                arguments.jobID,
+                errorMessage: "cancelled by worker request"
+            )
+        }
+        return ReportAgentJobResultToolResult(accepted: accepted)
+    }
+}
+
+public struct ReportAgentJobResultArguments: Equatable, Codable, Sendable {
+    public var jobID: String
+    public var itemID: String
+    public var result: JSONValue
+    public var stop: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case itemID = "item_id"
+        case result
+        case stop
+    }
+
+    public init(jobID: String, itemID: String, result: JSONValue, stop: Bool? = nil) {
+        self.jobID = jobID
+        self.itemID = itemID
+        self.result = result
+        self.stop = stop
+    }
 }
 
 public struct SpawnAgentsOnCSVResult: Equatable, Codable, Sendable {
