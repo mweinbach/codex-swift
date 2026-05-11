@@ -43,6 +43,68 @@ final class TurnMetadataTests: XCTestCase {
         XCTAssertNil(json["workspaces"])
     }
 
+    func testTurnMetadataStateEnrichesHeaderWithWorkspaceGitMetadataLikeRust() async throws {
+        let repo = try createRepository(named: "repo-東京")
+        let remoteURL = "https://github.com/OpenAI/Codex.git"
+        try runGit(["remote", "add", "origin", remoteURL], cwd: repo)
+        let head = try runGit(["rev-parse", "HEAD"], cwd: repo)
+            .stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let state = TurnMetadataState(
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .user,
+            turnID: "turn-a",
+            cwd: repo,
+            sandbox: "read-only"
+        )
+
+        let baseHeader = try XCTUnwrap(state.currentHeaderValue())
+        XCTAssertNil(try jsonObject(baseHeader)["workspaces"])
+
+        state.spawnGitEnrichmentTask()
+        let enriched = try await waitForHeader(state) { header in
+            guard let json = try? jsonObject(header),
+                  let workspaces = json["workspaces"] as? [String: [String: Any]]
+            else {
+                return false
+            }
+            return workspaces[repo.path] != nil
+        }
+        let json = try jsonObject(enriched)
+        let workspaces = try XCTUnwrap(json["workspaces"] as? [String: [String: Any]])
+        let workspace = try XCTUnwrap(workspaces[repo.path])
+
+        XCTAssertTrue(enriched.allSatisfy(\.isASCII))
+        XCTAssertFalse(enriched.contains("東京"))
+        XCTAssertEqual(json["session_id"] as? String, "session-a")
+        XCTAssertEqual(json["sandbox"] as? String, "read-only")
+        XCTAssertEqual(workspace["associated_remote_urls"] as? [String: String], ["origin": remoteURL])
+        XCTAssertEqual(workspace["latest_git_commit_hash"] as? String, head)
+        XCTAssertEqual(workspace["has_changes"] as? Bool, false)
+    }
+
+    func testTurnMetadataStateDoesNotEnrichOutsideGitRepoLikeRust() throws {
+        let dir = try TurnMetadataTemporaryDirectory()
+        retainedTemporaryDirectories.append(dir)
+        let state = TurnMetadataState(
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .user,
+            turnID: "turn-a",
+            cwd: dir.url,
+            sandbox: "read-only"
+        )
+
+        state.spawnGitEnrichmentTask()
+
+        let header = try XCTUnwrap(state.currentHeaderValue())
+        let json = try jsonObject(header)
+        XCTAssertNil(json["workspaces"])
+        XCTAssertEqual(json["session_id"] as? String, "session-a")
+        XCTAssertEqual(json["sandbox"] as? String, "read-only")
+    }
+
     func testCurrentHeaderValueStartsWithBaseTurnMetadataLikeRust() throws {
         let state = TurnMetadataState(
             sessionID: "session-a",
@@ -151,6 +213,21 @@ final class TurnMetadataTests: XCTestCase {
 
 private func jsonObject(_ text: String) throws -> [String: Any] {
     try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+}
+
+private func waitForHeader(
+    _ state: TurnMetadataState,
+    matching predicate: (String) throws -> Bool
+) async throws -> String {
+    for _ in 0..<50 {
+        if let header = state.currentHeaderValue(),
+           try predicate(header)
+        {
+            return header
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return try XCTUnwrap(state.currentHeaderValue())
 }
 
 private extension TurnMetadataTests {

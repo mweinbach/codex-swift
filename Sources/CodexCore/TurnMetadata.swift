@@ -6,23 +6,14 @@ private let turnStartedAtUnixMsKey = "turn_started_at_unix_ms"
 
 public func buildTurnMetadataHeader(cwd: URL, sandbox: String? = nil) -> String? {
     let repoRoot = GitInfoCollector.gitRepoRoot(baseDir: cwd)?.path
-    let latestGitCommitHash = GitInfoCollector.headCommitHash(cwd: cwd)
-    let associatedRemoteURLs = GitInfoCollector.remoteURLsByNameAssumingGitRepo(cwd: cwd)
-    let hasChanges = GitInfoCollector.hasChanges(cwd: cwd)
+    let workspaceGitMetadata = WorkspaceGitMetadata.collect(cwd: cwd)
 
-    if latestGitCommitHash == nil,
-       associatedRemoteURLs == nil,
-       hasChanges == nil,
+    if workspaceGitMetadata.isEmpty,
        sandbox == nil
     {
         return nil
     }
 
-    let workspaceGitMetadata = WorkspaceGitMetadata(
-        associatedRemoteURLs: associatedRemoteURLs,
-        latestGitCommitHash: latestGitCommitHash,
-        hasChanges: hasChanges
-    )
     return TurnMetadataState.asciiJSONString(
         TurnMetadataState.buildTurnMetadataBag(
             sessionID: nil,
@@ -49,18 +40,26 @@ public struct McpTurnMetadataContext: Equatable, Sendable {
 /// Mutable per-turn metadata shared across request builders; all mutable fields are guarded by
 /// `lock`, so callers can read or update the header state across concurrency domains.
 public final class TurnMetadataState: @unchecked Sendable {
+    private let cwd: URL?
+    private let repoRoot: String?
+    private let baseMetadata: [String: Any]
     private let baseHeader: String
     private let lock = NSLock()
+    private var enrichedHeader: String?
     private var turnStartedAtUnixMs: Int64?
     private var responsesAPIClientMetadata: [String: String]?
+    private var enrichmentTask: Task<Void, Never>?
 
     public init(
         sessionID: String,
         threadID: String,
         threadSource: ThreadSource?,
         turnID: String,
+        cwd: URL? = nil,
         sandbox: String? = nil
     ) {
+        self.cwd = cwd
+        repoRoot = cwd.flatMap { GitInfoCollector.gitRepoRoot(baseDir: $0)?.path }
         let metadata = Self.buildTurnMetadataBag(
             sessionID: sessionID,
             threadID: threadID,
@@ -68,21 +67,24 @@ public final class TurnMetadataState: @unchecked Sendable {
             turnID: turnID,
             sandbox: sandbox
         )
+        baseMetadata = metadata
         baseHeader = Self.asciiJSONString(metadata) ?? "{}"
     }
 
     public func currentHeaderValue() -> String? {
+        let header: String
         let startedAt: Int64?
         let clientMetadata: [String: String]?
         lock.lock()
+        header = enrichedHeader ?? baseHeader
         startedAt = turnStartedAtUnixMs
         clientMetadata = responsesAPIClientMetadata
         lock.unlock()
         return Self.mergingTurnMetadata(
-            header: baseHeader,
+            header: header,
             turnStartedAtUnixMs: startedAt,
             responsesAPIClientMetadata: clientMetadata
-        ) ?? baseHeader
+        ) ?? header
     }
 
     public func currentMetaValueForMcpRequest(context: McpTurnMetadataContext) -> JSONValue? {
@@ -112,6 +114,54 @@ public final class TurnMetadataState: @unchecked Sendable {
     public func setTurnStartedAtUnixMs(_ value: Int64) {
         lock.lock()
         turnStartedAtUnixMs = value
+        lock.unlock()
+    }
+
+    public func spawnGitEnrichmentTask() {
+        guard let cwd, let repoRoot else {
+            return
+        }
+
+        lock.lock()
+        if enrichmentTask != nil {
+            lock.unlock()
+            return
+        }
+        let baseMetadata = self.baseMetadata
+        enrichmentTask = Task { [weak self] in
+            let workspaceGitMetadata = WorkspaceGitMetadata.collect(cwd: cwd)
+            guard !Task.isCancelled,
+                  !workspaceGitMetadata.isEmpty,
+                  let headerValue = Self.asciiJSONString(Self.buildTurnMetadataBag(
+                    baseMetadata: baseMetadata,
+                    repoRoot: repoRoot,
+                    workspaceGitMetadata: workspaceGitMetadata
+                  ))
+            else {
+                return
+            }
+
+            guard let self else {
+                return
+            }
+            self.setEnrichedHeaderIfNotCancelled(headerValue)
+        }
+        lock.unlock()
+    }
+
+    public func cancelGitEnrichmentTask() {
+        lock.lock()
+        let task = enrichmentTask
+        enrichmentTask = nil
+        lock.unlock()
+        task?.cancel()
+    }
+
+    private func setEnrichedHeaderIfNotCancelled(_ headerValue: String) {
+        lock.lock()
+        if !Task.isCancelled {
+            enrichedHeader = headerValue
+        }
         lock.unlock()
     }
 
@@ -181,6 +231,18 @@ public final class TurnMetadataState: @unchecked Sendable {
         return metadata
     }
 
+    fileprivate static func buildTurnMetadataBag(
+        baseMetadata: [String: Any],
+        repoRoot: String,
+        workspaceGitMetadata: WorkspaceGitMetadata
+    ) -> [String: Any] {
+        var metadata = baseMetadata
+        if !workspaceGitMetadata.isEmpty {
+            metadata["workspaces"] = [repoRoot: workspaceGitMetadata.jsonObject]
+        }
+        return metadata
+    }
+
     fileprivate static func asciiJSONString(_ object: [String: Any]) -> String? {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
@@ -210,6 +272,18 @@ fileprivate struct WorkspaceGitMetadata {
     let associatedRemoteURLs: [String: String]?
     let latestGitCommitHash: String?
     let hasChanges: Bool?
+
+    static func collect(cwd: URL) -> WorkspaceGitMetadata {
+        WorkspaceGitMetadata(
+            associatedRemoteURLs: GitInfoCollector.remoteURLsByNameAssumingGitRepo(cwd: cwd),
+            latestGitCommitHash: GitInfoCollector.headCommitHash(cwd: cwd),
+            hasChanges: GitInfoCollector.hasChanges(cwd: cwd)
+        )
+    }
+
+    var isEmpty: Bool {
+        associatedRemoteURLs == nil && latestGitCommitHash == nil && hasChanges == nil
+    }
 
     var jsonObject: [String: Any] {
         var object: [String: Any] = [:]
