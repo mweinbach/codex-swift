@@ -523,7 +523,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` archived thread reads
   - `thread/read` and `thread/turns/list` now resolve archived JSONL rollouts by thread id, matching Rust's `include_archived` local thread-store reads while keeping mutating rollout lookup paths active-session-only unless their route explicitly handles archive state.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` loaded-thread listing
-  - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, limit handling, `nextCursor`, and unsubscribe-keeps-loaded behavior.
+  - `thread/loaded/list` now returns the Swift app-server's in-memory loaded thread ids with Rust-matching lexicographic sort, cursor validation, `Option<u32>` limit decoding and clamping, `nextCursor`, and unsubscribe-keeps-loaded behavior.
 - `codex-rs/app-server/src/request_processors/plugins.rs` local plugin read config scope
   - `plugin/read` now reloads local plugin configuration with the marketplace manifest's parent directory as the project cwd, so project `.codex/config.toml` layers can override user config for local plugin detail summaries like Rust.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` out-of-band elicitation counters

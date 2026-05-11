@@ -1725,7 +1725,7 @@ public enum CodexAppServer {
             start = 0
         }
 
-        let limit = max(intParam(params?["limit"], defaultValue: data.count), 1)
+        let limit = max(try rustU32Param(params?["limit"], defaultValue: data.count), 1)
         let end = min(start + limit, data.count)
         let page = start < end ? Array(data[start..<end]) : []
         let nextCursor: Any = end < data.count ? (page.last ?? "") : NSNull()
@@ -14291,12 +14291,16 @@ public enum CodexAppServer {
         guard let value, !(value is NSNull) else {
             return
         }
-        if let bool = value as? Bool {
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            let bool = number.boolValue ? "true" : "false"
             throw AppServerError.invalidRequest("Invalid request: invalid type: boolean `\(bool)`, expected \(expected)")
         }
         if let int = value as? Int {
-            if expected == "usize", int < 0 {
-                throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected usize")
+            if ["u32", "usize"].contains(expected), int < 0 {
+                throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected \(expected)")
+            }
+            if expected == "u32", int > Int(UInt32.max) {
+                throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u32")
             }
             return
         }
@@ -14310,16 +14314,33 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: invalid type: map, expected \(expected)")
         }
         if let number = value as? NSNumber {
-            let int = number.intValue
+            let int = number.int64Value
             if Double(int) == number.doubleValue {
-                if expected == "usize", int < 0 {
-                    throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected usize")
+                if ["u32", "usize"].contains(expected), int < 0 {
+                    throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected \(expected)")
+                }
+                if expected == "u32", int > Int64(UInt32.max) {
+                    throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected u32")
                 }
                 return
             }
             throw AppServerError.invalidRequest("Invalid request: invalid type: floating point `\(number)`, expected \(expected)")
         }
         throw AppServerError.invalidRequest("Invalid request: invalid type for field, expected \(expected)")
+    }
+
+    private static func rustU32Param(_ value: Any?, defaultValue: Int) throws -> Int {
+        try validateRustIntegerParam(value, expected: "u32")
+        guard let value, !(value is NSNull) else {
+            return defaultValue
+        }
+        if let int = value as? Int {
+            return int
+        }
+        if let number = value as? NSNumber {
+            return Int(number.uint32Value)
+        }
+        return defaultValue
     }
 
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {

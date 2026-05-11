@@ -11299,6 +11299,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondResult["nextCursor"] as? NSNull, NSNull())
     }
 
+    func testThreadLoadedListMatchesRustU32LimitDecoding() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let firstStart = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let secondStart = try decodeMessages(processor.processLine(
+            Data(#"{"id":2,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let firstID = try XCTUnwrap(((firstStart[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+        let secondID = try XCTUnwrap(((secondStart[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+        let expected = [firstID, secondID].sorted()
+
+        let zeroLimit = try decode(processor.processLine(
+            Data(#"{"id":3,"method":"thread/loaded/list","params":{"limit":0}}"#.utf8)
+        ))
+        let zeroLimitResult = try XCTUnwrap(zeroLimit["result"] as? [String: Any])
+        XCTAssertEqual(zeroLimitResult["data"] as? [String], [expected[0]])
+        XCTAssertEqual(zeroLimitResult["nextCursor"] as? String, expected[0])
+
+        let invalidLimits: [(String, String)] = [
+            (#"true"#, "Invalid request: invalid type: boolean `true`, expected u32"),
+            (#""small""#, #"Invalid request: invalid type: string "small", expected u32"#),
+            (#"1.5"#, "Invalid request: invalid type: floating point `1.5`, expected u32"),
+            (#"-1"#, "Invalid request: invalid value: integer `-1`, expected u32")
+        ]
+
+        for (index, invalidLimit) in invalidLimits.enumerated() {
+            let response = try decode(processor.processLine(
+                Data(#"{"id":\#(index + 4),"method":"thread/loaded/list","params":{"limit":\#(invalidLimit.0)}}"#.utf8)
+            ))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, invalidLimit.1)
+        }
+    }
+
     func testThreadLoadedListRejectsInvalidCursorAndKeepsUnsubscribedThreadLoaded() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
