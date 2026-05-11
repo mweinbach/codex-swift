@@ -329,6 +329,165 @@ final class AgentJobRuntimeTests: XCTestCase {
         ))
     }
 
+    func testRecoverRunningItemsAppliesRustFinalAndMalformedThreadRules() async throws {
+        let fixture = try await makeStoreWithItems(["missing-thread", "invalid-thread", "finished-thread", "active-thread"])
+        let finishedThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000003")
+        let activeThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000004")
+        let markedMissingRunning = try await fixture.store.markAgentJobItemRunning(
+            jobID: "job-1",
+            itemID: "missing-thread"
+        )
+        XCTAssertTrue(markedMissingRunning)
+        let markedInvalidRunning = try await fixture.store.markAgentJobItemRunning(
+            jobID: "job-1",
+            itemID: "invalid-thread"
+        )
+        XCTAssertTrue(markedInvalidRunning)
+        let setInvalidThread = try await fixture.store.setAgentJobItemThread(
+            jobID: "job-1",
+            itemID: "invalid-thread",
+            threadID: "not-a-thread-id"
+        )
+        XCTAssertTrue(setInvalidThread)
+        let markedFinishedRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "finished-thread",
+            threadID: finishedThreadID.description
+        )
+        XCTAssertTrue(markedFinishedRunning)
+        let markedActiveRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "active-thread",
+            threadID: activeThreadID.description
+        )
+        XCTAssertTrue(markedActiveRunning)
+
+        let shutdownThreads = ThreadRecorder()
+        let activeItems = try await AgentJobRuntime.recoverRunningItems(
+            store: fixture.store,
+            jobID: "job-1",
+            runtimeTimeout: 999,
+            statusForThread: { threadID in
+                threadID == finishedThreadID ? .completed(nil) : .running
+            },
+            shutdownThread: { threadID in
+                await shutdownThreads.append(threadID)
+            }
+        )
+
+        XCTAssertEqual(activeItems.map(\.itemID), ["active-thread"])
+        XCTAssertEqual(activeItems.map(\.threadID), [activeThreadID])
+        let recordedShutdownThreads = await shutdownThreads.values()
+        XCTAssertEqual(recordedShutdownThreads, [finishedThreadID])
+
+        let persistedMissing = try await fixture.store.getAgentJobItem(
+            jobID: "job-1",
+            itemID: "missing-thread"
+        )
+        let missing = try XCTUnwrap(persistedMissing)
+        XCTAssertEqual(missing.status, .failed)
+        XCTAssertEqual(missing.lastError, "running item is missing assigned_thread_id")
+
+        let persistedInvalid = try await fixture.store.getAgentJobItem(
+            jobID: "job-1",
+            itemID: "invalid-thread"
+        )
+        let invalid = try XCTUnwrap(persistedInvalid)
+        XCTAssertEqual(invalid.status, .failed)
+        XCTAssertTrue(invalid.lastError?.hasPrefix("invalid assigned_thread_id: Invalid thread id: not-a-thread-id") == true)
+
+        let persistedFinished = try await fixture.store.getAgentJobItem(
+            jobID: "job-1",
+            itemID: "finished-thread"
+        )
+        let finished = try XCTUnwrap(persistedFinished)
+        XCTAssertEqual(finished.status, .failed)
+        XCTAssertEqual(finished.lastError, "worker finished without calling report_agent_job_result")
+    }
+
+    func testRecoverRunningItemsReapsStalePersistedItemsLikeRust() async throws {
+        let fixture = try await makeStoreWithItems(["stale-thread"])
+        let staleThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000011")
+        let markedStaleRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "stale-thread",
+            threadID: staleThreadID.description
+        )
+        XCTAssertTrue(markedStaleRunning)
+
+        let shutdownThreads = ThreadRecorder()
+        let activeItems = try await AgentJobRuntime.recoverRunningItems(
+            store: fixture.store,
+            jobID: "job-1",
+            runtimeTimeout: 45,
+            now: Date().addingTimeInterval(90),
+            statusForThread: { _ in .running },
+            shutdownThread: { threadID in
+                await shutdownThreads.append(threadID)
+            }
+        )
+
+        XCTAssertEqual(activeItems, [])
+        let recordedShutdownThreads = await shutdownThreads.values()
+        XCTAssertEqual(recordedShutdownThreads, [staleThreadID])
+        let persistedStale = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "stale-thread")
+        let stale = try XCTUnwrap(persistedStale)
+        XCTAssertEqual(stale.status, .failed)
+        XCTAssertEqual(stale.lastError, "worker exceeded max runtime of 45s")
+    }
+
+    func testFindAndReapActiveItemsMatchRustFinalAndTimeoutRules() async throws {
+        let fixture = try await makeStoreWithItems(["stale-active", "fresh-active"])
+        let staleThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000021")
+        let freshThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000022")
+        let markedStaleRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "stale-active",
+            threadID: staleThreadID.description
+        )
+        XCTAssertTrue(markedStaleRunning)
+        let markedFreshRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "fresh-active",
+            threadID: freshThreadID.description
+        )
+        XCTAssertTrue(markedFreshRunning)
+
+        let now = Date()
+        let activeItems = [
+            ActiveAgentJobItem(threadID: staleThreadID, itemID: "stale-active", startedAt: now.addingTimeInterval(-60)),
+            ActiveAgentJobItem(threadID: freshThreadID, itemID: "fresh-active", startedAt: now),
+        ]
+        let finished = await AgentJobRuntime.findFinishedThreads(
+            activeItems: activeItems,
+            statusForThread: { threadID in
+                threadID == freshThreadID ? .errored("done") : .running
+            }
+        )
+        XCTAssertEqual(finished.map(\.itemID), ["fresh-active"])
+
+        let shutdownThreads = ThreadRecorder()
+        let reapResult = try await AgentJobRuntime.reapStaleActiveItems(
+            store: fixture.store,
+            jobID: "job-1",
+            activeItems: activeItems,
+            runtimeTimeout: 45,
+            now: now,
+            shutdownThread: { threadID in
+                await shutdownThreads.append(threadID)
+            }
+        )
+
+        XCTAssertTrue(reapResult.didProgress)
+        XCTAssertEqual(reapResult.remainingItems.map(\.itemID), ["fresh-active"])
+        let recordedShutdownThreads = await shutdownThreads.values()
+        XCTAssertEqual(recordedShutdownThreads, [staleThreadID])
+        let persistedStale = try await fixture.store.getAgentJobItem(jobID: "job-1", itemID: "stale-active")
+        let stale = try XCTUnwrap(persistedStale)
+        XCTAssertEqual(stale.status, .failed)
+        XCTAssertEqual(stale.lastError, "worker exceeded max runtime of 45s")
+    }
+
     func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
         let fixture = try await makeStoreWithRunningItem()
 
@@ -478,6 +637,46 @@ final class AgentJobRuntimeTests: XCTestCase {
         )
         XCTAssertTrue(markedRunning)
         return AgentJobRuntimeStoreFixture(store: store, tempDirectory: tempDirectory)
+    }
+
+    private func makeStoreWithItems(_ itemIDs: [String]) async throws -> AgentJobRuntimeStoreFixture {
+        let tempDirectory = try AgentJobRuntimeTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: tempDirectory.url.appendingPathComponent("state.sqlite3"))
+        _ = try await store.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-1",
+                name: "job",
+                instruction: "do it",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id"],
+                inputCSVPath: "/tmp/input.csv",
+                outputCSVPath: "/tmp/output.csv",
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: itemIDs.enumerated().map { index, itemID in
+                AgentJobItemCreateParams(
+                    itemID: itemID,
+                    rowIndex: Int64(index),
+                    sourceID: nil,
+                    rowJSON: .object(["id": .string(itemID)])
+                )
+            }
+        )
+        try await store.markAgentJobRunning("job-1")
+        return AgentJobRuntimeStoreFixture(store: store, tempDirectory: tempDirectory)
+    }
+}
+
+private actor ThreadRecorder {
+    private var recordedThreads: [ThreadId] = []
+
+    func append(_ threadID: ThreadId) {
+        recordedThreads.append(threadID)
+    }
+
+    func values() -> [ThreadId] {
+        recordedThreads
     }
 }
 

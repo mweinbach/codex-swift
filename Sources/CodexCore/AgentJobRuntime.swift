@@ -139,6 +139,134 @@ public enum AgentJobRuntime {
         return makeSpawnResult(job: job, progress: progress, failedItems: failedItems)
     }
 
+    public static func recoverRunningItems(
+        store: SQLiteAgentJobStore,
+        jobID: String,
+        runtimeTimeout: TimeInterval,
+        now: Date = Date(),
+        statusForThread: @Sendable (ThreadId) async -> AgentStatus,
+        shutdownThread: @Sendable (ThreadId) async -> Void
+    ) async throws -> [ActiveAgentJobItem] {
+        let runningItems = try await store.listAgentJobItems(jobID: jobID, status: .running)
+        var activeItems: [ActiveAgentJobItem] = []
+        for item in runningItems {
+            if isItemStale(item, runtimeTimeout: runtimeTimeout, now: now) {
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: jobID,
+                    itemID: item.itemID,
+                    errorMessage: staleWorkerErrorMessage(runtimeTimeout: runtimeTimeout)
+                )
+                if let assignedThreadID = item.assignedThreadID,
+                   let threadID = try? ThreadId(string: assignedThreadID)
+                {
+                    await shutdownThread(threadID)
+                }
+                continue
+            }
+
+            guard let assignedThreadID = item.assignedThreadID else {
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: jobID,
+                    itemID: item.itemID,
+                    errorMessage: "running item is missing assigned_thread_id"
+                )
+                continue
+            }
+
+            let threadID: ThreadId
+            do {
+                threadID = try ThreadId(string: assignedThreadID)
+            } catch {
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: jobID,
+                    itemID: item.itemID,
+                    errorMessage: "invalid assigned_thread_id: \(error)"
+                )
+                continue
+            }
+
+            if await statusForThread(threadID).isFinal {
+                try await finalizeFinishedItem(
+                    store: store,
+                    jobID: jobID,
+                    itemID: item.itemID,
+                    threadID: threadID,
+                    shutdownThread: shutdownThread
+                )
+            } else {
+                activeItems.append(ActiveAgentJobItem(
+                    threadID: threadID,
+                    itemID: item.itemID,
+                    startedAt: startedAt(from: item, now: now)
+                ))
+            }
+        }
+        return activeItems
+    }
+
+    public static func findFinishedThreads(
+        activeItems: [ActiveAgentJobItem],
+        statusForThread: @Sendable (ThreadId) async -> AgentStatus
+    ) async -> [(threadID: ThreadId, itemID: String)] {
+        var finished: [(threadID: ThreadId, itemID: String)] = []
+        for item in activeItems {
+            if await statusForThread(item.threadID).isFinal {
+                finished.append((item.threadID, item.itemID))
+            }
+        }
+        return finished
+    }
+
+    public static func reapStaleActiveItems(
+        store: SQLiteAgentJobStore,
+        jobID: String,
+        activeItems: [ActiveAgentJobItem],
+        runtimeTimeout: TimeInterval,
+        now: Date = Date(),
+        shutdownThread: @Sendable (ThreadId) async -> Void
+    ) async throws -> (remainingItems: [ActiveAgentJobItem], didProgress: Bool) {
+        var remainingItems: [ActiveAgentJobItem] = []
+        var didProgress = false
+        for item in activeItems {
+            if now.timeIntervalSince(item.startedAt) >= runtimeTimeout {
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: jobID,
+                    itemID: item.itemID,
+                    errorMessage: staleWorkerErrorMessage(runtimeTimeout: runtimeTimeout)
+                )
+                await shutdownThread(item.threadID)
+                didProgress = true
+            } else {
+                remainingItems.append(item)
+            }
+        }
+        return (remainingItems, didProgress)
+    }
+
+    public static func finalizeFinishedItem(
+        store: SQLiteAgentJobStore,
+        jobID: String,
+        itemID: String,
+        threadID: ThreadId,
+        shutdownThread: @Sendable (ThreadId) async -> Void
+    ) async throws {
+        guard let item = try await store.getAgentJobItem(jobID: jobID, itemID: itemID) else {
+            throw FunctionCallError.respondToModel("job item not found for finalization: \(jobID)/\(itemID)")
+        }
+        if item.status == .running {
+            if item.resultJSON != nil {
+                _ = try await store.markAgentJobItemCompleted(jobID: jobID, itemID: itemID)
+            } else {
+                _ = try await store.markAgentJobItemFailed(
+                    jobID: jobID,
+                    itemID: itemID,
+                    errorMessage: "worker finished without calling report_agent_job_result"
+                )
+            }
+        }
+        await shutdownThread(threadID)
+    }
+
     public static func decodeReportAgentJobResultArguments(
         _ argumentsJSON: String
     ) throws -> ReportAgentJobResultArguments {
@@ -315,6 +443,46 @@ public enum AgentJobRuntime {
             url = URL(fileURLWithPath: cwd, isDirectory: true).appendingPathComponent(path)
         }
         return url.standardizedFileURL.path
+    }
+
+    private static func startedAt(from item: AgentJobItem, now: Date) -> Date {
+        let age = now.timeIntervalSince(item.updatedAt)
+        guard age >= 0 else {
+            return now
+        }
+        return now.addingTimeInterval(-age)
+    }
+
+    private static func isItemStale(_ item: AgentJobItem, runtimeTimeout: TimeInterval, now: Date) -> Bool {
+        let age = now.timeIntervalSince(item.updatedAt)
+        return age >= runtimeTimeout
+    }
+
+    private static func staleWorkerErrorMessage(runtimeTimeout: TimeInterval) -> String {
+        "worker exceeded max runtime of \(rustDurationDebug(runtimeTimeout))"
+    }
+
+    private static func rustDurationDebug(_ interval: TimeInterval) -> String {
+        if interval.rounded(.towardZero) == interval {
+            return "\(Int(interval))s"
+        }
+        let milliseconds = interval * 1_000
+        if milliseconds.rounded(.towardZero) == milliseconds {
+            return "\(Int(milliseconds))ms"
+        }
+        return "\(interval)s"
+    }
+}
+
+public struct ActiveAgentJobItem: Equatable, Sendable {
+    public var threadID: ThreadId
+    public var itemID: String
+    public var startedAt: Date
+
+    public init(threadID: ThreadId, itemID: String, startedAt: Date) {
+        self.threadID = threadID
+        self.itemID = itemID
+        self.startedAt = startedAt
     }
 }
 
