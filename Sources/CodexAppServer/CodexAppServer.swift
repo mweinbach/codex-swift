@@ -18585,7 +18585,7 @@ public enum CodexAppServer {
         let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
             return []
@@ -18593,7 +18593,9 @@ public enum CodexAppServer {
 
         var results: [[String: Any]] = []
         while let fileURL = enumerator.nextObject() as? URL {
-            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+            let values = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+            let isDirectory = values?.isDirectory == true
+            guard isDirectory || values?.isRegularFile == true else {
                 continue
             }
             let path = relativePath(fileURL: fileURL.standardizedFileURL, rootURL: rootURL)
@@ -18603,6 +18605,7 @@ public enum CodexAppServer {
             results.append([
                 "root": root,
                 "path": path,
+                "match_type": isDirectory ? "directory" : "file",
                 "file_name": fileName(fromRelativePath: path),
                 "score": fuzzyScore(candidate: path, indices: indices),
                 "indices": indices
@@ -18647,8 +18650,10 @@ public enum CodexAppServer {
         }
         let span = last - first + 1
         let gaps = max(0, span - indices.count)
-        let basenameBonus = first == 0 || candidate[candidate.index(candidate.startIndex, offsetBy: first - 1)] == "/" ? 12 : 0
-        return max(1, 100 + basenameBonus - candidate.count * 2 - gaps * 7 - first)
+        let componentStart = first == 0 || candidate[candidate.index(candidate.startIndex, offsetBy: first - 1)] == "/"
+        let boundaryBonus = first == 0 ? 0 : (componentStart ? 3 : 0)
+        let contiguousPenalty = gaps == 0 ? 1 : 0
+        return max(1, 100 - candidate.count * 3 - gaps * 7 + boundaryBonus - contiguousPenalty)
     }
 
     private static func relativePath(fileURL: URL, rootURL: URL) -> String {

@@ -20007,12 +20007,39 @@ final class CodexAppServerTests: XCTestCase {
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let files = try XCTUnwrap(result["files"] as? [[String: Any]])
-        XCTAssertEqual(files.map { $0["path"] as? String }, ["abexy", "abcde", "sub/abce"])
+        XCTAssertEqual(files.map { $0["path"] as? String }, ["abexy", "sub/abce", "abcde"])
         XCTAssertEqual(files[0]["root"] as? String, root.url.path)
+        XCTAssertEqual(files[0]["match_type"] as? String, "file")
         XCTAssertEqual(files[0]["file_name"] as? String, "abexy")
+        XCTAssertEqual(files[0]["score"] as? Int, 84)
         XCTAssertEqual(files[0]["indices"] as? [Int], [0, 1, 2])
-        XCTAssertEqual(files[1]["indices"] as? [Int], [0, 1, 4])
-        XCTAssertEqual(files[2]["indices"] as? [Int], [4, 5, 7])
+        XCTAssertEqual(files[1]["match_type"] as? String, "file")
+        XCTAssertEqual(files[1]["file_name"] as? String, "abce")
+        XCTAssertEqual(files[1]["score"] as? Int, 72)
+        XCTAssertEqual(files[1]["indices"] as? [Int], [4, 5, 7])
+        XCTAssertEqual(files[2]["match_type"] as? String, "file")
+        XCTAssertEqual(files[2]["file_name"] as? String, "abcde")
+        XCTAssertEqual(files[2]["score"] as? Int, 71)
+        XCTAssertEqual(files[2]["indices"] as? [Int], [0, 1, 4])
+    }
+
+    func testFuzzyFileSearchIncludesDirectoryMatchesLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let root = try TemporaryDirectory()
+        let directory = root.url.appendingPathComponent("alpha", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try "x".write(to: directory.appendingPathComponent("beta.txt"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fuzzyFileSearch","params":{"query":"alp","roots":["\#(root.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let files = try XCTUnwrap(result["files"] as? [[String: Any]])
+        let directoryMatch = try XCTUnwrap(files.first { $0["path"] as? String == "alpha" })
+        XCTAssertEqual(directoryMatch["match_type"] as? String, "directory")
+        XCTAssertEqual(directoryMatch["file_name"] as? String, "alpha")
+        XCTAssertEqual(directoryMatch["indices"] as? [Int], [0, 1, 2])
     }
 
     func testFuzzyFileSearchEmptyQueryReturnsNoFilesAndAcceptsCancellationToken() throws {
