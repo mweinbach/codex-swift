@@ -20609,6 +20609,9 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     func writeStdin(delta: Data, closeStdin: Bool) throws {
+        guard process.isRunning else {
+            throw AppServerError.invalidRequest(commandExecNoLongerRunningMessage(processID: params.processID))
+        }
         let stdin = try lock.withLock { () throws -> AppServerProcessInput in
             guard !stdinClosed else {
                 throw AppServerError.invalidRequest("stdin is already closed")
@@ -20656,10 +20659,17 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     func resizePty(size: AppServerTerminalSize) throws {
+        guard process.isRunning else {
+            throw AppServerError.invalidRequest(commandExecNoLongerRunningMessage(processID: params.processID))
+        }
         guard let pseudoTerminal else {
             throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
         }
         try pseudoTerminal.resize(size)
+    }
+
+    func isRunning() -> Bool {
+        process.isRunning
     }
 
     func terminate() {
@@ -20790,6 +20800,10 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             capReached: capReached
         )
     }
+}
+
+private func commandExecNoLongerRunningMessage(processID: String?) -> String {
+    "command/exec \"\(processID ?? "")\" is no longer running"
 }
 
 private final class AppServerCommandExecRegistry: @unchecked Sendable {
@@ -22208,9 +22222,13 @@ final class CodexAppServerMessageProcessor {
 
     private func commandExecTerminateResult(params: [String: Any]?) throws -> [String: Any] {
         let processID = try CodexAppServer.commandExecProcessID(params: params)
-        guard let session = activeCommandExecs.remove(processID) else {
+        guard let session = activeCommandExecs.get(processID) else {
             throw AppServerError.invalidRequest("no active command/exec for process id \"\(processID)\"")
         }
+        guard session.isRunning() else {
+            throw AppServerError.invalidRequest(commandExecNoLongerRunningMessage(processID: processID))
+        }
+        _ = activeCommandExecs.remove(processID)
         session.terminate()
         return [:]
     }

@@ -19757,6 +19757,34 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["exitCode"] as? Int, 124)
     }
 
+    func testCommandExecActiveExitedSessionReportsNoLongerRunning() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf done"],"processId":"cmd-exited","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        let responseData = try await nextNotificationPayload(notificationCapture)
+        let response = try XCTUnwrap(decodeMessages(responseData).first)
+        XCTAssertEqual(response["id"] as? Int, 1)
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/terminate","params":{"processId":"cmd-exited"}}"#.utf8
+        )))
+        let terminateError = try XCTUnwrap(terminate["error"] as? [String: Any])
+        XCTAssertEqual(terminateError["code"] as? Int, -32600)
+        XCTAssertEqual(terminateError["message"] as? String, #"command/exec "cmd-exited" is no longer running"#)
+    }
+
     func testCommandExecResizeActiveNonPtyReportsRustError() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
