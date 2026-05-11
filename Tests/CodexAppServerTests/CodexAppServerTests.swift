@@ -15417,6 +15417,73 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testRealtimeConversationRoutesRejectMalformedStringsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        realtime_conversation = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let expectedStringTypeError = "Invalid request: invalid type: integer `1`, expected a string"
+
+        let cases = [
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":1,"outputModality":"text"}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":1}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","prompt":1}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","realtimeSessionId":1}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","transport":{"type":"webrtc","sdp":1}}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":1,"sampleRate":24000,"numChannels":1}}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1,"itemId":1}}}"#,
+                expectedStringTypeError
+            ),
+            (
+                #"{"method":"thread/realtime/appendText","params":{"threadId":"\#(threadID)","text":1}}"#,
+                expectedStringTypeError
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 2),\#(testCase.0.dropFirst())"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testMcpServerStatusListReturnsConfiguredServersAndPaginates() throws {
         let temp = try TemporaryDirectory()
         try """

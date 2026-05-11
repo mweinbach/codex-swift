@@ -13598,9 +13598,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -13645,9 +13643,10 @@ public enum CodexAppServer {
 
         switch method {
         case "thread/realtime/start":
-            guard let outputModality = params["outputModality"] as? String else {
+            guard let rawOutputModality = params["outputModality"] else {
                 throw AppServerError.invalidParams("missing field `outputModality`")
             }
+            let outputModality = try rustRequiredStringParam(rawOutputModality, field: "outputModality")
             guard outputModality == "text" || outputModality == "audio" else {
                 throw AppServerError.invalidParams(
                     "unknown variant `\(outputModality)`, expected `text` or `audio`"
@@ -13660,9 +13659,10 @@ public enum CodexAppServer {
             }
             try validateRealtimeAudioChunk(audio)
         case "thread/realtime/appendText":
-            guard params["text"] is String else {
+            guard let text = params["text"] else {
                 throw AppServerError.invalidParams("missing field `text`")
             }
+            _ = try rustRequiredStringParam(text, field: "text")
         case "thread/realtime/stop":
             break
         default:
@@ -13671,14 +13671,11 @@ public enum CodexAppServer {
     }
 
     private static func validateRealtimeStartOptionals(_ params: [String: Any]) throws {
-        if let prompt = params["prompt"], !(prompt is NSNull), !(prompt is String) {
-            throw AppServerError.invalidParams("invalid type for field `prompt`")
+        if let prompt = params["prompt"] {
+            _ = try rustOptionalStringParam(prompt)
         }
-        if let realtimeSessionID = params["realtimeSessionId"],
-           !(realtimeSessionID is NSNull),
-           !(realtimeSessionID is String)
-        {
-            throw AppServerError.invalidParams("invalid type for field `realtimeSessionId`")
+        if let realtimeSessionID = params["realtimeSessionId"] {
+            _ = try rustOptionalStringParam(realtimeSessionID)
         }
         if let voice = params["voice"], !(voice is NSNull) {
             guard let voiceString = voice as? String else {
@@ -13693,18 +13690,18 @@ public enum CodexAppServer {
             }
         }
         if let transportValue = params["transport"], !(transportValue is NSNull) {
-            guard let transport = transportValue as? [String: Any],
-                  let type = transport["type"] as? String
-            else {
+            guard let transport = transportValue as? [String: Any] else {
                 throw AppServerError.invalidParams("invalid transport")
             }
+            let type = try rustRequiredStringParam(transport["type"], field: "type")
             switch type {
             case "websocket":
                 break
             case "webrtc":
-                guard transport["sdp"] is String else {
+                guard let sdp = transport["sdp"] else {
                     throw AppServerError.invalidParams("missing field `sdp`")
                 }
+                _ = try rustRequiredStringParam(sdp, field: "sdp")
             default:
                 throw AppServerError.invalidParams(
                     "unknown variant `\(type)`, expected `websocket` or `webrtc`"
@@ -13714,16 +13711,17 @@ public enum CodexAppServer {
     }
 
     private static func validateRealtimeAudioChunk(_ audio: [String: Any]) throws {
-        guard audio["data"] is String else {
+        guard let data = audio["data"] else {
             throw AppServerError.invalidParams("missing field `data`")
         }
+        _ = try rustRequiredStringParam(data, field: "data")
         _ = try unsignedIntegerParam(audio["sampleRate"], field: "sampleRate", upperBound: UInt64(UInt32.max))
         _ = try unsignedIntegerParam(audio["numChannels"], field: "numChannels", upperBound: UInt64(UInt16.max))
         if let samplesPerChannel = audio["samplesPerChannel"], !(samplesPerChannel is NSNull) {
             _ = try unsignedIntegerParam(samplesPerChannel, field: "samplesPerChannel", upperBound: UInt64(UInt32.max))
         }
-        if let itemID = audio["itemId"], !(itemID is NSNull), !(itemID is String) {
-            throw AppServerError.invalidParams("invalid type for field `itemId`")
+        if let itemID = audio["itemId"] {
+            _ = try rustOptionalStringParam(itemID)
         }
     }
 
