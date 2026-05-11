@@ -32,6 +32,7 @@ Source baseline inspected for this scaffold:
   - slash command names, presentation order, descriptions, and task availability
 - `codex-rs/cli/src/main.rs`
   - top-level command registry, visible aliases, hidden command marking, version, and shell completion generation for bash, elvish, fish, PowerShell, and zsh
+  - root `--remote` / `--remote-auth-token-env` mode now follows Rust's command dispatch guard: non-interactive subcommands reject those flags with subcommand-specific error text before runner startup, while `resume` and `fork` retain their interactive remote forwarding path.
   - `remote-control` dispatch now rejects Rust's root `--remote` / `--remote-auth-token-env` flags for this non-interactive subcommand, rejects unexpected command arguments before runtime startup, and starts the Swift app-server path with `features.remote_control=true` appended after any root config or feature-toggle overrides
 - `codex-rs/common/src/approval_mode_cli_arg.rs`
   - approval CLI argument names and protocol mapping

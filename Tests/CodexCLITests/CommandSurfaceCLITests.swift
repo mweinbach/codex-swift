@@ -809,6 +809,89 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncRejectsRootRemoteModeForNonInteractiveCommandsLikeRust() async {
+        let cases: [([String], String)] = [
+            (
+                ["--remote", "ws://root.example.test", "exec", "hello"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex exec`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "e", "hello"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex exec`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "review"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex review`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "mcp-server"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex mcp-server`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "mcp", "list"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex mcp`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "plugin", "marketplace", "list"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex plugin`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "app-server", "generate-ts", "--out", "/tmp/out"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server generate-ts`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "sandbox", "macos", "echo", "hi"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex sandbox macos`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "execpolicy", "check", "--rules", "rules.rules", "echo", "hi"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex execpolicy check`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "features", "enable", "apps"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex features enable`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "completion", "zsh"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex completion`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "apply", "task-123"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex apply`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "a", "task-123"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex apply`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "update"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex update`"
+            ),
+            (
+                ["--remote", "ws://root.example.test", "app", "."],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex app`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "stdio-to-uds", "/tmp/codex.sock"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex stdio-to-uds`"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stdout: [String] = []
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { stdout.append($0) },
+                stderr: { stderr.append($0) }
+            )
+
+            XCTAssertEqual(exitCode, 1, "\(arguments)")
+            XCTAssertEqual(stdout, [], "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncRemoteControlRejectsArgumentsBeforeRunner() async {
         let cases: [([String], String)] = [
             (

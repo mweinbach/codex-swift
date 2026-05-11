@@ -722,7 +722,18 @@ public struct CodexCLI: Sendable {
         responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil,
         updateRunner: UpdateCommandRunner? = nil
     ) async -> Int32 {
-        switch parseInvocation(arguments: arguments) {
+        let invocation = parseInvocation(arguments: arguments)
+        if case let .command(spec, commandArguments) = invocation,
+           let message = rootRemoteModeRejectionMessage(
+               spec: spec,
+               commandArguments: commandArguments,
+               arguments: arguments
+           ) {
+            stderr(message)
+            return 1
+        }
+
+        switch invocation {
         case .version:
             stdout(renderVersion())
             return 0
@@ -1044,15 +1055,6 @@ public struct CodexCLI: Sendable {
             let rawArguments = rawCommandArguments(after: spec, in: arguments)
             switch parseDebugCommandAction(rawArguments) {
             case let .success(action):
-                let subcommand = debugRemoteRejectionSubcommand(for: action)
-                if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "debug", in: arguments) {
-                    stderr("`--remote \(remote)` is only supported for interactive TUI commands, not `codex \(subcommand)`")
-                    return 1
-                }
-                if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: "debug", in: arguments) != nil {
-                    stderr("`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex \(subcommand)`")
-                    return 1
-                }
                 let mergedAction = debugAction(
                     action,
                     prependingRootImagePaths: rootImagePaths(before: spec, in: arguments)
@@ -2435,10 +2437,18 @@ public struct CodexCLI: Sendable {
     }
 
     private func rootRemoteFlagValue(named option: String, beforeCommand command: String, in arguments: [String]) -> String? {
+        rootRemoteFlagValue(named: option, beforeCommands: [command], in: arguments)
+    }
+
+    private func rootRemoteFlagValue(named option: String, beforeCommand spec: CommandSpec, in arguments: [String]) -> String? {
+        rootRemoteFlagValue(named: option, beforeCommands: [spec.name] + spec.aliases, in: arguments)
+    }
+
+    private func rootRemoteFlagValue(named option: String, beforeCommands commands: [String], in arguments: [String]) -> String? {
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
-            if argument == command {
+            if commands.contains(argument) {
                 return nil
             }
             if argument == option {
@@ -2454,6 +2464,109 @@ public struct CodexCLI: Sendable {
             }
         }
         return nil
+    }
+
+    private func rootRemoteModeRejectionMessage(
+        spec: CommandSpec,
+        commandArguments: [String],
+        arguments: [String]
+    ) -> String? {
+        guard let subcommand = rootRemoteRejectedSubcommandName(
+            spec: spec,
+            commandArguments: commandArguments
+        ) else {
+            return nil
+        }
+        if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: spec, in: arguments) {
+            return "`--remote \(remote)` is only supported for interactive TUI commands, not `codex \(subcommand)`"
+        }
+        if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: spec, in: arguments) != nil {
+            return "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex \(subcommand)`"
+        }
+        return nil
+    }
+
+    private func rootRemoteRejectedSubcommandName(
+        spec: CommandSpec,
+        commandArguments: [String]
+    ) -> String? {
+        switch spec.name {
+        case "resume", "fork":
+            return nil
+        case "app-server":
+            return appServerRemoteRejectionSubcommand(commandArguments)
+        case "sandbox":
+            return sandboxRemoteRejectionSubcommand(commandArguments)
+        case "debug":
+            return debugRemoteRejectionSubcommand(commandArguments)
+        case "execpolicy":
+            return commandArguments.first == "check" ? "execpolicy check" : nil
+        case "features":
+            switch commandArguments.first {
+            case "list":
+                return "features list"
+            case "enable":
+                return "features enable"
+            case "disable":
+                return "features disable"
+            default:
+                return nil
+            }
+        case "exec", "computer-use", "review", "login", "logout", "mcp", "plugin",
+             "mcp-server", "remote-control", "app", "completion", "update", "cloud",
+             "apply", "responses-api-proxy", "stdio-to-uds", "exec-server":
+            return spec.name
+        default:
+            return nil
+        }
+    }
+
+    private func appServerRemoteRejectionSubcommand(_ arguments: [String]) -> String? {
+        guard let subcommand = arguments.first else {
+            return "app-server"
+        }
+        switch subcommand {
+        case "proxy":
+            return "app-server proxy"
+        case "generate-ts":
+            return "app-server generate-ts"
+        case "generate-json-schema":
+            return "app-server generate-json-schema"
+        case "generate-internal-json-schema":
+            return "app-server generate-internal-json-schema"
+        default:
+            return nil
+        }
+    }
+
+    private func sandboxRemoteRejectionSubcommand(_ arguments: [String]) -> String? {
+        switch arguments.first {
+        case "macos":
+            return "sandbox macos"
+        case "linux":
+            return "sandbox linux"
+        case "windows":
+            return "sandbox windows"
+        default:
+            return nil
+        }
+    }
+
+    private func debugRemoteRejectionSubcommand(_ arguments: [String]) -> String? {
+        switch arguments.first {
+        case "models":
+            return "debug models"
+        case "app-server":
+            return "debug app-server"
+        case "prompt-input":
+            return "debug prompt-input"
+        case "trace-reduce":
+            return "debug trace-reduce"
+        case "clear-memories":
+            return "debug clear-memories"
+        default:
+            return nil
+        }
     }
 
     private func appServerRequest(
@@ -2966,21 +3079,6 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>", 64)
         }
         return .success(.traceReduce(traceBundle: traceBundle, output: output))
-    }
-
-    private func debugRemoteRejectionSubcommand(for action: DebugCommandAction) -> String {
-        switch action {
-        case .models:
-            return "debug models"
-        case .appServerSendMessageV2:
-            return "debug app-server"
-        case .promptInput:
-            return "debug prompt-input"
-        case .traceReduce:
-            return "debug trace-reduce"
-        case .clearMemories:
-            return "debug clear-memories"
-        }
     }
 
     private func parseNoArgumentDebugAction(
