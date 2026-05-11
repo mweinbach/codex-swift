@@ -954,6 +954,12 @@ public enum CodexAppServer {
         let sandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
+        let dynamicTools = try dynamicToolsParam(params?["dynamicTools"]) ?? []
+        do {
+            try DynamicToolSpec.validate(dynamicTools)
+        } catch let error as DynamicToolValidationError {
+            throw AppServerError.invalidRequest(error.description)
+        }
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         try persistTrustedProjectForThreadStartIfNeeded(
@@ -989,7 +995,8 @@ public enum CodexAppServer {
             source: .mcp,
             originator: "codex_app_server",
             cliVersion: configuration.version,
-            modelProvider: modelProvider
+            modelProvider: modelProvider,
+            dynamicTools: dynamicTools.isEmpty ? nil : dynamicTools
         )
         try recorder.shutdown()
         return AppServerStartedConversation(
@@ -1005,6 +1012,25 @@ public enum CodexAppServer {
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             ephemeral: false
         )
+    }
+
+    private struct DynamicToolsPayload: Decodable {
+        let dynamicTools: [DynamicToolSpec]
+    }
+
+    private static func dynamicToolsParam(_ raw: Any?) throws -> [DynamicToolSpec]? {
+        guard let raw, !(raw is NSNull) else {
+            return nil
+        }
+        guard JSONSerialization.isValidJSONObject(["dynamicTools": raw]) else {
+            throw AppServerError.invalidRequest("thread/start.dynamicTools is not valid JSON")
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: ["dynamicTools": raw])
+            return try JSONDecoder().decode(DynamicToolsPayload.self, from: data).dynamicTools
+        } catch {
+            throw AppServerError.invalidRequest("thread/start.dynamicTools is invalid: \(error)")
+        }
     }
 
     private static func loadRuntimeConfigForThreadStartup(

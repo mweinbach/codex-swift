@@ -70,6 +70,7 @@ public final class RolloutRecorder {
         originator: String,
         cliVersion: String,
         modelProvider: String?,
+        dynamicTools: [DynamicToolSpec]? = nil,
         gitInfo: GitInfo? = nil,
         eventPersistenceMode: EventPersistenceMode = .limited,
         calendar: Calendar = .current,
@@ -102,7 +103,8 @@ public final class RolloutRecorder {
                 instructions: instructions,
                 source: source,
                 threadSource: threadSource,
-                modelProvider: modelProvider
+                modelProvider: modelProvider,
+                dynamicTools: dynamicTools
             ),
             git: gitInfo
         )))
@@ -129,6 +131,7 @@ public final class RolloutRecorder {
         originator: String,
         cliVersion: String,
         modelProvider: String?,
+        dynamicTools: [DynamicToolSpec]? = nil,
         forkedFromID: ConversationId? = nil,
         threadSource: ThreadSource? = nil,
         params: RolloutRecorderParams,
@@ -151,6 +154,7 @@ public final class RolloutRecorder {
                 originator: originator,
                 cliVersion: cliVersion,
                 modelProvider: modelProvider,
+                dynamicTools: dynamicTools,
                 gitInfo: gitInfo,
                 eventPersistenceMode: eventPersistenceMode,
                 calendar: calendar,

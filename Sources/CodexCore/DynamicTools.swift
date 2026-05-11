@@ -1,5 +1,13 @@
 import Foundation
 
+public struct DynamicToolValidationError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let description: String
+
+    public init(_ description: String) {
+        self.description = description
+    }
+}
+
 public struct DynamicToolSpec: Codable, Equatable, Sendable {
     public let namespace: String?
     public let name: String
@@ -52,6 +60,159 @@ public struct DynamicToolSpec: Codable, Equatable, Sendable {
         try container.encode(description, forKey: .description)
         try container.encode(inputSchema, forKey: .inputSchema)
         try container.encode(deferLoading, forKey: .deferLoading)
+    }
+
+    public static func validate(_ tools: [DynamicToolSpec]) throws {
+        let nameMaximumLength = 128
+        let namespaceMaximumLength = 64
+        let reservedResponsesNamespaces: Set<String> = [
+            "api_tool",
+            "browser",
+            "computer",
+            "container",
+            "file_search",
+            "functions",
+            "image_gen",
+            "multi_tool_use",
+            "python",
+            "python_user_visible",
+            "submodel_delegator",
+            "terminal",
+            "tool_search",
+            "web"
+        ]
+
+        var seen = Set<DynamicToolIdentifier>()
+        for tool in tools {
+            let trimmedName = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else {
+                throw DynamicToolValidationError("dynamic tool name must not be empty")
+            }
+            guard trimmedName == tool.name else {
+                throw DynamicToolValidationError(
+                    "dynamic tool name has leading/trailing whitespace: \(escapedIdentifierForError(tool.name))"
+                )
+            }
+            try validateIdentifier(trimmedName, label: "dynamic tool name", maximumLength: nameMaximumLength)
+            if trimmedName == "mcp" || trimmedName.hasPrefix("mcp__") {
+                throw DynamicToolValidationError("dynamic tool name is reserved: \(trimmedName)")
+            }
+
+            let trimmedNamespace = tool.namespace?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let trimmedNamespace {
+                guard !trimmedNamespace.isEmpty else {
+                    throw DynamicToolValidationError("dynamic tool namespace must not be empty for \(trimmedName)")
+                }
+                guard trimmedNamespace == tool.namespace else {
+                    throw DynamicToolValidationError(
+                        "dynamic tool namespace has leading/trailing whitespace for \(escapedIdentifierForError(trimmedName)): \(escapedIdentifierForError(trimmedNamespace))"
+                    )
+                }
+                try validateIdentifier(
+                    trimmedNamespace,
+                    label: "dynamic tool namespace",
+                    maximumLength: namespaceMaximumLength
+                )
+                if trimmedNamespace == "mcp" || trimmedNamespace.hasPrefix("mcp__") {
+                    throw DynamicToolValidationError(
+                        "dynamic tool namespace is reserved for \(trimmedName): \(trimmedNamespace)"
+                    )
+                }
+                if reservedResponsesNamespaces.contains(trimmedNamespace) {
+                    throw DynamicToolValidationError(
+                        "dynamic tool namespace collides with a reserved Responses API namespace for \(trimmedName): \(trimmedNamespace)"
+                    )
+                }
+            }
+
+            let identifier = DynamicToolIdentifier(namespace: trimmedNamespace, name: trimmedName)
+            guard seen.insert(identifier).inserted else {
+                if let trimmedNamespace {
+                    throw DynamicToolValidationError(
+                        "duplicate dynamic tool name in namespace \(trimmedNamespace): \(trimmedName)"
+                    )
+                }
+                throw DynamicToolValidationError("duplicate dynamic tool name: \(trimmedName)")
+            }
+            if tool.deferLoading && trimmedNamespace == nil {
+                throw DynamicToolValidationError("deferred dynamic tool must include a namespace: \(trimmedName)")
+            }
+            try validateInputSchema(tool.inputSchema, toolName: trimmedName)
+        }
+    }
+
+    private static func validateIdentifier(_ value: String, label: String, maximumLength: Int) throws {
+        let matchesResponsesPattern = value.utf8.allSatisfy { byte in
+            byte.isASCIIAlphaNumeric || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "-")
+        }
+        guard matchesResponsesPattern else {
+            throw DynamicToolValidationError(
+                "\(label) must match ^[a-zA-Z0-9_-]+$ to match Responses API: \(escapedIdentifierForError(value))"
+            )
+        }
+        guard value.count <= maximumLength else {
+            throw DynamicToolValidationError(
+                "\(label) must be at most \(maximumLength) characters to match Responses API: \(escapedIdentifierForError(value))"
+            )
+        }
+    }
+
+    private static func validateInputSchema(_ schema: JSONValue, toolName: String) throws {
+        let sanitized = JSONSchema.sanitized(from: jsonCompatibleValue(schema))
+        if case .null = sanitized {
+            throw DynamicToolValidationError(
+                "dynamic tool input schema is not supported for \(toolName): singleton null schema is not supported"
+            )
+        }
+    }
+
+    private static func jsonCompatibleValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .null:
+            return NSNull()
+        case let .bool(value):
+            return value
+        case let .integer(value):
+            return value
+        case let .double(value):
+            return value
+        case let .string(value):
+            return value
+        case let .array(values):
+            return values.map(jsonCompatibleValue)
+        case let .object(values):
+            return values.mapValues(jsonCompatibleValue)
+        }
+    }
+
+    private static func escapedIdentifierForError(_ value: String) -> String {
+        value.unicodeScalars.reduce(into: "") { result, scalar in
+            switch scalar.value {
+            case 10:
+                result += "\\n"
+            case 13:
+                result += "\\r"
+            case 9:
+                result += "\\t"
+            case 92:
+                result += "\\\\"
+            default:
+                result += String(scalar)
+            }
+        }
+    }
+}
+
+private struct DynamicToolIdentifier: Hashable {
+    let namespace: String?
+    let name: String
+}
+
+private extension UInt8 {
+    var isASCIIAlphaNumeric: Bool {
+        (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(self)
+            || (UInt8(ascii: "A")...UInt8(ascii: "Z")).contains(self)
+            || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(self)
     }
 }
 

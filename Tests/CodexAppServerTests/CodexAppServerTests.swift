@@ -367,6 +367,86 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(messages[0]["error"])
     }
 
+    func testThreadStartValidatesDynamicToolsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let inputSchema = #"{"type":"object","properties":{},"additionalProperties":false}"#
+        let cases: [(String, String)] = [
+            (
+                #"[{"name":"hidden_tool","description":"Hidden dynamic tool","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "deferred dynamic tool must include a namespace: hidden_tool"
+            ),
+            (
+                #"[{"namespace":"codex_app","name":"lookup.ticket","description":"Invalid dynamic tool","inputSchema":\#(inputSchema)}]"#,
+                "dynamic tool name must match ^[a-zA-Z0-9_-]+$ to match Responses API: lookup.ticket"
+            ),
+            (
+                #"[{"namespace":"codex.app","name":"lookup_ticket","description":"Invalid dynamic tool","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex.app"
+            ),
+            (
+                #"[{"namespace":"codex_app","name":"lookup","description":"First","inputSchema":\#(inputSchema)},{"namespace":"codex_app","name":"lookup","description":"Second","inputSchema":\#(inputSchema)}]"#,
+                "duplicate dynamic tool name in namespace codex_app: lookup"
+            ),
+            (
+                #"[{"namespace":"functions","name":"lookup","description":"Reserved","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "dynamic tool namespace collides with a reserved Responses API namespace for lookup: functions"
+            ),
+            (
+                #"[{"namespace":"codex_app","name":"mcp__lookup","description":"Reserved","inputSchema":\#(inputSchema)}]"#,
+                "dynamic tool name is reserved: mcp__lookup"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let messages = try decodeMessages(processor.processLine(Data(
+                #"{"id":\#(index + 1),"method":"thread/start","params":{"dynamicTools":\#(testCase.0)}}"#.utf8
+            )))
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
+    func testThreadStartPersistsDynamicToolsInRolloutMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(#"""
+        {"id":1,"method":"thread/start","params":{"dynamicTools":[{"namespace":"codex_app","name":"lookup","description":"Lookup dynamic tool","inputSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"deferLoading":true}]}}
+        """#.utf8)))
+
+        XCTAssertNil(messages[0]["error"])
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        let firstLine = try XCTUnwrap(rollout.split(separator: "\n").first)
+        let sessionMeta = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(firstLine.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(sessionMeta["type"] as? String, "session_meta")
+        let payload = try XCTUnwrap(sessionMeta["payload"] as? [String: Any])
+        let dynamicTools = try XCTUnwrap(payload["dynamic_tools"] as? [[String: Any]])
+        XCTAssertEqual(dynamicTools.count, 1)
+        XCTAssertEqual(dynamicTools[0]["namespace"] as? String, "codex_app")
+        XCTAssertEqual(dynamicTools[0]["name"] as? String, "lookup")
+        XCTAssertEqual(dynamicTools[0]["description"] as? String, "Lookup dynamic tool")
+        XCTAssertEqual(dynamicTools[0]["deferLoading"] as? Bool, true)
+        let inputSchema = try XCTUnwrap(dynamicTools[0]["inputSchema"] as? [String: Any])
+        XCTAssertEqual(inputSchema["type"] as? String, "object")
+    }
+
     func testThreadStartRejectsUnknownEnvironmentBeforeCreatingThreadLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(
