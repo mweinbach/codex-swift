@@ -3746,6 +3746,65 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(integerError["message"] as? String, "Invalid request: invalid type: integer `1`, expected a string")
     }
 
+    func testReviewStartRejectsMalformedTargetAndDeliveryLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases: [(request: String, message: String)] = [
+            (
+                #"{"id":2,"method":"review/start","params":{"threadId":"\#(threadID)","delivery":1,"target":{"type":"custom","instructions":"inspect"}}}"#,
+                "Invalid request: invalid type: integer `1`, expected enum ReviewDelivery"
+            ),
+            (
+                #"{"id":3,"method":"review/start","params":{"threadId":"\#(threadID)","delivery":"later","target":{"type":"custom","instructions":"inspect"}}}"#,
+                "Invalid request: unknown variant `later`, expected `inline` or `detached`"
+            ),
+            (
+                #"{"id":4,"method":"review/start","params":{"threadId":"\#(threadID)"}}"#,
+                "missing field `target`"
+            ),
+            (
+                #"{"id":5,"method":"review/start","params":{"threadId":"\#(threadID)","target":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected struct ReviewTarget"
+            ),
+            (
+                #"{"id":6,"method":"review/start","params":{"threadId":"\#(threadID)","target":{}}}"#,
+                "missing field `type`"
+            ),
+            (
+                #"{"id":7,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected enum ReviewTarget"
+            ),
+            (
+                #"{"id":8,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"diff"}}}"#,
+                "Invalid request: unknown variant `diff`, expected one of `uncommittedChanges`, `baseBranch`, `commit`, `custom`"
+            ),
+            (
+                #"{"id":9,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"baseBranch"}}}"#,
+                "missing field `branch`"
+            ),
+            (
+                #"{"id":10,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"baseBranch","branch":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":11,"method":"review/start","params":{"threadId":"\#(threadID)","target":{"type":"commit","sha":"abc123","title":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for testCase in cases {
+            let response = try decode(processor.processLine(Data(testCase.request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any], testCase.request)
+            XCTAssertEqual(error["code"] as? Int, -32600, testCase.request)
+            XCTAssertEqual(error["message"] as? String, testCase.message, testCase.request)
+        }
+    }
+
     func testThreadResumeReturnsThreadWithRebuiltTurns() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

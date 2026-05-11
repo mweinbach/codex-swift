@@ -2546,6 +2546,8 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerReviewStartOutcome {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        let review = try reviewRequestFromTarget(params?["target"])
+        let delivery = try reviewDeliveryParam(params?["delivery"])
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2554,11 +2556,6 @@ public enum CodexAppServer {
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
         let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
-        let review = try reviewRequestFromTarget(params?["target"])
-        let delivery = stringParam(params?["delivery"]) ?? "inline"
-        guard delivery == "inline" || delivery == "detached" else {
-            throw AppServerError.invalidRequest("unsupported review delivery: \(delivery)")
-        }
 
         let turnID = UUID().uuidString.lowercased()
         let turn = reviewTurn(id: turnID, displayText: review.displayText)
@@ -17764,43 +17761,66 @@ public enum CodexAppServer {
     }
 
     private static func reviewRequestFromTarget(_ value: Any?) throws -> (request: ReviewRequest, displayText: String) {
-        guard let target = value as? [String: Any],
-              let type = stringParam(target["type"])
-        else {
-            throw AppServerError.invalidRequest("missing review target")
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `target`")
         }
+        guard let target = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected struct ReviewTarget"
+            )
+        }
+        let type = try rustRequiredEnumStringParam(target["type"], field: "type", enumName: "ReviewTarget")
 
         let reviewTarget: ReviewTarget
         switch type {
         case "uncommittedChanges":
             reviewTarget = .uncommittedChanges
         case "baseBranch":
-            let branch = stringParam(target["branch"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let branch = try rustRequiredStringParam(target["branch"], field: "branch")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !branch.isEmpty else {
                 throw AppServerError.invalidRequest("branch must not be empty")
             }
             reviewTarget = .baseBranch(branch: branch)
         case "commit":
-            let sha = stringParam(target["sha"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sha = try rustRequiredStringParam(target["sha"], field: "sha")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !sha.isEmpty else {
                 throw AppServerError.invalidRequest("sha must not be empty")
             }
-            let trimmedTitle = stringParam(target["title"])?
+            let trimmedTitle = try rustOptionalStringParam(target["title"])?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let title = trimmedTitle?.isEmpty == true ? nil : trimmedTitle
             reviewTarget = .commit(sha: sha, title: title)
         case "custom":
-            let instructions = stringParam(target["instructions"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let instructions = try rustRequiredStringParam(target["instructions"], field: "instructions")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !instructions.isEmpty else {
                 throw AppServerError.invalidRequest("instructions must not be empty")
             }
             reviewTarget = .custom(instructions: instructions)
         default:
-            throw AppServerError.invalidRequest("unsupported review target: \(type)")
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(type)`, expected one of `uncommittedChanges`, `baseBranch`, `commit`, `custom`"
+            )
         }
 
         let hint = ReviewPrompts.userFacingHint(target: reviewTarget)
         return (ReviewRequest(target: reviewTarget, userFacingHint: hint), hint)
+    }
+
+    private static func reviewDeliveryParam(_ value: Any?) throws -> String {
+        guard let delivery = try rustOptionalEnumStringParam(value, enumName: "ReviewDelivery") else {
+            return "inline"
+        }
+        switch delivery {
+        case "inline", "detached":
+            return delivery
+        default:
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(delivery)`, expected `inline` or `detached`"
+            )
+        }
     }
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
