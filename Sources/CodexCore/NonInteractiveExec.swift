@@ -293,10 +293,31 @@ public enum NonInteractiveExec {
     public struct AgentJobToolContext: Sendable {
         public var store: SQLiteAgentJobStore
         public var reportingThreadID: String
+        public var maxThreads: Int?
+        public var configuredMaxRuntimeSeconds: UInt64?
+        public var statusForThread: (@Sendable (ThreadId) async -> AgentStatus)?
+        public var spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)?
+        public var shutdownThread: (@Sendable (ThreadId) async -> Void)?
+        public var waitWhenIdle: (@Sendable () async -> Void)?
 
-        public init(store: SQLiteAgentJobStore, reportingThreadID: String) {
+        public init(
+            store: SQLiteAgentJobStore,
+            reportingThreadID: String,
+            maxThreads: Int? = nil,
+            configuredMaxRuntimeSeconds: UInt64? = nil,
+            statusForThread: (@Sendable (ThreadId) async -> AgentStatus)? = nil,
+            spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)? = nil,
+            shutdownThread: (@Sendable (ThreadId) async -> Void)? = nil,
+            waitWhenIdle: (@Sendable () async -> Void)? = nil
+        ) {
             self.store = store
             self.reportingThreadID = reportingThreadID
+            self.maxThreads = maxThreads
+            self.configuredMaxRuntimeSeconds = configuredMaxRuntimeSeconds
+            self.statusForThread = statusForThread
+            self.spawnWorker = spawnWorker
+            self.shutdownThread = shutdownThread
+            self.waitWhenIdle = waitWhenIdle
         }
     }
 
@@ -951,6 +972,81 @@ public enum NonInteractiveExec {
                     )
                 }
 
+            case "spawn_agents_on_csv":
+                guard let agentJobContext,
+                      let statusForThread = agentJobContext.statusForThread,
+                      let spawnWorker = agentJobContext.spawnWorker,
+                      let shutdownThread = agentJobContext.shutdownThread
+                else {
+                    return functionOutput(
+                        callID: callID,
+                        content: "unsupported tool: \(name)",
+                        success: false
+                    )
+                }
+                do {
+                    let inputCSVPath = resolveAgentJobPath(
+                        try AgentJobRuntime.decodeSpawnAgentsOnCSVArguments(arguments).csvPath,
+                        cwd: cwd
+                    )
+                    let csvContent: String
+                    do {
+                        csvContent = try String(contentsOfFile: inputCSVPath, encoding: .utf8)
+                    } catch {
+                        throw FunctionCallError.respondToModel(
+                            "failed to read csv input \(inputCSVPath): \(error)"
+                        )
+                    }
+                    let prepared = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+                        argumentsJSON: arguments,
+                        csvContent: csvContent,
+                        cwd: cwd.path,
+                        store: agentJobContext.store,
+                        maxThreads: agentJobContext.maxThreads,
+                        configuredMaxRuntimeSeconds: agentJobContext.configuredMaxRuntimeSeconds
+                    )
+                    let finalJob: AgentJob
+                    do {
+                        finalJob = try await AgentJobRuntime.runAgentJobLoop(
+                            store: agentJobContext.store,
+                            jobID: prepared.job.id,
+                            maxConcurrency: prepared.concurrency,
+                            spawnConfig: prepared.spawnConfig,
+                            statusForThread: statusForThread,
+                            spawnWorker: spawnWorker,
+                            shutdownThread: shutdownThread,
+                            waitWhenIdle: agentJobContext.waitWhenIdle ?? {}
+                        )
+                    } catch {
+                        let errorMessage = "job runner failed: \(error)"
+                        try? await agentJobContext.store.markAgentJobFailed(
+                            prepared.job.id,
+                            errorMessage: errorMessage
+                        )
+                        throw FunctionCallError.respondToModel(
+                            "agent job \(prepared.job.id) failed: \(error)"
+                        )
+                    }
+                    let result = try await AgentJobRuntime.makeSpawnAgentsOnCSVResult(
+                        store: agentJobContext.store,
+                        job: finalJob
+                    )
+                    let data = try JSONEncoder().encode(result)
+                    return functionOutput(
+                        callID: callID,
+                        content: String(decoding: data, as: UTF8.self),
+                        success: true
+                    )
+                } catch let error as FunctionCallError {
+                    return functionOutput(callID: callID, content: error.description, success: false)
+                } catch {
+                    return functionOutput(
+                        callID: callID,
+                        content: "failed to handle \(name): \(String(describing: error))",
+                        success: false
+                    )
+                }
+
             case "report_agent_job_result":
                 guard let agentJobContext else {
                     return functionOutput(
@@ -995,6 +1091,13 @@ public enum NonInteractiveExec {
                 success: false
             )
         }
+    }
+
+    private static func resolveAgentJobPath(_ path: String, cwd: URL) -> String {
+        let url = path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : cwd.appendingPathComponent(path)
+        return url.standardizedFileURL.path
     }
 
     private static func executeShellCommand(

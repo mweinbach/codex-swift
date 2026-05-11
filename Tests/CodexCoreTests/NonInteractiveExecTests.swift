@@ -1233,6 +1233,105 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(job.lastError, "cancelled by worker request")
     }
 
+    func testSpawnAgentsOnCSVRequiresAgentJobRunnerContext() async throws {
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "spawn_agents_on_csv",
+                arguments: #"{"csv_path":"input.csv","instruction":"check {id}"}"#,
+                callID: "call-spawn"
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-spawn")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported tool: spawn_agents_on_csv")
+    }
+
+    func testSpawnAgentsOnCSVRunsJobLoopAndReturnsRustShapedResult() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let inputURL = temp.url.appendingPathComponent("input.csv")
+        let outputURL = temp.url.appendingPathComponent("results.csv")
+        try "id,value\nalpha,one\n".write(to: inputURL, atomically: true, encoding: .utf8)
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let workerThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000061")
+        let statusStore = NonInteractiveAgentStatusStore(statuses: [workerThreadID: .running])
+        let spawnRecorder = NonInteractiveAgentSpawnRecorder(results: [.spawned(workerThreadID)])
+        let shutdownRecorder = NonInteractiveThreadRecorder()
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "spawn_agents_on_csv",
+                arguments: #"{"csv_path":"input.csv","instruction":"check {id}","id_column":"id","output_csv_path":"results.csv","max_concurrency":1}"#,
+                callID: "call-spawn"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            agentJobContext: NonInteractiveExec.AgentJobToolContext(
+                store: store,
+                reportingThreadID: "parent-thread",
+                statusForThread: { threadID in
+                    await statusStore.status(for: threadID)
+                },
+                spawnWorker: { request in
+                    await spawnRecorder.spawn(request)
+                },
+                shutdownThread: { threadID in
+                    await shutdownRecorder.append(threadID)
+                },
+                waitWhenIdle: {
+                    let jobs = await spawnRecorder.jobIDs()
+                    if let jobID = jobs.first {
+                        _ = try? await store.reportAgentJobItemResult(
+                            jobID: jobID,
+                            itemID: "alpha",
+                            reportingThreadID: workerThreadID.description,
+                            resultJSON: .object(["passed": .bool(true)])
+                        )
+                    }
+                    await statusStore.set(.completed(nil), for: workerThreadID)
+                }
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-spawn")
+        XCTAssertEqual(payload.success, true)
+        let data = try XCTUnwrap(payload.content.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(SpawnAgentsOnCSVResult.self, from: data)
+        XCTAssertEqual(decoded.status, "completed")
+        XCTAssertEqual(decoded.outputCSVPath, outputURL.path)
+        XCTAssertEqual(decoded.totalItems, 1)
+        XCTAssertEqual(decoded.completedItems, 1)
+        XCTAssertEqual(decoded.failedItems, 0)
+        XCTAssertNil(decoded.jobError)
+        XCTAssertNil(decoded.failedItemErrors)
+
+        let requests = await spawnRecorder.requests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].itemID, "alpha")
+        XCTAssertTrue(requests[0].prompt.contains("check alpha"))
+        let shutdownThreads = await shutdownRecorder.values()
+        XCTAssertEqual(shutdownThreads, [workerThreadID])
+        let exported = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertTrue(exported.contains(#"alpha,one,"#))
+        XCTAssertTrue(exported.contains(#"alpha,completed,1,,"{""passed"":true}""#))
+    }
+
     func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let patch = """
@@ -1619,6 +1718,59 @@ private extension NonInteractiveExecTests {
     static func jsonString(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private actor NonInteractiveThreadRecorder {
+    private var recordedThreads: [ThreadId] = []
+
+    func append(_ threadID: ThreadId) {
+        recordedThreads.append(threadID)
+    }
+
+    func values() -> [ThreadId] {
+        recordedThreads
+    }
+}
+
+private actor NonInteractiveAgentSpawnRecorder {
+    private var recordedRequests: [AgentJobWorkerSpawnRequest] = []
+    private var results: [AgentJobWorkerSpawnResult]
+
+    init(results: [AgentJobWorkerSpawnResult]) {
+        self.results = results
+    }
+
+    func spawn(_ request: AgentJobWorkerSpawnRequest) -> AgentJobWorkerSpawnResult {
+        recordedRequests.append(request)
+        guard !results.isEmpty else {
+            return .failed("missing test spawn result")
+        }
+        return results.removeFirst()
+    }
+
+    func requests() -> [AgentJobWorkerSpawnRequest] {
+        recordedRequests
+    }
+
+    func jobIDs() -> [String] {
+        recordedRequests.map(\.jobID)
+    }
+}
+
+private actor NonInteractiveAgentStatusStore {
+    private var statuses: [ThreadId: AgentStatus]
+
+    init(statuses: [ThreadId: AgentStatus]) {
+        self.statuses = statuses
+    }
+
+    func set(_ status: AgentStatus, for threadID: ThreadId) {
+        statuses[threadID] = status
+    }
+
+    func status(for threadID: ThreadId) -> AgentStatus {
+        statuses[threadID] ?? .running
     }
 }
 
