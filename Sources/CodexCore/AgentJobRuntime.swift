@@ -98,6 +98,47 @@ public enum AgentJobRuntime {
         )
     }
 
+    public static func exportJobCSVSnapshot(
+        store: SQLiteAgentJobStore,
+        job: AgentJob,
+        fileManager: FileManager = .default
+    ) async throws {
+        let items = try await store.listAgentJobItems(jobID: job.id)
+        let csvContent: String
+        do {
+            csvContent = try AgentJobCSV.renderJobCSV(inputHeaders: job.inputHeaders, items: items)
+        } catch {
+            throw FunctionCallError.respondToModel("failed to render job csv for auto-export: \(error)")
+        }
+
+        let outputURL = URL(fileURLWithPath: job.outputCSVPath)
+        try fileManager.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try csvContent.write(to: outputURL, atomically: true, encoding: .utf8)
+    }
+
+    public static func makeSpawnAgentsOnCSVResult(
+        store: SQLiteAgentJobStore,
+        job: AgentJob,
+        fileManager: FileManager = .default
+    ) async throws -> SpawnAgentsOnCSVResult {
+        if !fileManager.fileExists(atPath: job.outputCSVPath) {
+            do {
+                try await exportJobCSVSnapshot(store: store, job: job, fileManager: fileManager)
+            } catch {
+                throw FunctionCallError.respondToModel("failed to export output csv \(job.id): \(error)")
+            }
+        }
+
+        let progress = try await store.getAgentJobProgress(job.id)
+        let failedItems = progress.failed > 0
+            ? try await store.listAgentJobItems(jobID: job.id, status: .failed, limit: 5)
+            : []
+        return makeSpawnResult(job: job, progress: progress, failedItems: failedItems)
+    }
+
     public static func decodeReportAgentJobResultArguments(
         _ argumentsJSON: String
     ) throws -> ReportAgentJobResultArguments {

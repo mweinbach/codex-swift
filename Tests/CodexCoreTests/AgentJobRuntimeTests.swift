@@ -238,6 +238,97 @@ final class AgentJobRuntimeTests: XCTestCase {
         }
     }
 
+    func testMakeSpawnAgentsOnCSVResultExportsMissingSnapshotLikeRust() async throws {
+        let fixture = try AgentJobRuntimeStoreFixture.make()
+        let outputURL = fixture.tempDirectory.url
+            .appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("results.csv")
+        _ = try await fixture.store.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-export",
+                name: "agent-job-export",
+                instruction: "Review {name}",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id", "name"],
+                inputCSVPath: fixture.tempDirectory.url.appendingPathComponent("input.csv").path,
+                outputCSVPath: outputURL.path,
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: [
+                AgentJobItemCreateParams(
+                    itemID: "row-1",
+                    rowIndex: 0,
+                    sourceID: "source-1",
+                    rowJSON: .object(["id": .string("1"), "name": .string("alpha, beta")])
+                ),
+                AgentJobItemCreateParams(
+                    itemID: "row-2",
+                    rowIndex: 1,
+                    sourceID: nil,
+                    rowJSON: .object(["id": .string("2"), "name": .string("gamma")])
+                ),
+            ]
+        )
+        try await fixture.store.markAgentJobRunning("job-export")
+        let markedFirstRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-export",
+            itemID: "row-1",
+            threadID: "thread-1"
+        )
+        XCTAssertTrue(markedFirstRunning)
+        let reportedFirstResult = try await fixture.store.reportAgentJobItemResult(
+            jobID: "job-export",
+            itemID: "row-1",
+            reportingThreadID: "thread-1",
+            resultJSON: .object(["ok": .bool(true)])
+        )
+        XCTAssertTrue(reportedFirstResult)
+        let markedSecondRunning = try await fixture.store.markAgentJobItemRunningWithThread(
+            jobID: "job-export",
+            itemID: "row-2",
+            threadID: "thread-2"
+        )
+        XCTAssertTrue(markedSecondRunning)
+        let markedSecondFailed = try await fixture.store.markAgentJobItemFailed(
+            jobID: "job-export",
+            itemID: "row-2",
+            errorMessage: "worker finished without calling report_agent_job_result"
+        )
+        XCTAssertTrue(markedSecondFailed)
+        try await fixture.store.markAgentJobCompleted("job-export")
+
+        let persistedJob = try await fixture.store.getAgentJob("job-export")
+        let job = try XCTUnwrap(persistedJob)
+        let result = try await AgentJobRuntime.makeSpawnAgentsOnCSVResult(
+            store: fixture.store,
+            job: job
+        )
+
+        XCTAssertEqual(result.status, "completed")
+        XCTAssertEqual(result.outputCSVPath, outputURL.path)
+        XCTAssertEqual(result.totalItems, 2)
+        XCTAssertEqual(result.completedItems, 1)
+        XCTAssertEqual(result.failedItems, 1)
+        XCTAssertNil(result.jobError)
+        XCTAssertEqual(result.failedItemErrors, [
+            AgentJobFailureSummary(
+                itemID: "row-2",
+                sourceID: nil,
+                lastError: "worker finished without calling report_agent_job_result"
+            ),
+        ])
+
+        let csv = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertTrue(csv.hasPrefix(
+            "id,name,job_id,item_id,row_index,source_id,status,attempt_count,last_error,result_json,reported_at,completed_at\n"
+        ))
+        XCTAssertTrue(csv.contains(#"1,"alpha, beta",job-export,row-1,0,source-1,completed,1,,"{""ok"":true}""#))
+        XCTAssertTrue(csv.contains(
+            "2,gamma,job-export,row-2,1,,failed,1,worker finished without calling report_agent_job_result,"
+        ))
+    }
+
     func testRecordReportAgentJobResultRejectsNonObjectResultLikeRust() async throws {
         let fixture = try await makeStoreWithRunningItem()
 
