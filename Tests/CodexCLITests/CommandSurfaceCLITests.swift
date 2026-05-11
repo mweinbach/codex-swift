@@ -1099,6 +1099,10 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() async throws {
+        // Match the bundled variant above: Swift 6.2 XCTest can crash when
+        // adjacent async tests complete entirely synchronously.
+        await Task.yield()
+
         let expected = ModelsResponse(models: [])
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: false)

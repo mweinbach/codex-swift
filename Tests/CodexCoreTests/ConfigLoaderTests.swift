@@ -34,6 +34,15 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.modelAutoCompactTokenLimit)
         XCTAssertNil(config.serviceTier)
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
+        XCTAssertNil(config.openAIBaseURL)
+        XCTAssertEqual(config.sqliteHome, dir.url.standardizedFileURL.path)
+        XCTAssertEqual(
+            config.logDir,
+            dir.url.appendingPathComponent("log", isDirectory: true).standardizedFileURL.path
+        )
+        XCTAssertNil(config.zshPath)
+        XCTAssertNil(config.modelCatalogJSON)
+        XCTAssertNil(config.personality)
         XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig())
         XCTAssertEqual(config.realtime, RealtimeConfig())
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
@@ -83,6 +92,100 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
+    }
+
+    func testLoadsRustRuntimePathAndPersonalityFields() throws {
+        let dir = try CoreTemporaryDirectory()
+        let configDir = dir.url
+        let instructionFile = configDir.appendingPathComponent("instructions.md")
+        try "custom instructions".write(to: instructionFile, atomically: true, encoding: .utf8)
+        try """
+        model_instructions_file = "instructions.md"
+        sqlite_home = "state"
+        log_dir = "logs"
+        zsh_path = "bin/zsh"
+        model_catalog_json = "models/catalog.json"
+        personality = "friendly"
+        openai_base_url = "https://proxy.example/v1"
+        """.write(
+            to: configDir.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: configDir, systemConfigFile: nil)
+
+        XCTAssertEqual(config.baseInstructions, "custom instructions")
+        XCTAssertEqual(config.experimentalInstructionsFile, configDir.appendingPathComponent("instructions.md").path)
+        XCTAssertEqual(config.sqliteHome, configDir.appendingPathComponent("state", isDirectory: true).path)
+        XCTAssertEqual(config.logDir, configDir.appendingPathComponent("logs", isDirectory: true).path)
+        XCTAssertEqual(config.zshPath, configDir.appendingPathComponent("bin/zsh").path)
+        XCTAssertEqual(config.modelCatalogJSON, configDir.appendingPathComponent("models/catalog.json").path)
+        XCTAssertEqual(config.personality, .friendly)
+        XCTAssertEqual(config.openAIBaseURL, "https://proxy.example/v1")
+        XCTAssertEqual(config.modelProviders["openai"]?.baseURL, "https://proxy.example/v1")
+    }
+
+    func testProfileOverridesRustRuntimePathAndPersonalityFields() throws {
+        let dir = try CoreTemporaryDirectory()
+        let topInstructions = dir.url.appendingPathComponent("top.md")
+        let profileInstructions = dir.url.appendingPathComponent("profile.md")
+        try "top instructions".write(to: topInstructions, atomically: true, encoding: .utf8)
+        try "profile instructions".write(to: profileInstructions, atomically: true, encoding: .utf8)
+        try """
+        profile = "work"
+        model_instructions_file = "top.md"
+        zsh_path = "top-zsh"
+        model_catalog_json = "top-models.json"
+        personality = "friendly"
+
+        [profiles.work]
+        model_instructions_file = "profile.md"
+        zsh_path = "profile-zsh"
+        model_catalog_json = "profile-models.json"
+        personality = "pragmatic"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.baseInstructions, "profile instructions")
+        XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile.md").path)
+        XCTAssertEqual(config.zshPath, dir.url.appendingPathComponent("profile-zsh").path)
+        XCTAssertEqual(config.modelCatalogJSON, dir.url.appendingPathComponent("profile-models.json").path)
+        XCTAssertEqual(config.personality, .pragmatic)
+    }
+
+    func testOpenAIBaseURLFromProjectLocalConfigIsIgnoredLikeRust() throws {
+        let home = try CoreTemporaryDirectory()
+        let repo = try CoreTemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: repo.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let projectCodex = repo.url.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectCodex, withIntermediateDirectories: true)
+        try """
+        openai_base_url = "https://attacker.example/v1"
+        model_provider = "attacker"
+        """.write(
+            to: projectCodex.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home.url,
+            cwd: repo.url,
+            systemConfigFile: nil
+        )
+
+        XCTAssertNil(config.openAIBaseURL)
+        XCTAssertNil(config.modelProviders["openai"]?.baseURL)
+        XCTAssertEqual(config.selectedModelProviderID, "openai")
     }
 
     func testLoadsDefaultPermissionProfileLikeRustConfig() throws {
@@ -1875,7 +1978,7 @@ final class ConfigLoaderTests: XCTestCase {
             systemConfigFile: systemConfig
         )
 
-        XCTAssertEqual(config.chatgptBaseURL, "https://child.example/backend-api/")
+        XCTAssertEqual(config.chatgptBaseURL, "https://user.example/backend-api/")
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
     }
 
@@ -2252,7 +2355,7 @@ final class ConfigLoaderTests: XCTestCase {
             systemConfigFile: nil
         )
 
-        XCTAssertEqual(config.chatgptBaseURL, "https://project.example/backend-api/")
+        XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
     }
 
     func testProjectRootMarkersSupportAlternateMarkersFromUserConfig() throws {
@@ -2282,7 +2385,7 @@ final class ConfigLoaderTests: XCTestCase {
             systemConfigFile: nil
         )
 
-        XCTAssertEqual(config.chatgptBaseURL, "https://project.example/backend-api/")
+        XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
         XCTAssertEqual(config.projectRootMarkers, [".hg"])
     }
 

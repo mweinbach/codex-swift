@@ -246,6 +246,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
     public var chatgptBaseURL: String
+    public var openAIBaseURL: String?
+    public var sqliteHome: String?
+    public var logDir: String?
+    public var zshPath: String?
+    public var modelCatalogJSON: String?
+    public var personality: Personality?
     public var appsMcpPathOverride: String?
     public var realtimeAudio: RealtimeAudioConfig
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
@@ -344,6 +350,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        openAIBaseURL: String? = nil,
+        sqliteHome: String? = nil,
+        logDir: String? = nil,
+        zshPath: String? = nil,
+        modelCatalogJSON: String? = nil,
+        personality: Personality? = nil,
         appsMcpPathOverride: String? = nil,
         realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
@@ -412,6 +424,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
         self.chatgptBaseURL = chatgptBaseURL
+        self.openAIBaseURL = openAIBaseURL
+        self.sqliteHome = sqliteHome
+        self.logDir = logDir
+        self.zshPath = zshPath
+        self.modelCatalogJSON = modelCatalogJSON
+        self.personality = personality
         self.appsMcpPathOverride = appsMcpPathOverride
         self.realtimeAudio = realtimeAudio
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
@@ -1022,10 +1040,12 @@ public enum CodexConfigLoader {
             ) {
                 if fileManager.fileExists(atPath: configFile.path) {
                     let contents = try String(contentsOf: configFile, encoding: .utf8)
-                    parsed.merge(try ParsedCodexConfigToml.parse(
+                    var projectConfig = try ParsedCodexConfigToml.parse(
                         contents,
                         baseURL: configFile.deletingLastPathComponent()
-                    ))
+                    )
+                    projectConfig.removeProjectLocalDenylistedKeys()
+                    parsed.merge(projectConfig)
                 }
             }
         }
@@ -1056,6 +1076,14 @@ public enum CodexConfigLoader {
 
         let requirements = try requirementsToml.requirements()
         var config = try parsed.resolvedConfig(environment: environment)
+        config.sqliteHome = config.sqliteHome ?? {
+            let sqliteHome = environment["CODEX_SQLITE_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return sqliteHome?.isEmpty == false ? environment["CODEX_SQLITE_HOME"] : codexHome.standardizedFileURL.path
+        }()
+        config.logDir = config.logDir ?? codexHome
+            .appendingPathComponent("log", isDirectory: true)
+            .standardizedFileURL
+            .path
         try applyRequirements(requirements, to: &config)
         config.sandboxPolicy = try parsed.resolvedSandboxPolicy(
             codexHome: codexHome,
@@ -1702,6 +1730,16 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
 
 private struct ParsedCodexConfigToml {
     private static let webSearchToolConfigKey = "__tools_web_search_config"
+    private static let projectLocalConfigDenylist: Set<String> = [
+        "openai_base_url",
+        "chatgpt_base_url",
+        "model_provider",
+        "model_providers",
+        "notify",
+        "profile",
+        "profiles",
+        "experimental_realtime_ws_base_url"
+    ]
 
     var topLevel: [String: ConfigValue] = [:]
     var profiles: [String: [String: ConfigValue]] = [:]
@@ -1728,6 +1766,18 @@ private struct ParsedCodexConfigToml {
     var toolSuggestDisabledToolLayers: [[ToolSuggestDisabledTool]] = []
     var skillsIncludeInstructions: Bool?
     var permissions: [String: ParsedPermissionProfileToml] = [:]
+
+    mutating func removeProjectLocalDenylistedKeys() {
+        for key in Self.projectLocalConfigDenylist {
+            topLevel.removeValue(forKey: key)
+        }
+        modelProviders.removeAll()
+        profiles.removeAll()
+        profileFeatures.removeAll()
+        profileAppsMcpPathOverride.removeAll()
+        profileAnalytics.removeAll()
+        profileTui.removeAll()
+    }
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
@@ -2089,7 +2139,15 @@ private struct ParsedCodexConfigToml {
     }
 
     private static func normalizePathLikeValue(_ value: ConfigValue, key: String, baseURL: URL?) throws -> ConfigValue {
-        guard ["experimental_instructions_file", "experimental_compact_prompt_file"].contains(key),
+        guard [
+            "model_instructions_file",
+            "experimental_instructions_file",
+            "experimental_compact_prompt_file",
+            "zsh_path",
+            "sqlite_home",
+            "log_dir",
+            "model_catalog_json"
+        ].contains(key),
               let baseURL,
               case let .string(path) = value,
               !(path as NSString).isAbsolutePath
@@ -2736,7 +2794,11 @@ private struct ParsedCodexConfigToml {
         config.features = featureStates
         config.mcpServers = mcpServers
         config.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
-        config.modelProviders = try Self.combinedModelProviders(from: modelProviders, environment: environment)
+        config.modelProviders = try Self.combinedModelProviders(
+            from: modelProviders,
+            openAIBaseURL: config.openAIBaseURL,
+            environment: environment
+        )
         guard config.selectedModelProvider != nil else {
             throw CodexConfigLoadError.modelProviderNotFound(config.selectedModelProviderID)
         }
@@ -3067,9 +3129,13 @@ private struct ParsedCodexConfigToml {
 
     private static func combinedModelProviders(
         from configuredProviders: [String: ConfigValue],
+        openAIBaseURL: String?,
         environment: [String: String]
     ) throws -> [String: ModelProviderInfo] {
-        var providers = ModelProviderInfo.builtInModelProviders(environment: environment)
+        var providers = ModelProviderInfo.builtInModelProviders(
+            openAIBaseURL: openAIBaseURL,
+            environment: environment
+        )
         let reservedConflicts = configuredProviders.keys
             .filter { $0 != ModelProviderInfo.amazonBedrockProviderID && providers[$0] != nil }
             .sorted()
@@ -3252,10 +3318,42 @@ private struct ParsedCodexConfigToml {
         if let baseURL = values["chatgpt_base_url"] {
             config.chatgptBaseURL = try stringValue(baseURL, key: "\(keyPrefix)chatgpt_base_url")
         }
+        if let baseURL = values["openai_base_url"] {
+            let value = try stringValue(baseURL, key: "\(keyPrefix)openai_base_url")
+            config.openAIBaseURL = value.isEmpty ? nil : value
+        }
+        if let sqliteHome = values["sqlite_home"] {
+            config.sqliteHome = try stringValue(sqliteHome, key: "\(keyPrefix)sqlite_home")
+        }
+        if let logDir = values["log_dir"] {
+            config.logDir = try stringValue(logDir, key: "\(keyPrefix)log_dir")
+        }
+        if let zshPath = values["zsh_path"] {
+            config.zshPath = try stringValue(zshPath, key: "\(keyPrefix)zsh_path")
+        }
+        if let modelCatalogJSON = values["model_catalog_json"] {
+            config.modelCatalogJSON = try stringValue(
+                modelCatalogJSON,
+                key: "\(keyPrefix)model_catalog_json"
+            )
+        }
+        if let personality = values["personality"] {
+            config.personality = try stringEnumValue(
+                Personality.self,
+                personality,
+                key: "\(keyPrefix)personality"
+            )
+        }
         if let instructionsFile = values["experimental_instructions_file"] {
             config.experimentalInstructionsFile = try stringValue(
                 instructionsFile,
                 key: "\(keyPrefix)experimental_instructions_file"
+            )
+        }
+        if let instructionsFile = values["model_instructions_file"] {
+            config.experimentalInstructionsFile = try stringValue(
+                instructionsFile,
+                key: "\(keyPrefix)model_instructions_file"
             )
         }
         if let compactPromptFile = values["experimental_compact_prompt_file"] {
@@ -3418,11 +3516,18 @@ private struct ParsedCodexConfigToml {
             || key == "model_reasoning_summary"
             || key == "model_supports_reasoning_summaries"
             || key == "model_verbosity"
+            || key == "model_catalog_json"
+            || key == "personality"
             || key == "service_tier"
             || key == "chatgpt_base_url"
+            || key == "openai_base_url"
+            || key == "sqlite_home"
+            || key == "log_dir"
+            || key == "zsh_path"
             || key == "cli_auth_credentials_store"
             || key == "forced_login_method"
             || key == "forced_chatgpt_workspace_id"
+            || key == "model_instructions_file"
             || key == "developer_instructions"
             || key == "compact_prompt"
             || key == "experimental_instructions_file"
@@ -3471,8 +3576,12 @@ private struct ParsedCodexConfigToml {
             || key == "plan_mode_reasoning_effort"
             || key == "model_reasoning_summary"
             || key == "model_verbosity"
+            || key == "model_catalog_json"
+            || key == "personality"
             || key == "service_tier"
             || key == "chatgpt_base_url"
+            || key == "zsh_path"
+            || key == "model_instructions_file"
             || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
             || key == "include_permissions_instructions"

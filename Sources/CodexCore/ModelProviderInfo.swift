@@ -482,12 +482,14 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     }
 
     public static func createOpenAIProvider(
+        openAIBaseURL: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         packageVersion: String = "0.0.0"
     ) -> ModelProviderInfo {
-        let baseURL = environment["OPENAI_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let environmentBaseURL = environment["OPENAI_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? environment["OPENAI_BASE_URL"]
             : nil
+        let baseURL = openAIBaseURL?.isEmpty == false ? openAIBaseURL : environmentBaseURL
 
         return ModelProviderInfo(
             name: openAIProviderName,
@@ -503,11 +505,16 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     }
 
     public static func builtInModelProviders(
+        openAIBaseURL: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         packageVersion: String = "0.0.0"
     ) -> [String: ModelProviderInfo] {
         [
-            "openai": createOpenAIProvider(environment: environment, packageVersion: packageVersion),
+            "openai": createOpenAIProvider(
+                openAIBaseURL: openAIBaseURL,
+                environment: environment,
+                packageVersion: packageVersion
+            ),
             amazonBedrockProviderID: createAmazonBedrockProvider(),
             ollamaOSSProviderID: createOSSProvider(
                 defaultProviderPort: defaultOllamaPort,
