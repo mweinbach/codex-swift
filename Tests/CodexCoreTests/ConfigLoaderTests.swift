@@ -20,6 +20,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.defaultPermissions)
         XCTAssertNil(config.permissionProfile)
         XCTAssertNil(config.activePermissionProfile)
+        XCTAssertNil(config.networkProxy)
         XCTAssertNil(config.modelReasoningEffort)
         XCTAssertNil(config.modelReasoningSummary)
         XCTAssertNil(config.modelVerbosity)
@@ -1612,6 +1613,53 @@ final class ConfigLoaderTests: XCTestCase {
             permissionProfile.fileSystemSandboxPolicy.getUnreadableRootsWithCwd(dir.url.path),
             [try AbsolutePath(absolutePath: normalizedSecretPath)]
         )
+    }
+
+    func testRequirementsTomlBuildsManagedNetworkProxySpecLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [experimental_network]
+        enabled = true
+        http_port = 18080
+        socks_port = 18081
+        allow_upstream_proxy = false
+        managed_allowed_domains_only = true
+
+        [experimental_network.domains]
+        "*.example.com" = "allow"
+        "blocked.example.com" = "deny"
+
+        [experimental_network.unix_sockets]
+        "/tmp/codex.sock" = "allow"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        default_permissions = ":workspace"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        let networkProxy = try XCTUnwrap(config.networkProxy)
+        XCTAssertTrue(networkProxy.enabled)
+        XCTAssertTrue(networkProxy.hardDenyAllowlistMisses)
+        XCTAssertEqual(networkProxy.config.network.proxyURL, "http://127.0.0.1:18080")
+        XCTAssertEqual(networkProxy.config.network.socksURL, "http://127.0.0.1:18081")
+        XCTAssertEqual(networkProxy.config.network.allowUpstreamProxy, false)
+        XCTAssertEqual(networkProxy.config.network.allowedDomains(), ["*.example.com"])
+        XCTAssertEqual(networkProxy.config.network.deniedDomains(), ["blocked.example.com"])
+        XCTAssertEqual(networkProxy.config.network.allowedUnixSockets(), ["/tmp/codex.sock"])
+        XCTAssertEqual(networkProxy.constraints.allowedDomains, ["*.example.com"])
+        XCTAssertEqual(networkProxy.constraints.deniedDomains, ["blocked.example.com"])
+        XCTAssertEqual(networkProxy.constraints.allowlistExpansionEnabled, false)
+        XCTAssertEqual(networkProxy.constraints.denylistExpansionEnabled, true)
     }
 
     func testProjectLayerStopsAtDetectedGitRoot() throws {

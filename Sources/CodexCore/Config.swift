@@ -82,6 +82,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var defaultPermissions: String?
     public var permissionProfile: PermissionProfile?
     public var activePermissionProfile: ActivePermissionProfile?
+    public var networkProxy: NetworkProxySpec?
     public var modelReasoningEffort: ReasoningEffort?
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
@@ -199,6 +200,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.defaultPermissions = defaultPermissions
         self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
+        self.networkProxy = nil
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
@@ -714,6 +716,7 @@ public enum CodexConfigLoader {
             to: &config,
             cwd: cwd ?? codexHome
         )
+        applyNetworkRequirements(requirements, to: &config)
         return config
     }
 
@@ -812,6 +815,22 @@ public enum CodexConfigLoader {
 
     private static func isGlobMetacharacter(_ character: Character) -> Bool {
         character == "*" || character == "?" || character == "["
+    }
+
+    private static func applyNetworkRequirements(
+        _ requirements: ConfigRequirements,
+        to config: inout CodexRuntimeConfig
+    ) {
+        guard let network = requirements.network else {
+            return
+        }
+        let permissionProfile = config.permissionProfile ?? .fromLegacySandboxPolicy(config.legacySandboxPolicy())
+        let spec = NetworkProxySpec.fromConfigAndRequirements(
+            NetworkProxyConfig(),
+            requirements: network,
+            permissionProfile: permissionProfile
+        )
+        config.networkProxy = spec
     }
 
     private static func baseConfigLayerFiles(

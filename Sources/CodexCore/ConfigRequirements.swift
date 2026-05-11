@@ -55,6 +55,7 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var mcpServers: [String: McpServerRequirement]?
     public var plugins: [String: PluginRequirementsToml]?
     public var execPolicy: ExecPolicy?
+    public var network: NetworkRequirementsToml?
     public var filesystem: FilesystemConstraints?
 
     public init(
@@ -65,6 +66,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         mcpServers: [String: McpServerRequirement]? = nil,
         plugins: [String: PluginRequirementsToml]? = nil,
         execPolicy: ExecPolicy? = nil,
+        network: NetworkRequirementsToml? = nil,
         filesystem: FilesystemConstraints? = nil
     ) {
         self.approvalPolicy = approvalPolicy
@@ -74,6 +76,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         self.mcpServers = mcpServers
         self.plugins = plugins
         self.execPolicy = execPolicy
+        self.network = network
         self.filesystem = filesystem
     }
 
@@ -680,6 +683,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             mcpServers: mcpServers,
             plugins: plugins,
             execPolicy: execPolicy,
+            network: network,
             filesystem: permissions?.filesystem.map { FilesystemConstraints(denyRead: $0.denyRead ?? []) }
         )
     }
