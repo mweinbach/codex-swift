@@ -1,4 +1,5 @@
 import CodexCore
+import CodexMCPServer
 import CryptoKit
 import Darwin
 import Dispatch
@@ -10531,18 +10532,22 @@ public enum CodexAppServer {
             throw AppServerError.internalError("failed to load MCP server config: \(error)")
         }
 
-        let serverNames = runtimeConfig.mcpServers.keys.sorted()
+        let runtimeMcpConfig = runtimeConfig.runtimeMcpConfig
+        let serverNames = (
+            Array(runtimeMcpConfig.configuredMcpServers.keys)
+                + runtimeMcpConfig.builtinMcpServers.map(\.name)
+        ).sorted()
         let total = serverNames.count
         let start = try mcpServerStatusStart(cursor: stringParam(params?["cursor"]), total: total)
         let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
         let end = min(start + effectiveLimit, total)
         let statuses = McpAuthStatusResolver.authStatuses(
-            for: runtimeConfig.mcpServers,
+            for: runtimeMcpConfig.configuredMcpServers,
             codexHome: configuration.codexHome,
             storeMode: runtimeConfig.mcpOAuthCredentialsStoreMode
         )
         let snapshot = mcpServerStatusSnapshot(
-            servers: runtimeConfig.mcpServers,
+            mcpConfig: runtimeMcpConfig,
             detail: detail,
             configuration: configuration
         )
@@ -10623,13 +10628,13 @@ public enum CodexAppServer {
     }
 
     fileprivate static func mcpServerStatusSnapshot(
-        servers: [String: McpServerConfig],
+        mcpConfig: RuntimeMcpConfig,
         detail: AppServerMcpServerStatusDetail,
         configuration: CodexAppServerConfiguration
     ) -> AppServerMcpServerStatusSnapshot {
         var snapshot = AppServerMcpServerStatusSnapshot()
-        for name in servers.keys.sorted() {
-            guard let server = servers[name], server.enabled else {
+        for name in mcpConfig.configuredMcpServers.keys.sorted() {
+            guard let server = mcpConfig.configuredMcpServers[name], server.enabled else {
                 continue
             }
             do {
@@ -10647,6 +10652,28 @@ public enum CodexAppServer {
             } catch {
                 continue
             }
+        }
+        for server in mcpConfig.builtinMcpServers.sorted(by: { $0.name < $1.name }) {
+            let inventory = mcpBuiltinInventorySnapshot(server: server, detail: detail)
+            snapshot.toolsByServer[server.name] = inventory.toolsByServer[server.name] ?? [:]
+            if detail == .full {
+                snapshot.resources[server.name] = inventory.resources[server.name] ?? []
+                snapshot.resourceTemplates[server.name] = inventory.resourceTemplates[server.name] ?? []
+            }
+        }
+        return snapshot
+    }
+
+    fileprivate static func mcpBuiltinInventorySnapshot(
+        server: BuiltinMcpServer,
+        detail _: AppServerMcpServerStatusDetail
+    ) -> AppServerMcpServerStatusSnapshot {
+        var snapshot = AppServerMcpServerStatusSnapshot()
+        switch server {
+        case .memories:
+            snapshot.toolsByServer[server.name] = toolsByName(MemoriesMCPServer.toolDefinitionsForStatus())
+            snapshot.resources[server.name] = []
+            snapshot.resourceTemplates[server.name] = []
         }
         return snapshot
     }
@@ -10892,6 +10919,10 @@ public enum CodexAppServer {
 
     fileprivate static func mcpToolsByRawName(from response: [String: Any], server: String) throws -> [String: Any] {
         let tools = try mcpArrayResult("tools", from: response, server: server, as: McpTool.self)
+        return toolsByName(tools)
+    }
+
+    fileprivate static func toolsByName(_ tools: [[String: Any]]) -> [String: Any] {
         var toolsByName: [String: Any] = [:]
         for tool in tools {
             guard let name = tool["name"] as? String else {

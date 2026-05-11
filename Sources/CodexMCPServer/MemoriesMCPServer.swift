@@ -59,7 +59,7 @@ public enum MemoriesMCPServer {
         case "ping":
             response = jsonRPCResponse(id: id as Any, result: [:])
         case "tools/list":
-            response = jsonRPCResponse(id: id as Any, result: ["tools": toolDefinitions()])
+            response = jsonRPCResponse(id: id as Any, result: ["tools": toolDefinitionsForStatus()])
         case "tools/call":
             response = handleToolCall(id: id as Any, params: params, backend: backend)
         default:
@@ -195,7 +195,7 @@ public enum MemoriesMCPServer {
         return -32602
     }
 
-    private static func toolDefinitions() -> [[String: Any]] {
+    public static func toolDefinitionsForStatus() -> [[String: Any]] {
         [
             [
                 "name": "list",

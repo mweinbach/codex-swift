@@ -14283,6 +14283,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(methods, ["initialize", "tools/list"])
     }
 
+    func testMcpServerStatusListIncludesBuiltinMemoriesEffectiveServer() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        builtin_mcp = true
+        memories = true
+
+        [memories]
+        use_memories = true
+
+        [mcp_servers.memories]
+        command = "user-memories"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"full"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["name"] as? String }, ["memories"])
+        let status = try XCTUnwrap(data.first)
+        XCTAssertEqual(status["authStatus"] as? String, "unsupported")
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(tools.keys), ["list", "read", "search"])
+        XCTAssertEqual(tools["list"]?["name"] as? String, "list")
+        XCTAssertEqual(tools["read"]?["annotations"] as? [String: Bool], ["readOnlyHint": true])
+        XCTAssertEqual((status["resources"] as? [Any])?.count, 0)
+        XCTAssertEqual((status["resourceTemplates"] as? [Any])?.count, 0)
+        XCTAssertNil(result["nextCursor"])
+    }
+
     func testMcpServerStatusListRejectsInvalidCursor() throws {
         let temp = try TemporaryDirectory()
 

@@ -44,7 +44,7 @@ let package = Package(
         ),
         .target(
             name: "CodexAppServer",
-            dependencies: ["CodexCore"]
+            dependencies: ["CodexCore", "CodexMCPServer"]
         ),
         .target(
             name: "CodexCLI",
