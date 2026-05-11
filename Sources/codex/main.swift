@@ -951,7 +951,8 @@ private func runNonInteractiveExec(
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 truncationPolicy: modelFamily.truncationPolicy,
-                environment: ExecEnvironment.createEnv(policy: settings.shellEnvironmentPolicy, environment: environment),
+                environment: environment,
+                shellEnvironmentPolicy: settings.shellEnvironmentPolicy,
                 explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
                 allowLoginShell: settings.allowLoginShell,
                 backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS

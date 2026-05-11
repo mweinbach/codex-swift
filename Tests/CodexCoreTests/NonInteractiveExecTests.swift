@@ -1171,6 +1171,96 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("Output:\nhello"))
     }
 
+    func testShellCommandAppliesConfiguredShellEnvironmentPolicyLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let command = try Self.jsonString(
+            #"printf '%s|%s|%s' "${VISIBLE-unset}" "${SECRET_TOKEN-unset}" "${DROP_ME-unset}""#
+        )
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(command),"login":false}"#,
+            callID: "call-shell-env-policy"
+        )
+        let policy = ShellEnvironmentPolicy(
+            inherit: .none,
+            set: [
+                "VISIBLE": "yes",
+                "SECRET_TOKEN": "hidden",
+                "DROP_ME": "no"
+            ],
+            includeOnly: [.newCaseInsensitive("VISIBLE")]
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [
+                "PATH": "/bin:/usr/bin",
+                "VISIBLE": "inherited",
+                "SECRET_TOKEN": "inherited",
+                "DROP_ME": "inherited"
+            ],
+            shellEnvironmentPolicy: policy,
+            explicitEnvOverrides: policy.set
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-env-policy")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Output:\nyes|unset|unset"), payload.content)
+    }
+
+    func testUnifiedExecAppliesConfiguredShellEnvironmentPolicyLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let command = try Self.jsonString(
+            #"printf '%s|%s|%s' "${VISIBLE-unset}" "${SECRET_TOKEN-unset}" "${DROP_ME-unset}""#
+        )
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(command),"login":false,"yield_time_ms":1000}"#,
+            callID: "call-unified-env-policy"
+        )
+        let policy = ShellEnvironmentPolicy(
+            inherit: .none,
+            set: [
+                "VISIBLE": "yes",
+                "SECRET_TOKEN": "hidden",
+                "DROP_ME": "no"
+            ],
+            includeOnly: [.newCaseInsensitive("VISIBLE")]
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [
+                "PATH": "/bin:/usr/bin",
+                "VISIBLE": "inherited",
+                "SECRET_TOKEN": "inherited",
+                "DROP_ME": "inherited"
+            ],
+            shellEnvironmentPolicy: policy,
+            explicitEnvOverrides: policy.set
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-unified-env-policy")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Output:\nyes|unset|unset"), payload.content)
+    }
+
     func testShellCommandSnapshotRestoresExplicitEnvironmentOverrides() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let snapshotPath = temp.url.appendingPathComponent("snapshot.sh")

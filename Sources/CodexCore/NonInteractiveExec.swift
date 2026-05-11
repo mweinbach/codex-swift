@@ -589,6 +589,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
@@ -607,6 +608,7 @@ public enum NonInteractiveExec {
                 shell: shell,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
@@ -645,6 +647,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 responseFormat: .structured
             )
@@ -688,6 +691,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
@@ -742,6 +746,7 @@ public enum NonInteractiveExec {
                 shell: shell,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
@@ -778,6 +783,7 @@ public enum NonInteractiveExec {
             shell: shell,
             truncationPolicy: truncationPolicy,
             environment: environment,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
             explicitEnvOverrides: explicitEnvOverrides,
             allowLoginShell: allowLoginShell,
             backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
@@ -927,6 +933,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
+        shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String],
         allowLoginShell: Bool,
         backgroundTerminalMaxTimeoutMS: UInt64,
@@ -955,6 +962,7 @@ public enum NonInteractiveExec {
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
                     environment: environment,
+                    shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides
                 )
 
@@ -977,6 +985,7 @@ public enum NonInteractiveExec {
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
+                    shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .freeform
                 )
@@ -996,6 +1005,7 @@ public enum NonInteractiveExec {
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
+                    shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .structured
                 )
@@ -1178,6 +1188,7 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
+        shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String],
         responseFormat: ShellResponseFormat
     ) async -> ResponseItem {
@@ -1194,6 +1205,7 @@ public enum NonInteractiveExec {
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
         switch maybeParseApplyPatchVerified(command, cwd: commandCwd) {
         case let .body(action):
             let result = executeApplyPatch(
@@ -1237,7 +1249,7 @@ public enum NonInteractiveExec {
                 sessionShell: $0,
                 cwd: commandCwd,
                 explicitEnvOverrides: explicitEnvOverrides,
-                environment: environment
+                environment: childEnvironment
             )
         } ?? command
 
@@ -1247,7 +1259,7 @@ public enum NonInteractiveExec {
                 cwd: commandCwd,
                 sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
                 timeoutMS: timeoutMS,
-                environment: environment
+                environment: childEnvironment
             )
         }.value
 
@@ -1270,6 +1282,7 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
+        shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String]
     ) async -> ResponseItem {
         if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
@@ -1285,13 +1298,14 @@ public enum NonInteractiveExec {
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
         let command = sessionShell.map {
             ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
                 command: command,
                 sessionShell: $0,
                 cwd: commandCwd,
                 explicitEnvOverrides: explicitEnvOverrides,
-                environment: environment
+                environment: childEnvironment
             )
         } ?? command
         do {
@@ -1301,7 +1315,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
-                environment: environment
+                environment: childEnvironment
             )
             return functionOutput(
                 callID: callID,
@@ -1770,7 +1784,7 @@ public enum NonInteractiveExec {
     ) -> ExecToolCallOutput {
         let start = Date()
         let launch: [String]
-        var childEnvironment = ExecEnvironment.createEnv(policy: ShellEnvironmentPolicy(), environment: environment)
+        var childEnvironment = environment
 
         if sandboxPolicy == .dangerFullAccess {
             launch = command
@@ -2243,7 +2257,7 @@ private actor UnifiedExecSessionRegistry {
         sandboxPolicy: SandboxPolicy,
         environment: [String: String]
     ) throws -> (executable: String, arguments: [String], environment: [String: String]) {
-        var childEnvironment = ExecEnvironment.createEnv(policy: ShellEnvironmentPolicy(), environment: environment)
+        var childEnvironment = environment
         let launch: [String]
         if sandboxPolicy == .dangerFullAccess {
             launch = command
