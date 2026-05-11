@@ -11076,6 +11076,83 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testExternalAgentConfigRoutesRejectMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(request: String, message: String)] = [
+            (
+                #"{"id":1,"method":"externalAgentConfig/detect","params":{"includeHome":"true"}}"#,
+                "Invalid request: invalid type: string \"true\", expected a boolean"
+            ),
+            (
+                #"{"id":2,"method":"externalAgentConfig/detect","params":{"cwds":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a sequence"
+            ),
+            (
+                #"{"id":3,"method":"externalAgentConfig/detect","params":{"cwds":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":4,"method":"externalAgentConfig/import","params":{}}"#,
+                "missing field `migrationItems`"
+            ),
+            (
+                #"{"id":5,"method":"externalAgentConfig/import","params":{"migrationItems":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a sequence"
+            ),
+            (
+                #"{"id":6,"method":"externalAgentConfig/import","params":{"migrationItems":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected struct ExternalAgentConfigMigrationItem"
+            ),
+            (
+                #"{"id":7,"method":"externalAgentConfig/import","params":{"migrationItems":[{}]}}"#,
+                "missing field `itemType`"
+            ),
+            (
+                #"{"id":8,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":1,"description":"Config","cwd":null}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected enum ExternalAgentConfigMigrationItemType"
+            ),
+            (
+                #"{"id":9,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","cwd":null}]}}"#,
+                "missing field `description`"
+            ),
+            (
+                #"{"id":10,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":1,"cwd":null}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":11,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":1}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":12,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"CONFIG","description":"Config","cwd":null,"details":1}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected struct MigrationDetails"
+            ),
+            (
+                #"{"id":13,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"PLUGINS","description":"Plugins","cwd":null,"details":{"plugins":1}}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a sequence"
+            ),
+            (
+                #"{"id":14,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"PLUGINS","description":"Plugins","cwd":null,"details":{"plugins":[{}]}}]}}"#,
+                "missing field `marketplaceName`"
+            ),
+            (
+                #"{"id":15,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null,"details":{"sessions":[{"path":"/tmp/session.jsonl","cwd":1}]}}]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":16,"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"HOOKS","description":"Hooks","cwd":null,"details":{"hooks":[{}]}}]}}"#,
+                "missing field `name`"
+            )
+        ]
+
+        for testCase in cases {
+            let response = try appServerResponse(testCase.request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], testCase.request)
+            XCTAssertEqual(error["code"] as? Int, -32600, testCase.request)
+            XCTAssertEqual(error["message"] as? String, testCase.message, testCase.request)
+        }
+    }
+
     func testExternalAgentConfigImportSessionsWithoutDetailsIsNoopLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: CodexAppServerConfiguration(codexHome: temp.url))

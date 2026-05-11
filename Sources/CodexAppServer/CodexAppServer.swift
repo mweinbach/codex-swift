@@ -8009,35 +8009,37 @@ public enum CodexAppServer {
            let item = try detectExternalAgentMcpServerConfig(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        let includeHome = try rustDefaultBoolParam(params?["includeHome"], defaultValue: false)
+        let cwds = try rustStringArrayParam(params?["cwds"]) ?? []
+        if includeHome,
            let item = try detectExternalAgentPlugins(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentHooks(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentSkills(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentCommands(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentSubagents(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentAgentsMd(cwd: nil, configuration: configuration) {
             items.append(item)
         }
-        if params?["includeHome"] as? Bool == true,
+        if includeHome,
            let item = try detectExternalAgentSessions(configuration: configuration) {
             items.append(item)
         }
-        for cwd in params?["cwds"] as? [String] ?? [] {
+        for cwd in cwds {
             guard let repoRoot = gitRepositoryRoot(containing: URL(fileURLWithPath: cwd, isDirectory: true)) else {
                 continue
             }
@@ -8073,18 +8075,18 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (result: [String: Any], notifications: [[String: Any]]) {
-        guard let items = params?["migrationItems"] as? [[String: Any]] else {
-            throw AppServerError.invalidParams("externalAgentConfig/import migrationItems must be an array")
-        }
+        let items = try externalAgentConfigMigrationItemsParam(params?["migrationItems"])
         guard !items.isEmpty else {
             return ([:], [])
         }
 
         for item in items {
-            guard let itemType = item["itemType"] as? String else {
-                throw AppServerError.invalidParams("external agent migration item is missing itemType")
-            }
-            let cwd = stringParam(item["cwd"])
+            let itemType = try rustRequiredEnumStringParam(
+                item["itemType"],
+                field: "itemType",
+                enumName: "ExternalAgentConfigMigrationItemType"
+            )
+            let cwd = try rustOptionalStringParam(item["cwd"])
             switch itemType {
             case "AGENTS_MD":
                 try importExternalAgentAgentsMd(cwd: cwd, configuration: configuration)
@@ -8118,6 +8120,89 @@ public enum CodexAppServer {
                 "params": [:]
             ]]
         )
+    }
+
+    private static func externalAgentConfigMigrationItemsParam(_ value: Any?) throws -> [[String: Any]] {
+        let rawItems = try rustRequiredArrayParam(value, field: "migrationItems")
+        return try rawItems.map { rawItem in
+            guard let item = rawItem as? [String: Any] else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(rawItem)), expected struct ExternalAgentConfigMigrationItem"
+                )
+            }
+
+            let itemType = try rustRequiredEnumStringParam(
+                item["itemType"],
+                field: "itemType",
+                enumName: "ExternalAgentConfigMigrationItemType"
+            )
+            try validateExternalAgentMigrationItemType(itemType)
+            _ = try rustRequiredStringParam(item["description"], field: "description")
+            _ = try rustOptionalStringParam(item["cwd"])
+            try validateExternalAgentMigrationDetails(item["details"])
+            return item
+        }
+    }
+
+    private static func validateExternalAgentMigrationItemType(_ itemType: String) throws {
+        switch itemType {
+        case "AGENTS_MD", "CONFIG", "SKILLS", "PLUGINS", "MCP_SERVER_CONFIG", "SUBAGENTS", "HOOKS", "COMMANDS", "SESSIONS":
+            return
+        default:
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(itemType)`, expected one of `AGENTS_MD`, `CONFIG`, `SKILLS`, `PLUGINS`, `MCP_SERVER_CONFIG`, `SUBAGENTS`, `HOOKS`, `COMMANDS`, `SESSIONS`"
+            )
+        }
+    }
+
+    private static func validateExternalAgentMigrationDetails(_ value: Any?) throws {
+        guard let value, !(value is NSNull) else {
+            return
+        }
+        guard let details = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected struct MigrationDetails"
+            )
+        }
+        try validatePluginsMigrationDetails(details["plugins"])
+        try validateSessionsMigrationDetails(details["sessions"])
+        try validateNamedMigrationDetails(details["mcpServers"], structName: "McpServerMigration")
+        try validateNamedMigrationDetails(details["hooks"], structName: "HookMigration")
+        try validateNamedMigrationDetails(details["subagents"], structName: "SubagentMigration")
+        try validateNamedMigrationDetails(details["commands"], structName: "CommandMigration")
+    }
+
+    private static func validatePluginsMigrationDetails(_ value: Any?) throws {
+        guard let value else {
+            return
+        }
+        let plugins = try rustStringKeyedObjectArrayParam(value, structName: "PluginsMigration")
+        for plugin in plugins {
+            _ = try rustRequiredStringParam(plugin["marketplaceName"], field: "marketplaceName")
+            _ = try rustRequiredStringArrayParam(plugin["pluginNames"], missingMessage: "missing field `pluginNames`")
+        }
+    }
+
+    private static func validateSessionsMigrationDetails(_ value: Any?) throws {
+        guard let value else {
+            return
+        }
+        let sessions = try rustStringKeyedObjectArrayParam(value, structName: "SessionMigration")
+        for session in sessions {
+            _ = try rustRequiredStringParam(session["path"], field: "path")
+            _ = try rustRequiredStringParam(session["cwd"], field: "cwd")
+            _ = try rustOptionalStringParam(session["title"])
+        }
+    }
+
+    private static func validateNamedMigrationDetails(_ value: Any?, structName: String) throws {
+        guard let value else {
+            return
+        }
+        let items = try rustStringKeyedObjectArrayParam(value, structName: structName)
+        for item in items {
+            _ = try rustRequiredStringParam(item["name"], field: "name")
+        }
     }
 
     private static func detectExternalAgentConfig(
@@ -17755,6 +17840,26 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
         }
         return try rustStringArrayParam(value) ?? []
+    }
+
+    private static func rustStringKeyedObjectArrayParam(
+        _ value: Any?,
+        structName: String
+    ) throws -> [[String: Any]] {
+        guard let value, !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value ?? NSNull())), expected a sequence")
+        }
+        guard let values = value as? [Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return try values.map { item in
+            guard let object = item as? [String: Any] else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(item)), expected struct \(structName)"
+                )
+            }
+            return object
+        }
     }
 
     private static func rustStringParam(_ value: Any) throws -> String {
