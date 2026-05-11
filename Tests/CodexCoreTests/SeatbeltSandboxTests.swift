@@ -192,6 +192,23 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertTrue(args.contains { $0.hasPrefix("-DWRITABLE_ROOT_0_EXCLUDED_") && $0.hasSuffix("=/private/tmp/codex-unreadable") })
     }
 
+    func testDirectWritableRootsIncludeTopLevelTmpAliasForSeatbelt() throws {
+        let cwd = try AbsolutePath(absolutePath: "/tmp/codex-direct-cwd")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue), access: .write)
+        ])
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            fileSystemSandboxPolicy: policy,
+            networkSandboxPolicy: .restricted,
+            sandboxPolicyCwd: cwd
+        )
+
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0=/private/tmp/codex-direct-cwd"))
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_1=/tmp/codex-direct-cwd"))
+    }
+
     func testDirectReadableRootsExcludeNestedUnreadableRoots() throws {
         let readableRoot = try AbsolutePath(absolutePath: "/tmp/codex-readable")
         let unreadableRoot = try readableRoot.join("private")

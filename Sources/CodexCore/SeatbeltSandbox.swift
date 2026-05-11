@@ -266,7 +266,26 @@ public enum SeatbeltSandbox {
             )
         }
 
-        let roots = fileSystemSandboxPolicy.getWritableRootsWithCwd(cwd).map {
+        var writableRoots = fileSystemSandboxPolicy.getWritableRootsWithCwd(cwd)
+        if let cwdPath = try? AbsolutePath(absolutePath: cwd),
+           fileSystemSandboxPolicy.canWritePathWithCwd(cwdPath.path, cwd: cwd),
+           !writableRoots.contains(where: { $0.root == cwdPath })
+        {
+            writableRoots.append(WritableRoot(
+                root: cwdPath,
+                protectedMetadataNames: [".git", ".agents", ".codex"]
+            ))
+        }
+        for alias in writableRoots.flatMap({ writableRootAliases(for: $0.root) }) {
+            guard !writableRoots.contains(where: { $0.root == alias }) else {
+                continue
+            }
+            writableRoots.append(WritableRoot(
+                root: alias,
+                protectedMetadataNames: [".git", ".agents", ".codex"]
+            ))
+        }
+        let roots = writableRoots.map {
             SeatbeltAccessRoot(
                 root: $0.root,
                 excludedSubpaths: $0.readOnlySubpaths,
@@ -274,6 +293,19 @@ public enum SeatbeltSandbox {
             )
         }
         return accessPolicyAndParams(action: "file-write*", paramPrefix: "WRITABLE_ROOT", roots: roots)
+    }
+
+    private static func writableRootAliases(for root: AbsolutePath) -> [AbsolutePath] {
+        let path = root.path
+        let aliases: [String]
+        if path == "/tmp" || path.hasPrefix("/tmp/") {
+            aliases = ["/private\(path)"]
+        } else if path == "/private/tmp" || path.hasPrefix("/private/tmp/") {
+            aliases = [String(path.dropFirst("/private".count))]
+        } else {
+            aliases = []
+        }
+        return aliases.compactMap { try? AbsolutePath(absolutePath: $0) }
     }
 
     private static func directFileReadPolicyAndParams(
