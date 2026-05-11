@@ -14067,6 +14067,36 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         runtimeFeatureEnablement: [String: Bool] = [:]
     ) throws -> [String: Any] {
+        _ = try realtimeControlCoreOp(
+            method: method,
+            params: params,
+            configuration: configuration,
+            runtimeFeatureEnablement: runtimeFeatureEnablement
+        )
+        return [:]
+    }
+
+    fileprivate static func realtimeControlFailureMessage(method: String) -> String {
+        switch method {
+        case "thread/realtime/start":
+            return "failed to start realtime conversation"
+        case "thread/realtime/appendAudio":
+            return "failed to append realtime conversation audio"
+        case "thread/realtime/appendText":
+            return "failed to append realtime conversation text"
+        case "thread/realtime/stop":
+            return "failed to stop realtime conversation"
+        default:
+            return "failed to control realtime conversation"
+        }
+    }
+
+    fileprivate static func realtimeControlCoreOp(
+        method: String,
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
+    ) throws -> (threadID: String, op: Op) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
@@ -14101,85 +14131,101 @@ public enum CodexAppServer {
         guard runtimeConfig.features.isEnabled(.realtimeConversation) else {
             throw AppServerError.invalidRequest("thread \(threadID) does not support realtime conversation")
         }
-        try validateRealtimeControlParams(method: method, params: params)
-        return [:]
+        return try realtimeControlOp(method: method, params: params, threadID: threadID)
     }
 
-    private static func validateRealtimeControlParams(method: String, params: [String: Any]?) throws {
+    private static func realtimeControlOp(
+        method: String,
+        params: [String: Any]?,
+        threadID: String
+    ) throws -> (threadID: String, op: Op) {
         guard let params else {
             throw AppServerError.invalidParams("missing field `threadId`")
         }
 
         switch method {
         case "thread/realtime/start":
-            guard let rawOutputModality = params["outputModality"] else {
-                throw AppServerError.invalidParams("missing field `outputModality`")
-            }
-            let outputModality = try rustRequiredStringParam(rawOutputModality, field: "outputModality")
-            guard outputModality == "text" || outputModality == "audio" else {
-                throw AppServerError.invalidParams(
-                    "unknown variant `\(outputModality)`, expected `text` or `audio`"
-                )
-            }
-            try validateRealtimeStartOptionals(params)
+            return (threadID, try realtimeStartOp(params))
         case "thread/realtime/appendAudio":
-            let audio = try rustRequiredObjectParam(
-                params["audio"],
-                field: "audio",
-                typeName: "struct ThreadRealtimeAudioChunk"
-            )
-            try validateRealtimeAudioChunk(audio)
+            return (threadID, try realtimeAppendAudioOp(params))
         case "thread/realtime/appendText":
             guard let text = params["text"] else {
                 throw AppServerError.invalidParams("missing field `text`")
             }
-            _ = try rustRequiredStringParam(text, field: "text")
+            return (threadID, .realtimeConversationText(ConversationTextParams(
+                text: try rustRequiredStringParam(text, field: "text")
+            )))
         case "thread/realtime/stop":
-            break
+            return (threadID, .realtimeConversationClose)
         default:
-            break
+            return (threadID, .realtimeConversationClose)
         }
     }
 
-    private static func validateRealtimeStartOptionals(_ params: [String: Any]) throws {
-        if let prompt = params["prompt"] {
-            _ = try rustOptionalStringParam(prompt)
+    private static func realtimeStartOp(_ params: [String: Any]) throws -> Op {
+        guard let rawOutputModality = params["outputModality"] else {
+            throw AppServerError.invalidParams("missing field `outputModality`")
         }
-        if let realtimeSessionID = params["realtimeSessionId"] {
-            _ = try rustOptionalStringParam(realtimeSessionID)
-        }
-        if let voice = params["voice"], !(voice is NSNull) {
-            let voiceString = try rustRealtimeVoiceParam(voice)
-            let validVoices: Set<String> = [
-                "alloy", "arbor", "ash", "ballad", "breeze", "cedar", "coral", "cove", "echo",
-                "ember", "juniper", "maple", "marin", "sage", "shimmer", "sol", "spruce", "vale", "verse"
-            ]
-            guard validVoices.contains(voiceString) else {
-                throw AppServerError.invalidRequest(
-                    "Invalid request: unknown variant `\(voiceString)`, expected one of `alloy`, `arbor`, `ash`, `ballad`, `breeze`, `cedar`, `coral`, `cove`, `echo`, `ember`, `juniper`, `maple`, `marin`, `sage`, `shimmer`, `sol`, `spruce`, `vale`, `verse`"
-                )
-            }
-        }
-        if let transportValue = params["transport"], !(transportValue is NSNull) {
-            let transport = try rustRequiredObjectParam(
-                transportValue,
-                field: "transport",
-                typeName: "internally tagged enum ThreadRealtimeStartTransport"
+        let outputModalityString = try rustRequiredStringParam(rawOutputModality, field: "outputModality")
+        guard let outputModality = RealtimeOutputModality(rawValue: outputModalityString) else {
+            throw AppServerError.invalidParams(
+                "unknown variant `\(outputModalityString)`, expected `text` or `audio`"
             )
-            let type = try rustRequiredStringParam(transport["type"], field: "type")
-            switch type {
-            case "websocket":
-                break
-            case "webrtc":
-                guard let sdp = transport["sdp"] else {
-                    throw AppServerError.invalidParams("missing field `sdp`")
-                }
-                _ = try rustRequiredStringParam(sdp, field: "sdp")
-            default:
-                throw AppServerError.invalidParams(
-                    "unknown variant `\(type)`, expected `websocket` or `webrtc`"
-                )
+        }
+        return .realtimeConversationStart(ConversationStartParams(
+            outputModality: outputModality,
+            prompt: try realtimeStartPrompt(params),
+            realtimeSessionID: try rustOptionalStringParam(params["realtimeSessionId"]),
+            transport: try realtimeStartTransport(params["transport"]),
+            voice: try realtimeStartVoice(params["voice"])
+        ))
+    }
+
+    private static func realtimeStartPrompt(_ params: [String: Any]) throws -> ConversationStartPrompt {
+        if let prompt = params["prompt"] {
+            if prompt is NSNull {
+                return .null
             }
+            return .value(try rustRequiredStringParam(prompt, field: "prompt"))
+        }
+        return .omitted
+    }
+
+    private static func realtimeStartVoice(_ value: Any?) throws -> RealtimeVoice? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        let voiceString = try rustRealtimeVoiceParam(value)
+        guard let voice = RealtimeVoice(rawValue: voiceString) else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(voiceString)`, expected one of `alloy`, `arbor`, `ash`, `ballad`, `breeze`, `cedar`, `coral`, `cove`, `echo`, `ember`, `juniper`, `maple`, `marin`, `sage`, `shimmer`, `sol`, `spruce`, `vale`, `verse`"
+            )
+        }
+        return voice
+    }
+
+    private static func realtimeStartTransport(_ value: Any?) throws -> ConversationStartTransport? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        let transport = try rustRequiredObjectParam(
+            value,
+            field: "transport",
+            typeName: "internally tagged enum ThreadRealtimeStartTransport"
+        )
+        let type = try rustRequiredStringParam(transport["type"], field: "type")
+        switch type {
+        case "websocket":
+            return .websocket
+        case "webrtc":
+            guard let sdp = transport["sdp"] else {
+                throw AppServerError.invalidParams("missing field `sdp`")
+            }
+            return .webrtc(sdp: try rustRequiredStringParam(sdp, field: "sdp"))
+        default:
+            throw AppServerError.invalidParams(
+                "unknown variant `\(type)`, expected `websocket` or `webrtc`"
+            )
         }
     }
 
@@ -14208,34 +14254,45 @@ public enum CodexAppServer {
         return object
     }
 
-    private static func validateRealtimeAudioChunk(_ audio: [String: Any]) throws {
+    private static func realtimeAppendAudioOp(_ params: [String: Any]) throws -> Op {
+        let audio = try rustRequiredObjectParam(
+            params["audio"],
+            field: "audio",
+            typeName: "struct ThreadRealtimeAudioChunk"
+        )
         guard let data = audio["data"] else {
             throw AppServerError.invalidParams("missing field `data`")
         }
-        _ = try rustRequiredStringParam(data, field: "data")
-        _ = try rustRequiredUnsignedIntegerParam(
+        let sampleRate = try rustRequiredUnsignedIntegerParam(
             audio["sampleRate"],
             field: "sampleRate",
             typeName: "u32",
             upperBound: UInt64(UInt32.max)
         )
-        _ = try rustRequiredUnsignedIntegerParam(
+        let numChannels = try rustRequiredUnsignedIntegerParam(
             audio["numChannels"],
             field: "numChannels",
             typeName: "u16",
             upperBound: UInt64(UInt16.max)
         )
-        if let samplesPerChannel = audio["samplesPerChannel"], !(samplesPerChannel is NSNull) {
-            _ = try rustRequiredUnsignedIntegerParam(
-                samplesPerChannel,
+        let samplesPerChannel: UInt32?
+        if let rawSamplesPerChannel = audio["samplesPerChannel"], !(rawSamplesPerChannel is NSNull) {
+            samplesPerChannel = UInt32(try rustRequiredUnsignedIntegerParam(
+                rawSamplesPerChannel,
                 field: "samplesPerChannel",
                 typeName: "u32",
                 upperBound: UInt64(UInt32.max)
-            )
+            ))
+        } else {
+            samplesPerChannel = nil
         }
-        if let itemID = audio["itemId"] {
-            _ = try rustOptionalStringParam(itemID)
-        }
+        return .realtimeConversationAudio(ConversationAudioParams(frame: RealtimeAudioFrame(
+            data: try rustRequiredStringParam(data, field: "data"),
+            sampleRate: UInt32(sampleRate),
+            numChannels: UInt16(numChannels),
+            samplesPerChannel: samplesPerChannel,
+            itemID: try rustOptionalStringParam(audio["itemId"])
+        )))
     }
 
     private static func rustRequiredUnsignedIntegerParam(
@@ -23018,14 +23075,21 @@ final class CodexAppServerMessageProcessor {
                         method: method,
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
+                    let coreOp = try CodexAppServer.realtimeControlCoreOp(
+                        method: method,
+                        params: params,
+                        configuration: configuration,
+                        runtimeFeatureEnablement: runtimeFeatureEnablement
+                    )
+                    try submitCoreOp(
+                        requestID: id,
+                        threadID: coreOp.threadID,
+                        op: coreOp.op,
+                        failureMessage: CodexAppServer.realtimeControlFailureMessage(method: method)
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.realtimeControlResult(
-                            method: method,
-                            params: params,
-                            configuration: configuration,
-                            runtimeFeatureEnablement: runtimeFeatureEnablement
-                        )
+                        result: [:]
                     )
                 case "mock/experimentalMethod":
                     try CodexAppServer.requireExperimentalAPI(

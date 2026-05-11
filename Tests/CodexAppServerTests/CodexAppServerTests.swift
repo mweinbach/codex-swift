@@ -16057,7 +16057,12 @@ final class CodexAppServerTests: XCTestCase {
             encoding: .utf8
         )
 
-        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
         let startMessages = try decodeMessages(processor.processLine(
             Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
         ))
@@ -16067,21 +16072,44 @@ final class CodexAppServerTests: XCTestCase {
 
         let requests = [
             #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"text"}}"#,
-            #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1}}}"#,
+            #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","prompt":null,"realtimeSessionId":"sess_1","transport":{"type":"webrtc","sdp":"v=offer\r\n"},"voice":"marin"}}"#,
+            #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1,"samplesPerChannel":480,"itemId":"item_1"}}}"#,
             #"{"method":"thread/realtime/appendText","params":{"threadId":"\#(threadID)","text":"hello"}}"#,
             #"{"method":"thread/realtime/stop","params":{"threadId":"\#(threadID)"}}"#
         ]
 
         for (index, request) in requests.enumerated() {
-            let response = try appServerResponse(
-                #"{"id":\#(index + 2),\#(request.dropFirst())"#,
-                codexHome: temp.url,
-                experimentalAPIEnabled: true
-            )
+            let response = try decode(processor.processLine(Data(
+                #"{"id":\#(index + 2),\#(request.dropFirst())"#.utf8
+            )))
             XCTAssertNil(response["error"], "\(response)")
             let result = try XCTUnwrap(response["result"] as? [String: Any])
             XCTAssertEqual(result.isEmpty, true)
         }
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3), .integer(4), .integer(5), .integer(6)])
+        XCTAssertEqual(submissions.map(\.threadID), Array(repeating: threadID, count: 5))
+        XCTAssertEqual(submissions[0].op, .realtimeConversationStart(ConversationStartParams(
+            outputModality: .text,
+            prompt: .omitted
+        )))
+        XCTAssertEqual(submissions[1].op, .realtimeConversationStart(ConversationStartParams(
+            outputModality: .audio,
+            prompt: .null,
+            realtimeSessionID: "sess_1",
+            transport: .webrtc(sdp: "v=offer\r\n"),
+            voice: .marin
+        )))
+        XCTAssertEqual(submissions[2].op, .realtimeConversationAudio(ConversationAudioParams(frame: RealtimeAudioFrame(
+            data: "AA==",
+            sampleRate: 24_000,
+            numChannels: 1,
+            samplesPerChannel: 480,
+            itemID: "item_1"
+        ))))
+        XCTAssertEqual(submissions[3].op, .realtimeConversationText(ConversationTextParams(text: "hello")))
+        XCTAssertEqual(submissions[4].op, .realtimeConversationClose)
     }
 
     func testRealtimeConversationRoutesValidateRustParamsWhenFeatureEnabled() throws {
