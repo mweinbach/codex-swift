@@ -10727,6 +10727,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
     }
 
+    func testMarketplaceRoutesRejectMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(request: String, message: String)] = [
+            (
+                #"{"id":1,"method":"marketplace/add","params":{}}"#,
+                "missing field `source`"
+            ),
+            (
+                #"{"id":2,"method":"marketplace/add","params":{"source":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","refName":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":4,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","sparsePaths":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a sequence"
+            ),
+            (
+                #"{"id":5,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","sparsePaths":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":6,"method":"marketplace/remove","params":{}}"#,
+                "missing field `marketplaceName`"
+            ),
+            (
+                #"{"id":7,"method":"marketplace/remove","params":{"marketplaceName":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":8,"method":"marketplace/upgrade","params":{"marketplaceName":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for testCase in cases {
+            let response = try appServerResponse(testCase.request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], testCase.request)
+            XCTAssertEqual(error["code"] as? Int, -32600, testCase.request)
+            XCTAssertEqual(error["message"] as? String, testCase.message, testCase.request)
+        }
+    }
+
     func testMarketplaceAddClonesGitSourceAndRecordsDuplicate() throws {
         let temp = try TemporaryDirectory()
         let remote = try makeGitMarketplaceRemote(named: "debug", marker: "git ref", in: temp.url)

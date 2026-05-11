@@ -7663,14 +7663,14 @@ public enum CodexAppServer {
             environment: configuration.environment
         )
         let configuredGitMarketplaces = configuredGitMarketplaces(in: stack)
-        if let marketplaceName = stringParam(params?["marketplaceName"]),
+        let marketplaceName = try rustOptionalStringParam(params?["marketplaceName"])
+        if let marketplaceName,
            !configuredGitMarketplaces.contains(where: { $0.name == marketplaceName }) {
             throw AppServerError.invalidRequest(
                 "marketplace `\(marketplaceName)` is not configured as a Git marketplace"
             )
         }
 
-        let marketplaceName = stringParam(params?["marketplaceName"])
         let selectedMarketplaces = configuredGitMarketplaces
             .filter { marketplaceName == nil || $0.name == marketplaceName }
         if selectedMarketplaces.isEmpty {
@@ -7759,7 +7759,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let marketplaceName = stringParam(params?["marketplaceName"]) ?? ""
+        let marketplaceName = try rustRequiredStringParam(params?["marketplaceName"], field: "marketplaceName")
         try validatePluginSegment(marketplaceName, kind: "marketplace name")
 
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
@@ -7796,9 +7796,10 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let source = stringParam(params?["source"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let refName = stringParam(params?["refName"])
-        let sparsePaths = stringArrayParam(params?["sparsePaths"]) ?? []
+        let source = try rustRequiredStringParam(params?["source"], field: "source")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let refName = try rustOptionalStringParam(params?["refName"])
+        let sparsePaths = try rustStringArrayParam(params?["sparsePaths"]) ?? []
         guard !source.isEmpty else {
             throw AppServerError.invalidRequest("marketplace source must not be empty")
         }
