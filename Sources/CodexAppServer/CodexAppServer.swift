@@ -3083,7 +3083,32 @@ public enum CodexAppServer {
         let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
         try recorder.recordItems([.sessionMeta(SessionMetaLine(meta: updatedMeta, git: nil))])
         try recorder.shutdown()
+        try updateStateStoreMemoryModeIfConfigured(
+            rolloutPath: rolloutPath,
+            memoryMode: mode,
+            configuration: configuration
+        )
         return [:]
+    }
+
+    private static func updateStateStoreMemoryModeIfConfigured(
+        rolloutPath: String,
+        memoryMode: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let stateStore = configuration.stateStore else {
+            return
+        }
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let metadata = try threadMetadata(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            archivedOnly: false
+        )
+        try runAsyncBlocking {
+            try await stateStore.upsertThread(metadata)
+            _ = try await stateStore.setThreadMemoryMode(threadID: metadata.id, memoryMode: memoryMode)
+        }
     }
 
     fileprivate static func threadInjectItemsResult(

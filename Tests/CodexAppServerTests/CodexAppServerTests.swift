@@ -4217,6 +4217,56 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(sessionMetaLines.last?.contains(#""memory_mode":"enabled""#) == true)
     }
 
+    func testThreadMemoryModeSetUpdatesStoredThreadStateLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-30-00",
+            timestamp: "2025-01-06T08:30:00Z",
+            preview: "Stored thread preview",
+            provider: "mock_provider"
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        for (index, mode) in ["disabled", "enabled"].enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"\#(mode)"}}"#,
+                configuration: configuration,
+                experimentalAPIEnabled: true
+            )
+            let result = try XCTUnwrap(response["result"] as? [String: Any])
+            XCTAssertTrue(result.isEmpty)
+        }
+
+        let memoryMode = try await stateStore.getThreadMemoryMode(threadID: try ThreadId(string: threadID))
+        XCTAssertEqual(memoryMode, "enabled")
+    }
+
+    func testThreadMemoryModeSetUpdatesStartedThreadStateLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ), experimentalAPIEnabled: true)
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"mock-model","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"disabled"}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+
+        let memoryMode = try await stateStore.getThreadMemoryMode(threadID: try ThreadId(string: threadID))
+        XCTAssertEqual(memoryMode, "disabled")
+    }
+
     func testThreadMemoryModeSetRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()
