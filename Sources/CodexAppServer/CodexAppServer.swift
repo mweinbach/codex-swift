@@ -1410,9 +1410,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let rolloutPath: String
         if let path = stringParam(params?["path"]) {
@@ -1507,9 +1505,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let sourceRolloutPath: String
         let sourceConversationID: ConversationId
@@ -1650,9 +1646,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil }
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let conversationID: ConversationId
         do {
@@ -1691,9 +1685,7 @@ public enum CodexAppServer {
         experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "thread/turns/list", experimentalAPIEnabled: experimentalAPIEnabled)
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let conversationID: ConversationId
         do {
@@ -1716,7 +1708,7 @@ public enum CodexAppServer {
         }
         let page = try paginateThreadTurns(
             turns,
-            cursor: stringParam(params?["cursor"]),
+            cursor: try rustOptionalStringParam(params?["cursor"]),
             limit: try rustU32ListLimit(params?["limit"]),
             sortDirection: try threadTurnsSortDirection(params?["sortDirection"])
         )
@@ -1725,6 +1717,14 @@ public enum CodexAppServer {
             "nextCursor": page.nextCursor ?? NSNull(),
             "backwardsCursor": page.backwardsCursor ?? NSNull()
         ].nullStripped(keepNulls: true)
+    }
+
+    fileprivate static func validateThreadTurnsItemsListParams(_ params: [String: Any]?) throws {
+        _ = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        _ = try rustRequiredStringParam(params?["turnId"], field: "turnId")
+        _ = try rustOptionalStringParam(params?["cursor"])
+        _ = try rustU32ListLimit(params?["limit"])
+        _ = try threadTurnsSortDirection(params?["sortDirection"])
     }
 
     fileprivate static func threadRollbackResult(
@@ -16623,7 +16623,7 @@ public enum CodexAppServer {
         return value
     }
 
-    private static func rustOptionalStringParam(_ value: Any?) throws -> String? {
+    fileprivate static func rustOptionalStringParam(_ value: Any?) throws -> String? {
         guard let value, !(value is NSNull) else {
             return nil
         }
@@ -17788,7 +17788,7 @@ public enum CodexAppServer {
         return string
     }
 
-    private static func rustInvalidTypeDescription(_ value: Any) -> String {
+    fileprivate static func rustInvalidTypeDescription(_ value: Any) -> String {
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             return "invalid type: boolean `\(number.boolValue ? "true" : "false")`"
         }
@@ -22628,6 +22628,7 @@ final class CodexAppServerMessageProcessor {
                         method: "thread/turns/items/list",
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
+                    try CodexAppServer.validateThreadTurnsItemsListParams(params)
                     response = CodexAppServer.errorObject(
                         id: id,
                         code: -32601,
@@ -23754,8 +23755,13 @@ private func mcpServerStatusDetail(_ rawValue: Any?) throws -> AppServerMcpServe
 }
 
 private func turnItemsView(_ rawValue: Any?) throws -> AppServerTurnItemsView {
-    guard let value = CodexAppServer.stringParam(rawValue) else {
+    guard let rawValue, !(rawValue is NSNull) else {
         return .summary
+    }
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        throw AppServerError.invalidRequest(
+            "Invalid request: \(CodexAppServer.rustInvalidTypeDescription(rawValue)), expected one of `notLoaded`, `summary`, `full`"
+        )
     }
     guard let itemsView = AppServerTurnItemsView(rawValue: value) else {
         throw AppServerError.invalidRequest(
@@ -23766,8 +23772,13 @@ private func turnItemsView(_ rawValue: Any?) throws -> AppServerTurnItemsView {
 }
 
 private func threadTurnsSortDirection(_ rawValue: Any?) throws -> AppServerThreadTurnsSortDirection {
-    guard let value = CodexAppServer.stringParam(rawValue) else {
+    guard let rawValue, !(rawValue is NSNull) else {
         return .desc
+    }
+    guard let value = CodexAppServer.stringParam(rawValue) else {
+        throw AppServerError.invalidRequest(
+            "Invalid request: \(CodexAppServer.rustInvalidTypeDescription(rawValue)), expected `asc` or `desc`"
+        )
     }
     switch value {
     case "asc":

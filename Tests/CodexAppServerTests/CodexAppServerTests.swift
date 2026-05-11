@@ -3987,6 +3987,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
     }
 
+    func testThreadResumeAndForkRejectMalformedThreadIDParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"thread/resume","params":{}}"#,
+                "missing field `threadId`"
+            ),
+            (
+                #"{"id":2,"method":"thread/resume","params":{"threadId":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"thread/fork","params":{}}"#,
+                "missing field `threadId`"
+            ),
+            (
+                #"{"id":4,"method":"thread/fork","params":{"threadId":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testThreadForkCreatesNewThreadWithCopiedHistoryAndStartedNotification() throws {
         let temp = try TemporaryDirectory()
         let sourceID = try writeRollout(
@@ -4118,8 +4147,24 @@ final class CodexAppServerTests: XCTestCase {
     func testThreadReadRejectsInvalidThreadIDAndMissingRollout() throws {
         let temp = try TemporaryDirectory()
 
+        let missingThreadID = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let integerThreadID = try appServerResponse(
+            #"{"id":2,"method":"thread/read","params":{"threadId":1}}"#,
+            codexHome: temp.url
+        )
+        let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
+        XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(integerThreadIDError["message"] as? String, "Invalid request: invalid type: integer `1`, expected a string")
+
         let invalid = try appServerResponse(
-            #"{"id":1,"method":"thread/read","params":{"threadId":"not-a-uuid"}}"#,
+            #"{"id":3,"method":"thread/read","params":{"threadId":"not-a-uuid"}}"#,
             codexHome: temp.url
         )
         let invalidError = try XCTUnwrap(invalid["error"] as? [String: Any])
@@ -4128,7 +4173,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let threadID = UUID().uuidString.lowercased()
         let missing = try appServerResponse(
-            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
+            #"{"id":4,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#,
             codexHome: temp.url
         )
         let missingError = try XCTUnwrap(missing["error"] as? [String: Any])
@@ -12886,6 +12931,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "thread/turns/items/list is not supported yet")
     }
 
+    func testThreadTurnsItemsListValidatesParamsBeforeUnsupportedLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"thread/turns/items/list","params":{"turnId":"turn-1"}}"#,
+                "missing field `threadId`"
+            ),
+            (
+                #"{"id":2,"method":"thread/turns/items/list","params":{"threadId":1,"turnId":"turn-1"}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"thread/turns/items/list","params":{"threadId":"\#(UUID().uuidString.lowercased())"}}"#,
+                "missing field `turnId`"
+            ),
+            (
+                #"{"id":4,"method":"thread/turns/items/list","params":{"threadId":"\#(UUID().uuidString.lowercased())","turnId":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":5,"method":"thread/turns/items/list","params":{"threadId":"\#(UUID().uuidString.lowercased())","turnId":"turn-1","cursor":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":6,"method":"thread/turns/items/list","params":{"threadId":"\#(UUID().uuidString.lowercased())","turnId":"turn-1","sortDirection":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected `asc` or `desc`"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(
+                request,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testThreadTurnsListRejectsUnknownEnumValuesLikeRustProtocol() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -12919,6 +13005,51 @@ final class CodexAppServerTests: XCTestCase {
             badSortDirectionError["message"] as? String,
             "Invalid request: unknown variant `sideways`, expected `asc` or `desc`"
         )
+    }
+
+    func testThreadTurnsListRejectsMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"thread/turns/list","params":{"limit":1}}"#,
+                "missing field `threadId`"
+            ),
+            (
+                #"{"id":2,"method":"thread/turns/list","params":{"threadId":1,"limit":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":4,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","itemsView":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected one of `notLoaded`, `summary`, `full`"
+            ),
+            (
+                #"{"id":5,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","sortDirection":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected `asc` or `desc`"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(
+                request,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
     }
 
     func testThreadTurnsListMatchesRustU32LimitDecoding() throws {
