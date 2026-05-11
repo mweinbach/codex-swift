@@ -319,6 +319,10 @@ public enum NonInteractiveExec {
         public var store: SQLiteAgentJobStore
         public var reportingThreadID: String
         public var maxThreads: Int?
+        public var sessionSource: SessionSource
+        public var maxDepth: Int32?
+        public var spawnConfigSource: AgentJobSpawnConfigSource?
+        public var environments: [TurnEnvironmentSelection]?
         public var configuredMaxRuntimeSeconds: UInt64?
         public var statusForThread: (@Sendable (ThreadId) async -> AgentStatus)?
         public var spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)?
@@ -329,6 +333,10 @@ public enum NonInteractiveExec {
             store: SQLiteAgentJobStore,
             reportingThreadID: String,
             maxThreads: Int? = nil,
+            sessionSource: SessionSource = .default,
+            maxDepth: Int32? = nil,
+            spawnConfigSource: AgentJobSpawnConfigSource? = nil,
+            environments: [TurnEnvironmentSelection]? = nil,
             configuredMaxRuntimeSeconds: UInt64? = nil,
             statusForThread: (@Sendable (ThreadId) async -> AgentStatus)? = nil,
             spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)? = nil,
@@ -338,6 +346,10 @@ public enum NonInteractiveExec {
             self.store = store
             self.reportingThreadID = reportingThreadID
             self.maxThreads = maxThreads
+            self.sessionSource = sessionSource
+            self.maxDepth = maxDepth
+            self.spawnConfigSource = spawnConfigSource
+            self.environments = environments
             self.configuredMaxRuntimeSeconds = configuredMaxRuntimeSeconds
             self.statusForThread = statusForThread
             self.spawnWorker = spawnWorker
@@ -1064,6 +1076,9 @@ public enum NonInteractiveExec {
                         cwd: cwd.path,
                         store: agentJobContext.store,
                         maxThreads: agentJobContext.maxThreads,
+                        sessionSource: agentJobContext.sessionSource,
+                        maxDepth: agentJobContext.maxDepth,
+                        spawnConfigSource: agentJobContext.spawnConfigSource,
                         configuredMaxRuntimeSeconds: agentJobContext.configuredMaxRuntimeSeconds
                     )
                     let finalJob: AgentJob
@@ -1073,6 +1088,7 @@ public enum NonInteractiveExec {
                             jobID: prepared.job.id,
                             maxConcurrency: prepared.concurrency,
                             spawnConfig: prepared.spawnConfig,
+                            environments: agentJobContext.environments,
                             statusForThread: statusForThread,
                             spawnWorker: spawnWorker,
                             shutdownThread: shutdownThread,

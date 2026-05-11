@@ -1662,9 +1662,34 @@ final class NonInteractiveExecTests: XCTestCase {
         try "id,value\nalpha,one\n".write(to: inputURL, atomically: true, encoding: .utf8)
         let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
         let workerThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000061")
+        let parentThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000060")
         let statusStore = NonInteractiveAgentStatusStore(statuses: [workerThreadID: .running])
         let spawnRecorder = NonInteractiveAgentSpawnRecorder(results: [.spawned(workerThreadID)])
         let shutdownRecorder = NonInteractiveThreadRecorder()
+        let shellEnvironmentPolicy = ShellEnvironmentPolicy(inherit: .all, set: ["JOB": "1"])
+        let spawnConfigSource = AgentJobSpawnConfigSource(
+            parentConfig: CodexRuntimeConfig(
+                modelProvider: "parent-provider",
+                shellEnvironmentPolicy: ShellEnvironmentPolicy(inherit: .core, set: ["PARENT": "1"])
+            ),
+            baseInstructions: "agent job base",
+            model: "gpt-job",
+            modelProviderID: "job-provider",
+            reasoningEffort: .medium,
+            reasoningSummary: .concise,
+            developerInstructions: "job developer",
+            compactPrompt: "job compact",
+            turnContext: TurnContext(
+                cwd: temp.url.path,
+                approvalPolicy: .onRequest,
+                sandboxPolicy: .readOnlyWithNetworkAccess
+            ),
+            shellEnvironmentPolicy: shellEnvironmentPolicy
+        )
+        let environments = [
+            TurnEnvironmentSelection(environmentID: "local", cwd: temp.url.path),
+            TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+        ]
 
         let output = await NonInteractiveExec.executeFunctionCall(
             .functionCall(
@@ -1681,6 +1706,10 @@ final class NonInteractiveExecTests: XCTestCase {
             agentJobContext: NonInteractiveExec.AgentJobToolContext(
                 store: store,
                 reportingThreadID: "parent-thread",
+                sessionSource: .subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 1)),
+                maxDepth: 2,
+                spawnConfigSource: spawnConfigSource,
+                environments: environments,
                 statusForThread: { threadID in
                     await statusStore.status(for: threadID)
                 },
@@ -1723,6 +1752,9 @@ final class NonInteractiveExecTests: XCTestCase {
         let requests = await spawnRecorder.requests()
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests[0].itemID, "alpha")
+        XCTAssertEqual(requests[0].spawnConfig, AgentJobRuntime.buildAgentSpawnConfig(source: spawnConfigSource))
+        XCTAssertEqual(requests[0].sessionSource, .subagent(.other("agent_job:\(decoded.jobID)")))
+        XCTAssertEqual(requests[0].environments, environments)
         XCTAssertTrue(requests[0].prompt.contains("check alpha"))
         let shutdownThreads = await shutdownRecorder.values()
         XCTAssertEqual(shutdownThreads, [workerThreadID])

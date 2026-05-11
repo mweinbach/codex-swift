@@ -652,6 +652,10 @@ final class AgentJobRuntimeTests: XCTestCase {
         let firstThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000032")
         let secondThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000033")
         let recorder = SpawnRequestRecorder(results: [.spawned(firstThreadID), .spawned(secondThreadID)])
+        let environments = [
+            TurnEnvironmentSelection(environmentID: "local", cwd: "/work/job"),
+            TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+        ]
 
         let result = try await AgentJobRuntime.spawnPendingItems(
             store: fixture.store,
@@ -661,6 +665,7 @@ final class AgentJobRuntimeTests: XCTestCase {
             ],
             maxConcurrency: 3,
             spawnConfig: spawnConfig,
+            environments: environments,
             spawnWorker: { request in
                 await recorder.spawn(request)
             },
@@ -673,6 +678,11 @@ final class AgentJobRuntimeTests: XCTestCase {
         let requests = await recorder.requests()
         XCTAssertEqual(requests.map(\.itemID), ["row-1", "row-2"])
         XCTAssertEqual(requests.map(\.spawnConfig), [spawnConfig, spawnConfig])
+        XCTAssertEqual(requests.map(\.sessionSource), [
+            .subagent(.other("agent_job:job-1")),
+            .subagent(.other("agent_job:job-1"))
+        ])
+        XCTAssertEqual(requests.map(\.environments), [environments, environments])
         XCTAssertTrue(requests[0].prompt.contains("Job ID: job-1"))
         XCTAssertTrue(requests[0].prompt.contains("Item ID: row-1"))
 

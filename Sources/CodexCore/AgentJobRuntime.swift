@@ -330,6 +330,7 @@ public enum AgentJobRuntime {
         activeItems: [ActiveAgentJobItem],
         maxConcurrency: Int,
         spawnConfig: AgentJobSpawnConfigSnapshot? = nil,
+        environments: [TurnEnvironmentSelection]? = nil,
         now: Date = Date(),
         spawnWorker: @Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult,
         shutdownThread: @Sendable (ThreadId) async -> Void
@@ -351,7 +352,9 @@ public enum AgentJobRuntime {
                 jobID: job.id,
                 itemID: item.itemID,
                 prompt: buildWorkerPrompt(job: job, item: item),
-                spawnConfig: spawnConfig
+                spawnConfig: spawnConfig,
+                sessionSource: .subagent(.other("agent_job:\(job.id)")),
+                environments: environments
             )
             switch await spawnWorker(request) {
             case let .spawned(threadID):
@@ -396,6 +399,7 @@ public enum AgentJobRuntime {
         jobID: String,
         maxConcurrency: Int,
         spawnConfig: AgentJobSpawnConfigSnapshot? = nil,
+        environments: [TurnEnvironmentSelection]? = nil,
         now: @Sendable () -> Date = Date.init,
         fileManager: FileManager = .default,
         statusForThread: @Sendable (ThreadId) async -> AgentStatus,
@@ -430,6 +434,7 @@ public enum AgentJobRuntime {
                     activeItems: activeItems,
                     maxConcurrency: maxConcurrency,
                     spawnConfig: spawnConfig,
+                    environments: environments,
                     now: now(),
                     spawnWorker: spawnWorker,
                     shutdownThread: shutdownThread
@@ -753,17 +758,23 @@ public struct AgentJobWorkerSpawnRequest: Equatable, Sendable {
     public var itemID: String
     public var prompt: String
     public var spawnConfig: AgentJobSpawnConfigSnapshot?
+    public var sessionSource: SessionSource?
+    public var environments: [TurnEnvironmentSelection]?
 
     public init(
         jobID: String,
         itemID: String,
         prompt: String,
-        spawnConfig: AgentJobSpawnConfigSnapshot? = nil
+        spawnConfig: AgentJobSpawnConfigSnapshot? = nil,
+        sessionSource: SessionSource? = nil,
+        environments: [TurnEnvironmentSelection]? = nil
     ) {
         self.jobID = jobID
         self.itemID = itemID
         self.prompt = prompt
         self.spawnConfig = spawnConfig
+        self.sessionSource = sessionSource
+        self.environments = environments
     }
 }
 
