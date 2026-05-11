@@ -171,7 +171,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(entries.first?["access"] as? String, "read")
         let activePermissionProfile = try XCTUnwrap(result["activePermissionProfile"] as? [String: Any])
         XCTAssertEqual(activePermissionProfile["id"] as? String, "limited-read-test")
-        XCTAssertNil(activePermissionProfile["modifications"])
+        XCTAssertEqual(activePermissionProfile["extends"] as? NSNull, NSNull())
+        XCTAssertEqual((activePermissionProfile["modifications"] as? [[String: Any]])?.count, 0)
     }
 
     func testThreadLifecyclePermissionsSelectionAppliesProfileLikeRust() throws {
@@ -17571,7 +17572,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(activePermissionProfile["id"] as? String, activeID, file: file, line: line)
         let modifications = activePermissionProfile["modifications"] as? [[String: Any]]
         XCTAssertEqual(modifications?.count, 1, file: file, line: line)
-        XCTAssertEqual(modifications?.first?["type"] as? String, "additional_writable_root", file: file, line: line)
+        XCTAssertEqual(modifications?.first?["type"] as? String, "additionalWritableRoot", file: file, line: line)
         XCTAssertEqual(modifications?.first?["path"] as? String, extraPath, file: file, line: line)
     }
 

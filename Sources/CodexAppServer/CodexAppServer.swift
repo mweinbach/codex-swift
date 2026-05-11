@@ -929,7 +929,7 @@ public enum CodexAppServer {
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(started.sandbox),
             "permissionProfile": try jsonObject(permissionProfile),
-            "activePermissionProfile": try nullableJSON(started.activePermissionProfile),
+            "activePermissionProfile": activePermissionProfileObject(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -1376,7 +1376,7 @@ public enum CodexAppServer {
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": try jsonObject(permissionProfile),
-            "activePermissionProfile": try nullableJSON(runtimeConfig.activePermissionProfile),
+            "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -1517,7 +1517,7 @@ public enum CodexAppServer {
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
             "permissionProfile": try jsonObject(permissionProfile),
-            "activePermissionProfile": try nullableJSON(runtimeConfig.activePermissionProfile),
+            "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -14912,11 +14912,23 @@ public enum CodexAppServer {
         return try JSONSerialization.jsonObject(with: data)
     }
 
-    private static func nullableJSON<T: Encodable>(_ value: T?) throws -> Any {
-        guard let value else {
+    private static func activePermissionProfileObject(_ profile: ActivePermissionProfile?) -> Any {
+        guard let profile else {
             return NSNull()
         }
-        return try jsonObject(value)
+        return [
+            "id": profile.id,
+            "extends": profile.extends as Any? ?? NSNull(),
+            "modifications": profile.modifications.map { modification -> [String: Any] in
+                switch modification {
+                case let .additionalWritableRoot(path):
+                    return [
+                        "type": "additionalWritableRoot",
+                        "path": path
+                    ]
+                }
+            }
+        ]
     }
 
     private static func conversationObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
