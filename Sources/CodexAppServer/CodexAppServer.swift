@@ -9,6 +9,11 @@ public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async th
 public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
 public typealias AppServerMcpHTTPTransport = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
 public typealias AppServerPluginHTTPTransport = @Sendable (URLRequest) throws -> URLSessionTransportResponse
+public typealias AppServerCoreOpSubmitter = @Sendable (
+    _ requestID: RequestID,
+    _ threadID: String,
+    _ op: Op
+) throws -> Void
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
     _ runtimeConfig: CodexRuntimeConfig,
     _ usesChatGPTBackend: Bool
@@ -2858,14 +2863,30 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        _ = try materializedThreadID(params: params, configuration: configuration)
+        _ = try threadCompactStartCoreOp(params: params, configuration: configuration)
         return [:]
+    }
+
+    fileprivate static func threadCompactStartCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (threadID: String, op: Op) {
+        let threadID = try materializedThreadID(params: params, configuration: configuration)
+        return (threadID, .compact)
     }
 
     fileprivate static func threadShellCommandResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        _ = try threadShellCommandCoreOp(params: params, configuration: configuration)
+        return [:]
+    }
+
+    fileprivate static func threadShellCommandCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (threadID: String, op: Op) {
         guard let rawCommand = stringParam(params?["command"]) else {
             throw AppServerError.invalidRequest("missing command")
         }
@@ -2873,25 +2894,34 @@ public enum CodexAppServer {
         guard !command.isEmpty else {
             throw AppServerError.invalidRequest("command must not be empty")
         }
-        _ = try materializedThreadID(params: params, configuration: configuration)
-        return [:]
+        let threadID = try materializedThreadID(params: params, configuration: configuration)
+        return (threadID, .runUserShellCommand(command: command))
     }
 
     fileprivate static func threadApproveGuardianDeniedActionResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        _ = try threadApproveGuardianDeniedActionCoreOp(params: params, configuration: configuration)
+        return [:]
+    }
+
+    fileprivate static func threadApproveGuardianDeniedActionCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (threadID: String, op: Op) {
         guard let event = params?["event"] else {
             throw AppServerError.invalidRequest("missing event")
         }
+        let decodedEvent: GuardianAssessmentEvent
         do {
             let data = try JSONSerialization.data(withJSONObject: event)
-            _ = try JSONDecoder().decode(GuardianAssessmentEvent.self, from: data)
+            decodedEvent = try JSONDecoder().decode(GuardianAssessmentEvent.self, from: data)
         } catch {
             throw AppServerError.invalidRequest("invalid Guardian denial event: \(error)")
         }
-        _ = try materializedThreadID(params: params, configuration: configuration)
-        return [:]
+        let threadID = try materializedThreadID(params: params, configuration: configuration)
+        return (threadID, .approveGuardianDeniedAction(event: decodedEvent))
     }
 
     fileprivate static func threadBackgroundTerminalsCleanResult(
@@ -2899,11 +2929,24 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
+        _ = try threadBackgroundTerminalsCleanCoreOp(
+            params: params,
+            configuration: configuration,
+            experimentalAPIEnabled: experimentalAPIEnabled
+        )
+        return [:]
+    }
+
+    fileprivate static func threadBackgroundTerminalsCleanCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
+    ) throws -> (threadID: String, op: Op) {
         guard experimentalAPIEnabled else {
             throw AppServerError.invalidRequest("thread/backgroundTerminals/clean requires experimentalApi capability")
         }
-        _ = try materializedThreadID(params: params, configuration: configuration)
-        return [:]
+        let threadID = try materializedThreadID(params: params, configuration: configuration)
+        return (threadID, .cleanBackgroundTerminals)
     }
 
     fileprivate static func threadElicitationCounterThreadID(params: [String: Any]?) throws -> String {
@@ -21034,6 +21077,7 @@ final class CodexAppServerMessageProcessor {
     private var userAgent: String
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
+    private let coreOpSubmitter: AppServerCoreOpSubmitter?
     private let acceptedLineAnalyticsClient: AcceptedLineAnalyticsClient
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
@@ -21063,11 +21107,13 @@ final class CodexAppServerMessageProcessor {
     init(
         configuration: CodexAppServerConfiguration,
         notificationSink: AppServerNotificationSink? = nil,
+        coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
         threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         outgoingRequestBroker: AppServerOutgoingRequestBroker? = nil
     ) {
         self.configuration = configuration
         self.notificationSink = notificationSink
+        self.coreOpSubmitter = coreOpSubmitter
         self.acceptedLineAnalyticsClient = AcceptedLineAnalyticsClient(
             uploader: configuration.acceptedLineAnalyticsUploader
         )
@@ -22168,6 +22214,25 @@ final class CodexAppServerMessageProcessor {
         return [:]
     }
 
+    private func submitCoreOp(
+        requestID rawRequestID: Any,
+        threadID: String,
+        op: Op,
+        failureMessage: String
+    ) throws {
+        guard let coreOpSubmitter else {
+            return
+        }
+        guard let requestID = AppServerRequestIDCodec.requestID(from: rawRequestID) else {
+            throw AppServerError.invalidRequest("invalid request id")
+        }
+        do {
+            try coreOpSubmitter(requestID, threadID, op)
+        } catch {
+            throw AppServerError.internalError("\(failureMessage): \(error)")
+        }
+    }
+
     func processLine(_ data: Data) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -22483,22 +22548,49 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadMetadataUpdateResult(params: params, configuration: configuration)
                     )
                 case "thread/compact/start":
+                    let coreOp = try CodexAppServer.threadCompactStartCoreOp(
+                        params: params,
+                        configuration: configuration
+                    )
+                    try submitCoreOp(
+                        requestID: id,
+                        threadID: coreOp.threadID,
+                        op: coreOp.op,
+                        failureMessage: "failed to start compaction"
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadCompactStartResult(params: params, configuration: configuration)
+                        result: [:]
                     )
                 case "thread/shellCommand":
+                    let coreOp = try CodexAppServer.threadShellCommandCoreOp(
+                        params: params,
+                        configuration: configuration
+                    )
+                    try submitCoreOp(
+                        requestID: id,
+                        threadID: coreOp.threadID,
+                        op: coreOp.op,
+                        failureMessage: "failed to start shell command"
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadShellCommandResult(params: params, configuration: configuration)
+                        result: [:]
                     )
                 case "thread/approveGuardianDeniedAction":
+                    let coreOp = try CodexAppServer.threadApproveGuardianDeniedActionCoreOp(
+                        params: params,
+                        configuration: configuration
+                    )
+                    try submitCoreOp(
+                        requestID: id,
+                        threadID: coreOp.threadID,
+                        op: coreOp.op,
+                        failureMessage: "failed to approve Guardian denial"
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadApproveGuardianDeniedActionResult(
-                            params: params,
-                            configuration: configuration
-                        )
+                        result: [:]
                     )
                 case "thread/rollback":
                     response = CodexAppServer.responseObject(
@@ -22506,13 +22598,20 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadRollbackResult(params: params, configuration: configuration)
                     )
                 case "thread/backgroundTerminals/clean":
+                    let coreOp = try CodexAppServer.threadBackgroundTerminalsCleanCoreOp(
+                        params: params,
+                        configuration: configuration,
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    try submitCoreOp(
+                        requestID: id,
+                        threadID: coreOp.threadID,
+                        op: coreOp.op,
+                        failureMessage: "failed to clean background terminals"
+                    )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadBackgroundTerminalsCleanResult(
-                            params: params,
-                            configuration: configuration,
-                            experimentalAPIEnabled: experimentalAPIEnabled
-                        )
+                        result: [:]
                     )
                 case "thread/goal/set":
                     let result = try CodexAppServer.threadGoalSetResult(

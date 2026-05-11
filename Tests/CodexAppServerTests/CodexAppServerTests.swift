@@ -4423,6 +4423,80 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(shellResult.isEmpty)
     }
 
+    func testThreadOperationsSubmitRustCoreOpsWhenRuntimeSubmitterIsAvailable() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-01-00",
+            timestamp: "2025-01-06T08:01:00Z",
+            preview: "thread operations",
+            provider: "mock_provider"
+        )
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+
+        let compact = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/compact/start","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertNotNil(compact["result"])
+
+        let shell = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"  git status --short  "}}"#.utf8
+        )))
+        XCTAssertNotNil(shell["result"])
+
+        let guardian = try decode(processor.processLine(Data(
+            """
+            {"id":3,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\(threadID)","event":{"id":"guardian-1","turn_id":"turn-1","started_at_ms":1234,"status":"denied","risk_level":"high","action":{"type":"command","source":"shell","command":"rm -rf build","cwd":"/repo"}}}}
+            """.utf8
+        )))
+        XCTAssertNotNil(guardian["result"])
+
+        let clean = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"thread/backgroundTerminals/clean","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertNotNil(clean["result"])
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(1), .integer(2), .integer(3), .integer(4)])
+        XCTAssertEqual(submissions.map(\.threadID), Array(repeating: threadID, count: 4))
+        XCTAssertEqual(submissions[0].op, .compact)
+        XCTAssertEqual(submissions[1].op, .runUserShellCommand(command: "git status --short"))
+        XCTAssertEqual(submissions[3].op, .cleanBackgroundTerminals)
+        guard case let .approveGuardianDeniedAction(event) = submissions[2].op else {
+            XCTFail("expected Guardian approval op")
+            return
+        }
+        XCTAssertEqual(event.id, "guardian-1")
+    }
+
+    func testThreadOperationSubmitterFailuresReturnRustInternalErrors() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-02-00",
+            timestamp: "2025-01-06T08:02:00Z",
+            preview: "thread operation failure",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") }
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"pwd"}}"#.utf8
+        )))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "failed to start shell command: channel closed")
+    }
+
     func testThreadCompactStartAndShellCommandValidateInputs() throws {
         let temp = try TemporaryDirectory()
         let threadID = UUID().uuidString.lowercased()
@@ -20420,10 +20494,15 @@ final class CodexAppServerTests: XCTestCase {
     private func initializedProcessor(
         configuration: CodexAppServerConfiguration,
         notificationSink: AppServerNotificationSink? = nil,
+        coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
         experimentalAPIEnabled: Bool = false,
         optOutNotificationMethods: [String] = []
     ) throws -> CodexAppServerMessageProcessor {
-        let processor = CodexAppServerMessageProcessor(configuration: configuration, notificationSink: notificationSink)
+        let processor = CodexAppServerMessageProcessor(
+            configuration: configuration,
+            notificationSink: notificationSink,
+            coreOpSubmitter: coreOpSubmitter
+        )
         var capabilities: [String: Any] = [:]
         if experimentalAPIEnabled {
             capabilities["experimentalApi"] = true
@@ -21762,6 +21841,41 @@ private actor AppServerNotificationCapture {
         }
         return await withCheckedContinuation { continuation in
             waiters.append(continuation)
+        }
+    }
+}
+
+private struct SubmittedCoreOp: Equatable {
+    let requestID: RequestID
+    let threadID: String
+    let op: Op
+}
+
+private struct AppServerCoreOpCaptureError: Error, CustomStringConvertible {
+    let message: String
+
+    var description: String {
+        message
+    }
+}
+
+private final class AppServerCoreOpCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedSubmissions: [SubmittedCoreOp] = []
+
+    var submissions: [SubmittedCoreOp] {
+        lock.withLock {
+            recordedSubmissions
+        }
+    }
+
+    func submit(requestID: RequestID, threadID: String, op: Op) {
+        lock.withLock {
+            recordedSubmissions.append(SubmittedCoreOp(
+                requestID: requestID,
+                threadID: threadID,
+                op: op
+            ))
         }
     }
 }
