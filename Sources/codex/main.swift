@@ -803,6 +803,7 @@ private func runNonInteractiveExec(
             budget: Skills.defaultSkillMetadataBudget(contextWindow: modelFamily.contextWindow.map(Int.init))
         )
     }
+    let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: settings)
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
         imagePaths: options.imagePaths,
@@ -814,6 +815,7 @@ private func runNonInteractiveExec(
         includeEnvironmentContext: settings.includeEnvironmentContext,
         includePermissionsInstructions: settings.includePermissionsInstructions,
         developerInstructions: settings.developerInstructions,
+        memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
         availableSkills: availableSkills,
         userInstructions: projectInstructions,
         history: history,

@@ -116,6 +116,112 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(environmentText.contains("<environment_context>"))
     }
 
+    func testMemoryToolInstructionsRenderRustReadPathTemplate() throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let memories = temp.url.appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: memories, withIntermediateDirectories: true)
+        try "Short memory summary for tests.\n".write(
+            to: memories.appendingPathComponent("memory_summary.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let instructions = try XCTUnwrap(MemoryToolInstructions.build(codexHome: temp.url))
+
+        XCTAssertTrue(instructions.contains(
+            "- \(memories.path)/memory_summary.md (already provided below; do NOT open again)"
+        ))
+        XCTAssertTrue(instructions.contains("Short memory summary for tests."))
+        XCTAssertEqual(instructions.components(separatedBy: "========= MEMORY_SUMMARY BEGINS =========").count - 1, 1)
+    }
+
+    func testMemoryToolInstructionsRequireFeatureAndUseMemoriesConfig() throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let memories = temp.url.appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: memories, withIntermediateDirectories: true)
+        try "Configured memory summary.".write(
+            to: memories.appendingPathComponent("memory_summary.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.memoryTool, enabled: true)
+
+        XCTAssertNil(MemoryToolInstructions.build(
+            codexHome: temp.url,
+            config: CodexRuntimeConfig(modelProvider: "test-provider")
+        ))
+        XCTAssertNil(MemoryToolInstructions.build(
+            codexHome: temp.url,
+            config: CodexRuntimeConfig(
+                modelProvider: "test-provider",
+                features: features,
+                memories: MemoriesConfig(useMemories: false)
+            )
+        ))
+        XCTAssertNotNil(MemoryToolInstructions.build(
+            codexHome: temp.url,
+            config: CodexRuntimeConfig(
+                modelProvider: "test-provider",
+                features: features
+            )
+        ))
+    }
+
+    func testMakePromptIncludesMemoryToolInstructionsBetweenDeveloperAndSkillsLikeRust() throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let memories = temp.url.appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: memories, withIntermediateDirectories: true)
+        try "Prompt memory summary.".write(
+            to: memories.appendingPathComponent("memory_summary.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let memoryInstructions = try XCTUnwrap(MemoryToolInstructions.build(codexHome: temp.url))
+        let availableSkills = try XCTUnwrap(Skills.buildAvailableSkills(
+            outcome: SkillLoadOutcome(
+                skills: [
+                    SkillMetadata(
+                        name: "linting",
+                        description: "run swiftlint",
+                        path: "/tmp/skills/linting/SKILL.md",
+                        scope: .user
+                    )
+                ],
+                skillRoots: ["/tmp/skills"],
+                skillRootByPath: ["/tmp/skills/linting/SKILL.md": "/tmp/skills"]
+            ),
+            budget: .characters(120)
+        ))
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            developerInstructions: "Follow developer notes.",
+            memoryToolDeveloperInstructions: memoryInstructions,
+            availableSkills: availableSkills
+        )
+
+        guard case let .message(_, developerRole, developerContent, _) = prompt.input[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 4)
+        guard case let .inputText(developerText) = developerContent[1],
+              case let .inputText(memoryText) = developerContent[2],
+              case let .inputText(skillsText) = developerContent[3]
+        else {
+            return XCTFail("expected developer, memory, and skills instructions")
+        }
+        XCTAssertEqual(developerText, "Follow developer notes.")
+        XCTAssertTrue(memoryText.contains("========= MEMORY_SUMMARY BEGINS ========="))
+        XCTAssertTrue(skillsText.contains("### Available skills"))
+    }
+
     func testMakePromptIncludesAvailableSkillsAsDeveloperContextLikeRust() throws {
         let root = "/tmp/skills"
         let skill = SkillMetadata(

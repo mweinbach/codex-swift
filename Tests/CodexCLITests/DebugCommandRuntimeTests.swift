@@ -208,6 +208,44 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(promptContent, [.inputText(text: "hello")])
     }
 
+    func testPromptInputIncludesMemoryToolInstructionsWhenEnabled() async throws {
+        let temp = try TemporaryDirectory()
+        let memories = temp.url.appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: memories, withIntermediateDirectories: true)
+        try "Remember the debug prompt path.".write(
+            to: memories.appendingPathComponent("memory_summary.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.memoryTool, enabled: true)
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    features: features,
+                    projectDocMaxBytes: 0
+                )
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, developerRole, developerContent, _) = decoded[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(memoryText) = developerContent[1] else {
+            return XCTFail("expected memory instructions after permissions")
+        }
+        XCTAssertTrue(memoryText.contains("Remember the debug prompt path."))
+        XCTAssertTrue(memoryText.contains("\(memories.path)/MEMORY.md"))
+    }
+
     func testClearMemoriesClearsStateRowsAndMemoryRoots() async throws {
         let temp = try TemporaryDirectory()
         let statePath = temp.url.appendingPathComponent("state_5.sqlite", isDirectory: false)

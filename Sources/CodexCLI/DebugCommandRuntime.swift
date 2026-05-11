@@ -299,6 +299,7 @@ public enum DebugCommandRuntime {
         let input = makePromptInput(
             prompt: prompt,
             imagePaths: imagePaths,
+            codexHome: codexHome,
             config: config
         )
         let encoder = JSONEncoder()
@@ -319,6 +320,7 @@ public enum DebugCommandRuntime {
     private static func makePromptInput(
         prompt: String?,
         imagePaths: [String],
+        codexHome: URL,
         config: CodexRuntimeConfig
     ) -> [ResponseItem] {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
@@ -327,6 +329,7 @@ public enum DebugCommandRuntime {
         let projectInstructions = ProjectDoc.getUserInstructions(
             config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
         ).map { UserInstructions(directory: cwd.path, text: $0) }
+        let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: config)
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -335,6 +338,7 @@ public enum DebugCommandRuntime {
             includeEnvironmentContext: config.includeEnvironmentContext,
             includePermissionsInstructions: config.includePermissionsInstructions,
             developerInstructions: config.developerInstructions,
+            memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
             userInstructions: projectInstructions
         )
 

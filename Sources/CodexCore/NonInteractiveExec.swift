@@ -50,6 +50,7 @@ public enum NonInteractiveExec {
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
+        memoryToolDeveloperInstructions: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil
     ) -> [ResponseItem] {
@@ -71,6 +72,9 @@ public enum NonInteractiveExec {
         }
         if let developerInstructions, !developerInstructions.isEmpty {
             developerContent.append(.inputText(text: developerInstructions))
+        }
+        if let memoryToolDeveloperInstructions, !memoryToolDeveloperInstructions.isEmpty {
+            developerContent.append(.inputText(text: memoryToolDeveloperInstructions))
         }
         if let availableSkills {
             developerContent.append(.inputText(text: Skills.renderAvailableSkillsBody(
@@ -108,6 +112,7 @@ public enum NonInteractiveExec {
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
+        memoryToolDeveloperInstructions: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
         history: [ResponseItem] = [],
@@ -122,6 +127,7 @@ public enum NonInteractiveExec {
             includeEnvironmentContext: includeEnvironmentContext,
             includePermissionsInstructions: includePermissionsInstructions,
             developerInstructions: developerInstructions,
+            memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
             availableSkills: availableSkills,
             userInstructions: userInstructions
         )
