@@ -10952,6 +10952,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
     }
 
+    func testMarketplaceAddAcceptsRelativeLocalDirectorySourceLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url)
+        let previousCWD = FileManager.default.currentDirectoryPath
+        XCTAssertTrue(FileManager.default.changeCurrentDirectoryPath(temp.url.path))
+        defer {
+            XCTAssertTrue(FileManager.default.changeCurrentDirectoryPath(previousCWD))
+        }
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":"./marketplace-source"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(
+            result["installedRoot"] as? String,
+            sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        )
+        XCTAssertEqual(result["alreadyAdded"] as? Bool, false)
+        let config = try String(contentsOf: temp.url.appendingPathComponent("config.toml"), encoding: .utf8)
+        XCTAssertTrue(config.contains(#"source_type = "local""#))
+        XCTAssertTrue(config.contains(#"source = "\#(sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path)""#))
+    }
+
     func testMarketplaceRoutesRejectMalformedParamsLikeRustProtocol() throws {
         let temp = try TemporaryDirectory()
         let cases: [(request: String, message: String)] = [
