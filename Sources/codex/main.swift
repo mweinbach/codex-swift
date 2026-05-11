@@ -950,7 +950,9 @@ private func runNonInteractiveExec(
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
-                truncationPolicy: modelFamily.truncationPolicy
+                truncationPolicy: modelFamily.truncationPolicy,
+                environment: ExecEnvironment.createEnv(policy: settings.shellEnvironmentPolicy, environment: environment),
+                explicitEnvOverrides: settings.shellEnvironmentPolicy.set
             )
         }
     )

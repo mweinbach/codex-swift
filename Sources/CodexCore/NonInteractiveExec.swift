@@ -570,6 +570,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        explicitEnvOverrides: [String: String] = [:],
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> ResponseItem {
@@ -585,6 +586,7 @@ public enum NonInteractiveExec {
                 shell: shell,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                explicitEnvOverrides: explicitEnvOverrides,
                 agentJobContext: agentJobContext
             )
 
@@ -620,6 +622,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                explicitEnvOverrides: explicitEnvOverrides,
                 responseFormat: .structured
             )
 
@@ -662,6 +665,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        explicitEnvOverrides: [String: String] = [:],
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil
     ) async -> FunctionCallExecutionResult {
@@ -713,6 +717,7 @@ public enum NonInteractiveExec {
                 shell: shell,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
+                explicitEnvOverrides: explicitEnvOverrides,
                 toolSearchIndex: toolSearchIndex,
                 agentJobContext: agentJobContext
             )
@@ -746,6 +751,7 @@ public enum NonInteractiveExec {
             shell: shell,
             truncationPolicy: truncationPolicy,
             environment: environment,
+            explicitEnvOverrides: explicitEnvOverrides,
             toolSearchIndex: toolSearchIndex,
             agentJobContext: agentJobContext
         )
@@ -892,6 +898,7 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
+        explicitEnvOverrides: [String: String],
         agentJobContext: AgentJobToolContext?
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
@@ -914,7 +921,8 @@ public enum NonInteractiveExec {
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
-                    environment: environment
+                    environment: environment,
+                    explicitEnvOverrides: explicitEnvOverrides
                 )
 
             case "shell_command":
@@ -935,6 +943,7 @@ public enum NonInteractiveExec {
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
+                    explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .freeform
                 )
 
@@ -953,6 +962,7 @@ public enum NonInteractiveExec {
                     sandboxPolicy: sandboxPolicy,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
+                    explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .structured
                 )
 
@@ -1119,6 +1129,7 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
+        explicitEnvOverrides: [String: String],
         responseFormat: ShellResponseFormat
     ) async -> ResponseItem {
         if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
@@ -1176,7 +1187,7 @@ public enum NonInteractiveExec {
                 command: command,
                 sessionShell: $0,
                 cwd: commandCwd,
-                explicitEnvOverrides: [:],
+                explicitEnvOverrides: explicitEnvOverrides,
                 environment: environment
             )
         } ?? command
@@ -1209,7 +1220,8 @@ public enum NonInteractiveExec {
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
         truncationPolicy: TruncationPolicy,
-        environment: [String: String]
+        environment: [String: String],
+        explicitEnvOverrides: [String: String]
     ) async -> ResponseItem {
         if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
             return functionOutput(
@@ -1229,7 +1241,7 @@ public enum NonInteractiveExec {
                 command: command,
                 sessionShell: $0,
                 cwd: commandCwd,
-                explicitEnvOverrides: [:],
+                explicitEnvOverrides: explicitEnvOverrides,
                 environment: environment
             )
         } ?? command

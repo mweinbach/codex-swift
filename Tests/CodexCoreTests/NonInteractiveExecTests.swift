@@ -1108,6 +1108,46 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("Output:\nhello"))
     }
 
+    func testShellCommandSnapshotRestoresExplicitEnvironmentOverrides() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let snapshotPath = temp.url.appendingPathComponent("snapshot.sh")
+        try """
+        # Snapshot file
+        export CODEX_SWIFT_POLICY_SET=from-snapshot
+        """.write(to: snapshotPath, atomically: true, encoding: .utf8)
+        let snapshot = ShellSnapshot(path: snapshotPath, cwd: temp.url)
+        let shell = Shell(shellType: .bash, shellPath: "/bin/bash", shellSnapshot: snapshot)
+        let command = try Self.jsonString(#"printf '%s' "$CODEX_SWIFT_POLICY_SET""#)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(command),"login":true}"#,
+            callID: "call-shell-snapshot-env"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: [
+                "PATH": "/bin:/usr/bin",
+                "HOME": temp.url.path,
+                "CODEX_SWIFT_POLICY_SET": "from-policy"
+            ],
+            explicitEnvOverrides: ["CODEX_SWIFT_POLICY_SET": "from-policy"]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-snapshot-env")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Output:\nfrom-policy"))
+        XCTAssertFalse(payload.content.contains("from-snapshot"))
+    }
+
     func testEscalatedSandboxRequestReturnsFailureOutput() async throws {
         let item = ResponseItem.functionCall(
             name: "exec_command",
