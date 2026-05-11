@@ -35,33 +35,16 @@ public enum HookConfig {
         }
 
         for layer in stack.getLayers(ordering: .lowestPrecedenceFirst) {
-            switch layer.name {
-            case let .user(file):
-                appendHandlers(
-                    from: layer.config,
-                    sourcePath: URL(fileURLWithPath: file.path, isDirectory: false),
-                    source: .user,
-                    hookStates: hookStates,
-                    displayOrder: &displayOrder,
-                    handlers: &handlers
-                )
-            case let .project(dotCodexFolder):
-                appendHandlers(
-                    from: layer.config,
-                    sourcePath: URL(fileURLWithPath: dotCodexFolder.path, isDirectory: true)
-                        .appendingPathComponent("config.toml", isDirectory: false),
-                    source: .project,
-                    hookStates: hookStates,
-                    displayOrder: &displayOrder,
-                    handlers: &handlers
-                )
-            case .mdm,
-                 .system,
-                 .sessionFlags,
-                 .legacyManagedConfigTomlFromFile,
-                 .legacyManagedConfigTomlFromMdm:
-                continue
-            }
+            let metadata = hookLayerMetadata(for: layer.name)
+            appendHandlers(
+                from: layer.config,
+                sourcePath: metadata.sourcePath,
+                source: metadata.source,
+                hookStates: hookStates,
+                isManaged: metadata.isManaged,
+                displayOrder: &displayOrder,
+                handlers: &handlers
+            )
         }
 
         if let codexHome,
@@ -190,6 +173,44 @@ public enum HookConfig {
                 }
             }
         }
+    }
+
+    private static func hookLayerMetadata(
+        for source: ConfigLayerSource
+    ) -> (sourcePath: URL, source: HookSource, isManaged: Bool) {
+        switch source {
+        case let .mdm(domain, key):
+            return (
+                syntheticLayerPath("<mdm:\(domain):\(key)>/config.toml"),
+                .mdm,
+                true
+            )
+        case let .system(file):
+            return (URL(fileURLWithPath: file.path, isDirectory: false), .system, true)
+        case let .user(file):
+            return (URL(fileURLWithPath: file.path, isDirectory: false), .user, false)
+        case let .project(dotCodexFolder):
+            return (
+                URL(fileURLWithPath: dotCodexFolder.path, isDirectory: true)
+                    .appendingPathComponent("config.toml", isDirectory: false),
+                .project,
+                false
+            )
+        case .sessionFlags:
+            return (syntheticLayerPath("<session-flags>/config.toml"), .sessionFlags, false)
+        case let .legacyManagedConfigTomlFromFile(file):
+            return (URL(fileURLWithPath: file.path, isDirectory: false), .legacyManagedConfigFile, true)
+        case .legacyManagedConfigTomlFromMdm:
+            return (
+                syntheticLayerPath("<legacy-managed-config.toml-mdm>/managed_config.toml"),
+                .legacyManagedConfigMdm,
+                true
+            )
+        }
+    }
+
+    private static func syntheticLayerPath(_ path: String) -> URL {
+        URL(fileURLWithPath: "/").appendingPathComponent(path, isDirectory: false)
     }
 
     private static func appendPluginHandlers(

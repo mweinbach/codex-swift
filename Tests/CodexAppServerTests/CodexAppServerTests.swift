@@ -1122,6 +1122,76 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
     }
 
+    func testTurnStartRunsTrustedUserPromptSubmitHooksLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let managedDir = try TemporaryDirectory()
+        let command = #"printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"runtime hook context"}}'"#
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [hooks]
+        managed_dir = "\(managedDir.url.path)"
+
+        [[hooks.UserPromptSubmit]]
+
+        [[hooks.UserPromptSubmit.hooks]]
+        type = "command"
+        command = '''\(command)'''
+        statusMessage = "checking prompt"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","approvalPolicy":"never"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello hook"}]}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.map { $0["method"] as? String }, [
+            nil,
+            "hook/started",
+            "hook/completed",
+            "turn/started",
+            "thread/status/changed"
+        ])
+        let startedParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, threadID)
+        XCTAssertEqual((startedParams["run"] as? [String: Any])?["eventName"] as? String, "userPromptSubmit")
+        XCTAssertEqual((startedParams["run"] as? [String: Any])?["status"] as? String, "running")
+        let completedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        XCTAssertEqual((completedParams["run"] as? [String: Any])?["status"] as? String, "completed")
+        let entries = try XCTUnwrap((completedParams["run"] as? [String: Any])?["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.first?["kind"] as? String, "context")
+        XCTAssertEqual(entries.first?["text"] as? String, "runtime hook context")
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        guard case let .resumed(history) = try RolloutRecorder.getRolloutHistory(
+            path: URL(fileURLWithPath: rolloutPath)
+        ) else {
+            return XCTFail("expected resumed rollout history")
+        }
+        let userIndex = try XCTUnwrap(history.history.firstIndex {
+            $0 == .eventMsg(.userMessage(UserMessageEvent(message: "Hello hook")))
+        })
+        let contextIndex = try XCTUnwrap(history.history.firstIndex {
+            guard case let .responseItem(.message(_, role, content, _)) = $0 else {
+                return false
+            }
+            return role == "user" && content == [.inputText(text: "runtime hook context")]
+        })
+        XCTAssertLessThan(userIndex, contextIndex)
+    }
+
     func testTurnStartCwdOverrideUpdatesLatestTurnContextLikeRust() throws {
         let temp = try TemporaryDirectory()
         let initialCwd = temp.url.appendingPathComponent("initial", isDirectory: true)

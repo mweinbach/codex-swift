@@ -1199,6 +1199,28 @@ public enum CodexAppServer {
         return runtimeConfig
     }
 
+    private static func configuredRuntimeHookHandlers(
+        configuration: CodexAppServerConfiguration,
+        cwd: URL
+    ) throws -> [ConfiguredHookHandler] {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        return HookConfig.configuredHandlers(
+            from: stack,
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
+    }
+
+    private static func hookPermissionMode(_ approvalPolicy: AskForApproval) -> String {
+        approvalPolicy == .never ? "bypassPermissions" : "default"
+    }
+
     private static func responseSandboxPolicy(
         for permissionProfile: PermissionProfile,
         cwd: String,
@@ -1826,7 +1848,11 @@ public enum CodexAppServer {
     fileprivate static func turnStartResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> [String: Any] {
+    ) throws -> (
+        result: [String: Any],
+        hookStartedEvents: [HookStartedEvent],
+        hookCompletedEvents: [HookCompletedEvent]
+    ) {
         let input = v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -1843,10 +1869,66 @@ public enum CodexAppServer {
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let turnID = UUID().uuidString.lowercased()
+        let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let turnContext = try turnStartContextOverrideItem(
             params: params,
             rolloutPath: rolloutPath,
+            existing: existing,
             configuration: configuration
+        )
+        let hookCwd = URL(
+            fileURLWithPath: turnContext?.cwd ?? existing.cwd,
+            isDirectory: true
+        )
+        let hookRuntimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: hookCwd,
+            permissionSelection: try permissionProfileSelectionParam(params?["permissions"])
+        )
+        let hookModel = turnContext?.model
+            ?? hookRuntimeConfig.model
+            ?? existing.model
+            ?? ModelsManager.offlineModel(explicitModel: nil)
+        let hookApprovalPolicy = turnContext?.approvalPolicy
+            ?? hookRuntimeConfig.approvalPolicy
+            ?? .unlessTrusted
+        let hookHandlers = try configuredRuntimeHookHandlers(
+            configuration: configuration,
+            cwd: hookCwd
+        )
+        let hookStartedEvents: [HookStartedEvent]
+        let hookOutcome: HookUserPromptSubmitOutcome
+        if input.text.isEmpty {
+            hookStartedEvents = []
+            hookOutcome = HookUserPromptSubmitOutcome(
+                hookEvents: [],
+                shouldStop: false,
+                stopReason: nil,
+                additionalContexts: []
+            )
+        } else {
+            hookStartedEvents = HookUserPromptSubmit.preview(handlers: hookHandlers).map {
+                HookStartedEvent(turnID: turnID, run: $0)
+            }
+            let request = try HookUserPromptSubmitRequest(
+                sessionID: ThreadId(uuid: conversationID.uuid),
+                turnID: turnID,
+                cwd: AbsolutePath(absolutePath: hookCwd.standardizedFileURL.path),
+                model: hookModel,
+                permissionMode: hookPermissionMode(hookApprovalPolicy),
+                prompt: input.text
+            )
+            hookOutcome = try runAsyncBlocking {
+                await HookUserPromptSubmit.run(
+                    handlers: hookHandlers,
+                    shell: HookCommandShell(),
+                    request: request
+                )
+            }
+        }
+        let spilledHookContexts = HookOutputSpiller().maybeSpillTexts(
+            threadID: ThreadId(uuid: conversationID.uuid),
+            texts: hookOutcome.additionalContexts
         )
         if turnContext != nil || !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
@@ -1854,9 +1936,13 @@ public enum CodexAppServer {
             if let turnContext {
                 items.append(.turnContext(turnContext.withTurnID(turnID)))
             }
-            if !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+            if !hookOutcome.shouldStop,
+               (!input.text.isEmpty || !(input.images?.isEmpty ?? true)) {
                 items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
             }
+            items.append(contentsOf: spilledHookContexts.map { context in
+                .responseItem(ResponseInputItem(userInputs: [.text(context)]).responseItem())
+            })
             try recorder.recordItems(items)
             try recorder.shutdown()
         }
@@ -1866,14 +1952,17 @@ public enum CodexAppServer {
             "status": "inProgress",
             "error": NSNull()
         ]
-        return [
-            "turn": turn
-        ]
+        return (
+            result: ["turn": turn],
+            hookStartedEvents: hookStartedEvents,
+            hookCompletedEvents: hookOutcome.hookEvents
+        )
     }
 
     private static func turnStartContextOverrideItem(
         params: [String: Any]?,
         rolloutPath: String,
+        existing: RolloutSummary? = nil,
         configuration: CodexAppServerConfiguration
     ) throws -> TurnContextItem? {
         let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
@@ -1900,7 +1989,7 @@ public enum CodexAppServer {
             return nil
         }
 
-        let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let existing = try existing ?? RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let contextCwd = cwd ?? existing.cwd
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
@@ -22020,7 +22109,8 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireTurnStartContextOverrideCompatibility(params: params)
-                    let result = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
+                    let outcome = try CodexAppServer.turnStartResult(params: params, configuration: configuration)
+                    let result = outcome.result
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let threadID = params?["threadId"] as? String,
                        let turn = result["turn"] as? [String: Any] {
@@ -22028,6 +22118,12 @@ final class CodexAppServerMessageProcessor {
                             activeTurnIDs[threadID] = turnID
                         }
                         trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)
+                        notifications.append(contentsOf: outcome.hookStartedEvents.map {
+                            CodexAppServer.hookStartedNotification(threadID: threadID, event: $0)
+                        })
+                        notifications.append(contentsOf: outcome.hookCompletedEvents.map {
+                            CodexAppServer.hookCompletedNotification(threadID: threadID, event: $0)
+                        })
                         notifications.append(CodexAppServer.turnStartedNotification(threadID: threadID, turn: turn))
                         if let notification = threadStatusChangedNotification(
                             threadID: threadID,

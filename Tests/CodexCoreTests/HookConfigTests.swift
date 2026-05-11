@@ -101,6 +101,79 @@ final class HookConfigTests: XCTestCase {
         ])
     }
 
+    func testConfiguredHandlersIncludeSystemAndMdmConfigHooksWithoutTrustState() throws {
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .mdm(domain: "com.openai.codex", key: "ManagedConfig"),
+                config: hookConfig(command: "echo mdm")
+            ),
+            ConfigLayerEntry(
+                name: .system(file: try path("/etc/codex/config.toml")),
+                config: hookConfig(command: "echo system")
+            )
+        ])
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo mdm",
+                timeoutSec: 600,
+                sourcePath: try path("/<mdm:com.openai.codex:ManagedConfig>/config.toml"),
+                source: .mdm,
+                displayOrder: 0
+            ),
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo system",
+                timeoutSec: 600,
+                sourcePath: try path("/etc/codex/config.toml"),
+                source: .system,
+                displayOrder: 1
+            )
+        ])
+    }
+
+    func testConfiguredHandlersIncludeTrustedSessionFlagHooks() throws {
+        let command = "echo session"
+        let key = HookConfig.hookKey(
+            keySource: "/<session-flags>/config.toml",
+            eventName: .userPromptSubmit,
+            groupIndex: 0,
+            handlerIndex: 0
+        )
+        let hash = HookConfig.commandHookHash(
+            eventName: .userPromptSubmit,
+            matcher: nil,
+            command: command,
+            timeoutSec: 600,
+            statusMessage: nil
+        )
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .sessionFlags,
+                config: hookConfig(command: command, trustedKey: key, trustedHash: hash)
+            )
+        ])
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: command,
+                timeoutSec: 600,
+                sourcePath: try path("/<session-flags>/config.toml"),
+                source: .sessionFlags,
+                displayOrder: 0
+            )
+        ])
+    }
+
     func testConfiguredHandlersIncludeTrustedEnabledPluginHooks() throws {
         let codexHome = try HookConfigTemporaryDirectory()
         let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
