@@ -6035,6 +6035,63 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testFsFileMethodsRejectMalformedParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let source = temp.url.appendingPathComponent("source.txt", isDirectory: false)
+        let destination = temp.url.appendingPathComponent("destination.txt", isDirectory: false)
+        try Data("hello".utf8).write(to: source)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"fs/readFile","params":{"path":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":2,"method":"fs/writeFile","params":{"path":"\#(source.path)","dataBase64":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"fs/createDirectory","params":{"path":"\#(temp.url.appendingPathComponent("dir").path)","recursive":"yes"}}"#,
+                #"Invalid request: invalid type: string "yes", expected a boolean"#
+            ),
+            (
+                #"{"id":4,"method":"fs/getMetadata","params":{}}"#,
+                "missing field `path`"
+            ),
+            (
+                #"{"id":5,"method":"fs/readDirectory","params":{"path":false}}"#,
+                "Invalid request: invalid type: boolean `false`, expected a string"
+            ),
+            (
+                #"{"id":6,"method":"fs/remove","params":{"path":"\#(source.path)","recursive":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a boolean"
+            ),
+            (
+                #"{"id":7,"method":"fs/remove","params":{"path":"\#(source.path)","force":"true"}}"#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                #"{"id":8,"method":"fs/copy","params":{"sourcePath":1,"destinationPath":"\#(destination.path)","recursive":false}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":9,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":1,"recursive":false}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":10,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(destination.path)","recursive":null}}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try decode(processor.processLine(Data(request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["message"] as? String, expectedMessage, "request: \(request)")
+        }
+    }
+
     func testAppListReturnsEmptyPageWhenConnectorsUnavailable() throws {
         let temp = try TemporaryDirectory()
 

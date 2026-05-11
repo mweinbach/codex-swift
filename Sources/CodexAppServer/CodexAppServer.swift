@@ -3427,7 +3427,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsReadFileResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
         let data = try Data(contentsOf: URL(fileURLWithPath: path, isDirectory: false))
         return [
             "dataBase64": data.base64EncodedString()
@@ -3435,10 +3435,8 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsWriteFileResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
-        guard let dataBase64 = stringParam(params?["dataBase64"]) else {
-            throw AppServerError.invalidRequest("missing dataBase64")
-        }
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
+        let dataBase64 = try rustRequiredStringParam(params?["dataBase64"], field: "dataBase64")
         let data = try decodeAppServerStandardBase64(dataBase64) { error in
             AppServerError.invalidRequest("fs/writeFile requires valid base64 dataBase64: \(error)")
         }
@@ -3451,8 +3449,8 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsCreateDirectoryResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
-        let recursive = boolParam(params?["recursive"], defaultValue: true)
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
+        let recursive = try rustOptionalBoolParam(params?["recursive"], defaultValue: true)
         do {
             try FileManager.default.createDirectory(
                 at: URL(fileURLWithPath: path, isDirectory: true),
@@ -3465,7 +3463,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsGetMetadataResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
         do {
             let metadata = try filesystemMetadata(path: path)
             return [
@@ -3481,7 +3479,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsReadDirectoryResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
         do {
             let contents = try FileManager.default.contentsOfDirectory(
                 at: URL(fileURLWithPath: path, isDirectory: true),
@@ -3505,9 +3503,9 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsRemoveResult(params: [String: Any]?) throws -> [String: Any] {
-        let path = try absolutePathParam(params?["path"], name: "path")
-        let recursive = boolParam(params?["recursive"], defaultValue: true)
-        let force = boolParam(params?["force"], defaultValue: true)
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
+        let recursive = try rustOptionalBoolParam(params?["recursive"], defaultValue: true)
+        let force = try rustOptionalBoolParam(params?["force"], defaultValue: true)
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) || isSymlink(path: path) else {
             if force {
@@ -3529,9 +3527,9 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsCopyResult(params: [String: Any]?) throws -> [String: Any] {
-        let sourcePath = try absolutePathParam(params?["sourcePath"], name: "sourcePath")
-        let destinationPath = try absolutePathParam(params?["destinationPath"], name: "destinationPath")
-        let recursive = boolParam(params?["recursive"], defaultValue: false)
+        let sourcePath = try rustRequiredAbsolutePathParam(params?["sourcePath"], field: "sourcePath")
+        let destinationPath = try rustRequiredAbsolutePathParam(params?["destinationPath"], field: "destinationPath")
+        let recursive = try rustDefaultBoolParam(params?["recursive"], defaultValue: false)
         do {
             try copyFilesystemItem(
                 sourcePath: sourcePath,
