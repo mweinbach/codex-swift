@@ -1253,21 +1253,27 @@ private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) 
 private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case let .macos(profile, allowUnixSockets, logDenials, command):
-        let defaultPolicy = sandboxModeOverride(in: request.configOverrides)
-            .map(SandboxPolicy.fromSandboxMode) ?? .newReadOnlyPolicy()
-        let sandboxPolicy: SandboxPolicy
-        switch profile.resolveBuiltInPolicy(defaultPolicy: defaultPolicy) {
-        case let .resolved(resolvedPolicy):
-            sandboxPolicy = resolvedPolicy
-        case .customProfile:
-            return CodexCLI.CommandExecutionResult(
-                exitCode: 78,
-                stderrMessage: "codex-swift: sandbox permission profile runtime is not complete yet."
+        let codexHome = try CodexHome.find()
+        let processCwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let sandboxConfiguration: CodexCLI.DebugSandboxConfiguration
+        do {
+            sandboxConfiguration = try CodexCLI.resolveDebugSandboxConfiguration(
+                profile: profile,
+                configOverrides: request.configOverrides,
+                codexHome: codexHome,
+                processCwd: processCwd
             )
-        case let .unknownBuiltinProfile(profileName):
+        } catch let error as CodexCLI.DebugSandboxConfigurationError {
+            let exitCode: Int32
+            switch error {
+            case .customProfile:
+                exitCode = 78
+            case .unknownBuiltinProfile:
+                exitCode = 1
+            }
             return CodexCLI.CommandExecutionResult(
-                exitCode: 1,
-                stderrMessage: "default_permissions refers to unknown built-in profile `\(profileName)`"
+                exitCode: exitCode,
+                stderrMessage: error.description
             )
         }
 
@@ -1277,14 +1283,10 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
                 stderrMessage: "codex-swift: sandbox Unix socket allowlist runtime is not complete yet."
             )
         }
-        let cwd = profile.cwd.map(resolveSandboxCwd) ?? URL(
-            fileURLWithPath: FileManager.default.currentDirectoryPath,
-            isDirectory: true
-        )
         let exitCode = try SeatbeltSandbox.run(
             command: command,
-            sandboxPolicy: sandboxPolicy,
-            cwd: cwd,
+            sandboxPolicy: sandboxConfiguration.sandboxPolicy,
+            cwd: sandboxConfiguration.cwd,
             logDenials: logDenials
         )
         return CodexCLI.CommandExecutionResult(exitCode: exitCode)
@@ -1299,23 +1301,6 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
             stderrMessage: "Windows sandbox is only available on Windows"
         )
     }
-}
-
-private func resolveSandboxCwd(_ rawPath: String) -> URL {
-    if rawPath.hasPrefix("/") {
-        return URL(fileURLWithPath: rawPath, isDirectory: true)
-    }
-    return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(rawPath, isDirectory: true)
-}
-
-private func sandboxModeOverride(in configOverrides: CliConfigOverrides) -> SandboxMode? {
-    guard let value = (try? configOverrides.parseOverrides().last(where: { key, _ in key == "sandbox_mode" }))?.1,
-          case let .string(mode) = value
-    else {
-        return nil
-    }
-    return SandboxMode(rawValue: mode)
 }
 
 private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

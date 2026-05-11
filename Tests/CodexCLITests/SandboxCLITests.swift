@@ -186,6 +186,94 @@ final class SandboxCLITests: XCTestCase {
         )
     }
 
+    func testResolveDebugSandboxConfigurationPreservesWorkspaceWriteSettingsForBuiltInProfile() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+        let workspaceRoot = codexHome.url.appendingPathComponent("allowed", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceRoot, withIntermediateDirectories: true)
+        try """
+        profile = "legacy"
+
+        [profiles.legacy]
+        sandbox_mode = "danger-full-access"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(workspaceRoot.path)"]
+        network_access = true
+        exclude_tmpdir_env_var = true
+        exclude_slash_tmp = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(
+                permissionsProfile: ":workspace",
+                cwd: "nested"
+            ),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+
+        XCTAssertEqual(configuration.cwd.standardizedFileURL.path, processCwd.url.appendingPathComponent("nested").path)
+        guard case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp) =
+            configuration.sandboxPolicy
+        else {
+            return XCTFail("expected workspace-write sandbox policy")
+        }
+        XCTAssertTrue(writableRoots.contains(try AbsolutePath(absolutePath: workspaceRoot.path)))
+        XCTAssertTrue(writableRoots.contains(try AbsolutePath(
+            absolutePath: codexHome.url.appendingPathComponent("memories", isDirectory: true).path
+        )))
+        XCTAssertTrue(networkAccess)
+        XCTAssertTrue(excludeTmpdirEnvVar)
+        XCTAssertTrue(excludeSlashTmp)
+    }
+
+    func testResolveDebugSandboxConfigurationKeepsLegacyConfigsReadOnlyUnlessSandboxModeIsExplicit() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+        let workspaceRoot = codexHome.url.appendingPathComponent("allowed", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceRoot, withIntermediateDirectories: true)
+        try """
+        sandbox_mode = "workspace-write"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(workspaceRoot.path)"]
+        network_access = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let ambientConfiguration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+        XCTAssertEqual(ambientConfiguration.sandboxPolicy, .readOnly)
+
+        let explicitConfiguration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(),
+            configOverrides: CliConfigOverrides(rawOverrides: [#"sandbox_mode="workspace-write""#]),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+        guard case let .workspaceWrite(writableRoots, networkAccess, _, _) = explicitConfiguration.sandboxPolicy else {
+            return XCTFail("expected explicit workspace-write sandbox policy")
+        }
+        XCTAssertTrue(writableRoots.contains(try AbsolutePath(absolutePath: workspaceRoot.path)))
+        XCTAssertTrue(networkAccess)
+    }
+
     func testRunAsyncSandboxWindowsDelegatesToRunner() async {
         var receivedRequest: CodexCLI.SandboxCommandRequest?
 
@@ -292,5 +380,19 @@ final class SandboxCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 78)
         XCTAssertEqual(stderr, ["codex-swift: command 'sandbox' is registered but its runtime port is not complete yet."])
+    }
+}
+
+private final class SandboxTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-sandbox-cli-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }
