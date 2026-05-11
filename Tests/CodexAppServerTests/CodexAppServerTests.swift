@@ -109,7 +109,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["approvalPolicy"] as? String, "never")
         XCTAssertEqual(result["approvalsReviewer"] as? String, "guardian_subagent")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspace-write")
-        XCTAssertEqual(result["permissionProfile"] as? NSNull, NSNull())
+        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
+        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
+        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
+        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
         XCTAssertEqual(result["activePermissionProfile"] as? NSNull, NSNull())
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
         let threadID = try XCTUnwrap(thread["id"] as? String)
@@ -132,6 +135,43 @@ final class CodexAppServerTests: XCTestCase {
         let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
         XCTAssertTrue(rollout.contains(#""originator":"codex_app_server""#))
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
+    }
+
+    func testThreadStartResponseIncludesActivePermissionProfileLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let docs = temp.url.appendingPathComponent("docs", isDirectory: true)
+        try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        try """
+        default_permissions = "limited-read-test"
+
+        [permissions.limited-read-test.filesystem]
+        "\(docs.path)" = "read"
+
+        [permissions.limited-read-test.network]
+        enabled = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
+        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
+        XCTAssertEqual(permissionProfile["network"] as? String, "enabled")
+        let fileSystem = try XCTUnwrap(permissionProfile["file_system"] as? [String: Any])
+        XCTAssertEqual(fileSystem["type"] as? String, "restricted")
+        let entries = try XCTUnwrap(fileSystem["entries"] as? [[String: Any]])
+        XCTAssertEqual((entries.first?["path"] as? [String: Any])?["path"] as? String, docs.path)
+        XCTAssertEqual(entries.first?["access"] as? String, "read")
+        let activePermissionProfile = try XCTUnwrap(result["activePermissionProfile"] as? [String: Any])
+        XCTAssertEqual(activePermissionProfile["id"] as? String, "limited-read-test")
+        XCTAssertNil(activePermissionProfile["modifications"])
     }
 
     func testThreadStartEphemeralRemainsPathlessLikeRust() throws {
@@ -2952,7 +2992,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["approvalPolicy"] as? String, "untrusted")
         XCTAssertEqual(result["approvalsReviewer"] as? String, "user")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "read-only")
-        XCTAssertEqual(result["permissionProfile"] as? NSNull, NSNull())
+        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
+        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
+        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
+        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
         XCTAssertEqual(result["activePermissionProfile"] as? NSNull, NSNull())
         XCTAssertEqual(result["reasoningEffort"] as? NSNull, NSNull())
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])

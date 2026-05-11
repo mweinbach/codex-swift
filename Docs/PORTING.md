@@ -968,7 +968,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server-protocol` thread-start response reviewer
   - added Rust's required `approvalsReviewer` field to the `thread/start` response with the default `user` reviewer.
 - `codex-rs/app-server-protocol` thread-start response shape
-  - added Rust's required `thread/start` response fields for service tier, instruction sources, permission profile, and active permission profile.
+  - added Rust's required `thread/start` response fields for service tier, instruction sources, permission profile, and active permission profile; the response now carries the effective managed permission profile and active profile id instead of placeholder nulls.
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
 - `codex-rs/app-server` turn-start cwd context overrides
@@ -982,7 +982,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server` thread resume/fork override compatibility
   - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread-resume response shape
-  - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile.
+  - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile; `thread/resume` and `thread/fork` now return the effective permission profile and configured active profile id instead of placeholder nulls.
 - `AGENTS.md` and `Docs/SwiftPort` Swift guidance
   - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` omitted/null/value semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
   - tightened the SwiftPort agent and contributing docs so upstream Rust lint guidance is rewritten into concrete Swift review rules: prefer labels/enums/options over opaque literals, match Swift argument-comment text to the callee label/local name when unavoidable, avoid broad concurrency escape annotations, and model Rust `Option` wire behavior explicitly when plain Swift optionals would lose information.

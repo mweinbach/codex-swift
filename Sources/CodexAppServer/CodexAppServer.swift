@@ -904,6 +904,7 @@ public enum CodexAppServer {
     ) throws -> [String: Any] {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
+        let permissionProfile = started.permissionProfile
         let thread: [String: Any]
         if started.ephemeral {
             thread = threadObject(for: started)
@@ -927,8 +928,8 @@ public enum CodexAppServer {
             "approvalPolicy": started.approvalPolicy.rawValue,
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(started.sandbox),
-            "permissionProfile": NSNull(),
-            "activePermissionProfile": NSNull(),
+            "permissionProfile": try jsonObject(permissionProfile),
+            "activePermissionProfile": try nullableJSON(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -976,6 +977,10 @@ public enum CodexAppServer {
         }
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            sandbox,
+            cwd: cwd.path
+        )
         try persistTrustedProjectForThreadStartIfNeeded(
             params: params,
             cwd: cwd,
@@ -994,6 +999,8 @@ public enum CodexAppServer {
                 approvalsReviewer: approvalsReviewer,
                 serviceTier: serviceTier,
                 sandbox: sandbox,
+                permissionProfile: permissionProfile,
+                activePermissionProfile: runtimeConfig.activePermissionProfile,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
                 ephemeral: true
             )
@@ -1023,6 +1030,8 @@ public enum CodexAppServer {
             approvalsReviewer: approvalsReviewer,
             serviceTier: serviceTier,
             sandbox: sandbox,
+            permissionProfile: permissionProfile,
+            activePermissionProfile: runtimeConfig.activePermissionProfile,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             ephemeral: false
         )
@@ -1220,6 +1229,10 @@ public enum CodexAppServer {
             fallback: runtimeConfig.serviceTier
         )
         let sandbox = runtimeConfig.legacySandboxPolicy()
+        let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            sandbox,
+            cwd: thread["cwd"] as? String ?? "/"
+        )
 
         return [
             "thread": thread,
@@ -1231,8 +1244,8 @@ public enum CodexAppServer {
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
-            "permissionProfile": NSNull(),
-            "activePermissionProfile": NSNull(),
+            "permissionProfile": try jsonObject(permissionProfile),
+            "activePermissionProfile": try nullableJSON(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -1315,6 +1328,10 @@ public enum CodexAppServer {
             fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
             isDirectory: true
         )
+        let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            sandbox,
+            cwd: cwd.path
+        )
         let threadSource = threadSourceParam(params?["threadSource"])
         let conversationID = ConversationId()
         let recorder = try RolloutRecorder.create(
@@ -1358,8 +1375,8 @@ public enum CodexAppServer {
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
-            "permissionProfile": NSNull(),
-            "activePermissionProfile": NSNull(),
+            "permissionProfile": try jsonObject(permissionProfile),
+            "activePermissionProfile": try nullableJSON(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
     }
@@ -14735,6 +14752,13 @@ public enum CodexAppServer {
         return try JSONSerialization.jsonObject(with: data)
     }
 
+    private static func nullableJSON<T: Encodable>(_ value: T?) throws -> Any {
+        guard let value else {
+            return NSNull()
+        }
+        return try jsonObject(value)
+    }
+
     private static func conversationObject(for item: ConversationItem, defaultProvider: String) throws -> [String: Any] {
         let summary = try RolloutSummary(path: item.path, defaultProvider: defaultProvider)
         return [
@@ -18316,6 +18340,8 @@ private struct AppServerStartedConversation {
     let approvalsReviewer: ApprovalsReviewer
     let serviceTier: String?
     let sandbox: SandboxPolicy
+    let permissionProfile: PermissionProfile
+    let activePermissionProfile: ActivePermissionProfile?
     let reasoningEffort: String?
     let ephemeral: Bool
 }
