@@ -6209,13 +6209,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidError["code"] as? Int, -32600)
         XCTAssertEqual(invalidError["message"] as? String, "invalid cursor: abc")
 
+        let malformed = try appServerResponse(
+            #"{"id":2,"method":"app/list","params":{"cursor":1}}"#,
+            codexHome: temp.url
+        )
+        let malformedError = try XCTUnwrap(malformed["error"] as? [String: Any])
+        XCTAssertEqual(malformedError["code"] as? Int, -32600)
+        XCTAssertEqual(malformedError["message"] as? String, "Invalid request: invalid type: integer `1`, expected a string")
+
         let beyond = try appServerResponse(
-            #"{"id":2,"method":"app/list","params":{"cursor":"1"}}"#,
+            #"{"id":3,"method":"app/list","params":{"cursor":"1"}}"#,
             codexHome: temp.url
         )
         let beyondError = try XCTUnwrap(beyond["error"] as? [String: Any])
         XCTAssertEqual(beyondError["code"] as? Int, -32600)
         XCTAssertEqual(beyondError["message"] as? String, "cursor 1 exceeds total apps 0")
+    }
+
+    func testAppListRejectsMalformedThreadIDLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let response = try appServerResponse(
+            #"{"id":1,"method":"app/list","params":{"threadId":1}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: integer `1`, expected a string")
     }
 
     func testAppListReturnsConfiguredLocalPluginAppsAndPaginates() throws {

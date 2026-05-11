@@ -3576,7 +3576,7 @@ public enum CodexAppServer {
         cacheAppList: (([[String: Any]]) -> Void)? = nil
     ) throws -> [String: Any] {
         let forcedAppsFeatureEnabled: Bool?
-        if let threadID = stringParam(params?["threadId"]) {
+        if let threadID = try rustOptionalStringParam(params?["threadId"]) {
             do {
                 _ = try ConversationId(string: threadID)
             } catch {
@@ -3606,7 +3606,7 @@ public enum CodexAppServer {
     private static func appListPage(apps: [[String: Any]], params: [String: Any]?) throws -> [String: Any] {
         let total = apps.count
         var start = 0
-        if let cursor = stringParam(params?["cursor"]) {
+        if let cursor = try rustOptionalStringParam(params?["cursor"]) {
             guard let parsedStart = Int(cursor), parsedStart >= 0 else {
                 throw AppServerError.invalidRequest("invalid cursor: \(cursor)")
             }
