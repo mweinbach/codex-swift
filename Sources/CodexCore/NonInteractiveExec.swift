@@ -290,6 +290,16 @@ public enum NonInteractiveExec {
         }
     }
 
+    public struct AgentJobToolContext: Sendable {
+        public var store: SQLiteAgentJobStore
+        public var reportingThreadID: String
+
+        public init(store: SQLiteAgentJobStore, reportingThreadID: String) {
+            self.store = store
+            self.reportingThreadID = reportingThreadID
+        }
+    }
+
     public static func runResponsesLoop(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
@@ -537,7 +547,8 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        toolSearchIndex: ToolSearchIndex? = nil
+        toolSearchIndex: ToolSearchIndex? = nil,
+        agentJobContext: AgentJobToolContext? = nil
     ) async -> ResponseItem {
         switch item {
         case let .functionCall(_, name, _, arguments, callID):
@@ -550,7 +561,8 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 truncationPolicy: truncationPolicy,
-                environment: environment
+                environment: environment,
+                agentJobContext: agentJobContext
             )
 
         case let .customToolCall(_, _, callID, name, input):
@@ -626,7 +638,8 @@ public enum NonInteractiveExec {
         shell: Shell,
         truncationPolicy: TruncationPolicy,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        toolSearchIndex: ToolSearchIndex? = nil
+        toolSearchIndex: ToolSearchIndex? = nil,
+        agentJobContext: AgentJobToolContext? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         if let hookPayload {
@@ -676,7 +689,8 @@ public enum NonInteractiveExec {
                 shell: shell,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
-                toolSearchIndex: toolSearchIndex
+                toolSearchIndex: toolSearchIndex,
+                agentJobContext: agentJobContext
             )
             guard toolOutputSucceeded(output),
                   let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
@@ -708,7 +722,8 @@ public enum NonInteractiveExec {
             shell: shell,
             truncationPolicy: truncationPolicy,
             environment: environment,
-            toolSearchIndex: toolSearchIndex
+            toolSearchIndex: toolSearchIndex,
+            agentJobContext: agentJobContext
         )
         return FunctionCallExecutionResult(output: output)
     }
@@ -852,7 +867,8 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         truncationPolicy: TruncationPolicy,
-        environment: [String: String]
+        environment: [String: String],
+        agentJobContext: AgentJobToolContext?
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
         do {
@@ -931,6 +947,36 @@ public enum NonInteractiveExec {
                     return functionOutput(
                         callID: callID,
                         content: "write_stdin failed: \(String(describing: error))",
+                        success: false
+                    )
+                }
+
+            case "report_agent_job_result":
+                guard let agentJobContext else {
+                    return functionOutput(
+                        callID: callID,
+                        content: "unsupported tool: \(name)",
+                        success: false
+                    )
+                }
+                do {
+                    let result = try await AgentJobRuntime.recordReportAgentJobResult(
+                        argumentsJSON: arguments,
+                        reportingThreadID: agentJobContext.reportingThreadID,
+                        store: agentJobContext.store
+                    )
+                    let data = try JSONEncoder().encode(result)
+                    return functionOutput(
+                        callID: callID,
+                        content: String(decoding: data, as: UTF8.self),
+                        success: true
+                    )
+                } catch let error as FunctionCallError {
+                    return functionOutput(callID: callID, content: error.description, success: false)
+                } catch {
+                    return functionOutput(
+                        callID: callID,
+                        content: "failed to handle \(name): \(String(describing: error))",
                         success: false
                     )
                 }

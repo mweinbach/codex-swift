@@ -1143,6 +1143,96 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
+    func testReportAgentJobResultRequiresAgentJobContext() async throws {
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "report_agent_job_result",
+                arguments: #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true}}"#,
+                callID: "call-report"
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-report")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
+    }
+
+    func testReportAgentJobResultRecordsAcceptedResultLikeRustHandler() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        _ = try await store.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-1",
+                name: "job",
+                instruction: "do it",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id"],
+                inputCSVPath: "/tmp/input.csv",
+                outputCSVPath: temp.url.appendingPathComponent("output.csv").path,
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: [
+                AgentJobItemCreateParams(
+                    itemID: "row-1",
+                    rowIndex: 0,
+                    sourceID: nil,
+                    rowJSON: .object(["id": .string("1")])
+                ),
+            ]
+        )
+        try await store.markAgentJobRunning("job-1")
+        let markedRunning = try await store.markAgentJobItemRunningWithThread(
+            jobID: "job-1",
+            itemID: "row-1",
+            threadID: "thread-1"
+        )
+        XCTAssertTrue(markedRunning)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "report_agent_job_result",
+                arguments: #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true},"stop":true}"#,
+                callID: "call-report"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            agentJobContext: NonInteractiveExec.AgentJobToolContext(
+                store: store,
+                reportingThreadID: "thread-1"
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-report")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.content, #"{"accepted":true}"#)
+
+        let persistedItem = try await store.getAgentJobItem(jobID: "job-1", itemID: "row-1")
+        let item = try XCTUnwrap(persistedItem)
+        XCTAssertEqual(item.status, .completed)
+        XCTAssertEqual(item.resultJSON, .object(["ok": .bool(true)]))
+        let persistedJob = try await store.getAgentJob("job-1")
+        let job = try XCTUnwrap(persistedJob)
+        XCTAssertEqual(job.status, .cancelled)
+        XCTAssertEqual(job.lastError, "cancelled by worker request")
+    }
+
     func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let patch = """
