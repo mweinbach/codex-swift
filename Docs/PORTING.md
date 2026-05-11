@@ -336,6 +336,8 @@ Source baseline inspected for this scaffold:
   - effective config key/value summary ordering, approval/sandbox display values, and Responses-only reasoning entries
 - `codex-rs/features/src/lib.rs` and `codex-rs/features/src/legacy.rs`
   - current feature registry ordering, stages, defaults, legacy feature aliases, feature-toggle CLI override validation, and Rust dependency normalization for `enable_fanout -> multi_agent` plus `code_mode_only -> code_mode`
+- `codex-rs/core/src/tools/handlers/agent_jobs_spec.rs`
+  - added Swift Responses tool specs for `spawn_agents_on_csv` and `report_agent_job_result`, preserving Rust names, descriptions, required fields, loose object schemas for `output_schema`/`result`, and explicit supported-tool exposure. The CSV fanout runtime handlers and worker-result persistence/export flow remain pending.
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`

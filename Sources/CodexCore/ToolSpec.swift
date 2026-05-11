@@ -840,6 +840,12 @@ public enum ToolSpecFactory {
         if config.experimentalSupportedTools.contains("test_sync_tool") {
             specs.append(ConfiguredToolSpec(spec: createTestSyncTool(), supportsParallelToolCalls: true))
         }
+        if config.experimentalSupportedTools.contains("spawn_agents_on_csv") {
+            specs.append(ConfiguredToolSpec(spec: createSpawnAgentsOnCSVTool(), supportsParallelToolCalls: false))
+        }
+        if config.experimentalSupportedTools.contains("report_agent_job_result") {
+            specs.append(ConfiguredToolSpec(spec: createReportAgentJobResultTool(), supportsParallelToolCalls: false))
+        }
 
         let webSearchMode = config.webSearchMode ?? (config.webSearchRequest ? .live : nil)
         switch webSearchMode {
@@ -1228,6 +1234,38 @@ public enum ToolSpecFactory {
                 )
             ],
             required: nil
+        )
+    }
+
+    public static func createSpawnAgentsOnCSVTool() -> ToolSpec {
+        functionTool(
+            name: "spawn_agents_on_csv",
+            description: "Process a CSV by spawning one worker sub-agent per row. The instruction string is a template where `{column}` placeholders are replaced with row values. Each worker must call `report_agent_job_result` with a JSON object (matching `output_schema` when provided); missing reports are treated as failures. This call blocks until all rows finish and automatically exports results to `output_csv_path` (or a default path).",
+            properties: [
+                "csv_path": .string(description: "Path to the CSV file containing input rows."),
+                "instruction": .string(description: "Instruction template to apply to each CSV row. Use {column_name} placeholders to inject values from the row."),
+                "id_column": .string(description: "Optional column name to use as stable item id."),
+                "output_csv_path": .string(description: "Optional output CSV path for exported results."),
+                "max_concurrency": .number(description: "Maximum concurrent workers for this job. Defaults to 16 and is capped by config."),
+                "max_workers": .number(description: "Alias for max_concurrency. Set to 1 to run sequentially."),
+                "max_runtime_seconds": .number(description: "Maximum runtime per worker before it is failed. Defaults to 1800 seconds."),
+                "output_schema": .object(properties: [:], required: nil, additionalProperties: nil)
+            ],
+            required: ["csv_path", "instruction"]
+        )
+    }
+
+    public static func createReportAgentJobResultTool() -> ToolSpec {
+        functionTool(
+            name: "report_agent_job_result",
+            description: "Worker-only tool to report a result for an agent job item. Main agents should not call this.",
+            properties: [
+                "job_id": .string(description: "Identifier of the job."),
+                "item_id": .string(description: "Identifier of the job item."),
+                "result": .object(properties: [:], required: nil, additionalProperties: nil),
+                "stop": .boolean(description: "Optional. When true, cancels the remaining job items after this result is recorded.")
+            ],
+            required: ["job_id", "item_id", "result"]
         )
     }
 
