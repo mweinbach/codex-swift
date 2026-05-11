@@ -29,6 +29,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
     public static let closeTag = "</environment_context>"
 
     public let environments: [EnvironmentContextEnvironment]?
+    public let currentDate: String?
+    public let timezone: String?
     public let cwd: String?
     public let approvalPolicy: AskForApproval?
     public let sandboxMode: SandboxMode?
@@ -38,6 +40,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case environments
+        case currentDate = "current_date"
+        case timezone
         case cwd
         case approvalPolicy = "approval_policy"
         case sandboxMode = "sandbox_mode"
@@ -51,9 +55,13 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         approvalPolicy: AskForApproval?,
         sandboxPolicy: SandboxPolicy?,
         shell: Shell,
-        environments: [EnvironmentContextEnvironment]? = nil
+        environments: [EnvironmentContextEnvironment]? = nil,
+        currentDate: String? = nil,
+        timezone: String? = nil
     ) {
         self.environments = environments
+        self.currentDate = currentDate
+        self.timezone = timezone
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxPolicy.map(Self.sandboxMode(for:))
@@ -69,9 +77,13 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         networkAccess: NetworkAccess?,
         writableRoots: [AbsolutePath]?,
         shell: Shell,
-        environments: [EnvironmentContextEnvironment]? = nil
+        environments: [EnvironmentContextEnvironment]? = nil,
+        currentDate: String? = nil,
+        timezone: String? = nil
     ) {
         self.environments = environments
+        self.currentDate = currentDate
+        self.timezone = timezone
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxMode
@@ -100,6 +112,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
 
     public func equalsExceptShell(_ other: EnvironmentContext) -> Bool {
         environmentsEqualExceptShell(environments, other.environments)
+            && currentDate == other.currentDate
+            && timezone == other.timezone
             && cwd == other.cwd
             && approvalPolicy == other.approvalPolicy
             && sandboxMode == other.sandboxMode
@@ -133,6 +147,12 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             }
 
             lines.append("  <shell>\(shell.name)</shell>")
+        }
+        if let currentDate {
+            lines.append("  <current_date>\(currentDate)</current_date>")
+        }
+        if let timezone {
+            lines.append("  <timezone>\(timezone)</timezone>")
         }
         lines.append(Self.closeTag)
         return lines.joined(separator: "\n")

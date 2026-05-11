@@ -370,6 +370,8 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(environmentText.contains("      <cwd>/repo/dev</cwd>"))
         XCTAssertTrue(environmentText.contains(#"<environment id="local">"#))
         XCTAssertTrue(environmentText.contains("      <cwd>/repo/local</cwd>"))
+        XCTAssertTrue(environmentText.contains("  <current_date>2026-02-26</current_date>"))
+        XCTAssertTrue(environmentText.contains("  <timezone>America/Los_Angeles</timezone>"))
         XCTAssertFalse(environmentText.contains("\n  <cwd>"))
         XCTAssertFalse(environmentText.contains("\n  <shell>"))
     }
@@ -2751,7 +2753,10 @@ final class DebugCommandRuntimeTests: XCTestCase {
         codexHome: URL,
         config: CodexRuntimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0),
         configLayerStack: ConfigLayerStack? = nil,
-        configuredEnvironments: [TurnEnvironmentSelection]? = nil
+        configuredEnvironments: [TurnEnvironmentSelection]? = nil,
+        currentDateAndTimezone: @escaping () -> (currentDate: String, timezone: String) = {
+            ("2026-02-26", "America/Los_Angeles")
+        }
     ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
@@ -2766,7 +2771,8 @@ final class DebugCommandRuntimeTests: XCTestCase {
             },
             loadConfiguredEnvironments: { _, cwd in
                 configuredEnvironments ?? [TurnEnvironmentSelection(environmentID: "local", cwd: cwd)]
-            }
+            },
+            currentDateAndTimezone: currentDateAndTimezone
         )
     }
 

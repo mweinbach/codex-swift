@@ -116,7 +116,9 @@ final class EnvironmentContextTests: XCTestCase {
             environments: [
                 EnvironmentContextEnvironment(id: "dev", cwd: "/repo/dev", shell: "bash"),
                 EnvironmentContextEnvironment(id: "local", cwd: "/repo/local", shell: "zsh")
-            ]
+            ],
+            currentDate: "2026-02-26",
+            timezone: "America/Los_Angeles"
         )
 
         XCTAssertEqual(context.serializeToXML(), #"""
@@ -131,8 +133,31 @@ final class EnvironmentContextTests: XCTestCase {
               <shell>zsh</shell>
             </environment>
           </environments>
+          <current_date>2026-02-26</current_date>
+          <timezone>America/Los_Angeles</timezone>
         </environment_context>
         """#)
+    }
+
+    func testEqualsExceptShellComparesDateContext() {
+        let context1 = EnvironmentContext(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: fakeShell(),
+            currentDate: "2026-02-26",
+            timezone: "America/Los_Angeles"
+        )
+        let context2 = EnvironmentContext(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            currentDate: "2026-02-27",
+            timezone: "America/Los_Angeles"
+        )
+
+        XCTAssertFalse(context1.equalsExceptShell(context2))
     }
 
     func testEqualsExceptShellComparesApprovalPolicy() throws {

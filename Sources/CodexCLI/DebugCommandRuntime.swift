@@ -7,6 +7,7 @@ public enum DebugCommandRuntime {
         public var loadConfig: (URL, CliConfigOverrides) throws -> CodexRuntimeConfig
         public var loadConfigLayerStack: (URL, CliConfigOverrides) throws -> ConfigLayerStack
         public var loadConfiguredEnvironments: (URL, String) throws -> [TurnEnvironmentSelection]
+        public var currentDateAndTimezone: () -> (currentDate: String, timezone: String)
         public var makeStateStore: (URL, String) throws -> SQLiteAgentGraphStore
         public var loadRawModelCatalog: (URL, CodexRuntimeConfig) async throws -> ModelsResponse
         public var currentExecutable: () throws -> URL
@@ -33,6 +34,9 @@ public enum DebugCommandRuntime {
                     codexHome: codexHome,
                     cwd: cwd
                 )
+            },
+            currentDateAndTimezone: @escaping () -> (currentDate: String, timezone: String) = {
+                DebugCommandRuntime.currentDateAndTimezone()
             },
             makeStateStore: @escaping (URL, String) throws -> SQLiteAgentGraphStore = { databaseURL, modelProvider in
                 try SQLiteAgentGraphStore(databaseURL: databaseURL, defaultProvider: modelProvider)
@@ -68,6 +72,7 @@ public enum DebugCommandRuntime {
             self.loadConfig = loadConfig
             self.loadConfigLayerStack = loadConfigLayerStack
             self.loadConfiguredEnvironments = loadConfiguredEnvironments
+            self.currentDateAndTimezone = currentDateAndTimezone
             self.makeStateStore = makeStateStore
             self.loadRawModelCatalog = loadRawModelCatalog
             self.currentExecutable = currentExecutable
@@ -316,6 +321,7 @@ public enum DebugCommandRuntime {
         let configLayerStack = try dependencies.loadConfigLayerStack(codexHome, configOverrides)
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let configuredEnvironments = try dependencies.loadConfiguredEnvironments(codexHome, cwd.path)
+        let dateContext = dependencies.currentDateAndTimezone()
         let input = makePromptInput(
             prompt: prompt,
             imagePaths: imagePaths,
@@ -323,7 +329,9 @@ public enum DebugCommandRuntime {
             config: config,
             configLayerStack: configLayerStack,
             cwd: cwd,
-            configuredEnvironments: configuredEnvironments
+            configuredEnvironments: configuredEnvironments,
+            currentDate: dateContext.currentDate,
+            timezone: dateContext.timezone
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted]
@@ -347,7 +355,9 @@ public enum DebugCommandRuntime {
         config: CodexRuntimeConfig,
         configLayerStack: ConfigLayerStack,
         cwd: URL,
-        configuredEnvironments: [TurnEnvironmentSelection]
+        configuredEnvironments: [TurnEnvironmentSelection],
+        currentDate: String,
+        timezone: String
     ) -> [ResponseItem] {
         let approvalPolicy = config.approvalPolicy ?? .onRequest
         let sandboxPolicy = config.legacySandboxPolicy()
@@ -384,7 +394,9 @@ public enum DebugCommandRuntime {
             environmentContextEnvironments: environmentContextEnvironments(
                 from: configuredEnvironments,
                 defaultShell: shell
-            )
+            ),
+            environmentContextCurrentDate: currentDate,
+            environmentContextTimezone: timezone
         )
 
         var userInputs = imagePaths.map(UserInput.localImage(path:))
@@ -412,6 +424,18 @@ public enum DebugCommandRuntime {
                 shell: defaultShell.name
             )
         }
+    }
+
+    public static func currentDateAndTimezone(
+        now: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> (currentDate: String, timezone: String) {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return (formatter.string(from: now), timeZone.identifier)
     }
 
     private static func pendingRuntime(_ command: String) -> CodexCLI.CommandExecutionResult {

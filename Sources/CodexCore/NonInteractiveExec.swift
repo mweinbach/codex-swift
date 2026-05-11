@@ -53,7 +53,9 @@ public enum NonInteractiveExec {
         memoryToolDeveloperInstructions: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
-        environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil
+        environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
+        environmentContextCurrentDate: String? = nil,
+        environmentContextTimezone: String? = nil
     ) -> [ResponseItem] {
         let context = TurnContext(
             cwd: cwd.path,
@@ -98,7 +100,9 @@ public enum NonInteractiveExec {
                     approvalPolicy: context.approvalPolicy,
                     sandboxPolicy: context.sandboxPolicy,
                     shell: shell,
-                    environments: environmentContextEnvironments
+                    environments: environmentContextEnvironments,
+                    currentDate: environmentContextCurrentDate,
+                    timezone: environmentContextTimezone
                 ).serializeToXML())
             )
         }
@@ -123,6 +127,8 @@ public enum NonInteractiveExec {
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
         environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
+        environmentContextCurrentDate: String? = nil,
+        environmentContextTimezone: String? = nil,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
@@ -138,7 +144,9 @@ public enum NonInteractiveExec {
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
             availableSkills: availableSkills,
             userInstructions: userInstructions,
-            environmentContextEnvironments: environmentContextEnvironments
+            environmentContextEnvironments: environmentContextEnvironments,
+            environmentContextCurrentDate: environmentContextCurrentDate,
+            environmentContextTimezone: environmentContextTimezone
         )
         input.append(contentsOf: history)
 
