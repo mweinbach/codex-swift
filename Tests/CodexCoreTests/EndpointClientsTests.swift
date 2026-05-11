@@ -548,6 +548,40 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-123")])
     }
 
+    func testResponsesClientForwardsTurnMetadataHeaderAndClientMetadata() async throws {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key")
+        )
+        let turnMetadata = #"{"turn_id":"turn-123"}"#
+
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: Prompt(input: [.message(role: "user", content: [.inputText(text: "hi")])]),
+            options: ResponsesOptions(
+                clientMetadata: ["fiber_run_id": "fiber-123"],
+                turnMetadataHeader: turnMetadata
+            )
+        )
+
+        let request = try XCTUnwrap(transport.streamRequests.first)
+        let body = try JSONObject(try XCTUnwrap(request.body))
+        let metadata = try XCTUnwrap(body["client_metadata"] as? [String: String])
+        XCTAssertEqual(request.headers[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+        XCTAssertEqual(metadata["fiber_run_id"], "fiber-123")
+        XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+    }
+
     func testResponsesClientNormalizesPromptInputForTextOnlyModels() async throws {
         let transport = CapturingTransport(
             streamResults: [

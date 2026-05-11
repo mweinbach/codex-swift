@@ -682,6 +682,8 @@ public struct ResponsesOptions: Equatable, Sendable {
     public var storeOverride: Bool?
     public var conversationID: String?
     public var sessionSource: SessionSource?
+    public var clientMetadata: [String: String]
+    public var turnMetadataHeader: String?
     public var extraHeaders: [String: String]
 
     public init(
@@ -694,6 +696,8 @@ public struct ResponsesOptions: Equatable, Sendable {
         storeOverride: Bool? = nil,
         conversationID: String? = nil,
         sessionSource: SessionSource? = nil,
+        clientMetadata: [String: String] = [:],
+        turnMetadataHeader: String? = nil,
         extraHeaders: [String: String] = [:]
     ) {
         self.reasoning = reasoning
@@ -705,6 +709,8 @@ public struct ResponsesOptions: Equatable, Sendable {
         self.storeOverride = storeOverride
         self.conversationID = conversationID
         self.sessionSource = sessionSource
+        self.clientMetadata = clientMetadata
+        self.turnMetadataHeader = turnMetadataHeader
         self.extraHeaders = extraHeaders
     }
 }
@@ -807,6 +813,8 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
                 .conversation(options.conversationID)
                 .sessionSource(options.sessionSource)
                 .storeOverride(options.storeOverride)
+                .clientMetadata(options.clientMetadata)
+                .turnMetadataHeader(options.turnMetadataHeader)
                 .extraHeaders(options.extraHeaders)
                 .build(provider: streaming.provider)
             return await streamRequest(request)

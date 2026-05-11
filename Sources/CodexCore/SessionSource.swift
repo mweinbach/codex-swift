@@ -408,6 +408,8 @@ extension SubAgentSource: Codable {
 }
 
 public enum CodexRequestHeaders {
+    public static let turnMetadataHeaderName = "x-codex-turn-metadata"
+
     public static func conversationHeaders(conversationID: String?) -> [String: String] {
         guard let conversationID else {
             return [:]

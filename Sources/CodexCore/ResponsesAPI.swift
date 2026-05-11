@@ -98,6 +98,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
     public var serviceTier: String?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
+    public var clientMetadata: [String: String]?
 
     private enum CodingKeys: String, CodingKey {
         case model
@@ -113,6 +114,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         case serviceTier = "service_tier"
         case promptCacheKey = "prompt_cache_key"
         case text
+        case clientMetadata = "client_metadata"
     }
 
     public init(
@@ -128,7 +130,8 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         include: [String] = [],
         serviceTier: String? = nil,
         promptCacheKey: String? = nil,
-        text: ResponsesAPITextControls? = nil
+        text: ResponsesAPITextControls? = nil,
+        clientMetadata: [String: String]? = nil
     ) {
         self.model = model
         self.instructions = instructions
@@ -143,6 +146,7 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         self.serviceTier = serviceTier
         self.promptCacheKey = promptCacheKey
         self.text = text
+        self.clientMetadata = clientMetadata
     }
 }
 
@@ -181,6 +185,8 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
     public var conversationID: String?
     public var sessionSource: SessionSource?
     public var storeOverride: Bool?
+    public var clientMetadata: [String: String]
+    public var turnMetadataHeader: String?
     public var extraHeaders: [String: String]
 
     public init(model: String, instructions: String, input: [ResponseItem]) {
@@ -197,6 +203,8 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         self.conversationID = nil
         self.sessionSource = nil
         self.storeOverride = nil
+        self.clientMetadata = [:]
+        self.turnMetadataHeader = nil
         self.extraHeaders = [:]
     }
 
@@ -264,6 +272,18 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         return copy
     }
 
+    public func clientMetadata(_ metadata: [String: String]) -> ResponsesRequestBuilder {
+        var copy = self
+        copy.clientMetadata = metadata
+        return copy
+    }
+
+    public func turnMetadataHeader(_ header: String?) -> ResponsesRequestBuilder {
+        var copy = self
+        copy.turnMetadataHeader = header
+        return copy
+    }
+
     public func extraHeaders(_ headers: [String: String]) -> ResponsesRequestBuilder {
         var copy = self
         copy.extraHeaders = headers
@@ -272,6 +292,11 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
 
     public func build(provider: APIProvider) throws -> ResponsesRequest {
         let store = storeOverride ?? provider.isAzureResponsesEndpoint()
+        let sanitizedTurnMetadataHeader = Self.validHeaderValue(turnMetadataHeader)
+        var requestClientMetadata = clientMetadata
+        if let sanitizedTurnMetadataHeader {
+            requestClientMetadata[CodexRequestHeaders.turnMetadataHeaderName] = sanitizedTurnMetadataHeader
+        }
         let request = ResponsesAPIRequest(
             model: model,
             instructions: instructions,
@@ -283,7 +308,8 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
             include: include,
             serviceTier: serviceTier,
             promptCacheKey: promptCacheKey,
-            text: text
+            text: text,
+            clientMetadata: requestClientMetadata.isEmpty ? nil : requestClientMetadata
         )
 
         var body = try Self.jsonValue(request)
@@ -298,6 +324,9 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         if let subagent = CodexRequestHeaders.subagentHeader(for: sessionSource) {
             headers["x-openai-subagent"] = subagent
         }
+        if let sanitizedTurnMetadataHeader {
+            headers[CodexRequestHeaders.turnMetadataHeaderName] = sanitizedTurnMetadataHeader
+        }
 
         return ResponsesRequest(body: body, headers: headers)
     }
@@ -309,6 +338,17 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         } catch {
             throw ResponsesRequestBuildError.encodingFailed(String(describing: error))
         }
+    }
+
+    private static func validHeaderValue(_ value: String?) -> String? {
+        guard let value,
+              value.unicodeScalars.allSatisfy({ scalar in
+                scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
+              })
+        else {
+            return nil
+        }
+        return value
     }
 
     private static func attachItemIDs(to payload: inout JSONValue, originalItems: [ResponseItem]) {

@@ -71,6 +71,24 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(object["service_tier"] as? String, "flex")
     }
 
+    func testResponsesAPIRequestSerializesClientMetadataWhenSet() throws {
+        let request = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [],
+            store: false,
+            clientMetadata: [
+                "fiber_run_id": "fiber-123",
+                CodexRequestHeaders.turnMetadataHeaderName: #"{"turn_id":"turn-123"}"#
+            ]
+        )
+
+        let object = try JSONObject(request)
+        let metadata = try XCTUnwrap(object["client_metadata"] as? [String: String])
+        XCTAssertEqual(metadata["fiber_run_id"], "fiber-123")
+        XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-123"}"#)
+    }
+
     func testBuilderCanFilterUnsupportedServiceTierWithModelInfo() throws {
         let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
         let modelInfo = ModelInfo(
@@ -149,6 +167,37 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertNil(items[0]["id"])
         XCTAssertEqual(request.headers["x-extra"], "1")
         XCTAssertNil(request.headers["conversation_id"])
+    }
+
+    func testBuilderForwardsValidTurnMetadataToHeaderAndClientMetadataLikeRust() throws {
+        let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
+        let turnMetadata = #"{"turn_id":"turn-123"}"#
+
+        let request = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [])
+            .clientMetadata([
+                "fiber_run_id": "fiber-123",
+                CodexRequestHeaders.turnMetadataHeaderName: "client-supplied"
+            ])
+            .turnMetadataHeader(turnMetadata)
+            .extraHeaders([CodexRequestHeaders.turnMetadataHeaderName: "extra-supplied"])
+            .build(provider: provider)
+
+        let body = try JSONObject(request.body)
+        let metadata = try XCTUnwrap(body["client_metadata"] as? [String: String])
+        XCTAssertEqual(request.headers[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+        XCTAssertEqual(metadata["fiber_run_id"], "fiber-123")
+        XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+    }
+
+    func testBuilderSkipsInvalidTurnMetadataHeaderLikeRustHeaderValueParsing() throws {
+        let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
+
+        let request = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [])
+            .turnMetadataHeader("東京")
+            .build(provider: provider)
+
+        XCTAssertNil(request.headers[CodexRequestHeaders.turnMetadataHeaderName])
+        XCTAssertNil(try JSONObject(request.body)["client_metadata"])
     }
 
     private func apiProvider(name: String, baseURL: String) -> APIProvider {

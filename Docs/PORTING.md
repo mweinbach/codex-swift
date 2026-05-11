@@ -71,7 +71,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/client_common.rs` prompt instruction assembly and `codex-rs/apply-patch/apply_patch_tool_instructions.md`
   - prompt input/tool/output-schema container shape and model-family-aware full-instruction selection, including legacy apply_patch shell guidance only when no explicit base override or apply_patch tool is present
 - Pure request models from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/requests/responses.rs`
-  - Responses API reasoning/text controls, output-schema text formatting, request body serialization, conversation/subagent headers, and Azure store/id request assembly
+  - Responses API reasoning/text controls, output-schema text formatting, request body serialization, client metadata serialization, conversation/subagent/turn-metadata headers, and Azure store/id request assembly
 - `codex-rs/core/src/turn_metadata.rs`
   - turn metadata header state now preserves Rust's base session/thread/turn/source/sandbox JSON shape, ASCII-only header serialization, authoritative turn-start timestamp insertion, Responses API client-metadata merging without replacing reserved fields, MCP request metadata enrichment with model and optional reasoning effort, and async per-turn git enrichment without replacing the base turn fields. The one-shot `buildTurnMetadataHeader` path now mirrors Rust workspace git metadata for sandbox/memory-style requests, including repo-root workspace keys, remote URL maps, latest commit hash, clean/dirty state, and nil outside non-git directories without sandbox metadata. Live app-server request/header forwarding remains pending with the broader running-thread runtime.
 - `codex-rs/codex-api/src/requests/chat.rs`
