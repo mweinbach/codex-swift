@@ -13088,7 +13088,10 @@ public enum CodexAppServer {
             timeoutMilliseconds: parsed.timeoutMs,
             outputBytesCap: parsed.outputBytesCap,
             environment: commandExecEnvironment(
-                base: configuration.environment,
+                base: ExecEnvironment.createEnv(
+                    policy: runtimeConfig.shellEnvironmentPolicy,
+                    environment: configuration.environment
+                ),
                 overrides: parsed.environmentOverrides
             )
         )
@@ -19985,7 +19988,10 @@ final class CodexAppServerMessageProcessor {
             cwd: commandCwd,
             sandboxPolicy: sandbox.policy,
             sandboxCwd: sandbox.cwd,
-            environment: configuration.environment,
+            environment: ExecEnvironment.createEnv(
+                policy: runtimeConfig.shellEnvironmentPolicy,
+                environment: configuration.environment
+            ),
             notificationSink: notificationSink,
             onExit: { processID in
                 _ = registry.remove(processID)

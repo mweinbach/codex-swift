@@ -108,6 +108,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var projectDocMaxBytes: Int
     public var projectDocFallbackFilenames: [String]
     public var toolOutputTokenLimit: Int?
+    public var shellEnvironmentPolicy: ShellEnvironmentPolicy
     public var ossProvider: String?
     public var toolSuggest: ToolSuggestConfig
     public var checkForUpdateOnStartup: Bool
@@ -164,6 +165,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
         projectDocFallbackFilenames: [String] = [],
         toolOutputTokenLimit: Int? = nil,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String? = nil
     ) {
         self.model = model
@@ -216,6 +218,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.projectDocMaxBytes = projectDocMaxBytes
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
         self.toolOutputTokenLimit = toolOutputTokenLimit
+        self.shellEnvironmentPolicy = shellEnvironmentPolicy
         self.ossProvider = ossProvider
         self.toolSuggest = ToolSuggestConfig()
         self.checkForUpdateOnStartup = true
@@ -269,6 +272,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
         projectDocFallbackFilenames: [String] = [],
         toolOutputTokenLimit: Int? = nil,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String? = nil
     ) {
         self.init(
@@ -321,6 +325,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             projectDocMaxBytes: projectDocMaxBytes,
             projectDocFallbackFilenames: projectDocFallbackFilenames,
             toolOutputTokenLimit: toolOutputTokenLimit,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
             ossProvider: ossProvider
         )
     }
@@ -362,6 +367,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int,
         projectDocFallbackFilenames: [String],
         toolOutputTokenLimit: Int?,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String?
     ) {
         self.init(
@@ -408,6 +414,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             projectDocMaxBytes: projectDocMaxBytes,
             projectDocFallbackFilenames: projectDocFallbackFilenames,
             toolOutputTokenLimit: toolOutputTokenLimit,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
             ossProvider: ossProvider
         )
     }
@@ -455,6 +462,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         projectDocMaxBytes: Int,
         projectDocFallbackFilenames: [String],
         toolOutputTokenLimit: Int?,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         ossProvider: String?
     ) {
         self.init(
@@ -501,6 +509,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             projectDocMaxBytes: projectDocMaxBytes,
             projectDocFallbackFilenames: projectDocFallbackFilenames,
             toolOutputTokenLimit: toolOutputTokenLimit,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
             ossProvider: ossProvider
         )
     }
@@ -765,6 +774,7 @@ private struct ParsedCodexConfigToml {
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
+    var shellEnvironmentPolicy: [String: ConfigValue] = [:]
     var toolSuggest: [String: ConfigValue] = [:]
     var toolSuggestDisabledToolLayers: [[ToolSuggestDisabledTool]] = []
     var skillsIncludeInstructions: Bool?
@@ -855,6 +865,12 @@ private struct ParsedCodexConfigToml {
                 parsed.realtimeAudio[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .realtime:
                 parsed.realtime[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .shellEnvironmentPolicy:
+                parsed.shellEnvironmentPolicy[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .shellEnvironmentPolicySet:
+                var setTable = parsed.shellEnvironmentPolicy["set"] ?? .table([:])
+                setTable.merge(overlay: .table([key: try ConfigValueParser.parseTomlLiteral(valueText)]))
+                parsed.shellEnvironmentPolicy["set"] = setTable
             case .skills:
                 if key == "include_instructions" {
                     parsed.skillsIncludeInstructions = try Self.boolValue(
@@ -1129,6 +1145,10 @@ private struct ParsedCodexConfigToml {
             realtime[key] = value
         }
 
+        for (key, value) in overlay.shellEnvironmentPolicy {
+            shellEnvironmentPolicy[key] = value
+        }
+
         for (key, value) in overlay.toolSuggest {
             toolSuggest[key] = value
         }
@@ -1190,6 +1210,12 @@ private struct ParsedCodexConfigToml {
         if case let .table(realtimeTable) = table["realtime"] {
             for (key, value) in realtimeTable {
                 realtime[key] = value
+            }
+        }
+
+        if case let .table(shellEnvironmentPolicyTable) = table["shell_environment_policy"] {
+            for (key, value) in shellEnvironmentPolicyTable {
+                shellEnvironmentPolicy[key] = value
             }
         }
 
@@ -1263,6 +1289,10 @@ private struct ParsedCodexConfigToml {
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
+        config.shellEnvironmentPolicy = try Self.shellEnvironmentPolicyValue(
+            shellEnvironmentPolicy,
+            key: "shell_environment_policy"
+        )
         config.toolSuggest = try Self.toolSuggestConfigValue(
             table: toolSuggest,
             disabledToolLayers: toolSuggestDisabledToolLayers
@@ -1846,6 +1876,15 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)check_for_update_on_startup"
             )
         }
+        if let shellEnvironmentPolicy = values["shell_environment_policy"] {
+            guard case let .table(table) = shellEnvironmentPolicy else {
+                throw CodexConfigLoadError.invalidConfigLine("\(keyPrefix)shell_environment_policy")
+            }
+            config.shellEnvironmentPolicy = try shellEnvironmentPolicyValue(
+                table,
+                key: "\(keyPrefix)shell_environment_policy"
+            )
+        }
     }
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
@@ -1893,6 +1932,7 @@ private struct ParsedCodexConfigToml {
             || key == "project_doc_max_bytes"
             || key == "project_doc_fallback_filenames"
             || key == "tool_output_token_limit"
+            || key == "shell_environment_policy"
             || key == "oss_provider"
             || key == "check_for_update_on_startup"
     }
@@ -2034,6 +2074,45 @@ private struct ParsedCodexConfigToml {
         )
     }
 
+    private static func shellEnvironmentPolicyValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> ShellEnvironmentPolicy {
+        guard !table.isEmpty else {
+            return ShellEnvironmentPolicy()
+        }
+        for field in table.keys where ![
+            "inherit",
+            "ignore_default_excludes",
+            "exclude",
+            "set",
+            "include_only",
+            "experimental_use_profile"
+        ].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return ShellEnvironmentPolicy(toml: ShellEnvironmentPolicyToml(
+            inherit: try table["inherit"].map {
+                try stringEnumValue(ShellEnvironmentPolicyInherit.self, $0, key: "\(key).inherit")
+            },
+            ignoreDefaultExcludes: try table["ignore_default_excludes"].map {
+                try boolValue($0, key: "\(key).ignore_default_excludes")
+            },
+            exclude: try table["exclude"].map {
+                try stringArrayValue($0, key: "\(key).exclude")
+            },
+            set: try table["set"].map {
+                try stringMapValue($0, key: "\(key).set")
+            },
+            includeOnly: try table["include_only"].map {
+                try stringArrayValue($0, key: "\(key).include_only")
+            },
+            experimentalUseProfile: try table["experimental_use_profile"].map {
+                try boolValue($0, key: "\(key).experimental_use_profile")
+            }
+        ))
+    }
+
     private static func threadStoreConfigValue(_ value: ConfigValue, key: String) throws -> ThreadStoreConfig {
         guard case let .table(table) = value else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -2070,6 +2149,15 @@ private struct ParsedCodexConfigToml {
             strings.append(string)
         }
         return strings
+    }
+
+    private static func stringMapValue(_ value: ConfigValue, key: String) throws -> [String: String] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return try table.reduce(into: [:]) { result, pair in
+            result[pair.key] = try stringValue(pair.value, key: "\(key).\(pair.key)")
+        }
     }
 
     private static func absolutePathArrayValue(_ value: ConfigValue?, key: String) throws -> [AbsolutePath] {
@@ -2200,6 +2288,12 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 1, parts[0] == "realtime" {
             return .realtime
+        }
+        if parts.count == 1, parts[0] == "shell_environment_policy" {
+            return .shellEnvironmentPolicy
+        }
+        if parts.count == 2, parts[0] == "shell_environment_policy", parts[1] == "set" {
+            return .shellEnvironmentPolicySet
         }
         if parts.count == 1, parts[0] == "skills" {
             return .skills
@@ -2397,6 +2491,8 @@ private enum ConfigSection {
     case sandboxWorkspaceWrite
     case audio
     case realtime
+    case shellEnvironmentPolicy
+    case shellEnvironmentPolicySet
     case skills
     case toolSuggest
     case toolSuggestDisabledToolsArray

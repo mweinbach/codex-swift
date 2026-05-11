@@ -15933,6 +15933,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecHonorsConfiguredShellEnvironmentPolicyLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        try """
+        [shell_environment_policy]
+        inherit = "none"
+
+        [shell_environment_policy.set]
+        CODEX_SWIFT_POLICY_SET = "from-policy"
+        CODEX_SWIFT_POLICY_REMOVED = "remove-me"
+        """.write(to: codexHome.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let configuration = testConfiguration(
+            codexHome: codexHome.url,
+            environment: [
+                "CODEX_SWIFT_INHERITED": "should-not-survive"
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/usr/bin/env"],"cwd":"\#(cwd.url.path)","env":{"CODEX_SWIFT_POLICY_REMOVED":null,"CODEX_SWIFT_REQUEST_SET":"from-request"}}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        let environmentLines = Set((try XCTUnwrap(result["stdout"] as? String)).split(separator: "\n").map(String.init))
+        XCTAssertTrue(environmentLines.contains("CODEX_SWIFT_POLICY_SET=from-policy"))
+        XCTAssertTrue(environmentLines.contains("CODEX_SWIFT_REQUEST_SET=from-request"))
+        XCTAssertFalse(environmentLines.contains("CODEX_SWIFT_INHERITED=should-not-survive"))
+        XCTAssertFalse(environmentLines.contains { $0.hasPrefix("CODEX_SWIFT_POLICY_REMOVED=") })
+    }
+
     func testCommandExecBufferedOutputBytesCapAppliesPerStream() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
