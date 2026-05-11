@@ -16152,6 +16152,17 @@ final class CodexAppServerTests: XCTestCase {
             "command/exec timeoutMs must be non-negative, got -1"
         )
 
+        let invalidTimeoutType = try appServerResponse(
+            #"{"id":9,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","timeoutMs":"soon"}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidTimeoutTypeError = try XCTUnwrap(invalidTimeoutType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTimeoutTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidTimeoutTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "soon", expected i64"#
+        )
+
         let negativeOutputCap = try appServerResponse(
             #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":-1}}"#,
             codexHome: codexHome.url
@@ -16161,6 +16172,17 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             negativeOutputCapError["message"] as? String,
             "Invalid request: invalid value: integer `-1`, expected usize"
+        )
+
+        let invalidOutputCapType = try appServerResponse(
+            #"{"id":10,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":"small"}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidOutputCapTypeError = try XCTUnwrap(invalidOutputCapType["error"] as? [String: Any])
+        XCTAssertEqual(invalidOutputCapTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidOutputCapTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "small", expected usize"#
         )
 
         let streamingWithoutProcessID = try appServerResponse(
@@ -16754,6 +16776,30 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             negativeOutputCapError["message"] as? String,
             "Invalid request: invalid value: integer `-1`, expected usize"
+        )
+
+        let invalidTimeoutType = try appServerResponse(
+            #"{"id":8,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","timeoutMs":"soon"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidTimeoutTypeError = try XCTUnwrap(invalidTimeoutType["error"] as? [String: Any])
+        XCTAssertEqual(invalidTimeoutTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidTimeoutTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "soon", expected i64"#
+        )
+
+        let invalidOutputCapType = try appServerResponse(
+            #"{"id":9,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","outputBytesCap":"small"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidOutputCapTypeError = try XCTUnwrap(invalidOutputCapType["error"] as? [String: Any])
+        XCTAssertEqual(invalidOutputCapTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidOutputCapTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "small", expected usize"#
         )
     }
 

@@ -13129,7 +13129,8 @@ public enum CodexAppServer {
         let disableOutputCap = boolParam(params?["disableOutputCap"], defaultValue: false)
         let disableTimeout = boolParam(params?["disableTimeout"], defaultValue: false)
         let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
-        try rejectNegativeRustUSize(params?["outputBytesCap"])
+        try validateRustIntegerParam(params?["outputBytesCap"], expected: "usize")
+        try validateRustIntegerParam(params?["timeoutMs"], expected: "i64")
         if sandboxPolicy != nil,
            let permissionProfile = params?["permissionProfile"],
            !(permissionProfile is NSNull)
@@ -13521,7 +13522,8 @@ public enum CodexAppServer {
             throw AppServerError.invalidParams("process/spawn size requires tty: true")
         }
         let size = try processSize(params?["size"])
-        try rejectNegativeRustUSize(params?["outputBytesCap"])
+        try validateRustIntegerParam(params?["outputBytesCap"], expected: "usize")
+        try validateRustIntegerParam(params?["timeoutMs"], expected: "i64")
         if let timeoutMs = params?["timeoutMs"] as? Int, timeoutMs < 0 {
             throw AppServerError.invalidParams("process/spawn timeoutMs must be non-negative, got \(timeoutMs)")
         }
@@ -13619,21 +13621,33 @@ public enum CodexAppServer {
         return max(intParam(value, defaultValue: 1_048_576), 0)
     }
 
-    private static func rejectNegativeRustUSize(_ value: Any?) throws {
+    private static func validateRustIntegerParam(_ value: Any?, expected: String) throws {
         guard let value, !(value is NSNull) else {
             return
         }
-        let integerValue: Int?
+        if let bool = value as? Bool {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: boolean `\(bool)`, expected \(expected)")
+        }
         if let int = value as? Int {
-            integerValue = int
-        } else if let number = value as? NSNumber {
-            integerValue = number.intValue
-        } else {
-            integerValue = nil
+            if expected == "usize", int < 0 {
+                throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected usize")
+            }
+            return
         }
-        if let integerValue, integerValue < 0 {
-            throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(integerValue)`, expected usize")
+        if let string = value as? String {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: string \"\(string)\", expected \(expected)")
         }
+        if let number = value as? NSNumber {
+            let int = number.intValue
+            if Double(int) == number.doubleValue {
+                if expected == "usize", int < 0 {
+                    throw AppServerError.invalidRequest("Invalid request: invalid value: integer `\(int)`, expected usize")
+                }
+                return
+            }
+            throw AppServerError.invalidRequest("Invalid request: invalid type: floating point `\(number)`, expected \(expected)")
+        }
+        throw AppServerError.invalidRequest("Invalid request: invalid type for field, expected \(expected)")
     }
 
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {
