@@ -27,6 +27,7 @@ actor AppServerThreadStateManager {
     private var loadedThreadIDs: Set<String> = []
     private var outOfBandElicitationCounts: [String: Int] = [:]
     private var pendingMcpServerRefreshConfigs: [String: McpServerRefreshConfig] = [:]
+    private var pendingUserConfigRefreshes: [String: ConfigValue] = [:]
 
     func connectionInitialized(
         _ connectionID: AppServerConnectionID,
@@ -66,6 +67,19 @@ actor AppServerThreadStateManager {
 
     func pendingMcpServerRefreshConfig(threadID: String) -> McpServerRefreshConfig? {
         pendingMcpServerRefreshConfigs[threadID]
+    }
+
+    @discardableResult
+    func queueUserConfigRefresh(threadID: String, effectiveConfig: ConfigValue) -> Bool {
+        guard loadedThreadIDs.contains(threadID) else {
+            return false
+        }
+        pendingUserConfigRefreshes[threadID] = effectiveConfig
+        return true
+    }
+
+    func pendingUserConfigRefresh(threadID: String) -> ConfigValue? {
+        pendingUserConfigRefreshes[threadID]
     }
 
     func incrementOutOfBandElicitationCount(threadID: String) -> AppServerElicitationCounterResult {

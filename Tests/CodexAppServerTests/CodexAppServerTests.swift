@@ -14346,6 +14346,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(features["tool_search"] as? Bool, false)
     }
 
+    func testExperimentalFeatureEnablementSetQueuesUserConfigRefreshForLoadedThreads() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"memories":true,"plugins":false}}}"#.utf8
+        )))
+
+        guard case let .table(config)? = try processor.pendingUserConfigRefresh(threadID: threadID),
+              case let .table(features)? = config["features"]
+        else {
+            return XCTFail("expected queued user config refresh")
+        }
+        XCTAssertEqual(features["memories"], .bool(true))
+        XCTAssertEqual(features["plugins"], .bool(false))
+    }
+
     func testExperimentalFeatureEnablementSetPreservesPriorFlagsAndAllowsEmptyNoOpLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -16495,6 +16516,32 @@ final class CodexAppServerTests: XCTestCase {
         let verifyResult = try XCTUnwrap(verify["result"] as? [String: Any])
         let config = try XCTUnwrap(verifyResult["config"] as? [String: Any])
         XCTAssertEqual(config["model"] as? String, "gpt-new")
+    }
+
+    func testConfigBatchWriteReloadUserConfigQueuesRefreshForLoadedThreads() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"config/batchWrite","params":{"edits":[{"keyPath":"model","value":"gpt-no-reload","mergeStrategy":"replace"}]}}"#.utf8
+        )))
+        XCTAssertNil(try processor.pendingUserConfigRefresh(threadID: threadID))
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"config/batchWrite","params":{"edits":[{"keyPath":"model","value":"gpt-reloaded","mergeStrategy":"replace"}],"reloadUserConfig":true}}"#.utf8
+        )))
+        XCTAssertEqual((response["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        guard case let .table(config)? = try processor.pendingUserConfigRefresh(threadID: threadID) else {
+            return XCTFail("expected queued user config refresh")
+        }
+        XCTAssertEqual(config["model"], .string("gpt-reloaded"))
     }
 
     func testConfigValueWritePreservesCommentsAndOrderLikeRust() throws {

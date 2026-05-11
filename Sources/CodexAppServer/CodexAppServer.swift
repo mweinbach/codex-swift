@@ -13738,6 +13738,26 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func effectiveConfigSnapshot(
+        configuration: CodexAppServerConfiguration,
+        runtimeFeatureEnablement: [String: Bool] = [:]
+    ) throws -> ConfigValue {
+        do {
+            let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cliOverrides: configuration.cliConfigOverrides,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            return effectiveConfig(
+                stack.effectiveConfig(),
+                applyingRuntimeFeatureEnablement: runtimeFeatureEnablement
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+    }
+
     fileprivate static func userSavedConfigResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
         let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
         let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
@@ -20797,6 +20817,25 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
+    private func queueUserConfigRefresh(effectiveConfig: ConfigValue) throws {
+        for threadID in listLoadedThreadIDs() {
+            let manager = threadStateManager
+            let queued = try CodexAppServer.runAsyncBlocking {
+                await manager.queueUserConfigRefresh(threadID: threadID, effectiveConfig: effectiveConfig)
+            }
+            if !queued {
+                throw AppServerError.invalidRequest("thread not found: \(threadID)")
+            }
+        }
+    }
+
+    func pendingUserConfigRefresh(threadID: String) throws -> ConfigValue? {
+        let manager = threadStateManager
+        return try CodexAppServer.runAsyncBlocking {
+            await manager.pendingUserConfigRefresh(threadID: threadID)
+        }
+    }
+
     private func accountRateLimitsResult() throws -> [String: Any] {
         try CodexAppServer.accountRateLimitsResult(
             configuration: configuration,
@@ -21969,6 +22008,7 @@ final class CodexAppServerMessageProcessor {
                     )
                 case "experimentalFeature/enablement/set":
                     let refreshAppList = ((params?["enablement"] as? [String: Any])?["apps"] as? Bool) == true
+                    let shouldReloadUserConfig = ((params?["enablement"] as? [String: Any])?.isEmpty == false)
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.experimentalFeatureEnablementSetResult(
@@ -21976,6 +22016,12 @@ final class CodexAppServerMessageProcessor {
                             runtimeFeatureEnablement: &runtimeFeatureEnablement
                         )
                     )
+                    if shouldReloadUserConfig {
+                        try queueUserConfigRefresh(effectiveConfig: CodexAppServer.effectiveConfigSnapshot(
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        ))
+                    }
                     if refreshAppList {
                         if let notification = try? CodexAppServer.appListUpdatedNotification(
                             configuration: configuration,
@@ -22048,10 +22094,17 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.configValueWriteResult(params: params, configuration: configuration)
                     )
                 case "config/batchWrite":
+                    let reloadUserConfig = CodexAppServer.boolParam(params?["reloadUserConfig"], defaultValue: false)
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.configBatchWriteResult(params: params, configuration: configuration)
                     )
+                    if reloadUserConfig {
+                        try queueUserConfigRefresh(effectiveConfig: CodexAppServer.effectiveConfigSnapshot(
+                            configuration: configuration,
+                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                        ))
+                    }
                 case "getUserSavedConfig":
                     response = CodexAppServer.responseObject(
                         id: id,
