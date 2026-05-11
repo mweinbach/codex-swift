@@ -14,7 +14,6 @@ final class SandboxCLITests: XCTestCase {
                 "sandbox_mode=\"read-only\"",
                 "sandbox",
                 "macos",
-                "--full-auto",
                 "--log-denials",
                 "echo",
                 "hello"
@@ -33,7 +32,12 @@ final class SandboxCLITests: XCTestCase {
         XCTAssertEqual(
             receivedRequest,
             CodexCLI.SandboxCommandRequest(
-                action: .macos(fullAuto: true, logDenials: true, command: ["echo", "hello"]),
+                action: .macos(
+                    profile: CodexCLI.SandboxProfileOptions(),
+                    allowUnixSockets: [],
+                    logDenials: true,
+                    command: ["echo", "hello"]
+                ),
                 configOverrides: CliConfigOverrides(rawOverrides: ["sandbox_mode=\"read-only\""])
             )
         )
@@ -52,7 +56,7 @@ final class SandboxCLITests: XCTestCase {
         )
 
         let landlockExitCode = await CodexCLI().runAsync(
-            arguments: ["sandbox", "landlock", "--full-auto", "echo", "ok"],
+            arguments: ["sandbox", "landlock", "echo", "ok"],
             stderr: { _ in XCTFail("stderr should not be written") },
             sandboxRunner: { request in
                 receivedActions.append(request.action)
@@ -63,8 +67,77 @@ final class SandboxCLITests: XCTestCase {
         XCTAssertEqual(seatbeltExitCode, 0)
         XCTAssertEqual(landlockExitCode, 0)
         XCTAssertEqual(receivedActions, [
-            .macos(fullAuto: false, logDenials: false, command: ["echo", "ok"]),
-            .linux(fullAuto: true, command: ["echo", "ok"])
+            .macos(
+                profile: CodexCLI.SandboxProfileOptions(),
+                allowUnixSockets: [],
+                logDenials: false,
+                command: ["echo", "ok"]
+            ),
+            .linux(profile: CodexCLI.SandboxProfileOptions(), command: ["echo", "ok"])
+        ])
+    }
+
+    func testRunAsyncSandboxParsesRustPermissionProfileOptions() async {
+        var receivedActions: [CodexCLI.SandboxCommandAction] = []
+
+        let macosExitCode = await CodexCLI().runAsync(
+            arguments: [
+                "sandbox",
+                "macos",
+                "--permissions-profile",
+                ":workspace",
+                "-C",
+                "/tmp/work",
+                "--include-managed-config",
+                "--allow-unix-socket",
+                "/tmp/socket",
+                "--",
+                "echo",
+                "ok"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            sandboxRunner: { request in
+                receivedActions.append(request.action)
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        let linuxExitCode = await CodexCLI().runAsync(
+            arguments: [
+                "sandbox",
+                "linux",
+                "--permissions-profile=:workspace",
+                "--cd=/tmp/work",
+                "echo",
+                "ok"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            sandboxRunner: { request in
+                receivedActions.append(request.action)
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(macosExitCode, 0)
+        XCTAssertEqual(linuxExitCode, 0)
+        XCTAssertEqual(receivedActions, [
+            .macos(
+                profile: CodexCLI.SandboxProfileOptions(
+                    permissionsProfile: ":workspace",
+                    cwd: "/tmp/work",
+                    includeManagedConfig: true
+                ),
+                allowUnixSockets: ["/tmp/socket"],
+                logDenials: false,
+                command: ["echo", "ok"]
+            ),
+            .linux(
+                profile: CodexCLI.SandboxProfileOptions(
+                    permissionsProfile: ":workspace",
+                    cwd: "/tmp/work"
+                ),
+                command: ["echo", "ok"]
+            )
         ])
     }
 
@@ -72,7 +145,7 @@ final class SandboxCLITests: XCTestCase {
         var receivedRequest: CodexCLI.SandboxCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["sandbox", "windows", "--full-auto", "cmd", "/c", "echo", "ok"],
+            arguments: ["sandbox", "windows", "cmd", "/c", "echo", "ok"],
             stderr: { _ in XCTFail("stderr should not be written") },
             sandboxRunner: { request in
                 receivedRequest = request
@@ -81,7 +154,13 @@ final class SandboxCLITests: XCTestCase {
         )
 
         XCTAssertEqual(exitCode, 0)
-        XCTAssertEqual(receivedRequest?.action, .windows(fullAuto: true, command: ["cmd", "/c", "echo", "ok"]))
+        XCTAssertEqual(
+            receivedRequest?.action,
+            .windows(
+                profile: CodexCLI.SandboxProfileOptions(),
+                command: ["cmd", "/c", "echo", "ok"]
+            )
+        )
     }
 
     func testRunAsyncSandboxPreservesFlagLikeCommandAfterDoubleDash() async {
@@ -97,7 +176,15 @@ final class SandboxCLITests: XCTestCase {
         )
 
         XCTAssertEqual(exitCode, 0)
-        XCTAssertEqual(receivedRequest?.action, .macos(fullAuto: false, logDenials: false, command: ["-weird"]))
+        XCTAssertEqual(
+            receivedRequest?.action,
+            .macos(
+                profile: CodexCLI.SandboxProfileOptions(),
+                allowUnixSockets: [],
+                logDenials: false,
+                command: ["-weird"]
+            )
+        )
     }
 
     func testRunAsyncSandboxRejectsInvalidFormsBeforeRunner() async {
@@ -117,6 +204,18 @@ final class SandboxCLITests: XCTestCase {
             (
                 ["sandbox", "linux", "--log-denials", "echo", "ok"],
                 "codex-swift: unsupported option for command 'sandbox linux': --log-denials"
+            ),
+            (
+                ["sandbox", "linux", "--full-auto", "echo", "ok"],
+                "codex-swift: unsupported option for command 'sandbox linux': --full-auto"
+            ),
+            (
+                ["sandbox", "macos", "-C", "/tmp", "echo", "ok"],
+                "codex-swift: --cd and --include-managed-config require --permissions-profile"
+            ),
+            (
+                ["sandbox", "linux", "--allow-unix-socket", "/tmp/socket", "echo", "ok"],
+                "codex-swift: unsupported option for command 'sandbox linux': --allow-unix-socket"
             )
         ]
 

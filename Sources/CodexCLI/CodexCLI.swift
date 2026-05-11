@@ -377,10 +377,26 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct SandboxProfileOptions: Equatable, Sendable {
+        public let permissionsProfile: String?
+        public let cwd: String?
+        public let includeManagedConfig: Bool
+
+        public init(
+            permissionsProfile: String? = nil,
+            cwd: String? = nil,
+            includeManagedConfig: Bool = false
+        ) {
+            self.permissionsProfile = permissionsProfile
+            self.cwd = cwd
+            self.includeManagedConfig = includeManagedConfig
+        }
+    }
+
     public enum SandboxCommandAction: Equatable, Sendable {
-        case macos(fullAuto: Bool, logDenials: Bool, command: [String])
-        case linux(fullAuto: Bool, command: [String])
-        case windows(fullAuto: Bool, command: [String])
+        case macos(profile: SandboxProfileOptions, allowUnixSockets: [String], logDenials: Bool, command: [String])
+        case linux(profile: SandboxProfileOptions, command: [String])
+        case windows(profile: SandboxProfileOptions, command: [String])
     }
 
     public struct SandboxCommandRequest: Equatable, Sendable {
@@ -2632,7 +2648,8 @@ public struct CodexCLI: Sendable {
             switch parseSandboxSubcommand(subcommandArguments, commandName: "macos", supportsLogDenials: true) {
             case let .success(parsed):
                 return .success(.macos(
-                    fullAuto: parsed.fullAuto,
+                    profile: parsed.profile,
+                    allowUnixSockets: parsed.allowUnixSockets,
                     logDenials: parsed.logDenials,
                     command: parsed.command
                 ))
@@ -2642,14 +2659,14 @@ public struct CodexCLI: Sendable {
         case "linux", "landlock":
             switch parseSandboxSubcommand(subcommandArguments, commandName: "linux", supportsLogDenials: false) {
             case let .success(parsed):
-                return .success(.linux(fullAuto: parsed.fullAuto, command: parsed.command))
+                return .success(.linux(profile: parsed.profile, command: parsed.command))
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
         case "windows":
             switch parseSandboxSubcommand(subcommandArguments, commandName: "windows", supportsLogDenials: false) {
             case let .success(parsed):
-                return .success(.windows(fullAuto: parsed.fullAuto, command: parsed.command))
+                return .success(.windows(profile: parsed.profile, command: parsed.command))
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
@@ -2659,7 +2676,8 @@ public struct CodexCLI: Sendable {
     }
 
     private struct ParsedSandboxSubcommand {
-        let fullAuto: Bool
+        let profile: SandboxProfileOptions
+        let allowUnixSockets: [String]
         let logDenials: Bool
         let command: [String]
     }
@@ -2669,7 +2687,10 @@ public struct CodexCLI: Sendable {
         commandName: String,
         supportsLogDenials: Bool
     ) -> ParseResult<ParsedSandboxSubcommand> {
-        var fullAuto = false
+        var permissionsProfile: String?
+        var cwd: String?
+        var includeManagedConfig = false
+        var allowUnixSockets: [String] = []
         var logDenials = false
         var command: [String] = []
         var index = 0
@@ -2680,16 +2701,61 @@ public struct CodexCLI: Sendable {
                 command.append(contentsOf: arguments.dropFirst(index + 1))
                 break
             }
-            if argument == "--full-auto" {
-                fullAuto = true
-                index += 1
-                continue
-            }
             if argument == "--log-denials" {
                 guard supportsLogDenials else {
                     return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --log-denials", 64)
                 }
                 logDenials = true
+                index += 1
+                continue
+            }
+            if argument == "--include-managed-config" {
+                includeManagedConfig = true
+                index += 1
+                continue
+            }
+            if argument == "--permissions-profile" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for option '--permissions-profile'", 64)
+                }
+                permissionsProfile = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--permissions-profile=") {
+                permissionsProfile = String(argument.dropFirst("--permissions-profile=".count))
+                index += 1
+                continue
+            }
+            if argument == "-C" || argument == "--cd" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for option '\(argument)'", 64)
+                }
+                cwd = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--cd=") {
+                cwd = String(argument.dropFirst("--cd=".count))
+                index += 1
+                continue
+            }
+            if argument == "--allow-unix-socket" {
+                guard supportsLogDenials else {
+                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --allow-unix-socket", 64)
+                }
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for option '--allow-unix-socket'", 64)
+                }
+                allowUnixSockets.append(arguments[index + 1])
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--allow-unix-socket=") {
+                guard supportsLogDenials else {
+                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --allow-unix-socket", 64)
+                }
+                allowUnixSockets.append(String(argument.dropFirst("--allow-unix-socket=".count)))
                 index += 1
                 continue
             }
@@ -2706,8 +2772,17 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'sandbox \(commandName)': <COMMAND>", 64)
         }
 
+        guard permissionsProfile != nil || (cwd == nil && !includeManagedConfig) else {
+            return .failure("codex-swift: --cd and --include-managed-config require --permissions-profile", 64)
+        }
+
         return .success(ParsedSandboxSubcommand(
-            fullAuto: fullAuto,
+            profile: SandboxProfileOptions(
+                permissionsProfile: permissionsProfile,
+                cwd: cwd,
+                includeManagedConfig: includeManagedConfig
+            ),
+            allowUnixSockets: allowUnixSockets,
             logDenials: logDenials,
             command: command
         ))

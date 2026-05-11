@@ -1252,10 +1252,16 @@ private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) 
 
 private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
-    case let .macos(fullAuto, logDenials, command):
+    case let .macos(profile, allowUnixSockets, logDenials, command):
+        guard profile == CodexCLI.SandboxProfileOptions(), allowUnixSockets.isEmpty else {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 78,
+                stderrMessage: "codex-swift: sandbox permission profile runtime is not complete yet."
+            )
+        }
         let exitCode = try SeatbeltSandbox.run(
             command: command,
-            fullAuto: fullAuto,
+            fullAuto: sandboxModeOverride(in: request.configOverrides) == "workspace-write",
             cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
             logDenials: logDenials
         )
@@ -1271,6 +1277,15 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
             stderrMessage: "Windows sandbox is only available on Windows"
         )
     }
+}
+
+private func sandboxModeOverride(in configOverrides: CliConfigOverrides) -> String? {
+    guard let value = (try? configOverrides.parseOverrides().last(where: { key, _ in key == "sandbox_mode" }))?.1,
+          case let .string(mode) = value
+    else {
+        return nil
+    }
+    return mode
 }
 
 private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
