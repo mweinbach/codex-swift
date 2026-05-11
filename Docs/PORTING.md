@@ -265,6 +265,8 @@ Source baseline inspected for this scaffold:
   - response-item to turn-item projection for user/assistant/reasoning/web-search/image-generation items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
 - `codex-rs/protocol/src/memory_citation.rs` and `AgentMessageItem` fields from `codex-rs/protocol/src/items.rs`
   - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
+- `codex-rs/memories/mcp/src/local.rs`
+  - local memories backend now preserves Rust's list/read/search request and response models, hidden-path and symlink filtering, root containment checks, cursor validation, line-offset/max-line validation, token-based read truncation, lexicographic ordering, scoped directory/file reads, and `any`/`all_on_same_line`/`all_within_lines` search modes. MCP tool registration for the built-in memories server remains pending with the broader built-in MCP port.
 - Pure helpers from `codex-rs/core/src/stream_events_utils.rs` plus MCP result conversion from `codex-rs/protocol/src/models.rs`
   - non-tool output item projection, image-generation artifact path/base64 persistence, last assistant message extraction, response-input to response-item output conversion, MCP `CallToolResult` structured-content/text/image/error conversion, and `mcp_tool_call_output` wire shape
   - MCP image output conversion now preserves Rust's default image detail, `_meta` image-detail override including standard `high` values, existing data URLs, and unsupported block fallback text when mixed with image content.
