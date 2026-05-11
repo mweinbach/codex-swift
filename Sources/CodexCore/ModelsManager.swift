@@ -254,6 +254,10 @@ public enum ModelsManager {
         now: Date = Date(),
         cacheTTL: TimeInterval = defaultModelCacheTTL
     ) async throws -> ModelsResponse {
+        if let modelCatalog = config.modelCatalog {
+            return modelCatalog
+        }
+
         let providerInfo = selectedProviderInfo(for: config)
         if providerInfo.isAmazonBedrock() {
             return amazonBedrockStaticModelCatalog()

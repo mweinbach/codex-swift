@@ -14759,6 +14759,30 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hiddenData.count, 6)
     }
 
+    func testModelListUsesConfiguredModelCatalogLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let catalog = ModelsResponse(models: [
+            minimalModelInfo(slug: "configured-one", priority: 1),
+            minimalModelInfo(slug: "configured-two", priority: 2)
+        ])
+        let catalogFile = temp.url.appendingPathComponent("catalog.json")
+        try JSONEncoder().encode(catalog).write(to: catalogFile)
+        try """
+        model_catalog_json = "catalog.json"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"model/list","params":{"limit":100,"includeHidden":true}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, ["configured-one", "configured-two"])
+        XCTAssertEqual(data.first?["isDefault"] as? Bool, true)
+        XCTAssertNil(result["nextCursor"] as? String)
+    }
+
     func testModelListRejectsInvalidCursorWithRustErrorCode() throws {
         let temp = try TemporaryDirectory()
 
@@ -19797,6 +19821,28 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: codexHome),
             initializeFirst: initializeFirst,
             experimentalAPIEnabled: experimentalAPIEnabled
+        )
+    }
+
+    private func minimalModelInfo(slug: String, priority: Int32) -> ModelInfo {
+        ModelInfo(
+            slug: slug,
+            displayName: slug,
+            description: "\(slug) desc",
+            defaultReasoningLevel: .medium,
+            supportedReasoningLevels: [
+                ReasoningEffortPreset(effort: .medium, description: "medium")
+            ],
+            shellType: .shellCommand,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: priority,
+            baseInstructions: nil,
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(10_000),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
         )
     }
 

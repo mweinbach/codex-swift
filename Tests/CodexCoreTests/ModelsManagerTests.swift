@@ -81,6 +81,37 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(ModelsManager.formatClientVersion(ClientVersion(0, 62, 0)), "0.62.0")
     }
 
+    func testRawModelCatalogUsesConfigCatalogBeforeCacheOrNetworkLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuredModel = minimalModelInfo(slug: "configured-model", priority: 0)
+        let cachedModel = minimalModelInfo(slug: "cached-remote", priority: 0)
+        try ModelsCache(
+            fetchedAt: try parseDate("2026-05-08T12:00:00Z"),
+            etag: "cache-etag",
+            clientVersion: "1.2.3",
+            models: [cachedModel]
+        ).save(to: ModelsManager.cachePath(codexHome: root))
+
+        let transport = RecordingAPITransport { _ in
+            XCTFail("configured model_catalog_json should avoid cache refresh network")
+            return URLSessionTransportResponse(statusCode: 500)
+        }
+        var config = CodexRuntimeConfig(modelProvider: "openai")
+        config.modelCatalog = ModelsResponse(models: [configuredModel], etag: "configured-etag")
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: config,
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:04:59Z")
+        )
+
+        XCTAssertEqual(response, ModelsResponse(models: [configuredModel], etag: "configured-etag"))
+    }
+
     func testRawModelCatalogOnlineIfUncachedUsesFreshMatchingCache() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

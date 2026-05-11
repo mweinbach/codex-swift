@@ -251,6 +251,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var logDir: String?
     public var zshPath: String?
     public var modelCatalogJSON: String?
+    public var modelCatalog: ModelsResponse?
     public var personality: Personality?
     public var appsMcpPathOverride: String?
     public var realtimeAudio: RealtimeAudioConfig
@@ -355,6 +356,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         logDir: String? = nil,
         zshPath: String? = nil,
         modelCatalogJSON: String? = nil,
+        modelCatalog: ModelsResponse? = nil,
         personality: Personality? = nil,
         appsMcpPathOverride: String? = nil,
         realtimeAudio: RealtimeAudioConfig = RealtimeAudioConfig(),
@@ -429,6 +431,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.logDir = logDir
         self.zshPath = zshPath
         self.modelCatalogJSON = modelCatalogJSON
+        self.modelCatalog = modelCatalog
         self.personality = personality
         self.appsMcpPathOverride = appsMcpPathOverride
         self.realtimeAudio = realtimeAudio
@@ -1084,6 +1087,7 @@ public enum CodexConfigLoader {
             .appendingPathComponent("log", isDirectory: true)
             .standardizedFileURL
             .path
+        config.modelCatalog = try loadModelCatalog(from: config.modelCatalogJSON)
         try applyRequirements(requirements, to: &config)
         config.sandboxPolicy = try parsed.resolvedSandboxPolicy(
             codexHome: codexHome,
@@ -1127,6 +1131,28 @@ public enum CodexConfigLoader {
         var parsed = ParsedCodexConfigToml()
         try parsed.merge(config.removingConfigWriteRuntimeOnlyTables())
         try parsed.validateForConfigWrite(environment: environment)
+    }
+
+    private static func loadModelCatalog(from path: String?) throws -> ModelsResponse? {
+        guard let path else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: false)
+        let data = try Data(contentsOf: url)
+        let catalog: ModelsResponse
+        do {
+            catalog = try JSONDecoder().decode(ModelsResponse.self, from: data)
+        } catch {
+            throw CodexConfigLoadError.invalidConfig(
+                "failed to parse model_catalog_json path `\(path)` as JSON: \(error)"
+            )
+        }
+        guard !catalog.models.isEmpty else {
+            throw CodexConfigLoadError.invalidConfig(
+                "model_catalog_json path `\(path)` must contain at least one model"
+            )
+        }
+        return catalog
     }
 
     private static func applyRequirements(

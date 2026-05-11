@@ -10589,7 +10589,16 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let remoteModels = try ModelsCache.load(from: ModelsManager.cachePath(codexHome: configuration.codexHome))?.models ?? []
+        let runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        let configuredCatalog = runtimeConfig.modelCatalog?.models
+        let remoteModels = try configuredCatalog
+            ?? ModelsCache.load(from: ModelsManager.cachePath(codexHome: configuration.codexHome))?.models
+            ?? []
         let chatGPTMode: Bool
         if case .chatGPT = try currentAuth(configuration: configuration)?.kind {
             chatGPTMode = true
@@ -10598,7 +10607,7 @@ public enum CodexAppServer {
         }
         let availableModels = ModelsManager.buildAvailableModels(
             remoteModels: remoteModels,
-            localModels: ModelsManager.builtinModelPresets(),
+            localModels: configuredCatalog == nil ? ModelsManager.builtinModelPresets() : [],
             chatGPTMode: chatGPTMode
         )
         let defaultModel = ModelsManager.defaultModel(

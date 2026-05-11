@@ -527,7 +527,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         )
 
         // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
-        await Task.yield()
+        try await Task.sleep(nanoseconds: 1_000_000)
         let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .clearMemories),
             dependencies: testDependencies(codexHome: temp.url)
@@ -569,7 +569,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         )
 
         // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
-        await Task.yield()
+        try await Task.sleep(nanoseconds: 1_000_000)
         let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .clearMemories),
             dependencies: testDependencies(codexHome: temp.url)

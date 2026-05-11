@@ -42,6 +42,7 @@ final class ConfigLoaderTests: XCTestCase {
         )
         XCTAssertNil(config.zshPath)
         XCTAssertNil(config.modelCatalogJSON)
+        XCTAssertNil(config.modelCatalog)
         XCTAssertNil(config.personality)
         XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig())
         XCTAssertEqual(config.realtime, RealtimeConfig())
@@ -98,7 +99,16 @@ final class ConfigLoaderTests: XCTestCase {
         let dir = try CoreTemporaryDirectory()
         let configDir = dir.url
         let instructionFile = configDir.appendingPathComponent("instructions.md")
+        let catalog = ModelsResponse(models: [minimalModelInfo(slug: "custom-model")])
+        let catalogFile = configDir
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("catalog.json", isDirectory: false)
         try "custom instructions".write(to: instructionFile, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: catalogFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode(catalog).write(to: catalogFile)
         try """
         model_instructions_file = "instructions.md"
         sqlite_home = "state"
@@ -121,17 +131,63 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.logDir, configDir.appendingPathComponent("logs", isDirectory: true).path)
         XCTAssertEqual(config.zshPath, configDir.appendingPathComponent("bin/zsh").path)
         XCTAssertEqual(config.modelCatalogJSON, configDir.appendingPathComponent("models/catalog.json").path)
+        XCTAssertEqual(config.modelCatalog, catalog)
         XCTAssertEqual(config.personality, .friendly)
         XCTAssertEqual(config.openAIBaseURL, "https://proxy.example/v1")
         XCTAssertEqual(config.modelProviders["openai"]?.baseURL, "https://proxy.example/v1")
+    }
+
+    func testModelCatalogJSONRejectsEmptyCatalogLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let catalogFile = dir.url.appendingPathComponent("catalog.json")
+        try #"{"models":[]}"#.write(to: catalogFile, atomically: true, encoding: .utf8)
+        try """
+        model_catalog_json = "catalog.json"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "model_catalog_json path `\(catalogFile.path)` must contain at least one model"
+            )
+        }
+    }
+
+    func testModelCatalogJSONRejectsMalformedCatalogLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let catalogFile = dir.url.appendingPathComponent("catalog.json")
+        try #"{"models":true}"#.write(to: catalogFile, atomically: true, encoding: .utf8)
+        try """
+        model_catalog_json = "catalog.json"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            let message = String(describing: error)
+            XCTAssertTrue(
+                message.contains("failed to parse model_catalog_json path `\(catalogFile.path)` as JSON:"),
+                message
+            )
+        }
     }
 
     func testProfileOverridesRustRuntimePathAndPersonalityFields() throws {
         let dir = try CoreTemporaryDirectory()
         let topInstructions = dir.url.appendingPathComponent("top.md")
         let profileInstructions = dir.url.appendingPathComponent("profile.md")
+        let topCatalog = ModelsResponse(models: [minimalModelInfo(slug: "top-model")])
+        let profileCatalog = ModelsResponse(models: [minimalModelInfo(slug: "profile-model")])
         try "top instructions".write(to: topInstructions, atomically: true, encoding: .utf8)
         try "profile instructions".write(to: profileInstructions, atomically: true, encoding: .utf8)
+        try JSONEncoder().encode(topCatalog).write(to: dir.url.appendingPathComponent("top-models.json"))
+        try JSONEncoder().encode(profileCatalog).write(to: dir.url.appendingPathComponent("profile-models.json"))
         try """
         profile = "work"
         model_instructions_file = "top.md"
@@ -156,6 +212,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile.md").path)
         XCTAssertEqual(config.zshPath, dir.url.appendingPathComponent("profile-zsh").path)
         XCTAssertEqual(config.modelCatalogJSON, dir.url.appendingPathComponent("profile-models.json").path)
+        XCTAssertEqual(config.modelCatalog, profileCatalog)
         XCTAssertEqual(config.personality, .pragmatic)
     }
 
@@ -2529,6 +2586,28 @@ final class ConfigLoaderTests: XCTestCase {
             ToolSuggestDisabledTool(type: .connector, id: "project_connector"),
             ToolSuggestDisabledTool(type: .plugin, id: "project_plugin")
         ])
+    }
+
+    private func minimalModelInfo(slug: String) -> ModelInfo {
+        ModelInfo(
+            slug: slug,
+            displayName: slug,
+            description: "\(slug) desc",
+            defaultReasoningLevel: .medium,
+            supportedReasoningLevels: [
+                ReasoningEffortPreset(effort: .medium, description: "medium")
+            ],
+            shellType: .shellCommand,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 0,
+            baseInstructions: nil,
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(10_000),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
+        )
     }
 }
 
