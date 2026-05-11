@@ -19975,6 +19975,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(killError["message"] as? String, #"no active process for process handle "proc-1""#)
     }
 
+    func testProcessActiveExitedSessionReportsNoLongerRunning() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            },
+            experimentalAPIEnabled: true
+        )
+
+        let spawn = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf done"],"processHandle":"proc-exited","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        XCTAssertEqual((spawn[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/writeStdin","params":{"processHandle":"proc-exited","deltaBase64":"aGk="}}"#.utf8
+        )))
+        let writeError = try XCTUnwrap(write["error"] as? [String: Any])
+        XCTAssertEqual(writeError["code"] as? Int, -32600)
+        XCTAssertEqual(writeError["message"] as? String, #"process "proc-exited" is no longer running"#)
+
+        let resize = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"process/resizePty","params":{"processHandle":"proc-exited","size":{"rows":24,"cols":80}}}"#.utf8
+        )))
+        let resizeError = try XCTUnwrap(resize["error"] as? [String: Any])
+        XCTAssertEqual(resizeError["code"] as? Int, -32600)
+        XCTAssertEqual(resizeError["message"] as? String, #"process "proc-exited" is no longer running"#)
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"process/kill","params":{"processHandle":"proc-exited"}}"#.utf8
+        )))
+        let killError = try XCTUnwrap(kill["error"] as? [String: Any])
+        XCTAssertEqual(killError["code"] as? Int, -32600)
+        XCTAssertEqual(killError["message"] as? String, #"process "proc-exited" is no longer running"#)
+    }
+
     func testProcessSpawnValidatesRustParamsBeforeLiveLifecycle() throws {
         let temp = try TemporaryDirectory()
 

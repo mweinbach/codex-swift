@@ -20916,6 +20916,9 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     func writeStdin(delta: Data, closeStdin: Bool) throws {
+        guard process.isRunning else {
+            throw AppServerError.invalidRequest(processNoLongerRunningMessage(processHandle: params.processHandle))
+        }
         let stdin = try lock.withLock { () throws -> AppServerProcessInput in
             guard !stdinClosed else {
                 throw AppServerError.invalidRequest("stdin is already closed")
@@ -20963,10 +20966,17 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     func resizePty(size: AppServerTerminalSize) throws {
+        guard process.isRunning else {
+            throw AppServerError.invalidRequest(processNoLongerRunningMessage(processHandle: params.processHandle))
+        }
         guard let pseudoTerminal else {
             throw AppServerError.invalidRequest("failed to resize PTY: process is not attached to a PTY")
         }
         try pseudoTerminal.resize(size)
+    }
+
+    func isRunning() -> Bool {
+        process.isRunning
     }
 
     func terminate() {
@@ -21096,6 +21106,10 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             capReached: capReached
         )
     }
+}
+
+private func processNoLongerRunningMessage(processHandle: String) -> String {
+    "process \"\(processHandle)\" is no longer running"
 }
 
 private final class AppServerProcessRegistry: @unchecked Sendable {
@@ -22288,9 +22302,13 @@ final class CodexAppServerMessageProcessor {
 
     private func processKillResult(params: [String: Any]?) throws -> [String: Any] {
         let processHandle = try CodexAppServer.processHandle(params: params)
-        guard let session = activeProcesses.remove(processHandle) else {
+        guard let session = activeProcesses.get(processHandle) else {
             throw AppServerError.invalidRequest("no active process for process handle \"\(processHandle)\"")
         }
+        guard session.isRunning() else {
+            throw AppServerError.invalidRequest(processNoLongerRunningMessage(processHandle: processHandle))
+        }
+        _ = activeProcesses.remove(processHandle)
         session.terminate()
         return [:]
     }
