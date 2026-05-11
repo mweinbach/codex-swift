@@ -168,4 +168,139 @@ final class McpCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 78)
         XCTAssertEqual(stderr, ["codex-swift: command 'mcp' is registered but its runtime port is not complete yet."])
     }
+
+    func testMcpCommandRuntimeAddsStdioServerToGlobalConfig() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let request = CodexCLI.McpCommandRequest(action: .add(
+            name: "docs",
+            transport: .stdio(
+                command: ["docs-server", "--port", "4000"],
+                env: [CodexCLI.McpEnvPair(key: "TOKEN", value: "secret")]
+            )
+        ))
+
+        let result = try await McpCommandRuntime.run(request, dependencies: runtimeDependencies(codexHome: temp.url))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.stdoutMessage, "Added global MCP server 'docs'.")
+        XCTAssertEqual(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url), [
+            "docs": McpServerConfig(
+                transport: .stdio(
+                    command: "docs-server",
+                    args: ["--port", "4000"],
+                    env: ["TOKEN": "secret"],
+                    envVars: [],
+                    cwd: nil
+                )
+            )
+        ])
+    }
+
+    func testMcpCommandRuntimeValidatesConfigBeforeAddWrites() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "original""#.write(to: configFile, atomically: true, encoding: .utf8)
+        let request = CodexCLI.McpCommandRequest(
+            action: .add(name: "docs", transport: .stdio(command: ["docs-server"], env: [])),
+            configOverrides: CliConfigOverrides(rawOverrides: ["missing"])
+        )
+
+        do {
+            _ = try await McpCommandRuntime.run(request, dependencies: runtimeDependencies(codexHome: temp.url))
+            XCTFail("mcp add should reject invalid root overrides before writing")
+        } catch {
+            XCTAssertEqual(String(describing: error), "Invalid override (missing '='): missing")
+        }
+
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "original""#)
+    }
+
+    func testMcpCommandRuntimeListGetRemoveAndLogout() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let docs = McpServerConfig(transport: .stdio(command: "docs-server", args: [], env: nil, envVars: [], cwd: nil))
+        let github = McpServerConfig(transport: .streamableHttp(
+            url: "https://example.com/mcp",
+            bearerTokenEnvVar: nil,
+            httpHeaders: nil,
+            envHttpHeaders: nil
+        ))
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "docs": docs,
+            "github": github
+        ])
+        nonisolated(unsafe) var deletedOAuth: (name: String, url: String)?
+        let dependencies = runtimeDependencies(
+            codexHome: temp.url,
+            deleteOAuthTokens: { name, url, _, _ in
+                deletedOAuth = (name, url)
+                return true
+            }
+        )
+
+        let list = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .list(json: false)),
+            dependencies: dependencies
+        )
+        XCTAssertTrue(list.stdoutMessage?.contains("docs-server") == true)
+        XCTAssertTrue(list.stdoutMessage?.contains("https://example.com/mcp") == true)
+
+        let get = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .get(name: "docs", json: false)),
+            dependencies: dependencies
+        )
+        XCTAssertTrue(get.stdoutMessage?.contains("command: docs-server") == true)
+
+        let logout = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .logout(name: "github")),
+            dependencies: dependencies
+        )
+        XCTAssertEqual(logout.stdoutMessage, "Removed OAuth credentials for 'github'.")
+        XCTAssertEqual(deletedOAuth?.name, "github")
+        XCTAssertEqual(deletedOAuth?.url, "https://example.com/mcp")
+
+        let remove = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .remove(name: "docs")),
+            dependencies: dependencies
+        )
+        XCTAssertEqual(remove.stdoutMessage, "Removed global MCP server 'docs'.")
+        XCTAssertNil(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)["docs"])
+    }
+
+    private func runtimeDependencies(
+        codexHome: URL,
+        deleteOAuthTokens: @escaping @Sendable (String, String, URL, OAuthCredentialsStoreMode) throws -> Bool = { _, _, _, _ in false }
+    ) -> McpCommandRuntime.Dependencies {
+        McpCommandRuntime.Dependencies(
+            findCodexHome: { codexHome },
+            loadConfig: { codexHome, overrides in
+                _ = try overrides.applying()
+                return CodexRuntimeConfig(
+                    mcpServers: try McpConfigStore.loadGlobalMcpServers(codexHome: codexHome),
+                    mcpOAuthCredentialsStoreMode: .file
+                )
+            },
+            authStatuses: { servers, _, _, _ in
+                McpAuthStatusResolver.authStatuses(for: servers)
+            },
+            supportsOAuthLogin: { _, _, _, _ in false },
+            performOAuthLogin: { _, _ in },
+            deleteOAuthTokens: deleteOAuthTokens,
+            environment: { [:] },
+            messageSink: { _ in }
+        )
+    }
+}
+
+private final class TemporaryMcpRuntimeDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-mcp-runtime-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
 }
