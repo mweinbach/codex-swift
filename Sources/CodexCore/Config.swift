@@ -703,6 +703,10 @@ public enum CodexConfigLoader {
                 fileManager: fileManager
             )
             config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
+        } else if parsed.permissions.isEmpty == false {
+            throw CodexConfigLoadError.invalidConfigLine(
+                "config defines `[permissions]` profiles but does not set `default_permissions`"
+            )
         }
         return config
     }
@@ -810,13 +814,15 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
     }
 
     func permissionProfile(profileName: String, cwd: URL) throws -> PermissionProfile {
-        let entries = try filesystem.compactMap { key, value -> FileSystemSandboxEntry? in
+        let entries = try filesystem.flatMap { key, value -> [FileSystemSandboxEntry] in
             guard key != "glob_scan_max_depth" else {
-                return nil
+                return []
             }
-            return FileSystemSandboxEntry(
-                path: try filesystemPath(key, cwd: cwd),
-                access: try filesystemAccess(value, key: "permissions.\(profileName).filesystem.\(key)")
+            return try filesystemEntries(
+                key,
+                value: value,
+                profileName: profileName,
+                cwd: cwd
             )
         }.sorted { left, right in
             filesystemSortKey(left.path) < filesystemSortKey(right.path)
@@ -833,30 +839,170 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         )
     }
 
+    private func filesystemEntries(
+        _ rawPath: String,
+        value: ConfigValue,
+        profileName: String,
+        cwd: URL
+    ) throws -> [FileSystemSandboxEntry] {
+        let key = "permissions.\(profileName).filesystem.\(rawPath)"
+        if case let .table(scopedEntries) = value {
+            return try scopedEntries.map { subpath, scopedValue in
+                let access = try filesystemAccess(scopedValue, key: "\(key).\(subpath)")
+                if containsGlobCharacters(subpath),
+                   access == .none,
+                   canCompileScopedGlobPattern(basePath: rawPath)
+                {
+                    return FileSystemSandboxEntry(
+                        path: .globPattern(try scopedFilesystemPattern(rawPath, subpath: subpath, cwd: cwd)),
+                        access: access
+                    )
+                }
+                let compiledSubpath = try compileReadWriteGlobSubpath(subpath, access: access)
+                return FileSystemSandboxEntry(
+                    path: try scopedFilesystemPath(rawPath, subpath: compiledSubpath, cwd: cwd),
+                    access: access
+                )
+            }
+        }
+
+        let access = try filesystemAccess(value, key: key)
+        return [
+            FileSystemSandboxEntry(
+                path: try filesystemAccessPath(rawPath, access: access, cwd: cwd),
+                access: access
+            )
+        ]
+    }
+
+    private func filesystemAccessPath(_ raw: String, access: FileSystemAccessMode, cwd: URL) throws -> FileSystemPath {
+        if !containsGlobCharacters(raw) {
+            return try filesystemPath(raw, cwd: cwd)
+        }
+        if access == .none {
+            return .globPattern(try absolutePathString(raw, cwd: cwd))
+        }
+        return try filesystemPath(compileReadWriteGlobSubpath(raw, access: access), cwd: cwd)
+    }
+
     private func filesystemPath(_ raw: String, cwd: URL) throws -> FileSystemPath {
-        if raw == ":minimal" {
-            return .special(FileSystemSpecialPath.minimal.jsonValue)
+        if let special = filesystemSpecialPath(raw) {
+            return .special(special.jsonValue)
         }
-        if raw == ":root" {
-            return .special(FileSystemSpecialPath.root.jsonValue)
+        return .path(try absolutePathString(raw, cwd: cwd))
+    }
+
+    private func scopedFilesystemPath(_ raw: String, subpath: String, cwd: URL) throws -> FileSystemPath {
+        if subpath == "." {
+            return try filesystemPath(raw, cwd: cwd)
         }
-        if raw == ":project_roots" || raw == ":cwd" {
-            return .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue)
+
+        let relativeSubpath = try parseRelativeSubpath(subpath)
+        if let special = filesystemSpecialPath(raw) {
+            switch special {
+            case .projectRoots:
+                return .special(FileSystemSpecialPath.projectRoots(subpath: relativeSubpath).jsonValue)
+            case let .unknown(path, _):
+                return .special(FileSystemSpecialPath.unknown(path: path, subpath: relativeSubpath).jsonValue)
+            case .root, .minimal, .tmpdir, .slashTmp:
+                throw CodexConfigLoadError.invalidConfigLine(
+                    "filesystem path `\(raw)` does not support nested entries"
+                )
+            }
         }
-        if raw == ":tmpdir" {
-            return .special(FileSystemSpecialPath.tmpdir.jsonValue)
+
+        let base = try absolutePathString(raw, cwd: cwd)
+        return .path(try AbsolutePath.resolve(relativeSubpath, against: base).path)
+    }
+
+    private func scopedFilesystemPattern(_ raw: String, subpath: String, cwd: URL) throws -> String {
+        let relativeSubpath = try parseRelativeSubpath(subpath)
+        if let special = filesystemSpecialPath(raw) {
+            switch special {
+            case .projectRoots:
+                return try AbsolutePath.resolve(relativeSubpath, against: cwd.standardizedFileURL.path).path
+            case .root, .minimal, .tmpdir, .slashTmp, .unknown:
+                throw CodexConfigLoadError.invalidConfigLine(
+                    "filesystem path `\(raw)` does not support nested entries"
+                )
+            }
         }
-        if raw == ":slash_tmp" {
-            return .special(FileSystemSpecialPath.slashTmp.jsonValue)
-        }
+
+        let base = try absolutePathString(raw, cwd: cwd)
+        return try AbsolutePath.resolve(relativeSubpath, against: base).path
+    }
+
+    private func absolutePathString(_ raw: String, cwd: URL) throws -> String {
         guard raw.hasPrefix("/") else {
-            throw CodexConfigLoadError.invalidConfigLine("filesystem path `\(raw)` must be absolute")
+            throw CodexConfigLoadError.invalidConfigLine(
+                "filesystem path `\(raw)` must be absolute, use `~/...`, or start with `:`"
+            )
         }
-        if raw.contains("*") || raw.contains("?") || raw.contains("[") {
-            let resolved = try AbsolutePath.resolve(raw, against: cwd.standardizedFileURL.path)
-            return .globPattern(resolved.path)
+        return try AbsolutePath.resolve(raw, against: cwd.standardizedFileURL.path).path
+    }
+
+    private func filesystemSpecialPath(_ raw: String) -> FileSystemSpecialPath? {
+        switch raw {
+        case ":minimal":
+            return .minimal
+        case ":root":
+            return .root
+        case ":project_roots", ":cwd":
+            return .projectRoots(subpath: nil)
+        case ":tmpdir":
+            return .tmpdir
+        case ":slash_tmp":
+            return .slashTmp
+        default:
+            return raw.hasPrefix(":") ? .unknown(path: raw, subpath: nil) : nil
         }
-        return .path(raw)
+    }
+
+    private func canCompileScopedGlobPattern(basePath: String) -> Bool {
+        guard let special = filesystemSpecialPath(basePath) else {
+            return true
+        }
+        switch special {
+        case .projectRoots:
+            return true
+        case .root, .minimal, .tmpdir, .slashTmp, .unknown:
+            return false
+        }
+    }
+
+    private func compileReadWriteGlobSubpath(_ path: String, access: FileSystemAccessMode) throws -> String {
+        guard containsGlobCharacters(path), access != .none else {
+            return path
+        }
+        if path.hasSuffix("/**") {
+            let withoutTrailingGlob = String(path.dropLast(3))
+            if !containsGlobCharacters(withoutTrailingGlob) {
+                return withoutTrailingGlob
+            }
+        }
+        throw CodexConfigLoadError.invalidConfigLine(
+            "filesystem glob path `\(path)` only supports `none` access; use an exact path or trailing `/**` for `\(access.rawValue)` subtree access"
+        )
+    }
+
+    private func parseRelativeSubpath(_ subpath: String) throws -> String {
+        guard !subpath.isEmpty,
+              subpath.hasPrefix("/") == false,
+              subpath.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ component in
+                  component.isEmpty == false && component != "." && component != ".."
+              })
+        else {
+            throw CodexConfigLoadError.invalidConfigLine(
+                "filesystem subpath `\(subpath)` must be a descendant path without `.` or `..` components"
+            )
+        }
+        return subpath
+    }
+
+    private func containsGlobCharacters(_ path: String) -> Bool {
+        path.contains { character in
+            character == "*" || character == "?" || character == "[" || character == "]"
+        }
     }
 
     private func filesystemAccess(_ value: ConfigValue, key: String) throws -> FileSystemAccessMode {
@@ -999,6 +1145,14 @@ private struct ParsedCodexConfigToml {
                 let filesystemKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
                     .filesystem[filesystemKey] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .permissionFilesystemScoped(name, path):
+                let scopedKey = try parseDottedKey(key).joined(separator: ".")
+                let scopedValue = try ConfigValueParser.parseTomlLiteral(valueText)
+                var existing = parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .filesystem[path] ?? .table([:])
+                existing.merge(overlay: .table([scopedKey: scopedValue]))
+                parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .filesystem[path] = existing
             case let .permissionNetwork(name):
                 let networkKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
@@ -1176,6 +1330,14 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 4, parts[0] == "permissions", parts[2] == "filesystem" {
                 permissions[parts[1], default: ParsedPermissionProfileToml()].filesystem[parts[3]] = value
+                continue
+            }
+
+            if parts.count == 5, parts[0] == "permissions", parts[2] == "filesystem" {
+                var existing = permissions[parts[1], default: ParsedPermissionProfileToml()]
+                    .filesystem[parts[3]] ?? .table([:])
+                existing.merge(overlay: .table([parts[4]: value]))
+                permissions[parts[1], default: ParsedPermissionProfileToml()].filesystem[parts[3]] = existing
                 continue
             }
 
@@ -2539,6 +2701,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 3, parts[0] == "permissions", parts[2] == "filesystem" {
             return .permissionFilesystem(parts[1])
         }
+        if parts.count == 4, parts[0] == "permissions", parts[2] == "filesystem" {
+            return .permissionFilesystemScoped(parts[1], parts[3])
+        }
         if parts.count == 3, parts[0] == "permissions", parts[2] == "network" {
             return .permissionNetwork(parts[1])
         }
@@ -2752,6 +2917,7 @@ private enum ConfigSection {
     case features
     case sandboxWorkspaceWrite
     case permissionFilesystem(String)
+    case permissionFilesystemScoped(String, String)
     case permissionNetwork(String)
     case audio
     case realtime

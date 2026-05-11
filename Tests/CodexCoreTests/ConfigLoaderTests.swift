@@ -141,6 +141,73 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testLoadsScopedPermissionProfileEntriesLikeRustConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem]
+        glob_scan_max_depth = 2
+        ":minimal" = "read"
+
+        [permissions.workspace.filesystem.":project_roots"]
+        "." = "write"
+        "docs" = "read"
+        "**/*.env" = "none"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)
+
+        let expectedEnvPattern = "\(dir.url.standardizedFileURL.path)/**/*.env"
+        XCTAssertEqual(
+            config.permissionProfile,
+            .managed(
+                fileSystem: .restricted(
+                    entries: [
+                        FileSystemSandboxEntry(path: .globPattern(expectedEnvPattern), access: .none),
+                        FileSystemSandboxEntry(
+                            path: .special(FileSystemSpecialPath.minimal.jsonValue),
+                            access: .read
+                        ),
+                        FileSystemSandboxEntry(
+                            path: .special(FileSystemSpecialPath.projectRoots(subpath: "docs").jsonValue),
+                            access: .read
+                        ),
+                        FileSystemSandboxEntry(
+                            path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                            access: .write
+                        )
+                    ],
+                    globScanMaxDepth: 2
+                ),
+                network: .restricted
+            )
+        )
+    }
+
+    func testPermissionProfilesRequireDefaultPermissionsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [permissions.workspace.filesystem]
+        ":minimal" = "read"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Invalid config line: config defines `[permissions]` profiles but does not set `default_permissions`"
+            )
+        }
+    }
+
     func testLoadsApplyRelevantTopLevelValues() throws {
         let dir = try CoreTemporaryDirectory()
         let instructions = dir.url.appendingPathComponent("instructions.md")
