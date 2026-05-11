@@ -5123,10 +5123,55 @@ final class CodexAppServerTests: XCTestCase {
         )
         let invalidModeError = try XCTUnwrap(invalidMode["error"] as? [String: Any])
         XCTAssertEqual(invalidModeError["code"] as? Int, -32600)
-        XCTAssertEqual(invalidModeError["message"] as? String, "invalid memory mode: paused")
+        XCTAssertEqual(
+            invalidModeError["message"] as? String,
+            "Invalid request: unknown variant `paused`, expected `enabled` or `disabled`"
+        )
+
+        let missingThreadID = try appServerResponse(
+            #"{"id":2,"method":"thread/memoryMode/set","params":{"mode":"enabled"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let integerThreadID = try appServerResponse(
+            #"{"id":3,"method":"thread/memoryMode/set","params":{"threadId":1,"mode":"enabled"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
+        XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerThreadIDError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let missingMode = try appServerResponse(
+            #"{"id":4,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let missingModeError = try XCTUnwrap(missingMode["error"] as? [String: Any])
+        XCTAssertEqual(missingModeError["code"] as? Int, -32600)
+        XCTAssertEqual(missingModeError["message"] as? String, "missing field `mode`")
+
+        let integerMode = try appServerResponse(
+            #"{"id":5,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":1}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let integerModeError = try XCTUnwrap(integerMode["error"] as? [String: Any])
+        XCTAssertEqual(integerModeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerModeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
 
         let missing = try appServerResponse(
-            #"{"id":2,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"enabled"}}"#,
+            #"{"id":6,"method":"thread/memoryMode/set","params":{"threadId":"\#(missingID)","mode":"enabled"}}"#,
             codexHome: temp.url,
             experimentalAPIEnabled: true
         )

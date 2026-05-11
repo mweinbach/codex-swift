@@ -3311,21 +3311,14 @@ public enum CodexAppServer {
         experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "thread/memoryMode/set", experimentalAPIEnabled: experimentalAPIEnabled)
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let threadID: ConversationId
         do {
             threadID = try ConversationId(string: rawThreadID)
         } catch {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
-        guard let mode = stringParam(params?["mode"]) else {
-            throw AppServerError.invalidRequest("missing mode")
-        }
-        guard mode == "enabled" || mode == "disabled" else {
-            throw AppServerError.invalidRequest("invalid memory mode: \(mode)")
-        }
+        let mode = try threadMemoryModeParam(params?["mode"])
 
         let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
         let sessionMeta = try readSessionMetaLine(rolloutPath: rolloutPath)
@@ -3363,6 +3356,18 @@ public enum CodexAppServer {
             configuration: configuration
         )
         return [:]
+    }
+
+    private static func threadMemoryModeParam(_ value: Any?) throws -> String {
+        let mode = try rustRequiredStringParam(value, field: "mode")
+        switch mode {
+        case "enabled", "disabled":
+            return mode
+        default:
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(mode)`, expected `enabled` or `disabled`"
+            )
+        }
     }
 
     private static func updateStateStoreMemoryModeIfConfigured(
