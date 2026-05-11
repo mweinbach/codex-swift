@@ -19315,6 +19315,39 @@ final class CodexAppServerTests: XCTestCase {
             "Invalid request: invalid type: integer `1`, expected a string"
         )
 
+        let invalidCommandType = try appServerResponse(
+            #"{"id":16,"method":"command/exec","params":{"command":"echo","cwd":"\#(cwd.url.path)"}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidCommandTypeError = try XCTUnwrap(invalidCommandType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCommandTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCommandTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "echo", expected a sequence"#
+        )
+
+        let invalidCommandItemType = try appServerResponse(
+            #"{"id":17,"method":"command/exec","params":{"command":["/bin/echo",1],"cwd":"\#(cwd.url.path)"}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidCommandItemTypeError = try XCTUnwrap(invalidCommandItemType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCommandItemTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCommandItemTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidProcessIDType = try appServerResponse(
+            #"{"id":18,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","processId":1}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidProcessIDTypeError = try XCTUnwrap(invalidProcessIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidProcessIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidProcessIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let negativeOutputCap = try appServerResponse(
             #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":-1}}"#,
             codexHome: codexHome.url
@@ -19954,6 +19987,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
         XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: Invalid byte 37, offset 0.")
 
+        let invalidDeltaType = try appServerResponse(
+            #"{"id":4,"method":"command/exec/write","params":{"processId":"proc-1","deltaBase64":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidDeltaTypeError = try XCTUnwrap(invalidDeltaType["error"] as? [String: Any])
+        XCTAssertEqual(invalidDeltaTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidDeltaTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidCloseStdinType = try appServerResponse(
+            #"{"id":5,"method":"command/exec/write","params":{"processId":"proc-1","closeStdin":null}}"#,
+            codexHome: temp.url
+        )
+        let invalidCloseStdinTypeError = try XCTUnwrap(invalidCloseStdinType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCloseStdinTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCloseStdinTypeError["message"] as? String,
+            "Invalid request: invalid type: null, expected a boolean"
+        )
+
+        let invalidProcessIDType = try appServerResponse(
+            #"{"id":6,"method":"command/exec/terminate","params":{"processId":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidProcessIDTypeError = try XCTUnwrap(invalidProcessIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidProcessIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidProcessIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let zeroSize = try appServerResponse(
             #"{"id":3,"method":"command/exec/resize","params":{"processId":"proc-1","size":{"rows":0,"cols":80}}}"#,
             codexHome: temp.url
@@ -20209,6 +20275,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             invalidEnvValueTypeError["message"] as? String,
             "Invalid request: invalid type: sequence, expected a string"
+        )
+
+        let invalidCommandType = try appServerResponse(
+            #"{"id":15,"method":"process/spawn","params":{"command":true,"processHandle":"proc-1","cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidCommandTypeError = try XCTUnwrap(invalidCommandType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCommandTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCommandTypeError["message"] as? String,
+            "Invalid request: invalid type: boolean `true`, expected a sequence"
+        )
+
+        let invalidCommandItemType = try appServerResponse(
+            #"{"id":16,"method":"process/spawn","params":{"command":["echo",{}],"processHandle":"proc-1","cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidCommandItemTypeError = try XCTUnwrap(invalidCommandItemType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCommandItemTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCommandItemTypeError["message"] as? String,
+            "Invalid request: invalid type: map, expected a string"
+        )
+
+        let invalidProcessHandleType = try appServerResponse(
+            #"{"id":17,"method":"process/spawn","params":{"command":["echo"],"processHandle":1,"cwd":"\#(temp.url.path)"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidProcessHandleTypeError = try XCTUnwrap(invalidProcessHandleType["error"] as? [String: Any])
+        XCTAssertEqual(invalidProcessHandleTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidProcessHandleTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
         )
     }
 
@@ -20672,6 +20774,42 @@ final class CodexAppServerTests: XCTestCase {
         let badBase64Error = try XCTUnwrap(badBase64["error"] as? [String: Any])
         XCTAssertEqual(badBase64Error["code"] as? Int, -32602)
         XCTAssertEqual(badBase64Error["message"] as? String, "invalid deltaBase64: Invalid byte 37, offset 0.")
+
+        let invalidDeltaType = try appServerResponse(
+            #"{"id":4,"method":"process/writeStdin","params":{"processHandle":"proc-1","deltaBase64":{}}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidDeltaTypeError = try XCTUnwrap(invalidDeltaType["error"] as? [String: Any])
+        XCTAssertEqual(invalidDeltaTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidDeltaTypeError["message"] as? String,
+            "Invalid request: invalid type: map, expected a string"
+        )
+
+        let invalidCloseStdinType = try appServerResponse(
+            #"{"id":5,"method":"process/writeStdin","params":{"processHandle":"proc-1","closeStdin":"true"}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidCloseStdinTypeError = try XCTUnwrap(invalidCloseStdinType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCloseStdinTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCloseStdinTypeError["message"] as? String,
+            #"Invalid request: invalid type: string "true", expected a boolean"#
+        )
+
+        let invalidProcessHandleType = try appServerResponse(
+            #"{"id":6,"method":"process/kill","params":{"processHandle":[]}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidProcessHandleTypeError = try XCTUnwrap(invalidProcessHandleType["error"] as? [String: Any])
+        XCTAssertEqual(invalidProcessHandleTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidProcessHandleTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected a string"
+        )
 
         let zeroSize = try appServerResponse(
             #"{"id":3,"method":"process/resizePty","params":{"processHandle":"proc-1","size":{"rows":0,"cols":80}}}"#,

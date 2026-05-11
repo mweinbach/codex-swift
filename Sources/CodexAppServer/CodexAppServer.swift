@@ -14625,13 +14625,11 @@ public enum CodexAppServer {
     }
 
     fileprivate static func commandExecParams(params: [String: Any]?) throws -> AppServerCommandExecParams {
-        guard let command = stringArrayParam(params?["command"]) else {
-            throw AppServerError.invalidRequest("missing command")
-        }
+        let command = try rustRequiredStringArrayParam(params?["command"], missingMessage: "missing command")
         guard !command.isEmpty else {
             throw AppServerError.invalidRequest("command must not be empty")
         }
-        let processID = stringParam(params?["processId"])
+        let processID = try rustOptionalStringParam(params?["processId"])
         let tty = try rustDefaultedBoolParam(params?["tty"], defaultValue: false)
         let streamStdin = try rustDefaultedBoolParam(params?["streamStdin"], defaultValue: false)
         let streamStdoutStderr = try rustDefaultedBoolParam(params?["streamStdoutStderr"], defaultValue: false)
@@ -14666,7 +14664,7 @@ public enum CodexAppServer {
         return AppServerCommandExecParams(
             command: command,
             processID: processID,
-            cwd: stringParam(params?["cwd"]),
+            cwd: try rustOptionalStringParam(params?["cwd"]),
             tty: tty,
             streamStdin: streamStdin,
             streamStdoutStderr: streamStdoutStderr,
@@ -14868,8 +14866,8 @@ public enum CodexAppServer {
 
     fileprivate static func commandExecWriteParams(params: [String: Any]?) throws -> AppServerCommandExecWriteParams {
         let processID = try commandExecProcessID(params: params)
-        let deltaBase64 = stringParam(params?["deltaBase64"])
-        let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
+        let deltaBase64 = try rustOptionalStringParam(params?["deltaBase64"])
+        let closeStdin = try rustDefaultedBoolParam(params?["closeStdin"], defaultValue: false)
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("command/exec/write requires deltaBase64 or closeStdin")
         }
@@ -15067,7 +15065,11 @@ public enum CodexAppServer {
     }
 
     fileprivate static func commandExecProcessID(params: [String: Any]?) throws -> String {
-        guard let processID = stringParam(params?["processId"]), !processID.isEmpty else {
+        guard let value = params?["processId"] else {
+            throw AppServerError.invalidRequest("missing processId")
+        }
+        let processID = try rustStringParam(value)
+        guard !processID.isEmpty else {
             throw AppServerError.invalidRequest("missing processId")
         }
         return processID
@@ -15075,8 +15077,8 @@ public enum CodexAppServer {
 
     fileprivate static func processWriteStdinParams(params: [String: Any]?) throws -> AppServerProcessWriteStdinParams {
         let processHandle = try processHandle(params: params)
-        let deltaBase64 = stringParam(params?["deltaBase64"])
-        let closeStdin = boolParam(params?["closeStdin"], defaultValue: false)
+        let deltaBase64 = try rustOptionalStringParam(params?["deltaBase64"])
+        let closeStdin = try rustDefaultedBoolParam(params?["closeStdin"], defaultValue: false)
         guard deltaBase64 != nil || closeStdin else {
             throw AppServerError.invalidParams("process/writeStdin requires deltaBase64 or closeStdin")
         }
@@ -15098,15 +15100,14 @@ public enum CodexAppServer {
     }
 
     fileprivate static func processSpawnParams(params: [String: Any]?) throws -> AppServerProcessSpawnParams {
-        guard let command = stringArrayParam(params?["command"]) else {
-            throw AppServerError.invalidRequest("missing command")
-        }
+        let command = try rustRequiredStringArrayParam(params?["command"], missingMessage: "missing command")
         guard !command.isEmpty else {
             throw AppServerError.invalidRequest("command must not be empty")
         }
-        guard let processHandle = stringParam(params?["processHandle"]) else {
+        guard let processHandleValue = params?["processHandle"] else {
             throw AppServerError.invalidRequest("missing processHandle")
         }
+        let processHandle = try rustStringParam(processHandleValue)
         guard !processHandle.isEmpty else {
             throw AppServerError.invalidRequest("processHandle must not be empty")
         }
@@ -15182,7 +15183,11 @@ public enum CodexAppServer {
     }
 
     fileprivate static func processHandle(params: [String: Any]?) throws -> String {
-        guard let processHandle = stringParam(params?["processHandle"]), !processHandle.isEmpty else {
+        guard let value = params?["processHandle"] else {
+            throw AppServerError.invalidRequest("missing processHandle")
+        }
+        let processHandle = try rustStringParam(value)
+        guard !processHandle.isEmpty else {
             throw AppServerError.invalidRequest("missing processHandle")
         }
         return processHandle
@@ -17717,6 +17722,23 @@ public enum CodexAppServer {
             }
             return string
         }
+    }
+
+    private static func rustRequiredStringArrayParam(_ value: Any?, missingMessage: String) throws -> [String] {
+        guard let value else {
+            throw AppServerError.invalidRequest(missingMessage)
+        }
+        guard !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return try rustStringArrayParam(value) ?? []
+    }
+
+    private static func rustStringParam(_ value: Any) throws -> String {
+        guard let string = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
+        }
+        return string
     }
 
     private static func rustInvalidTypeDescription(_ value: Any) -> String {
