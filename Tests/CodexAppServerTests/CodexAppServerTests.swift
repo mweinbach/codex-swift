@@ -3532,6 +3532,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingError["message"] as? String, "thread not loaded: \(threadID)")
     }
 
+    func testThreadReadRejectsMalformedIncludeTurnsLikeRustParams() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+
+        let cases: [(String, String)] = [
+            (#""true""#, #"Invalid request: invalid type: string "true", expected a boolean"#),
+            (#"1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#"null"#, "Invalid request: invalid type: null, expected a boolean")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
+    func testThreadListRejectsMalformedBooleanParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#""archived":1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#""useStateDbOnly":null"#, "Invalid request: invalid type: null, expected a boolean"),
+            (#""useStateDbOnly":"false""#, #"Invalid request: invalid type: string "false", expected a boolean"#)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/list","params":{\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
+    func testThreadLifecycleRejectsMalformedBooleanParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String, String)] = [
+            (
+                "thread/start",
+                #""cwd":"\#(temp.url.path)","ephemeral":"true""#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                "thread/start",
+                #""cwd":"\#(temp.url.path)","experimentalRawEvents":null"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            ),
+            (
+                "thread/resume",
+                #""threadId":"00000000-0000-0000-0000-000000000000","excludeTurns":"true""#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                "thread/fork",
+                #""threadId":"00000000-0000-0000-0000-000000000000","excludeTurns":1"#,
+                "Invalid request: invalid type: integer `1`, expected a boolean"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(testCase.0)","params":{\#(testCase.1)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.2)
+        }
+    }
+
     func testThreadNameSetPersistsNameAndEmitsNotification() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

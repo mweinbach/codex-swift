@@ -852,13 +852,13 @@ public enum CodexAppServer {
         let pageSize = try rustU32ListLimit(params?["limit"])
         let modelProviders = modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
         let cwdFilters = try threadListCwdFilters(params?["cwd"])
-        let archivedOnly = boolParam(params?["archived"], defaultValue: false)
+        let archivedOnly = try rustOptionalBoolParam(params?["archived"], defaultValue: false)
         let searchTerm = stringParam(params?["searchTerm"])
         let hasExplicitMetadataFilter = params?["cwd"] != nil
             || params?["modelProviders"] != nil
             || params?["sourceKinds"] != nil
             || searchTerm?.isEmpty == false
-        if boolParam(params?["useStateDbOnly"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["useStateDbOnly"], defaultValue: false) {
             return try threadListStateDbOnlyResult(
                 configuration: configuration,
                 pageSize: pageSize,
@@ -1029,7 +1029,7 @@ public enum CodexAppServer {
             configuration: configuration
         )
         let conversationID = ConversationId()
-        if boolParam(params?["ephemeral"], defaultValue: false) {
+        if try rustOptionalBoolParam(params?["ephemeral"], defaultValue: false) {
             return AppServerStartedConversation(
                 conversationID: conversationID,
                 rolloutPath: nil,
@@ -1531,7 +1531,8 @@ public enum CodexAppServer {
         try recorder.shutdown()
 
         let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
-        let includeTurns = !boolParam(params?["excludeTurns"], defaultValue: false)
+        let excludeTurns = try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false)
+        let includeTurns = !excludeTurns
         let thread = try threadObject(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
@@ -1575,7 +1576,7 @@ public enum CodexAppServer {
         ) else {
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
-        let includeTurns = boolParam(params?["includeTurns"], defaultValue: false)
+        let includeTurns = try rustDefaultBoolParam(params?["includeTurns"], defaultValue: false)
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
         let thread = try threadObject(
             for: item,
@@ -2114,13 +2115,13 @@ public enum CodexAppServer {
         if let mockExperimentalField = params?["mockExperimentalField"], !(mockExperimentalField is NSNull) {
             throw AppServerError.invalidRequest("thread/start.mockExperimentalField requires experimentalApi capability")
         }
-        if boolParam(params?["experimentalRawEvents"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["experimentalRawEvents"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.experimentalRawEvents requires experimentalApi capability")
         }
-        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
         }
-        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/start.persistFullHistory requires experimentalApi capability")
         }
     }
@@ -2149,13 +2150,13 @@ public enum CodexAppServer {
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/resume.permissions requires experimentalApi capability")
         }
-        if boolParam(params?["excludeTurns"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/resume.excludeTurns requires experimentalApi capability")
         }
-        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/resume.persistFullHistory requires experimentalApi capability")
         }
-        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/resume.persistFullHistory requires experimentalApi capability")
         }
     }
@@ -2174,13 +2175,13 @@ public enum CodexAppServer {
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/fork.permissions requires experimentalApi capability")
         }
-        if boolParam(params?["excludeTurns"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/fork.excludeTurns requires experimentalApi capability")
         }
-        if boolParam(params?["persistFullHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistFullHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/fork.persistFullHistory requires experimentalApi capability")
         }
-        if boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+        if try rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
             throw AppServerError.invalidRequest("thread/fork.persistFullHistory requires experimentalApi capability")
         }
     }
@@ -14662,6 +14663,26 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
     }
 
+    fileprivate static func rustDefaultBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
+        guard let value else {
+            return defaultValue
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
+    }
+
+    fileprivate static func rustOptionalBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
+        guard let value, !(value is NSNull) else {
+            return defaultValue
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
+    }
+
     private static func commandExecOutputBytesCap(_ value: Any?) -> Int {
         guard let value, !(value is NSNull) else {
             return 1_048_576
@@ -21684,7 +21705,7 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadStartContextOverrideCompatibility(params: params)
-                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                    if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
                     let result = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
@@ -21771,7 +21792,7 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
-                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                    if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
                     let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
@@ -21793,7 +21814,7 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireThreadContextOverrideCompatibility(params: params)
-                    if CodexAppServer.boolParam(params?["persistExtendedHistory"], defaultValue: false) {
+                    if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
                     let result = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
