@@ -17,7 +17,8 @@ public enum StreamEventUtils {
     public static func handleNonToolResponseItem(
         _ item: ResponseItem,
         codexHome: URL? = nil,
-        sessionID: String? = nil
+        sessionID: String? = nil,
+        planMode: Bool = false
     ) -> TurnItem? {
         switch item {
         case .message,
@@ -26,6 +27,24 @@ public enum StreamEventUtils {
              .imageGenerationCall:
             guard var turnItem = EventMapping.parseTurnItem(item) else {
                 return nil
+            }
+            if case let .agentMessage(agentMessage) = turnItem {
+                let combined = agentMessage.content.map { content in
+                    switch content {
+                    case let .text(text):
+                        return text
+                    }
+                }.joined()
+                let (visibleText, memoryCitation) = stripHiddenAssistantMarkupAndParseMemoryCitation(
+                    combined,
+                    planMode: planMode
+                )
+                turnItem = .agentMessage(AgentMessageItem(
+                    id: agentMessage.id,
+                    content: [.text(visibleText)],
+                    phase: agentMessage.phase,
+                    memoryCitation: memoryCitation
+                ))
             }
             if case let .imageGeneration(imageItem) = turnItem,
                let codexHome,
@@ -63,18 +82,31 @@ public enum StreamEventUtils {
     }
 
     public static func lastAssistantMessage(from item: ResponseItem) -> String? {
+        lastAssistantMessage(from: item, planMode: false)
+    }
+
+    public static func lastAssistantMessage(from item: ResponseItem, planMode: Bool) -> String? {
         guard case let .message(_, role, content, _) = item,
               role == "assistant"
         else {
             return nil
         }
 
-        return content.reversed().compactMap { item -> String? in
-            if case let .outputText(text) = item {
-                return text
+        let combined = content.compactMap { item -> String? in
+            guard case let .outputText(text) = item else {
+                return nil
             }
+            return text
+        }.joined()
+        guard !combined.isEmpty else {
             return nil
-        }.first
+        }
+
+        let stripped = stripHiddenAssistantMarkup(combined, planMode: planMode)
+        guard !stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return stripped
     }
 
     public static func responseInputToResponseItem(_ input: ResponseInputItem) -> ResponseItem? {
@@ -138,6 +170,165 @@ public enum StreamEventUtils {
             return "_"
         })
         return sanitized.isEmpty ? "generated_image" : sanitized
+    }
+
+    private static func stripHiddenAssistantMarkup(_ text: String, planMode: Bool) -> String {
+        let (withoutCitations, _) = stripDelimitedBlocks(
+            text,
+            openTag: "<oai-mem-citation>",
+            closeTag: "</oai-mem-citation>"
+        )
+        guard planMode else {
+            return withoutCitations
+        }
+        return stripDelimitedBlocks(
+            withoutCitations,
+            openTag: "<proposed_plan>",
+            closeTag: "</proposed_plan>",
+            consumeFollowingNewline: true
+        ).visibleText
+    }
+
+    private static func stripHiddenAssistantMarkupAndParseMemoryCitation(
+        _ text: String,
+        planMode: Bool
+    ) -> (String, MemoryCitation?) {
+        let (withoutCitations, citations) = stripDelimitedBlocks(
+            text,
+            openTag: "<oai-mem-citation>",
+            closeTag: "</oai-mem-citation>"
+        )
+        let visibleText: String
+        if planMode {
+            visibleText = stripDelimitedBlocks(
+                withoutCitations,
+                openTag: "<proposed_plan>",
+                closeTag: "</proposed_plan>",
+                consumeFollowingNewline: true
+            ).visibleText
+        } else {
+            visibleText = withoutCitations
+        }
+        return (visibleText, parseMemoryCitation(citations))
+    }
+
+    private static func stripDelimitedBlocks(
+        _ text: String,
+        openTag: String,
+        closeTag: String,
+        consumeFollowingNewline: Bool = false
+    ) -> (visibleText: String, extracted: [String]) {
+        var visibleText = ""
+        var extracted: [String] = []
+        var cursor = text.startIndex
+
+        while let openRange = text.range(of: openTag, range: cursor ..< text.endIndex) {
+            visibleText.append(contentsOf: text[cursor ..< openRange.lowerBound])
+            let bodyStart = openRange.upperBound
+            if let closeRange = text.range(of: closeTag, range: bodyStart ..< text.endIndex) {
+                extracted.append(String(text[bodyStart ..< closeRange.lowerBound]))
+                cursor = closeRange.upperBound
+                if consumeFollowingNewline, cursor < text.endIndex {
+                    if text[cursor] == "\r" {
+                        let next = text.index(after: cursor)
+                        if next < text.endIndex, text[next] == "\n" {
+                            cursor = text.index(after: next)
+                        }
+                    } else if text[cursor] == "\n" {
+                        cursor = text.index(after: cursor)
+                    }
+                }
+            } else {
+                extracted.append(String(text[bodyStart ..< text.endIndex]))
+                cursor = text.endIndex
+            }
+        }
+
+        visibleText.append(contentsOf: text[cursor ..< text.endIndex])
+        return (visibleText, extracted)
+    }
+
+    private static func parseMemoryCitation(_ citations: [String]) -> MemoryCitation? {
+        var entries: [MemoryCitationEntry] = []
+        var rolloutIDs: [String] = []
+        var seenRolloutIDs: Set<String> = []
+
+        for citation in citations {
+            if let entriesBlock = extractBlock(
+                citation,
+                openTag: "<citation_entries>",
+                closeTag: "</citation_entries>"
+            ) {
+                entries.append(contentsOf: entriesBlock
+                    .split(whereSeparator: \.isNewline)
+                    .compactMap { parseMemoryCitationEntry(String($0)) })
+            }
+
+            let idsBlock = extractBlock(
+                citation,
+                openTag: "<rollout_ids>",
+                closeTag: "</rollout_ids>"
+            ) ?? extractBlock(
+                citation,
+                openTag: "<thread_ids>",
+                closeTag: "</thread_ids>"
+            )
+            if let idsBlock {
+                for id in idsBlock.split(whereSeparator: \.isNewline).map({ String($0).trimmingCharacters(in: .whitespacesAndNewlines) })
+                    where !id.isEmpty && seenRolloutIDs.insert(id).inserted
+                {
+                    rolloutIDs.append(id)
+                }
+            }
+        }
+
+        guard !entries.isEmpty || !rolloutIDs.isEmpty else {
+            return nil
+        }
+        return MemoryCitation(entries: entries, rolloutIDs: rolloutIDs)
+    }
+
+    private static func parseMemoryCitationEntry(_ line: String) -> MemoryCitationEntry? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let noteRange = trimmed.range(of: "|note=[", options: .backwards),
+              trimmed.hasSuffix("]")
+        else {
+            return nil
+        }
+
+        let location = String(trimmed[..<noteRange.lowerBound])
+        let noteStart = noteRange.upperBound
+        let noteEnd = trimmed.index(before: trimmed.endIndex)
+        let note = String(trimmed[noteStart ..< noteEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let pathRange = location.range(of: ":", options: .backwards),
+              let lineRangeSeparator = location[pathRange.upperBound...].firstIndex(of: "-")
+        else {
+            return nil
+        }
+
+        let path = String(location[..<pathRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineStartText = String(location[pathRange.upperBound ..< lineRangeSeparator])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineEndText = String(location[location.index(after: lineRangeSeparator)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lineStart = UInt32(lineStartText),
+              let lineEnd = UInt32(lineEndText)
+        else {
+            return nil
+        }
+
+        return MemoryCitationEntry(path: path, lineStart: lineStart, lineEnd: lineEnd, note: note)
+    }
+
+    private static func extractBlock(_ text: String, openTag: String, closeTag: String) -> String? {
+        guard let openRange = text.range(of: openTag),
+              let closeRange = text.range(of: closeTag, range: openRange.upperBound ..< text.endIndex)
+        else {
+            return nil
+        }
+        return String(text[openRange.upperBound ..< closeRange.lowerBound])
     }
 }
 
