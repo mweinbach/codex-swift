@@ -15056,6 +15056,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "codex account authentication required to notify workspace owner")
     }
 
+    func testSendAddCreditsNudgeEmailValidatesCreditTypeBeforeAuthentication() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{}"#,
+                "missing field `creditType`"
+            ),
+            (
+                #"{"creditType":1}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"creditType":"minutes"}"#,
+                "Invalid request: unknown variant `minutes`, expected `credits` or `usage_limit`"
+            )
+        ]
+
+        for (params, expectedMessage) in cases {
+            let response = try appServerResponse(
+                #"{"id":1,"method":"account/sendAddCreditsNudgeEmail","params":\#(params)}"#,
+                codexHome: temp.url
+            )
+
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testSendAddCreditsNudgeEmailRequiresChatGPTAuthentication() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")

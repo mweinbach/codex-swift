@@ -15951,6 +15951,13 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         retryAfterUnauthorized: ((AppServerAuth) throws -> AppServerAuth)?
     ) throws -> [String: Any] {
+        let rawCreditType = try rustRequiredStringParam(params?["creditType"], field: "creditType")
+        guard let creditType = AddCreditsNudgeCreditType(rawValue: rawCreditType) else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(rawCreditType)`, expected `credits` or `usage_limit`"
+            )
+        }
+
         guard let initialAuth = try currentAuth(configuration: configuration) else {
             throw AppServerError.invalidRequest("codex account authentication required to notify workspace owner")
         }
@@ -15960,14 +15967,6 @@ public enum CodexAppServer {
         guard initialAuth.accountID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         else {
             throw AppServerError.internalError("failed to construct backend client: ChatGPT account ID not available")
-        }
-        guard let rawCreditType = stringParam(params?["creditType"]) else {
-            throw AppServerError.invalidRequest("missing creditType")
-        }
-        guard let creditType = AddCreditsNudgeCreditType(rawValue: rawCreditType) else {
-            throw AppServerError.invalidRequest(
-                "Invalid request: unknown variant `\(rawCreditType)`, expected `credits` or `usage_limit`"
-            )
         }
 
         let runtimeConfig: CodexRuntimeConfig
