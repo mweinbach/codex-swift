@@ -1510,7 +1510,11 @@ private func runCloudCommand(_ request: CodexCLI.CloudCommandRequest) async thro
             stdoutMessage: outcome.message
         )
     case let .exec(query, environment, branch, attempts):
-        let prompt = try readCloudExecPrompt(query: query)
+        let prompt = try CloudExecPromptResolver.resolve(
+            query: query,
+            stdinIsTerminal: isatty(STDIN_FILENO) != 0,
+            readStdin: { FileHandle.standardInput.readDataToEndOfFile() }
+        )
         let url = try await client.createTask(
             prompt: prompt.prompt,
             environment: environment,
@@ -1538,36 +1542,6 @@ private func runResponsesAPIProxyCommand(_ request: CodexCLI.ResponsesAPIProxyCo
 
 private func runUpdateCommand(_ request: CodexCLI.UpdateCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     try UpdateCommandRuntime.run()
-}
-
-private struct CloudExecPrompt {
-    let prompt: String
-    let stderrMessage: String?
-}
-
-private struct CloudExecPromptError: Error, CustomStringConvertible {
-    let description: String
-}
-
-private func readCloudExecPrompt(query: String?) throws -> CloudExecPrompt {
-    if let query, query != "-" {
-        return CloudExecPrompt(prompt: query, stderrMessage: nil)
-    }
-
-    let forceStdin = query == "-"
-    if isatty(STDIN_FILENO) != 0, !forceStdin {
-        throw CloudExecPromptError(description: "no query provided. Pass one as an argument or pipe it via stdin.")
-    }
-
-    let stderrMessage = forceStdin ? nil : "Reading query from stdin..."
-    let data = FileHandle.standardInput.readDataToEndOfFile()
-    guard let input = String(data: data, encoding: .utf8) else {
-        throw CloudExecPromptError(description: "failed to read query from stdin: stream did not contain valid UTF-8")
-    }
-    guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        throw CloudExecPromptError(description: "no query provided via stdin (received empty input).")
-    }
-    return CloudExecPrompt(prompt: input, stderrMessage: stderrMessage)
 }
 
 private struct APIKeyReadResult {

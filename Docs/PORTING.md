@@ -482,7 +482,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cloud-tasks/src/cli.rs` and non-TUI command dispatch from `codex-rs/cloud-tasks/src/lib.rs`
   - `codex cloud status`, `codex cloud list`, `codex cloud diff`, and `codex cloud apply` argument parsing, task URL-to-ID normalization, `--attempt`/`--limit` validation, status/list/diff/apply stdout routing, Ready-status exit behavior, selected-attempt diff collection including Rust's attempt-zero error and stable current-attempt ordering for equal attempt metadata, and cloud-task status/list/diff summary formatting, including Rust-style pretty JSON key ordering and explicit nulls for `cloud list --json`
 - `codex-rs/cloud-tasks/src/exec_command.rs` task creation path
-  - `codex cloud exec` prompt/stdin loading, `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output
+  - `codex cloud exec` prompt/stdin loading now lives in a test-backed Swift CLI resolver with Rust's direct-query, forced-stdin, piped-stdin notice, terminal-missing-query, empty-input, and invalid-UTF-8 behavior. `--env`, `--branch`, `--attempts` parsing, environment label/id resolution, git ref resolution, create-task request body including optional starting diff and best-of-N metadata, and browser task URL output are ported.
 - `codex-rs/cloud-tasks/src/env_detect.rs` environment autodetection helper
   - repo-specific environment lookup, global fallback, label/single/pinned/highest-`task_count` selection order, and Rust-shaped `no environments available` failure are ported for the cloud tasks HTTP client
 - Initial `codex-rs/exec/src/lib.rs` non-interactive run path
