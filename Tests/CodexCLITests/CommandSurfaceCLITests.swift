@@ -957,6 +957,35 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncDebugRejectsRootRemoteModeLikeRust() async {
+        let cases: [([String], String)] = [
+            (
+                ["--remote", "ws://root.example.test", "debug", "models"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex debug models`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "debug", "prompt-input"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex debug prompt-input`"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                debugRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 1, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncDebugPromptInputParsesPromptAndImagesLikeRust() async {
         var receivedAction: CodexCLI.DebugCommandAction?
 

@@ -1044,6 +1044,15 @@ public struct CodexCLI: Sendable {
             let rawArguments = rawCommandArguments(after: spec, in: arguments)
             switch parseDebugCommandAction(rawArguments) {
             case let .success(action):
+                let subcommand = debugRemoteRejectionSubcommand(for: action)
+                if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "debug", in: arguments) {
+                    stderr("`--remote \(remote)` is only supported for interactive TUI commands, not `codex \(subcommand)`")
+                    return 1
+                }
+                if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: "debug", in: arguments) != nil {
+                    stderr("`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex \(subcommand)`")
+                    return 1
+                }
                 let mergedAction = debugAction(
                     action,
                     prependingRootImagePaths: rootImagePaths(before: spec, in: arguments)
@@ -2957,6 +2966,21 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>", 64)
         }
         return .success(.traceReduce(traceBundle: traceBundle, output: output))
+    }
+
+    private func debugRemoteRejectionSubcommand(for action: DebugCommandAction) -> String {
+        switch action {
+        case .models:
+            return "debug models"
+        case .appServerSendMessageV2:
+            return "debug app-server"
+        case .promptInput:
+            return "debug prompt-input"
+        case .traceReduce:
+            return "debug trace-reduce"
+        case .clearMemories:
+            return "debug clear-memories"
+        }
     }
 
     private func parseNoArgumentDebugAction(
