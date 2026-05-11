@@ -13654,9 +13654,11 @@ public enum CodexAppServer {
             }
             try validateRealtimeStartOptionals(params)
         case "thread/realtime/appendAudio":
-            guard let audio = params["audio"] as? [String: Any] else {
-                throw AppServerError.invalidParams("missing field `audio`")
-            }
+            let audio = try rustRequiredObjectParam(
+                params["audio"],
+                field: "audio",
+                typeName: "struct ThreadRealtimeAudioChunk"
+            )
             try validateRealtimeAudioChunk(audio)
         case "thread/realtime/appendText":
             guard let text = params["text"] else {
@@ -13678,21 +13680,23 @@ public enum CodexAppServer {
             _ = try rustOptionalStringParam(realtimeSessionID)
         }
         if let voice = params["voice"], !(voice is NSNull) {
-            guard let voiceString = voice as? String else {
-                throw AppServerError.invalidParams("invalid type for field `voice`")
-            }
+            let voiceString = try rustRealtimeVoiceParam(voice)
             let validVoices: Set<String> = [
                 "alloy", "arbor", "ash", "ballad", "breeze", "cedar", "coral", "cove", "echo",
                 "ember", "juniper", "maple", "marin", "sage", "shimmer", "sol", "spruce", "vale", "verse"
             ]
             guard validVoices.contains(voiceString) else {
-                throw AppServerError.invalidParams("unknown variant `\(voiceString)`, expected a realtime voice")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: unknown variant `\(voiceString)`, expected one of `alloy`, `arbor`, `ash`, `ballad`, `breeze`, `cedar`, `coral`, `cove`, `echo`, `ember`, `juniper`, `maple`, `marin`, `sage`, `shimmer`, `sol`, `spruce`, `vale`, `verse`"
+                )
             }
         }
         if let transportValue = params["transport"], !(transportValue is NSNull) {
-            guard let transport = transportValue as? [String: Any] else {
-                throw AppServerError.invalidParams("invalid transport")
-            }
+            let transport = try rustRequiredObjectParam(
+                transportValue,
+                field: "transport",
+                typeName: "internally tagged enum ThreadRealtimeStartTransport"
+            )
             let type = try rustRequiredStringParam(transport["type"], field: "type")
             switch type {
             case "websocket":
@@ -13708,6 +13712,31 @@ public enum CodexAppServer {
                 )
             }
         }
+    }
+
+    private static func rustRealtimeVoiceParam(_ value: Any) throws -> String {
+        guard let string = value as? String else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected string or map"
+            )
+        }
+        return string
+    }
+
+    private static func rustRequiredObjectParam(
+        _ value: Any?,
+        field: String,
+        typeName: String
+    ) throws -> [String: Any] {
+        guard let value else {
+            throw AppServerError.invalidParams("missing field `\(field)`")
+        }
+        guard let object = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected \(typeName)"
+            )
+        }
+        return object
     }
 
     private static func validateRealtimeAudioChunk(_ audio: [String: Any]) throws {

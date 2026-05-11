@@ -15526,6 +15526,26 @@ final class CodexAppServerTests: XCTestCase {
                 expectedStringTypeError
             ),
             (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","voice":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected string or map"
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","voice":"bogus"}}"#,
+                "Invalid request: unknown variant `bogus`, expected one of `alloy`, `arbor`, `ash`, `ballad`, `breeze`, `cedar`, `coral`, `cove`, `echo`, `ember`, `juniper`, `maple`, `marin`, `sage`, `shimmer`, `sol`, `spruce`, `vale`, `verse`"
+            ),
+            (
+                #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","transport":"webrtc"}}"#,
+                "Invalid request: invalid type: string \"webrtc\", expected internally tagged enum ThreadRealtimeStartTransport"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":"AA=="}}"#,
+                "Invalid request: invalid type: string \"AA==\", expected struct ThreadRealtimeAudioChunk"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":null}}"#,
+                "Invalid request: invalid type: null, expected struct ThreadRealtimeAudioChunk"
+            ),
+            (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":1,"sampleRate":24000,"numChannels":1}}}"#,
                 expectedStringTypeError
             ),
