@@ -18,6 +18,52 @@ final class AgentJobRuntimeTests: XCTestCase {
         }
     }
 
+    func testBuildRunnerOptionsMatchesRustDepthAndThreadLimits() throws {
+        let parentThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000061")
+        let childSource = SessionSource.subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 1))
+
+        let options = try AgentJobRuntime.buildRunnerOptions(
+            requestedConcurrency: 32,
+            maxThreads: 6,
+            sessionSource: childSource,
+            maxDepth: 2
+        )
+
+        XCTAssertEqual(options.maxConcurrency, 6)
+        XCTAssertEqual(options.childDepth, 2)
+        XCTAssertEqual(AgentJobRuntime.nextThreadSpawnDepth(for: .vscode), 1)
+        XCTAssertFalse(AgentJobRuntime.exceedsThreadSpawnDepthLimit(depth: 2, maxDepth: 2))
+        XCTAssertTrue(AgentJobRuntime.exceedsThreadSpawnDepthLimit(depth: 3, maxDepth: 2))
+
+        XCTAssertThrowsError(
+            try AgentJobRuntime.buildRunnerOptions(
+                requestedConcurrency: nil,
+                maxThreads: 6,
+                sessionSource: childSource,
+                maxDepth: 1
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? FunctionCallError,
+                .respondToModel("agent depth limit reached; this session cannot spawn more subagents")
+            )
+        }
+
+        XCTAssertThrowsError(
+            try AgentJobRuntime.buildRunnerOptions(
+                requestedConcurrency: nil,
+                maxThreads: 0,
+                sessionSource: .vscode,
+                maxDepth: 1
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? FunctionCallError,
+                .respondToModel("agent thread limit reached; this session cannot spawn more subagents")
+            )
+        }
+    }
+
     func testBuildWorkerPromptMatchesRustInstructions() {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let job = makeJob(
@@ -173,6 +219,37 @@ final class AgentJobRuntimeTests: XCTestCase {
         XCTAssertEqual(items.map(\.sourceID), ["alpha", "alpha"])
         XCTAssertEqual(items.map(\.status), [.pending, .pending])
         XCTAssertEqual(items[0].rowJSON, .object(["id": .string("alpha"), "path": .string("src/lib.rs")]))
+    }
+
+    func testCreateSpawnAgentsOnCSVJobFailsPendingJobWhenRunnerOptionsRejectLikeRust() async throws {
+        let fixture = try AgentJobRuntimeStoreFixture.make()
+        do {
+            _ = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
+                arguments: SpawnAgentsOnCSVArguments(
+                    csvPath: "input/jobs.csv",
+                    instruction: "Review {path}"
+                ),
+                csvContent: "id,path\nalpha,src/lib.rs\n",
+                cwd: fixture.tempDirectory.url.path,
+                store: fixture.store,
+                jobID: "job-thread-limit",
+                maxThreads: 0
+            )
+            XCTFail("Expected max thread zero to reject the runner")
+        } catch let error as FunctionCallError {
+            XCTAssertEqual(
+                error,
+                .respondToModel("agent thread limit reached; this session cannot spawn more subagents")
+            )
+        }
+
+        let persistedJob = try await fixture.store.getAgentJob("job-thread-limit")
+        let job = try XCTUnwrap(persistedJob)
+        XCTAssertEqual(job.status, .failed)
+        XCTAssertEqual(job.lastError, "agent thread limit reached; this session cannot spawn more subagents")
+
+        let items = try await fixture.store.listAgentJobItems(jobID: "job-thread-limit")
+        XCTAssertEqual(items.map(\.status), [.pending])
     }
 
     func testCreateSpawnAgentsOnCSVJobDerivesDefaultOutputAndUsesMaxWorkersFallback() async throws {

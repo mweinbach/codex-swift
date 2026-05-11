@@ -24,6 +24,43 @@ public enum AgentJobRuntime {
         return requested
     }
 
+    public static func nextThreadSpawnDepth(for sessionSource: SessionSource) -> Int32 {
+        guard case let .subagent(.threadSpawn(_, depth, _, _, _)) = sessionSource else {
+            return 1
+        }
+        guard depth < Int32.max else {
+            return Int32.max
+        }
+        return depth + 1
+    }
+
+    public static func exceedsThreadSpawnDepthLimit(depth: Int32, maxDepth: Int32) -> Bool {
+        depth > maxDepth
+    }
+
+    public static func buildRunnerOptions(
+        requestedConcurrency: Int?,
+        maxThreads: Int?,
+        sessionSource: SessionSource = .default,
+        maxDepth: Int32? = nil
+    ) throws -> AgentJobRunnerOptions {
+        let childDepth = nextThreadSpawnDepth(for: sessionSource)
+        if let maxDepth, exceedsThreadSpawnDepthLimit(depth: childDepth, maxDepth: maxDepth) {
+            throw FunctionCallError.respondToModel(
+                "agent depth limit reached; this session cannot spawn more subagents"
+            )
+        }
+        if maxThreads == 0 {
+            throw FunctionCallError.respondToModel(
+                "agent thread limit reached; this session cannot spawn more subagents"
+            )
+        }
+        return AgentJobRunnerOptions(
+            maxConcurrency: normalizeConcurrency(requested: requestedConcurrency, maxThreads: maxThreads),
+            childDepth: childDepth
+        )
+    }
+
     public static func itemTimeout(for job: AgentJob) -> TimeInterval {
         job.maxRuntimeSeconds.map(TimeInterval.init) ?? defaultItemTimeout
     }
@@ -521,6 +558,8 @@ public enum AgentJobRuntime {
         store: SQLiteAgentJobStore,
         jobID: String = UUID().uuidString,
         maxThreads: Int? = nil,
+        sessionSource: SessionSource = .default,
+        maxDepth: Int32? = nil,
         configuredMaxRuntimeSeconds: UInt64? = nil
     ) async throws -> PreparedSpawnAgentsOnCSVJob {
         let arguments = try decodeSpawnAgentsOnCSVArguments(argumentsJSON)
@@ -531,6 +570,8 @@ public enum AgentJobRuntime {
             store: store,
             jobID: jobID,
             maxThreads: maxThreads,
+            sessionSource: sessionSource,
+            maxDepth: maxDepth,
             configuredMaxRuntimeSeconds: configuredMaxRuntimeSeconds
         )
     }
@@ -542,6 +583,8 @@ public enum AgentJobRuntime {
         store: SQLiteAgentJobStore,
         jobID: String = UUID().uuidString,
         maxThreads: Int? = nil,
+        sessionSource: SessionSource = .default,
+        maxDepth: Int32? = nil,
         configuredMaxRuntimeSeconds: UInt64? = nil
     ) async throws -> PreparedSpawnAgentsOnCSVJob {
         guard !arguments.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -592,6 +635,23 @@ public enum AgentJobRuntime {
             throw FunctionCallError.respondToModel("failed to create agent job: \(error)")
         }
 
+        let requestedConcurrency = arguments.maxConcurrency ?? arguments.maxWorkers
+        let runnerOptions: AgentJobRunnerOptions
+        do {
+            runnerOptions = try buildRunnerOptions(
+                requestedConcurrency: requestedConcurrency,
+                maxThreads: maxThreads,
+                sessionSource: sessionSource,
+                maxDepth: maxDepth
+            )
+        } catch let error as FunctionCallError {
+            _ = try? await store.markAgentJobFailed(jobID, errorMessage: error.description)
+            throw error
+        } catch {
+            _ = try? await store.markAgentJobFailed(jobID, errorMessage: String(describing: error))
+            throw error
+        }
+
         do {
             try await store.markAgentJobRunning(jobID)
         } catch {
@@ -600,12 +660,11 @@ public enum AgentJobRuntime {
             )
         }
 
-        let requestedConcurrency = arguments.maxConcurrency ?? arguments.maxWorkers
         let runningJob = try await store.getAgentJob(jobID) ?? job
         return PreparedSpawnAgentsOnCSVJob(
             job: runningJob,
             itemCount: items.count,
-            concurrency: normalizeConcurrency(requested: requestedConcurrency, maxThreads: maxThreads)
+            concurrency: runnerOptions.maxConcurrency
         )
     }
 
@@ -685,6 +744,16 @@ public struct AgentJobSpawnPendingResult: Equatable, Sendable {
     public init(activeItems: [ActiveAgentJobItem], didProgress: Bool) {
         self.activeItems = activeItems
         self.didProgress = didProgress
+    }
+}
+
+public struct AgentJobRunnerOptions: Equatable, Sendable {
+    public var maxConcurrency: Int
+    public var childDepth: Int32
+
+    public init(maxConcurrency: Int, childDepth: Int32) {
+        self.maxConcurrency = maxConcurrency
+        self.childDepth = childDepth
     }
 }
 
