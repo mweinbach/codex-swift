@@ -1556,7 +1556,8 @@ public enum CodexAppServer {
 
     fileprivate static func threadReadResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil }
     ) throws -> [String: Any] {
         guard let threadID = stringParam(params?["threadId"]) else {
             throw AppServerError.invalidRequest("missing threadId")
@@ -1569,14 +1570,21 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
 
+        let includeTurns = try rustDefaultBoolParam(params?["includeTurns"], defaultValue: false)
+
         guard let rolloutPath = try RolloutListing.findConversationPathByIDString(
             codexHome: configuration.codexHome,
             idString: conversationID.description,
             includeArchived: true
         ) else {
+            if let thread = loadedEphemeralThread(conversationID.description) {
+                if includeTurns {
+                    throw AppServerError.invalidRequest("ephemeral threads do not support includeTurns")
+                }
+                return ["thread": thread]
+            }
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
-        let includeTurns = try rustDefaultBoolParam(params?["includeTurns"], defaultValue: false)
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
         let thread = try threadObject(
             for: item,
@@ -20632,6 +20640,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
     private var ephemeralThreadIDs: Set<String> = []
+    private var ephemeralThreadSnapshots: [String: [String: Any]] = [:]
     private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
@@ -20732,6 +20741,13 @@ final class CodexAppServerMessageProcessor {
 
     private func loadedEphemeralThreadIDs() -> Set<String> {
         Set(ephemeralThreadIDs.filter { isThreadLoaded($0) })
+    }
+
+    private func loadedEphemeralThreadSnapshot(threadID: String) -> [String: Any]? {
+        guard ephemeralThreadIDs.contains(threadID), isThreadLoaded(threadID) else {
+            return nil
+        }
+        return ephemeralThreadSnapshots[threadID]
     }
 
     private func rememberThreadAnalyticsMetadata(threadID: String, result: [String: Any]) {
@@ -21772,6 +21788,7 @@ final class CodexAppServerMessageProcessor {
                         if let threadID = thread["id"] as? String {
                             if (thread["ephemeral"] as? Bool) == true {
                                 ephemeralThreadIDs.insert(threadID)
+                                ephemeralThreadSnapshots[threadID] = thread
                             }
                             rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
@@ -21794,7 +21811,11 @@ final class CodexAppServerMessageProcessor {
                 case "thread/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadReadResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.threadReadResult(
+                            params: params,
+                            configuration: configuration,
+                            loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) }
+                        )
                     )
                 case "thread/unsubscribe":
                     response = CodexAppServer.responseObject(

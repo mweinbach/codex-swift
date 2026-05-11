@@ -332,6 +332,53 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadReadReturnsLoadedEphemeralThreadMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-test","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","ephemeral":true}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(read["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertEqual(thread["id"] as? String, threadID)
+        XCTAssertEqual(thread["sessionId"] as? String, threadID)
+        XCTAssertEqual(thread["ephemeral"] as? Bool, true)
+        XCTAssertEqual(thread["path"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
+        XCTAssertEqual(thread["cwd"] as? String, cwd.url.path)
+        XCTAssertEqual(thread["source"] as? String, "appServer")
+        XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
+    }
+
+    func testThreadReadRejectsIncludeTurnsForLoadedEphemeralThreadLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"ephemeral":true}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#.utf8
+        )))
+
+        let error = try XCTUnwrap(read["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "ephemeral threads do not support includeTurns")
+    }
+
     func testThreadStartWithWorkspaceWritePersistsTrustedProjectLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

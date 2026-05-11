@@ -8,6 +8,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertNil(config.model)
+        XCTAssertNil(config.reviewModel)
         XCTAssertNil(config.modelProvider)
         XCTAssertEqual(Set(config.modelProviders.keys), ["openai", "amazon-bedrock", "ollama", "lmstudio"])
         XCTAssertTrue(config.modelProviders["openai"]?.requiresOpenAIAuth == true)
@@ -74,7 +75,11 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
         XCTAssertTrue(config.checkForUpdateOnStartup)
+        XCTAssertFalse(config.disablePasteBurst)
+        XCTAssertNil(config.analyticsEnabled)
+        XCTAssertTrue(config.feedbackEnabled)
         XCTAssertEqual(config.history, HistoryConfig())
+        XCTAssertEqual(config.agents, AgentRuntimeConfig())
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
@@ -302,12 +307,14 @@ final class ConfigLoaderTests: XCTestCase {
         try "  file compact  ".write(to: compact, atomically: true, encoding: .utf8)
         try """
         model = "gpt-5.4"
+        review_model = "gpt-5-review"
         model_provider = "openai"
         approval_policy = "on-failure"
         approvals_reviewer = "guardian_subagent"
         sandbox_mode = "workspace-write"
         allow_login_shell = false
         notify = ["notify-send", "Codex"]
+        commit_attribution = "Codex Swift <codex-swift@example.test>"
         model_reasoning_effort = "high"
         plan_mode_reasoning_effort = "medium"
         model_reasoning_summary = "detailed"
@@ -348,7 +355,14 @@ final class ConfigLoaderTests: XCTestCase {
         background_terminal_max_timeout = 12345
         oss_provider = "ollama"
         check_for_update_on_startup = false
+        disable_paste_burst = true
         file_opener = "cursor"
+
+        [analytics]
+        enabled = true
+
+        [feedback]
+        enabled = false
 
         [audio]
         microphone = "USB Mic"
@@ -363,6 +377,12 @@ final class ConfigLoaderTests: XCTestCase {
         [history]
         persistence = "none"
         max_bytes = 2048
+
+        [agents]
+        max_threads = 3
+        max_depth = 2
+        job_max_runtime_seconds = 900
+        interrupt_message = false
 
         [tui]
         animations = false
@@ -391,6 +411,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.model, "gpt-5.4")
+        XCTAssertEqual(config.reviewModel, "gpt-5-review")
         XCTAssertEqual(config.modelProvider, "openai")
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertEqual(config.approvalPolicy, .onFailure)
@@ -398,6 +419,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertFalse(config.allowLoginShell)
         XCTAssertEqual(config.notify, ["notify-send", "Codex"])
+        XCTAssertEqual(config.commitAttribution, "Codex Swift <codex-swift@example.test>")
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.planModeReasoningEffort, .medium)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)
@@ -456,9 +478,18 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, 12_345)
         XCTAssertEqual(config.ossProvider, "ollama")
         XCTAssertFalse(config.checkForUpdateOnStartup)
+        XCTAssertTrue(config.disablePasteBurst)
+        XCTAssertEqual(config.analyticsEnabled, true)
+        XCTAssertFalse(config.feedbackEnabled)
         XCTAssertEqual(config.history, HistoryConfig(
             persistence: .none,
             maxBytes: 2048
+        ))
+        XCTAssertEqual(config.agents, AgentRuntimeConfig(
+            maxThreads: 3,
+            maxDepth: 2,
+            jobMaxRuntimeSeconds: 900,
+            interruptMessageEnabled: false
         ))
         XCTAssertEqual(config.fileOpener, .cursor)
         XCTAssertEqual(config.tui, TuiRuntimeConfig(
@@ -485,6 +516,58 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
     }
 
+    func testAgentRuntimeConfigAcceptsInlineAndDottedOverridesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        agents = { max_threads = 4, max_depth = 3, interrupt_message = true }
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"agents.job_max_runtime_seconds=120"#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.agents, AgentRuntimeConfig(
+            maxThreads: 4,
+            maxDepth: 3,
+            jobMaxRuntimeSeconds: 120,
+            interruptMessageEnabled: true
+        ))
+    }
+
+    func testAgentRuntimeConfigRejectsZeroLimitsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [agents]
+        max_threads = 0
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "agents.max_threads must be at least 1")
+        }
+
+        try """
+        [agents]
+        max_depth = 0
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "agents.max_depth must be at least 1")
+        }
+
+        try """
+        [agents]
+        job_max_runtime_seconds = 0
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "agents.job_max_runtime_seconds must be at least 1")
+        }
+    }
+
     func testHistoryConfigAcceptsInlineTableLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
@@ -500,6 +583,38 @@ final class ConfigLoaderTests: XCTestCase {
         ))
         XCTAssertEqual(config.fileOpener, .none)
         XCTAssertNil(config.fileOpener.scheme)
+    }
+
+    func testAnalyticsConfigAcceptsInlineTableAndProfileOverrideLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "zdr"
+        analytics = { enabled = true }
+        feedback = { enabled = false }
+
+        [profiles.zdr]
+        model = "gpt-5.4"
+
+        [profiles.zdr.analytics]
+        enabled = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.activeProfile, "zdr")
+        XCTAssertEqual(config.analyticsEnabled, false)
+        XCTAssertFalse(config.feedbackEnabled)
+    }
+
+    func testFeedbackConfigDefaultsEnabledWhenTableOmitsEnabledLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [feedback]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.feedbackEnabled)
     }
 
     func testHistoryConfigRejectsUnknownFieldsLikeRust() throws {

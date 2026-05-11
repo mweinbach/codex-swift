@@ -176,6 +176,29 @@ public struct HistoryConfig: Equatable, Sendable {
     }
 }
 
+public struct AgentRuntimeConfig: Equatable, Sendable {
+    public static let defaultMaxThreads: Int? = 6
+    public static let defaultMaxDepth: Int32 = 1
+    public static let defaultJobMaxRuntimeSeconds: UInt64? = nil
+
+    public var maxThreads: Int?
+    public var maxDepth: Int32
+    public var jobMaxRuntimeSeconds: UInt64?
+    public var interruptMessageEnabled: Bool
+
+    public init(
+        maxThreads: Int? = Self.defaultMaxThreads,
+        maxDepth: Int32 = Self.defaultMaxDepth,
+        jobMaxRuntimeSeconds: UInt64? = Self.defaultJobMaxRuntimeSeconds,
+        interruptMessageEnabled: Bool = true
+    ) {
+        self.maxThreads = maxThreads
+        self.maxDepth = maxDepth
+        self.jobMaxRuntimeSeconds = jobMaxRuntimeSeconds
+        self.interruptMessageEnabled = interruptMessageEnabled
+    }
+}
+
 public enum UriBasedFileOpener: String, Codable, Equatable, Sendable {
     case vsCode = "vscode"
     case vsCodeInsiders = "vscode-insiders"
@@ -201,6 +224,7 @@ public enum UriBasedFileOpener: String, Codable, Equatable, Sendable {
 
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
+    public var reviewModel: String?
     public var modelProvider: String?
     public var modelProviders: [String: ModelProviderInfo]
     public var approvalPolicy: AskForApproval?
@@ -232,6 +256,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var baseInstructions: String?
     public var developerInstructions: String?
     public var compactPrompt: String?
+    public var commitAttribution: String?
     public var includePermissionsInstructions: Bool
     public var includeAppsInstructions: Bool
     public var includeSkillInstructions: Bool
@@ -267,9 +292,13 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var ossProvider: String?
     public var toolSuggest: ToolSuggestConfig
     public var checkForUpdateOnStartup: Bool
+    public var disablePasteBurst: Bool
+    public var analyticsEnabled: Bool?
+    public var feedbackEnabled: Bool
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
     public var history: HistoryConfig
+    public var agents: AgentRuntimeConfig
     public var fileOpener: UriBasedFileOpener
     public var tui: TuiRuntimeConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
@@ -295,6 +324,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public init(
         model: String? = nil,
+        reviewModel: String? = nil,
         modelProvider: String? = nil,
         modelProviders: [String: ModelProviderInfo] = [:],
         approvalPolicy: AskForApproval? = nil,
@@ -324,6 +354,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
         compactPrompt: String? = nil,
+        commitAttribution: String? = nil,
         includePermissionsInstructions: Bool = true,
         includeAppsInstructions: Bool = true,
         includeSkillInstructions: Bool = true,
@@ -359,6 +390,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         ossProvider: String? = nil
     ) {
         self.model = model
+        self.reviewModel = reviewModel
         self.modelProvider = modelProvider
         self.modelProviders = modelProviders
         self.approvalPolicy = approvalPolicy
@@ -390,6 +422,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.baseInstructions = baseInstructions
         self.developerInstructions = developerInstructions
         self.compactPrompt = compactPrompt
+        self.commitAttribution = commitAttribution
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
         self.includeSkillInstructions = includeSkillInstructions
@@ -425,9 +458,13 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.ossProvider = ossProvider
         self.toolSuggest = ToolSuggestConfig()
         self.checkForUpdateOnStartup = true
+        self.disablePasteBurst = false
+        self.analyticsEnabled = nil
+        self.feedbackEnabled = true
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
         self.history = HistoryConfig()
+        self.agents = AgentRuntimeConfig()
         self.fileOpener = .vsCode
         self.tui = TuiRuntimeConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
@@ -886,6 +923,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 }
 
 public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidConfig(String)
     case invalidStringValue(String)
     case invalidBoolValue(String)
     case invalidAuthCredentialsStoreMode
@@ -904,6 +942,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
 
     public var description: String {
         switch self {
+        case let .invalidConfig(message):
+            return message
         case let .invalidStringValue(key):
             return "Invalid value for \(key): expected string"
         case let .invalidBoolValue(key):
@@ -1674,6 +1714,10 @@ private struct ParsedCodexConfigToml {
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var history: [String: ConfigValue] = [:]
+    var analytics: [String: ConfigValue] = [:]
+    var feedback: [String: ConfigValue] = [:]
+    var profileAnalytics: [String: [String: ConfigValue]] = [:]
+    var agents: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
@@ -1720,6 +1764,11 @@ private struct ParsedCodexConfigToml {
                         parsed.profiles[name] = [:]
                     }
                 }
+                if case let .profileAnalytics(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
                 continue
             }
 
@@ -1760,6 +1809,36 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
+                if key == "analytics" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (analyticsKey, analyticsValue) in table {
+                        parsed.analytics[analyticsKey] = analyticsValue
+                    }
+                    continue
+                }
+                if key == "feedback" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (feedbackKey, feedbackValue) in table {
+                        parsed.feedback[feedbackKey] = feedbackValue
+                    }
+                    continue
+                }
+                if key == "agents" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (agentKey, agentValue) in table where Self.isRelevantAgentKey(agentKey) {
+                        parsed.agents[agentKey] = agentValue
+                    }
+                    continue
+                }
                 guard isRelevantTopLevelKey(key) else { continue }
                 parsed.topLevel[key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -1772,6 +1851,14 @@ private struct ParsedCodexConfigToml {
                 {
                     for (tuiKey, tuiValue) in tuiTable {
                         parsed.profileTui[name, default: [:]][tuiKey] = tuiValue
+                    }
+                    continue
+                }
+                if key == "analytics",
+                   case let .table(analyticsTable) = try ConfigValueParser.parseTomlLiteral(valueText)
+                {
+                    for (analyticsKey, analyticsValue) in analyticsTable {
+                        parsed.profileAnalytics[name, default: [:]][analyticsKey] = analyticsValue
                     }
                     continue
                 }
@@ -1813,6 +1900,16 @@ private struct ParsedCodexConfigToml {
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .history:
                 parsed.history[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .analytics:
+                parsed.analytics[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .feedback:
+                parsed.feedback[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .profileAnalytics(name):
+                parsed.profileAnalytics[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .agents:
+                if Self.isRelevantAgentKey(key) {
+                    parsed.agents[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+                }
             case let .permissionFilesystem(name):
                 let filesystemKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
@@ -2028,6 +2125,16 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "analytics" {
+                analytics[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "feedback" {
+                feedback[parts[1]] = value
+                continue
+            }
+
             if parts.count == 1, parts[0] == "default_permissions" {
                 topLevel[parts[0]] = value
                 continue
@@ -2074,6 +2181,13 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "agents" {
+                if Self.isRelevantAgentKey(parts[1]) {
+                    agents[parts[1]] = value
+                }
+                continue
+            }
+
             if parts.count == 3, parts[0] == "tui", parts[1] == "model_availability_nux" {
                 tuiModelAvailabilityNux[try Self.parseDottedKey(path).dropFirst(2).joined(separator: ".")] = value
                 continue
@@ -2081,6 +2195,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 4, parts[0] == "profiles", parts[2] == "tui" {
                 profileTui[parts[1], default: [:]][parts[3]] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "profiles", parts[2] == "analytics" {
+                profileAnalytics[parts[1], default: [:]][parts[3]] = value
                 continue
             }
 
@@ -2192,6 +2311,26 @@ private struct ParsedCodexConfigToml {
 
         for (key, value) in overlay.history {
             history[key] = value
+        }
+
+        for (key, value) in overlay.analytics {
+            analytics[key] = value
+        }
+
+        for (key, value) in overlay.feedback {
+            feedback[key] = value
+        }
+
+        for (profileName, profileValue) in overlay.profileAnalytics {
+            var mergedProfile = profileAnalytics[profileName] ?? [:]
+            for (key, value) in profileValue {
+                mergedProfile[key] = value
+            }
+            profileAnalytics[profileName] = mergedProfile
+        }
+
+        for (key, value) in overlay.agents {
+            agents[key] = value
         }
 
         for (profileName, profileValue) in overlay.permissions {
@@ -2332,6 +2471,24 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(agentsTable) = table["agents"] {
+            for (key, value) in agentsTable where Self.isRelevantAgentKey(key) {
+                agents[key] = value
+            }
+        }
+
+        if case let .table(analyticsTable) = table["analytics"] {
+            for (key, value) in analyticsTable {
+                analytics[key] = value
+            }
+        }
+
+        if case let .table(feedbackTable) = table["feedback"] {
+            for (key, value) in feedbackTable {
+                feedback[key] = value
+            }
+        }
+
         if case let .table(shellEnvironmentPolicyTable) = table["shell_environment_policy"] {
             for (key, value) in shellEnvironmentPolicyTable {
                 shellEnvironmentPolicy[key] = value
@@ -2411,6 +2568,12 @@ private struct ParsedCodexConfigToml {
                             profileTui[profileName, default: [:]][tuiKey] = tuiValue
                         }
                     }
+
+                    if key == "analytics", case let .table(analyticsTable) = value {
+                        for (analyticsKey, analyticsValue) in analyticsTable {
+                            profileAnalytics[profileName, default: [:]][analyticsKey] = analyticsValue
+                        }
+                    }
                 }
             }
         }
@@ -2423,6 +2586,9 @@ private struct ParsedCodexConfigToml {
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
         config.history = try Self.historyConfigValue(history, key: "history")
+        config.analyticsEnabled = try Self.enabledConfigValue(analytics, key: "analytics") ?? config.analyticsEnabled
+        config.feedbackEnabled = try Self.enabledConfigValue(feedback, key: "feedback") ?? true
+        config.agents = try Self.agentRuntimeConfigValue(agents, key: "agents")
         let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         config.tui = try Self.tuiRuntimeConfigValue(
             tui,
@@ -2525,6 +2691,10 @@ private struct ParsedCodexConfigToml {
                 to: &config,
                 keyPrefix: "profiles.\(activeProfile)."
             )
+            config.analyticsEnabled = try Self.enabledConfigValue(
+                profileAnalytics[activeProfile] ?? [:],
+                key: "profiles.\(activeProfile).analytics"
+            ) ?? config.analyticsEnabled
         }
 
         config.baseInstructions = try config.baseInstructions ?? Self.readNonEmptyFile(
@@ -2971,6 +3141,9 @@ private struct ParsedCodexConfigToml {
         if let model = values["model"] {
             config.model = try stringValue(model, key: "\(keyPrefix)model")
         }
+        if let reviewModel = values["review_model"] {
+            config.reviewModel = try stringValue(reviewModel, key: "\(keyPrefix)review_model")
+        }
         if let contextWindow = values["model_context_window"] {
             config.modelContextWindow = try int64Value(
                 contextWindow,
@@ -3020,6 +3193,12 @@ private struct ParsedCodexConfigToml {
         }
         if let notify = values["notify"] {
             config.notify = try stringArrayValue(notify, key: "\(keyPrefix)notify")
+        }
+        if let commitAttribution = values["commit_attribution"] {
+            config.commitAttribution = try stringValue(
+                commitAttribution,
+                key: "\(keyPrefix)commit_attribution"
+            )
         }
         if let hideAgentReasoning = values["hide_agent_reasoning"] {
             config.hideAgentReasoning = try boolValue(
@@ -3195,6 +3374,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)check_for_update_on_startup"
             )
         }
+        if let disablePasteBurst = values["disable_paste_burst"] {
+            config.disablePasteBurst = try boolValue(
+                disablePasteBurst,
+                key: "\(keyPrefix)disable_paste_burst"
+            )
+        }
         if let fileOpener = values["file_opener"] {
             config.fileOpener = try stringEnumValue(
                 UriBasedFileOpener.self,
@@ -3215,6 +3400,7 @@ private struct ParsedCodexConfigToml {
 
     private static func isRelevantTopLevelKey(_ key: String) -> Bool {
         key == "model"
+            || key == "review_model"
             || key == "model_context_window"
             || key == "model_auto_compact_token_limit"
             || key == "model_provider"
@@ -3224,6 +3410,7 @@ private struct ParsedCodexConfigToml {
             || key == "default_permissions"
             || key == "allow_login_shell"
             || key == "notify"
+            || key == "commit_attribution"
             || key == "hide_agent_reasoning"
             || key == "show_raw_agent_reasoning"
             || key == "model_reasoning_effort"
@@ -3269,6 +3456,7 @@ private struct ParsedCodexConfigToml {
             || key == "shell_environment_policy"
             || key == "oss_provider"
             || key == "check_for_update_on_startup"
+            || key == "disable_paste_burst"
             || key == "file_opener"
     }
 
@@ -3508,6 +3696,76 @@ private struct ParsedCodexConfigToml {
         )
     }
 
+    private static func enabledConfigValue(_ table: [String: ConfigValue], key: String) throws -> Bool? {
+        guard !table.isEmpty else {
+            return nil
+        }
+        for field in table.keys where field != "enabled" {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return try table["enabled"].map { try boolValue($0, key: "\(key).enabled") }
+    }
+
+    private static func agentRuntimeConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> AgentRuntimeConfig {
+        guard !table.isEmpty else {
+            return AgentRuntimeConfig()
+        }
+        for field in table.keys where !isRelevantAgentKey(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+
+        let maxThreads = try table["max_threads"].map {
+            try positiveIntValue(
+                $0,
+                key: "\(key).max_threads",
+                message: "agents.max_threads must be at least 1"
+            )
+        } ?? AgentRuntimeConfig.defaultMaxThreads
+        let maxDepth = try table["max_depth"].map {
+            let value = try positiveIntValue(
+                $0,
+                key: "\(key).max_depth",
+                message: "agents.max_depth must be at least 1"
+            )
+            guard value <= Int(Int32.max) else {
+                throw CodexConfigLoadError.invalidConfig("agents.max_depth must fit within a 32-bit signed integer")
+            }
+            return Int32(value)
+        } ?? AgentRuntimeConfig.defaultMaxDepth
+        let jobMaxRuntimeSeconds = try table["job_max_runtime_seconds"].map {
+            try positiveUInt64Value(
+                $0,
+                key: "\(key).job_max_runtime_seconds",
+                message: "agents.job_max_runtime_seconds must be at least 1"
+            )
+        } ?? AgentRuntimeConfig.defaultJobMaxRuntimeSeconds
+
+        if let jobMaxRuntimeSeconds, jobMaxRuntimeSeconds > UInt64(Int64.max) {
+            throw CodexConfigLoadError.invalidConfig(
+                "agents.job_max_runtime_seconds must fit within a 64-bit signed integer"
+            )
+        }
+
+        return AgentRuntimeConfig(
+            maxThreads: maxThreads,
+            maxDepth: maxDepth,
+            jobMaxRuntimeSeconds: jobMaxRuntimeSeconds,
+            interruptMessageEnabled: try table["interrupt_message"].map {
+                try boolValue($0, key: "\(key).interrupt_message")
+            } ?? true
+        )
+    }
+
+    private static func isRelevantAgentKey(_ key: String) -> Bool {
+        key == "max_threads"
+            || key == "max_depth"
+            || key == "job_max_runtime_seconds"
+            || key == "interrupt_message"
+    }
+
     private static func tuiRuntimeConfigValue(
         _ table: [String: ConfigValue],
         modelAvailabilityNux: [String: ConfigValue],
@@ -3729,6 +3987,29 @@ private struct ParsedCodexConfigToml {
         return Int(integer)
     }
 
+    private static func positiveIntValue(_ value: ConfigValue, key: String, message: String) throws -> Int {
+        guard case let .integer(integer) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        guard integer >= 1 else {
+            throw CodexConfigLoadError.invalidConfig(message)
+        }
+        guard integer <= Int64(Int.max) else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        return Int(integer)
+    }
+
+    private static func positiveUInt64Value(_ value: ConfigValue, key: String, message: String) throws -> UInt64 {
+        guard case let .integer(integer) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        guard integer >= 1 else {
+            throw CodexConfigLoadError.invalidConfig(message)
+        }
+        return UInt64(integer)
+    }
+
     private static func int64Value(_ value: ConfigValue, key: String) throws -> Int64 {
         guard case let .integer(integer) = value else {
             throw CodexConfigLoadError.invalidStringValue(key)
@@ -3847,6 +4128,15 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "history" {
             return .history
         }
+        if parts.count == 1, parts[0] == "analytics" {
+            return .analytics
+        }
+        if parts.count == 1, parts[0] == "feedback" {
+            return .feedback
+        }
+        if parts.count == 1, parts[0] == "agents" {
+            return .agents
+        }
         if parts.count == 3, parts[0] == "permissions", parts[2] == "filesystem" {
             return .permissionFilesystem(parts[1])
         }
@@ -3906,6 +4196,9 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "tui" {
             return .profileTui(parts[1])
+        }
+        if parts.count == 3, parts[0] == "profiles", parts[2] == "analytics" {
+            return .profileAnalytics(parts[1])
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
@@ -4098,6 +4391,10 @@ private enum ConfigSection {
     case memories
     case sandboxWorkspaceWrite
     case history
+    case analytics
+    case feedback
+    case profileAnalytics(String)
+    case agents
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
     case permissionNetwork(String)
