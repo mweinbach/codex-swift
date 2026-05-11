@@ -13637,6 +13637,12 @@ public enum CodexAppServer {
         if let string = value as? String {
             throw AppServerError.invalidRequest("Invalid request: invalid type: string \"\(string)\", expected \(expected)")
         }
+        if value is [Any] {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: sequence, expected \(expected)")
+        }
+        if value is [String: Any] {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: map, expected \(expected)")
+        }
         if let number = value as? NSNumber {
             let int = number.intValue
             if Double(int) == number.doubleValue {
