@@ -1731,9 +1731,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         guard let numTurnsNumber = params?["numTurns"] as? NSNumber else {
             throw AppServerError.invalidRequest("missing numTurns")
         }
@@ -1779,9 +1777,7 @@ public enum CodexAppServer {
         isLoaded: (String) -> Bool,
         unsubscribe: (String) -> Bool
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let conversationID: ConversationId
         do {
@@ -1929,9 +1925,7 @@ public enum CodexAppServer {
         try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
         _ = try serviceTierParam(params?["serviceTier"])
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2468,9 +2462,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         activeTurnID: String?
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2478,9 +2470,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
-        guard let expectedTurnID = stringParam(params?["expectedTurnId"]) else {
-            throw AppServerError.invalidRequest("missing expectedTurnId")
-        }
+        let expectedTurnID = try rustRequiredStringParam(params?["expectedTurnId"], field: "expectedTurnId")
         guard !expectedTurnID.isEmpty else {
             throw AppServerError.invalidRequest("expectedTurnId must not be empty")
         }
@@ -2534,12 +2524,8 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
-        guard let turnID = stringParam(params?["turnId"]), !turnID.isEmpty else {
-            throw AppServerError.invalidRequest("missing turnId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        _ = try rustRequiredStringParam(params?["turnId"], field: "turnId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2559,9 +2545,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerReviewStartOutcome {
-        guard let threadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -2859,9 +2843,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let threadID: ConversationId
         do {
             threadID = try ConversationId(string: rawThreadID)
@@ -2990,9 +2972,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func threadElicitationCounterThreadID(params: [String: Any]?) throws -> String {
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         do {
             return try ConversationId(string: rawThreadID).description
         } catch {
