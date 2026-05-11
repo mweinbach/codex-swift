@@ -168,6 +168,95 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(socketRoot.path)"))
     }
 
+    func testDirectFileSystemPolicyExcludesUnreadableRootsFromReadAndWrite() throws {
+        let unreadableRoot = try AbsolutePath(absolutePath: "/tmp/codex-unreadable")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .write),
+            FileSystemSandboxEntry(path: .path(unreadableRoot.path), access: .none)
+        ])
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            fileSystemSandboxPolicy: policy,
+            networkSandboxPolicy: .restricted,
+            sandboxPolicyCwd: try AbsolutePath(absolutePath: "/")
+        )
+
+        let policyText = args[1]
+        XCTAssertTrue(policyText.contains(#"(require-not (literal (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
+        XCTAssertTrue(policyText.contains(#"(require-not (subpath (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
+        XCTAssertTrue(policyText.contains(#"(require-not (literal (param "WRITABLE_ROOT_0_EXCLUDED_0")))"#))
+        XCTAssertTrue(policyText.contains(#"(require-not (subpath (param "WRITABLE_ROOT_0_EXCLUDED_0")))"#))
+        XCTAssertTrue(args.contains("-DREADABLE_ROOT_0_EXCLUDED_0=/private/tmp/codex-unreadable"))
+        XCTAssertTrue(args.contains { $0.hasPrefix("-DWRITABLE_ROOT_0_EXCLUDED_") && $0.hasSuffix("=/private/tmp/codex-unreadable") })
+    }
+
+    func testDirectReadableRootsExcludeNestedUnreadableRoots() throws {
+        let readableRoot = try AbsolutePath(absolutePath: "/tmp/codex-readable")
+        let unreadableRoot = try readableRoot.join("private")
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .path(readableRoot.path), access: .read),
+            FileSystemSandboxEntry(path: .path(unreadableRoot.path), access: .none)
+        ])
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            fileSystemSandboxPolicy: policy,
+            networkSandboxPolicy: .restricted,
+            sandboxPolicyCwd: try AbsolutePath(absolutePath: "/")
+        )
+
+        XCTAssertTrue(args.contains("-DREADABLE_ROOT_0=/private/tmp/codex-readable"))
+        XCTAssertTrue(args.contains("-DREADABLE_ROOT_0_EXCLUDED_0=/private/tmp/codex-readable/private"))
+        XCTAssertTrue(args[1].contains(#"(require-not (literal (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
+        XCTAssertTrue(args[1].contains(#"(require-not (subpath (param "READABLE_ROOT_0_EXCLUDED_0")))"#))
+    }
+
+    func testUnreadableGlobRegexMatchesRustSeatbeltTranslation() {
+        XCTAssertEqual(
+            SeatbeltSandbox.seatbeltRegexForUnreadableGlob("/tmp/repo/**/*.env"),
+            #"^/tmp/repo/(.*/)?[^/]*\.env$"#
+        )
+        XCTAssertEqual(
+            SeatbeltSandbox.seatbeltRegexForUnreadableGlob("/tmp/repo/[!a-c]?.txt"),
+            #"^/tmp/repo/[^a-c][^/]\.txt$"#
+        )
+        XCTAssertEqual(
+            SeatbeltSandbox.seatbeltRegexForUnreadableGlob("/tmp/repo/[abc"),
+            #"^/tmp/repo/\[abc(/.*)?$"#
+        )
+    }
+
+    func testDirectSeatbeltArgsIncludeUnreadableGlobDenyPolicy() throws {
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.root.jsonValue), access: .read),
+            FileSystemSandboxEntry(path: .globPattern("/tmp/repo/**/*.env"), access: .none)
+        ])
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            fileSystemSandboxPolicy: policy,
+            networkSandboxPolicy: .restricted,
+            sandboxPolicyCwd: try AbsolutePath(absolutePath: "/")
+        )
+
+        let regex = #"^/tmp/repo/(.*/)?[^/]*\.env$"#
+        XCTAssertTrue(args[1].contains(#"(deny file-read* (regex #"\#(regex)"))"#))
+        XCTAssertTrue(args[1].contains(#"(deny file-write-unlink (regex #"\#(regex)"))"#))
+    }
+
+    func testDirectMinimalReadProfileIncludesRustPlatformDefaults() throws {
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
+        ])
+        let args = SeatbeltSandbox.commandArguments(
+            command: ["/usr/bin/true"],
+            fileSystemSandboxPolicy: policy,
+            networkSandboxPolicy: .restricted,
+            sandboxPolicyCwd: try AbsolutePath(absolutePath: "/")
+        )
+
+        XCTAssertTrue(args[1].contains("macOS platform defaults included when a split filesystem policy requests `:minimal`"))
+        XCTAssertTrue(args[1].contains(#"(allow file-read-data (subpath "/usr/bin"))"#))
+    }
+
     func testFullAutoSelectsWorkspaceWritePolicy() {
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: false), .readOnly)
         XCTAssertEqual(SeatbeltSandbox.sandboxPolicy(fullAuto: true), .newWorkspaceWritePolicy())

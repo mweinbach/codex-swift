@@ -232,6 +232,27 @@ final class SandboxCLITests: XCTestCase {
         XCTAssertTrue(networkAccess)
         XCTAssertTrue(excludeTmpdirEnvVar)
         XCTAssertTrue(excludeSlashTmp)
+        XCTAssertTrue(configuration.permissionProfile.fileSystemSandboxPolicy.canWritePathWithCwd(
+            workspaceRoot.path,
+            cwd: configuration.cwd.path
+        ))
+        XCTAssertTrue(configuration.permissionProfile.networkSandboxPolicy.isEnabled)
+    }
+
+    func testResolveDebugSandboxConfigurationDerivesPermissionProfileForDangerNoSandboxBuiltIn() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+
+        let configuration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-no-sandbox"),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+
+        XCTAssertEqual(configuration.sandboxPolicy, .dangerFullAccess)
+        XCTAssertEqual(configuration.permissionProfile, .fromLegacySandboxPolicy(.dangerFullAccess))
     }
 
     func testResolveDebugSandboxConfigurationKeepsLegacyConfigsReadOnlyUnlessSandboxModeIsExplicit() throws {
@@ -315,6 +336,44 @@ final class SandboxCLITests: XCTestCase {
                     FileSystemSandboxEntry(path: .special(FileSystemSpecialPath.minimal.jsonValue), access: .read)
                 ]),
                 network: .enabled
+            )
+        )
+    }
+
+    func testResolveDebugSandboxConfigurationPreservesNonLegacyPermissionProfileForDirectSeatbeltRuntime() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+        let externalWriteRoot = try SandboxTemporaryDirectory()
+        try """
+        default_permissions = "external-write-test"
+
+        [permissions.external-write-test.filesystem]
+        "\(externalWriteRoot.url.path)" = "write"
+
+        [permissions.external-write-test.network]
+        enabled = false
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: "external-write-test"),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            environment: [:]
+        )
+
+        XCTAssertEqual(configuration.sandboxPolicy, .readOnly)
+        XCTAssertEqual(
+            configuration.permissionProfile,
+            .managed(
+                fileSystem: .restricted(entries: [
+                    FileSystemSandboxEntry(path: .path(externalWriteRoot.url.path), access: .write)
+                ]),
+                network: .restricted
             )
         )
     }

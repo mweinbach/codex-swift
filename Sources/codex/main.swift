@@ -1279,7 +1279,7 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
 
         let exitCode = try SeatbeltSandbox.run(
             command: command,
-            sandboxPolicy: sandboxConfiguration.sandboxPolicy,
+            permissionProfile: sandboxConfiguration.permissionProfile,
             cwd: sandboxConfiguration.cwd,
             allowUnixSockets: allowUnixSockets,
             logDenials: logDenials

@@ -64,9 +64,15 @@ extension CodexCLI {
         )
         switch profile.resolveBuiltInPolicy(defaultPolicy: defaultConfig.sandboxPolicy) {
         case let .resolved(sandboxPolicy):
+            if profile.permissionsProfile == nil || profile.permissionsProfile == ":workspace" {
+                return DebugSandboxConfiguration(
+                    sandboxPolicy: sandboxPolicy,
+                    permissionProfile: defaultConfig.permissionProfile,
+                    cwd: cwd
+                )
+            }
             return DebugSandboxConfiguration(
                 sandboxPolicy: sandboxPolicy,
-                permissionProfile: defaultConfig.permissionProfile,
                 cwd: cwd
             )
         case let .customProfile(profileName):
@@ -170,10 +176,10 @@ extension CodexCLI {
     ) throws -> DebugSandboxConfiguration {
         let permissionProfile = config.permissionProfile
             ?? .fromLegacySandboxPolicyForCwd(config.legacySandboxPolicy(defaultMode: .readOnly), cwd: cwd.path)
-        let sandboxPolicy = try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+        let sandboxPolicy = (try? permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
             networkPolicy: permissionProfile.networkSandboxPolicy,
             cwd: cwd.standardizedFileURL.path
-        )
+        )) ?? config.legacySandboxPolicy(defaultMode: .readOnly)
         return DebugSandboxConfiguration(
             sandboxPolicy: sandboxPolicy,
             permissionProfile: permissionProfile,

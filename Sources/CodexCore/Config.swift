@@ -1035,7 +1035,22 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         case let .globPattern(pattern):
             return "1:\(pattern)"
         case let .special(value):
-            return "2:\(String(describing: value))"
+            switch FileSystemSpecialPath(jsonValue: value) {
+            case .minimal:
+                return "2:0:minimal"
+            case let .projectRoots(subpath?):
+                return "2:1:project_roots:\(subpath)"
+            case .projectRoots(nil):
+                return "2:2:project_roots"
+            case .root:
+                return "2:3:root"
+            case .tmpdir:
+                return "2:4:tmpdir"
+            case .slashTmp:
+                return "2:5:slash_tmp"
+            case let .unknown(path, subpath):
+                return "2:6:\(path):\(subpath ?? "")"
+            }
         }
     }
 }
