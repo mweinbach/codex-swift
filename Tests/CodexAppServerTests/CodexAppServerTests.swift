@@ -18388,6 +18388,63 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "")
     }
 
+    func testCommandExecPipeStreamsOutputAndAcceptsWriteLikeRust() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            }
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf 'out-start\n'; printf 'err-start\n' >&2; IFS= read line; printf 'out:%s\n' \"$line\"; printf 'err:%s\n' \"$line\" >&2"],"processId":"cmd-pipe","cwd":"\#(cwd.url.path)","streamStdin":true,"streamStdoutStderr":true}}"#.utf8
+        )))
+
+        var stdout = ""
+        var stderr = ""
+        while !stdout.contains("out-start\n") || !stderr.contains("err-start\n") {
+            let data = try await nextNotificationPayload(notificationCapture, timeoutNanoseconds: 1_000_000_000)
+            for message in try decodeMessages(data) {
+                if let delta = try commandExecOutputDelta(message, processID: "cmd-pipe") {
+                    if delta.stream == "stdout" {
+                        stdout += delta.text
+                    } else if delta.stream == "stderr" {
+                        stderr += delta.text
+                    }
+                }
+            }
+        }
+
+        let write = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/write","params":{"processId":"cmd-pipe","deltaBase64":"aGVsbG8K","closeStdin":true}}"#.utf8
+        )))
+        XCTAssertEqual((write["result"] as? [String: Any])?.isEmpty, true)
+
+        var response: [String: Any]?
+        while response == nil || !stdout.contains("out:hello\n") || !stderr.contains("err:hello\n") {
+            let data = try await nextNotificationPayload(notificationCapture, timeoutNanoseconds: 1_000_000_000)
+            for message in try decodeMessages(data) {
+                if let delta = try commandExecOutputDelta(message, processID: "cmd-pipe") {
+                    if delta.stream == "stdout" {
+                        stdout += delta.text
+                    } else if delta.stream == "stderr" {
+                        stderr += delta.text
+                    }
+                } else if message["id"] as? Int == 1 {
+                    response = message
+                }
+            }
+        }
+
+        let result = try XCTUnwrap(response?["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecProcessIDSessionRespectsOutputCapLikeRust() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -18925,6 +18982,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullTimeoutParams["processHandle"] as? String, "proc-null-timeout")
         XCTAssertEqual(nullTimeoutParams["exitCode"] as? Int, 0)
         XCTAssertEqual(nullTimeoutParams["stdout"] as? String, "hi\n")
+    }
+
+    func testProcessSpawnBufferedOutputCapReportsCapReachedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            },
+            experimentalAPIEnabled: true
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/sh","-c","printf abcde; printf 12345 >&2"],"processHandle":"proc-cap","cwd":"\#(cwd.url.path)","outputBytesCap":3}}"#.utf8
+        )))
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-cap")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        XCTAssertEqual(params["stdout"] as? String, "abc")
+        XCTAssertEqual(params["stdoutCapReached"] as? Bool, true)
+        XCTAssertEqual(params["stderr"] as? String, "123")
+        XCTAssertEqual(params["stderrCapReached"] as? Bool, true)
     }
 
     func testProcessSpawnInheritsServerEnvironmentAndAppliesOverrides() async throws {
@@ -19478,6 +19564,22 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func commandExecOutputDelta(
+        _ message: [String: Any],
+        processID: String
+    ) throws -> (stream: String, text: String)? {
+        guard message["method"] as? String == "command/exec/outputDelta",
+              let params = message["params"] as? [String: Any],
+              params["processId"] as? String == processID
+        else {
+            return nil
+        }
+        let stream = try XCTUnwrap(params["stream"] as? String)
+        let deltaBase64 = try XCTUnwrap(params["deltaBase64"] as? String)
+        let data = try XCTUnwrap(Data(base64Encoded: deltaBase64))
+        return (stream, String(data: data, encoding: .utf8) ?? "")
     }
 
     private func waitForCommandLineMarker(
