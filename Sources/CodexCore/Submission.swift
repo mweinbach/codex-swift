@@ -20,6 +20,38 @@ public struct W3CTraceContext: Equatable, Codable, Sendable {
         self.traceparent = traceparent
         self.tracestate = tracestate
     }
+
+    public static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> W3CTraceContext? {
+        guard let traceparent = environment["TRACEPARENT"],
+              isValidTraceparent(traceparent)
+        else {
+            return nil
+        }
+        return W3CTraceContext(traceparent: traceparent, tracestate: environment["TRACESTATE"])
+    }
+
+    private static func isValidTraceparent(_ value: String) -> Bool {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 4,
+              parts[0].count == 2,
+              parts[1].count == 32,
+              parts[2].count == 16,
+              parts[3].count == 2,
+              parts.allSatisfy(isLowercaseHex),
+              parts[0] != "ff",
+              parts[1].contains(where: { $0 != "0" }),
+              parts[2].contains(where: { $0 != "0" })
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func isLowercaseHex(_ value: Substring) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            (UnicodeScalar("0")..."9").contains(scalar) || (UnicodeScalar("a")..."f").contains(scalar)
+        }
+    }
 }
 
 public enum ResponsesClientMetadata {

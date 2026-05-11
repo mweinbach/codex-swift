@@ -903,6 +903,7 @@ private func runNonInteractiveExec(
         provider: provider,
         auth: authResolution.auth
     )
+    let requestTrace = W3CTraceContext.fromEnvironment()
     let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
         streamPrompt: { nextPrompt in
@@ -917,7 +918,8 @@ private func runNonInteractiveExec(
                     reasoningSummary: settings.modelReasoningSummary,
                     verbosity: settings.modelVerbosity,
                     serviceTier: settings.serviceTier,
-                    outputSchema: outputSchema
+                    outputSchema: outputSchema,
+                    requestTrace: requestTrace
                 ),
                 providerInfo: providerResolution.info,
                 commandRunner: commandAuthRunner

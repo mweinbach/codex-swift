@@ -382,6 +382,30 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(options.inputModalities, [.text])
     }
 
+    func testResponsesOptionsCarriesRequestTraceClientMetadataLikeRust() {
+        let options = NonInteractiveExec.responsesOptions(
+            conversationID: ConversationId(),
+            modelFamily: ModelFamily(slug: "gpt-test", family: "test"),
+            reasoningEffort: nil,
+            reasoningSummary: nil,
+            verbosity: nil,
+            outputSchema: nil,
+            requestTrace: W3CTraceContext(
+                traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                tracestate: "vendor=value"
+            )
+        )
+
+        XCTAssertEqual(
+            options.clientMetadata[ResponsesClientMetadata.wsRequestHeaderTraceparentKey],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        )
+        XCTAssertEqual(
+            options.clientMetadata[ResponsesClientMetadata.wsRequestHeaderTracestateKey],
+            "vendor=value"
+        )
+    }
+
     func testUserPromptSubmitHooksAppendAdditionalContextToPrompt() async throws {
         let cwd = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-hook-context-\(UUID().uuidString)", isDirectory: true)

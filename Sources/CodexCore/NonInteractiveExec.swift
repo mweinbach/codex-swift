@@ -228,7 +228,8 @@ public enum NonInteractiveExec {
         reasoningSummary: ReasoningSummary?,
         verbosity: Verbosity?,
         serviceTier: String? = nil,
-        outputSchema: JSONValue?
+        outputSchema: JSONValue?,
+        requestTrace: W3CTraceContext? = nil
     ) -> ResponsesOptions {
         let effort = reasoningEffort ?? modelFamily.defaultReasoningEffort
         let summary = reasoningSummary ?? (modelFamily.supportsReasoningSummaries
@@ -247,7 +248,8 @@ public enum NonInteractiveExec {
             ),
             inputModalities: modelFamily.inputModalities,
             conversationID: conversationID.description,
-            sessionSource: .exec
+            sessionSource: .exec,
+            clientMetadata: ResponsesClientMetadata.create(trace: requestTrace) ?? [:]
         )
     }
 
