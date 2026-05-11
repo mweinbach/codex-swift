@@ -158,6 +158,47 @@ public struct TuiRuntimeConfig: Equatable, Sendable {
     }
 }
 
+public enum HistoryPersistence: String, Codable, Equatable, Sendable {
+    case saveAll = "save-all"
+    case none
+}
+
+public struct HistoryConfig: Equatable, Sendable {
+    public var persistence: HistoryPersistence
+    public var maxBytes: Int?
+
+    public init(
+        persistence: HistoryPersistence = .saveAll,
+        maxBytes: Int? = nil
+    ) {
+        self.persistence = persistence
+        self.maxBytes = maxBytes
+    }
+}
+
+public enum UriBasedFileOpener: String, Codable, Equatable, Sendable {
+    case vsCode = "vscode"
+    case vsCodeInsiders = "vscode-insiders"
+    case windsurf
+    case cursor
+    case none
+
+    public var scheme: String? {
+        switch self {
+        case .vsCode:
+            "vscode"
+        case .vsCodeInsiders:
+            "vscode-insiders"
+        case .windsurf:
+            "windsurf"
+        case .cursor:
+            "cursor"
+        case .none:
+            nil
+        }
+    }
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -228,6 +269,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var checkForUpdateOnStartup: Bool
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
+    public var history: HistoryConfig
+    public var fileOpener: UriBasedFileOpener
     public var tui: TuiRuntimeConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
@@ -384,6 +427,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.checkForUpdateOnStartup = true
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
+        self.history = HistoryConfig()
+        self.fileOpener = .vsCode
         self.tui = TuiRuntimeConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
     }
@@ -1628,6 +1673,7 @@ private struct ParsedCodexConfigToml {
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
+    var history: [String: ConfigValue] = [:]
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
@@ -1704,6 +1750,16 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
+                if key == "history" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (historyKey, historyValue) in table {
+                        parsed.history[historyKey] = historyValue
+                    }
+                    continue
+                }
                 guard isRelevantTopLevelKey(key) else { continue }
                 parsed.topLevel[key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -1755,6 +1811,8 @@ private struct ParsedCodexConfigToml {
                 parsed.memories[canonicalMemoriesConfigKey(key)] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .sandboxWorkspaceWrite:
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .history:
+                parsed.history[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .permissionFilesystem(name):
                 let filesystemKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
@@ -2132,6 +2190,10 @@ private struct ParsedCodexConfigToml {
             sandboxWorkspaceWrite[key] = value
         }
 
+        for (key, value) in overlay.history {
+            history[key] = value
+        }
+
         for (profileName, profileValue) in overlay.permissions {
             permissions[profileName, default: ParsedPermissionProfileToml()].merge(profileValue)
         }
@@ -2360,6 +2422,7 @@ private struct ParsedCodexConfigToml {
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
+        config.history = try Self.historyConfigValue(history, key: "history")
         let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         config.tui = try Self.tuiRuntimeConfigValue(
             tui,
@@ -3132,6 +3195,13 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)check_for_update_on_startup"
             )
         }
+        if let fileOpener = values["file_opener"] {
+            config.fileOpener = try stringEnumValue(
+                UriBasedFileOpener.self,
+                fileOpener,
+                key: "\(keyPrefix)file_opener"
+            )
+        }
         if let shellEnvironmentPolicy = values["shell_environment_policy"] {
             guard case let .table(table) = shellEnvironmentPolicy else {
                 throw CodexConfigLoadError.invalidConfigLine("\(keyPrefix)shell_environment_policy")
@@ -3199,6 +3269,7 @@ private struct ParsedCodexConfigToml {
             || key == "shell_environment_policy"
             || key == "oss_provider"
             || key == "check_for_update_on_startup"
+            || key == "file_opener"
     }
 
     private static func isRelevantProfileKey(_ key: String) -> Bool {
@@ -3413,6 +3484,26 @@ private struct ParsedCodexConfigToml {
             },
             consolidationModel: try table["consolidation_model"].map {
                 try stringValue($0, key: "\(key).consolidation_model")
+            }
+        )
+    }
+
+    private static func historyConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> HistoryConfig {
+        guard !table.isEmpty else {
+            return HistoryConfig()
+        }
+        for field in table.keys where !["persistence", "max_bytes"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return HistoryConfig(
+            persistence: try table["persistence"].map {
+                try stringEnumValue(HistoryPersistence.self, $0, key: "\(key).persistence")
+            } ?? .saveAll,
+            maxBytes: try table["max_bytes"].map {
+                try nonNegativeIntValue($0, key: "\(key).max_bytes")
             }
         )
     }
@@ -3753,6 +3844,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "sandbox_workspace_write" {
             return .sandboxWorkspaceWrite
         }
+        if parts.count == 1, parts[0] == "history" {
+            return .history
+        }
         if parts.count == 3, parts[0] == "permissions", parts[2] == "filesystem" {
             return .permissionFilesystem(parts[1])
         }
@@ -4003,6 +4097,7 @@ private enum ConfigSection {
     case featuresAppsMcpPathOverride
     case memories
     case sandboxWorkspaceWrite
+    case history
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
     case permissionNetwork(String)

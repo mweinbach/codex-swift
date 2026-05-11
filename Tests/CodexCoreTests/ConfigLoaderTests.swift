@@ -74,6 +74,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
         XCTAssertTrue(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.history, HistoryConfig())
+        XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
     }
@@ -346,6 +348,7 @@ final class ConfigLoaderTests: XCTestCase {
         background_terminal_max_timeout = 12345
         oss_provider = "ollama"
         check_for_update_on_startup = false
+        file_opener = "cursor"
 
         [audio]
         microphone = "USB Mic"
@@ -356,6 +359,10 @@ final class ConfigLoaderTests: XCTestCase {
         type = "transcription"
         transport = "webrtc"
         voice = "cedar"
+
+        [history]
+        persistence = "none"
+        max_bytes = 2048
 
         [tui]
         animations = false
@@ -449,6 +456,11 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, 12_345)
         XCTAssertEqual(config.ossProvider, "ollama")
         XCTAssertFalse(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.history, HistoryConfig(
+            persistence: .none,
+            maxBytes: 2048
+        ))
+        XCTAssertEqual(config.fileOpener, .cursor)
         XCTAssertEqual(config.tui, TuiRuntimeConfig(
             animations: false,
             showTooltips: false,
@@ -471,6 +483,39 @@ final class ConfigLoaderTests: XCTestCase {
             )
         ))
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
+    }
+
+    func testHistoryConfigAcceptsInlineTableLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        history = { persistence = "save-all", max_bytes = 4096 }
+        file_opener = "none"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.history, HistoryConfig(
+            persistence: .saveAll,
+            maxBytes: 4096
+        ))
+        XCTAssertEqual(config.fileOpener, .none)
+        XCTAssertNil(config.fileOpener.scheme)
+    }
+
+    func testHistoryConfigRejectsUnknownFieldsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [history]
+        persistence = "save-all"
+        unexpected = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Invalid config line: history.unexpected"
+            )
+        }
     }
 
     func testTuiNotificationsLoadRustBooleanAndDefaults() throws {
