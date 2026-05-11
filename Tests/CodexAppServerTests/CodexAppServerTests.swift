@@ -5006,6 +5006,45 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["changedPaths"] as? [String], [watched.path])
     }
 
+    func testFsWatchAndUnwatchRejectMalformedParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let watched = temp.url.appendingPathComponent("FETCH_HEAD", isDirectory: false)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"fs/watch","params":{"path":"\#(watched.path)"}}"#,
+                "missing field `watchId`"
+            ),
+            (
+                #"{"id":2,"method":"fs/watch","params":{"watchId":1,"path":"\#(watched.path)"}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"fs/watch","params":{"watchId":"watch-fetch"}}"#,
+                "missing field `path`"
+            ),
+            (
+                #"{"id":4,"method":"fs/watch","params":{"watchId":"watch-fetch","path":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":5,"method":"fs/unwatch","params":{}}"#,
+                "missing field `watchId`"
+            ),
+            (
+                #"{"id":6,"method":"fs/unwatch","params":{"watchId":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try decode(processor.processLine(Data(request.utf8)))
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["message"] as? String, expectedMessage, "request: \(request)")
+        }
+    }
+
     func testAppListReturnsEmptyPageWhenConnectorsUnavailable() throws {
         let temp = try TemporaryDirectory()
 

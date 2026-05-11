@@ -3323,18 +3323,13 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fsWatchParams(_ params: [String: Any]?) throws -> (watchID: String, path: String) {
-        guard let watchID = stringParam(params?["watchId"]) else {
-            throw AppServerError.invalidRequest("missing watchId")
-        }
-        let path = try absolutePathParam(params?["path"], name: "path")
+        let watchID = try rustRequiredStringParam(params?["watchId"], field: "watchId")
+        let path = try rustRequiredAbsolutePathParam(params?["path"], field: "path")
         return (watchID, path)
     }
 
     fileprivate static func fsUnwatchParams(_ params: [String: Any]?) throws -> String {
-        guard let watchID = stringParam(params?["watchId"]) else {
-            throw AppServerError.invalidRequest("missing watchId")
-        }
-        return watchID
+        try rustRequiredStringParam(params?["watchId"], field: "watchId")
     }
 
     fileprivate static func fsChangedNotification(watchID: String, changedPaths: [String]) -> [String: Any] {
