@@ -932,6 +932,7 @@ Source baseline inspected for this scaffold:
   - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.permissions`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
 - `codex-rs/app-server` thread-start dynamic tool validation
   - matched Rust's `thread/start.dynamicTools` validation for Responses-compatible identifiers, reserved names/namespaces, duplicate names within a namespace, deferred tools requiring a namespace, and singleton-null input schemas, and persisted accepted non-empty specs into rollout session metadata.
+  - added direct Swift core coverage for Rust's accepted sanitizable/nullable schemas, shared names across different namespaces, identifier length limits, leading/trailing whitespace rejection, reserved `mcp` names/namespaces, duplicate unnamespaced tools, and deferred-without-namespace failures.
 - `codex-rs/app-server-protocol` turn-start experimental field gating
   - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.
 - `codex-rs/app-server` turn-start environment selection validation
