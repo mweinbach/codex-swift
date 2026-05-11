@@ -396,7 +396,8 @@ public enum DebugCommandRuntime {
                 defaultShell: shell
             ),
             environmentContextCurrentDate: currentDate,
-            environmentContextTimezone: timezone
+            environmentContextTimezone: timezone,
+            environmentContextNetwork: environmentContextNetwork(from: configLayerStack.requirements.network)
         )
 
         var userInputs = imagePaths.map(UserInput.localImage(path:))
@@ -424,6 +425,25 @@ public enum DebugCommandRuntime {
                 shell: defaultShell.name
             )
         }
+    }
+
+    private static func environmentContextNetwork(
+        from requirements: NetworkRequirementsToml?
+    ) -> EnvironmentContextNetwork? {
+        guard let requirements else {
+            return nil
+        }
+        let domains = requirements.domains ?? [:]
+        return EnvironmentContextNetwork(
+            allowedDomains: domains
+                .filter { $0.value == .allow }
+                .map(\.key)
+                .sorted(),
+            deniedDomains: domains
+                .filter { $0.value == .deny }
+                .map(\.key)
+                .sorted()
+        )
     }
 
     public static func currentDateAndTimezone(

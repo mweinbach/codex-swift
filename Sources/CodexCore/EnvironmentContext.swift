@@ -24,6 +24,21 @@ public struct EnvironmentContextEnvironment: Equatable, Codable, Sendable {
     }
 }
 
+public struct EnvironmentContextNetwork: Equatable, Codable, Sendable {
+    public let allowedDomains: [String]
+    public let deniedDomains: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case allowedDomains = "allowed_domains"
+        case deniedDomains = "denied_domains"
+    }
+
+    public init(allowedDomains: [String] = [], deniedDomains: [String] = []) {
+        self.allowedDomains = allowedDomains
+        self.deniedDomains = deniedDomains
+    }
+}
+
 public struct EnvironmentContext: Equatable, Codable, Sendable {
     public static let openTag = "<environment_context>"
     public static let closeTag = "</environment_context>"
@@ -31,6 +46,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
     public let environments: [EnvironmentContextEnvironment]?
     public let currentDate: String?
     public let timezone: String?
+    public let network: EnvironmentContextNetwork?
     public let cwd: String?
     public let approvalPolicy: AskForApproval?
     public let sandboxMode: SandboxMode?
@@ -42,6 +58,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         case environments
         case currentDate = "current_date"
         case timezone
+        case network
         case cwd
         case approvalPolicy = "approval_policy"
         case sandboxMode = "sandbox_mode"
@@ -57,11 +74,13 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         shell: Shell,
         environments: [EnvironmentContextEnvironment]? = nil,
         currentDate: String? = nil,
-        timezone: String? = nil
+        timezone: String? = nil,
+        network: EnvironmentContextNetwork? = nil
     ) {
         self.environments = environments
         self.currentDate = currentDate
         self.timezone = timezone
+        self.network = network
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxPolicy.map(Self.sandboxMode(for:))
@@ -79,11 +98,13 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         shell: Shell,
         environments: [EnvironmentContextEnvironment]? = nil,
         currentDate: String? = nil,
-        timezone: String? = nil
+        timezone: String? = nil,
+        network: EnvironmentContextNetwork? = nil
     ) {
         self.environments = environments
         self.currentDate = currentDate
         self.timezone = timezone
+        self.network = network
         self.cwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxMode = sandboxMode
@@ -114,6 +135,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         environmentsEqualExceptShell(environments, other.environments)
             && currentDate == other.currentDate
             && timezone == other.timezone
+            && network == other.network
             && cwd == other.cwd
             && approvalPolicy == other.approvalPolicy
             && sandboxMode == other.sandboxMode
@@ -153,6 +175,16 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         }
         if let timezone {
             lines.append("  <timezone>\(timezone)</timezone>")
+        }
+        if let network {
+            lines.append("  <network enabled=\"true\">")
+            for allowedDomain in network.allowedDomains {
+                lines.append("    <allowed>\(allowedDomain)</allowed>")
+            }
+            for deniedDomain in network.deniedDomains {
+                lines.append("    <denied>\(deniedDomain)</denied>")
+            }
+            lines.append("  </network>")
         }
         lines.append(Self.closeTag)
         return lines.joined(separator: "\n")

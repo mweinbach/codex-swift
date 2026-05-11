@@ -349,6 +349,25 @@ final class DebugCommandRuntimeTests: XCTestCase {
             CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
             dependencies: testDependencies(
                 codexHome: temp.url,
+                configLayerStack: try ConfigLayerStack(
+                    layers: [
+                        ConfigLayerEntry(
+                            name: .user(file: try AbsolutePath(
+                                absolutePath: temp.url.appendingPathComponent("config.toml").path
+                            )),
+                            config: .table([:])
+                        )
+                    ],
+                    requirements: ConfigRequirements(
+                        network: NetworkRequirementsToml(
+                            domains: [
+                                "api.example.com": .allow,
+                                "*.openai.com": .allow,
+                                "blocked.example.com": .deny
+                            ]
+                        )
+                    )
+                ),
                 configuredEnvironments: [
                     TurnEnvironmentSelection(environmentID: "dev", cwd: "/repo/dev"),
                     TurnEnvironmentSelection(environmentID: "local", cwd: "/repo/local")
@@ -372,6 +391,10 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(environmentText.contains("      <cwd>/repo/local</cwd>"))
         XCTAssertTrue(environmentText.contains("  <current_date>2026-02-26</current_date>"))
         XCTAssertTrue(environmentText.contains("  <timezone>America/Los_Angeles</timezone>"))
+        XCTAssertTrue(environmentText.contains("  <network enabled=\"true\">"))
+        XCTAssertTrue(environmentText.contains("    <allowed>*.openai.com</allowed>"))
+        XCTAssertTrue(environmentText.contains("    <allowed>api.example.com</allowed>"))
+        XCTAssertTrue(environmentText.contains("    <denied>blocked.example.com</denied>"))
         XCTAssertFalse(environmentText.contains("\n  <cwd>"))
         XCTAssertFalse(environmentText.contains("\n  <shell>"))
     }

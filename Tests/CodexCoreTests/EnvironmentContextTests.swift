@@ -160,6 +160,38 @@ final class EnvironmentContextTests: XCTestCase {
         XCTAssertFalse(context1.equalsExceptShell(context2))
     }
 
+    func testSerializeEnvironmentContextWithNetwork() {
+        let context = EnvironmentContext(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: fakeShell(),
+            currentDate: "2026-02-26",
+            timezone: "America/Los_Angeles",
+            network: EnvironmentContextNetwork(
+                allowedDomains: ["api.example.com", "*.openai.com"],
+                deniedDomains: ["blocked.example.com"]
+            )
+        )
+
+        XCTAssertEqual(context.serializeToXML(), #"""
+        <environment_context>
+          <cwd>/repo</cwd>
+          <approval_policy>never</approval_policy>
+          <sandbox_mode>read-only</sandbox_mode>
+          <network_access>restricted</network_access>
+          <shell>bash</shell>
+          <current_date>2026-02-26</current_date>
+          <timezone>America/Los_Angeles</timezone>
+          <network enabled="true">
+            <allowed>api.example.com</allowed>
+            <allowed>*.openai.com</allowed>
+            <denied>blocked.example.com</denied>
+          </network>
+        </environment_context>
+        """#)
+    }
+
     func testEqualsExceptShellComparesApprovalPolicy() throws {
         let context1 = EnvironmentContext(
             cwd: "/repo",

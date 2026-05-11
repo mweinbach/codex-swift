@@ -55,7 +55,8 @@ public enum NonInteractiveExec {
         userInstructions: UserInstructions? = nil,
         environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
         environmentContextCurrentDate: String? = nil,
-        environmentContextTimezone: String? = nil
+        environmentContextTimezone: String? = nil,
+        environmentContextNetwork: EnvironmentContextNetwork? = nil
     ) -> [ResponseItem] {
         let context = TurnContext(
             cwd: cwd.path,
@@ -102,7 +103,8 @@ public enum NonInteractiveExec {
                     shell: shell,
                     environments: environmentContextEnvironments,
                     currentDate: environmentContextCurrentDate,
-                    timezone: environmentContextTimezone
+                    timezone: environmentContextTimezone,
+                    network: environmentContextNetwork
                 ).serializeToXML())
             )
         }
@@ -129,6 +131,7 @@ public enum NonInteractiveExec {
         environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
         environmentContextCurrentDate: String? = nil,
         environmentContextTimezone: String? = nil,
+        environmentContextNetwork: EnvironmentContextNetwork? = nil,
         history: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false
@@ -146,7 +149,8 @@ public enum NonInteractiveExec {
             userInstructions: userInstructions,
             environmentContextEnvironments: environmentContextEnvironments,
             environmentContextCurrentDate: environmentContextCurrentDate,
-            environmentContextTimezone: environmentContextTimezone
+            environmentContextTimezone: environmentContextTimezone,
+            environmentContextNetwork: environmentContextNetwork
         )
         input.append(contentsOf: history)
 
