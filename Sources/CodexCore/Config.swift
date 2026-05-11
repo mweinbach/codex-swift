@@ -323,6 +323,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var history: HistoryConfig
     public var agents: AgentRuntimeConfig
     public var agentRoles: [String: AgentRoleConfig]
+    public var startupWarnings: [String]
     public var fileOpener: UriBasedFileOpener
     public var tui: TuiRuntimeConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
@@ -504,6 +505,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.history = HistoryConfig()
         self.agents = AgentRuntimeConfig()
         self.agentRoles = [:]
+        self.startupWarnings = []
         self.fileOpener = .vsCode
         self.tui = TuiRuntimeConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
@@ -1803,6 +1805,7 @@ private struct ParsedCodexConfigToml {
     var agents: [String: ConfigValue] = [:]
     var agentRoles: [String: [String: ConfigValue]] = [:]
     var agentRoleDiscoveryDirs: [URL] = []
+    var startupWarnings: [String] = []
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
@@ -2480,6 +2483,7 @@ private struct ParsedCodexConfigToml {
             agentRoles[roleName] = mergedRole
         }
         agentRoleDiscoveryDirs.append(contentsOf: overlay.agentRoleDiscoveryDirs)
+        startupWarnings.append(contentsOf: overlay.startupWarnings)
 
         for (profileName, profileValue) in overlay.permissions {
             permissions[profileName, default: ParsedPermissionProfileToml()].merge(profileValue)
@@ -2748,10 +2752,13 @@ private struct ParsedCodexConfigToml {
         config.analyticsEnabled = try Self.enabledConfigValue(analytics, key: "analytics") ?? config.analyticsEnabled
         config.feedbackEnabled = try Self.enabledConfigValue(feedback, key: "feedback") ?? true
         config.agents = try Self.agentRuntimeConfigValue(agents, key: "agents")
+        var startupWarnings = startupWarnings
         config.agentRoles = try Self.agentRoleConfigsValue(
             declaredRoles: agentRoles,
-            discoveryDirs: agentRoleDiscoveryDirs
+            discoveryDirs: agentRoleDiscoveryDirs,
+            startupWarnings: &startupWarnings
         )
+        config.startupWarnings = startupWarnings
         let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         config.tui = try Self.tuiRuntimeConfigValue(
             tui,
@@ -4022,7 +4029,8 @@ private struct ParsedCodexConfigToml {
 
     private static func agentRoleConfigsValue(
         declaredRoles roles: [String: [String: ConfigValue]],
-        discoveryDirs: [URL]
+        discoveryDirs: [URL],
+        startupWarnings: inout [String]
     ) throws -> [String: AgentRoleConfig] {
         var configs: [String: AgentRoleConfig] = [:]
         var declaredConfigFiles = Set<String>()
@@ -4079,38 +4087,69 @@ private struct ParsedCodexConfigToml {
             configs[roleName] = config
         }
 
-        for roleFile in discoveredAgentRoleFiles(in: discoveryDirs) where !declaredConfigFiles.contains(roleFile.path) {
-            guard let fileMetadata = try? agentRoleFileConfigValue(path: roleFile.path, roleNameHint: nil),
-                  let roleName = fileMetadata.name
-            else {
+        for roleFile in discoveredAgentRoleFiles(in: discoveryDirs) where !declaredConfigFiles.contains(roleFile.url.path) {
+            let fileMetadata: (name: String?, config: AgentRoleConfig)
+            do {
+                fileMetadata = try agentRoleFileConfigValue(path: roleFile.url.path, roleNameHint: nil)
+            } catch {
+                appendAgentRoleWarning(error, to: &startupWarnings)
                 continue
             }
+            guard let roleName = fileMetadata.name else { continue }
             guard configs[roleName] == nil else {
+                appendAgentRoleWarning(
+                    CodexConfigLoadError.invalidConfig(
+                        "duplicate agent role name `\(roleName)` discovered in \(roleFile.agentsDir.path)"
+                    ),
+                    to: &startupWarnings
+                )
+                continue
+            }
+            guard fileMetadata.config.description != nil else {
+                appendAgentRoleWarning(
+                    CodexConfigLoadError.invalidConfig(
+                        "agent role `\(roleName)` must define a description"
+                    ),
+                    to: &startupWarnings
+                )
                 continue
             }
             configs[roleName] = AgentRoleConfig(
                 description: fileMetadata.config.description,
-                configFile: roleFile.path,
+                configFile: roleFile.url.path,
                 nicknameCandidates: fileMetadata.config.nicknameCandidates
             )
         }
         return configs
     }
 
-    private static func discoveredAgentRoleFiles(in directories: [URL]) -> [URL] {
+    private static func appendAgentRoleWarning(_ error: Error, to startupWarnings: inout [String]) {
+        startupWarnings.append("Ignoring malformed agent role definition: \(error)")
+    }
+
+    private struct DiscoveredAgentRoleFile {
+        var url: URL
+        var agentsDir: URL
+    }
+
+    private static func discoveredAgentRoleFiles(in directories: [URL]) -> [DiscoveredAgentRoleFile] {
         var seenDirectories = Set<String>()
-        var files: [URL] = []
+        var files: [DiscoveredAgentRoleFile] = []
         for directory in directories {
             let standardizedDirectory = directory.standardizedFileURL
             guard seenDirectories.insert(standardizedDirectory.path).inserted else {
                 continue
             }
-            collectAgentRoleFiles(in: standardizedDirectory, into: &files)
+            collectAgentRoleFiles(in: standardizedDirectory, agentsDir: standardizedDirectory, into: &files)
         }
-        return files.sorted { $0.path < $1.path }
+        return files.sorted { $0.url.path < $1.url.path }
     }
 
-    private static func collectAgentRoleFiles(in directory: URL, into files: inout [URL]) {
+    private static func collectAgentRoleFiles(
+        in directory: URL,
+        agentsDir: URL,
+        into files: inout [DiscoveredAgentRoleFile]
+    ) {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -4121,7 +4160,10 @@ private struct ParsedCodexConfigToml {
         for case let file as URL in enumerator where file.pathExtension == "toml" {
             let resourceValues = try? file.resourceValues(forKeys: [.isRegularFileKey])
             if resourceValues?.isRegularFile == true {
-                files.append(file.standardizedFileURL)
+                files.append(DiscoveredAgentRoleFile(
+                    url: file.standardizedFileURL,
+                    agentsDir: agentsDir
+                ))
             }
         }
     }

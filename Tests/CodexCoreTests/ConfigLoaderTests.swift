@@ -815,7 +815,7 @@ final class ConfigLoaderTests: XCTestCase {
         ])
     }
 
-    func testAgentRoleDiscoverySkipsMalformedStandaloneFilesUntilWarningsArePorted() throws {
+    func testAgentRoleDiscoveryWarnsForMalformedStandaloneFilesLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
         try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
@@ -845,6 +845,83 @@ final class ConfigLoaderTests: XCTestCase {
                 configFile: agentsDir.appendingPathComponent("usable.toml").path
             )
         ])
+        XCTAssertEqual(config.startupWarnings.count, 1)
+        XCTAssertTrue(config.startupWarnings[0].contains("Ignoring malformed agent role definition:"))
+        XCTAssertTrue(config.startupWarnings[0].contains("must define `developer_instructions`"))
+    }
+
+    func testAgentRoleDiscoveryWarnsForMissingNameAndDescriptionLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        try """
+        description = "Missing name"
+        developer_instructions = "Research carefully"
+        """.write(
+            to: agentsDir.appendingPathComponent("missing-name.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        name = "missing-description"
+        developer_instructions = "Research carefully"
+        """.write(
+            to: agentsDir.appendingPathComponent("missing-description.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        name = "usable"
+        description = "Usable role"
+        developer_instructions = "Use this role"
+        """.write(
+            to: agentsDir.appendingPathComponent("usable.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "usable": AgentRoleConfig(
+                description: "Usable role",
+                configFile: agentsDir.appendingPathComponent("usable.toml").path
+            )
+        ])
+        XCTAssertEqual(config.startupWarnings.count, 2)
+        XCTAssertTrue(config.startupWarnings.contains { $0.contains("must define a non-empty `name`") })
+        XCTAssertTrue(config.startupWarnings.contains { $0.contains("agent role `missing-description` must define a description") })
+    }
+
+    func testAgentRoleDiscoveryWarnsForDuplicateStandaloneNamesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        let nestedDir = agentsDir.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        let firstFile = agentsDir.appendingPathComponent("first.toml")
+        try """
+        name = "researcher"
+        description = "First role"
+        developer_instructions = "Research carefully"
+        """.write(to: firstFile, atomically: true, encoding: .utf8)
+        try """
+        name = "researcher"
+        description = "Duplicate role"
+        developer_instructions = "Also research"
+        """.write(to: nestedDir.appendingPathComponent("second.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "researcher": AgentRoleConfig(
+                description: "First role",
+                configFile: firstFile.path
+            )
+        ])
+        XCTAssertEqual(config.startupWarnings.count, 1)
+        XCTAssertTrue(config.startupWarnings[0].contains(
+            "duplicate agent role name `researcher` discovered in \(agentsDir.standardizedFileURL.path)"
+        ))
     }
 
     func testDeclaredAgentRoleConfigFileIsNotDiscoveredTwiceLikeRust() throws {
