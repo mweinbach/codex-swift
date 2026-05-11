@@ -874,6 +874,32 @@ final class ExecServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: copiedDirectory.path))
     }
 
+    func testFilesystemRemoveNonRecursiveDirectoryMatchesRust() throws {
+        let fileSystem = ExecServerFileSystem()
+        let tempDirectory = try makeTemporaryDirectory()
+        let nonEmptyDirectory = tempDirectory.appendingPathComponent("non-empty")
+        let emptyDirectory = tempDirectory.appendingPathComponent("empty")
+        try FileManager.default.createDirectory(at: nonEmptyDirectory, withIntermediateDirectories: true)
+        try Data("kept".utf8).write(to: nonEmptyDirectory.appendingPathComponent("note.txt"))
+        try FileManager.default.createDirectory(at: emptyDirectory, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try fileSystem.remove(ExecServerFsRemoveParams(
+            path: absolutePath(nonEmptyDirectory.path),
+            recursive: false,
+            force: false
+        ))) { error in
+            XCTAssertEqual((error as? ExecServerFileSystemError)?.kind, .other)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: nonEmptyDirectory.path))
+
+        _ = try fileSystem.remove(ExecServerFsRemoveParams(
+            path: absolutePath(emptyDirectory.path),
+            recursive: false,
+            force: false
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: emptyDirectory.path))
+    }
+
     func testFilesystemMetadataAndSymlinkCopyMatchRust() throws {
         let fileSystem = ExecServerFileSystem()
         let tempDirectory = try makeTemporaryDirectory()

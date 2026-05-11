@@ -85,6 +85,8 @@ public struct ExecServerFileSystem: Sendable {
             let type = symlinkAttributes[.type] as? FileAttributeType
             if type == .typeDirectory, params.recursive ?? true {
                 try fileSystemCall { try FileManager.default.removeItem(at: fileURL(params.path)) }
+            } else if type == .typeDirectory {
+                try fileSystemCall { try removeEmptyDirectory(at: params.path) }
             } else {
                 try fileSystemCall { try FileManager.default.removeItem(at: fileURL(params.path)) }
             }
@@ -152,6 +154,15 @@ public struct ExecServerFileSystem: Sendable {
 
     private func symlinkAttributes(at path: AbsolutePath) throws -> [FileAttributeKey: Any] {
         try statAttributes(atPath: path.path, followSymlinks: false)
+    }
+
+    private func removeEmptyDirectory(at path: AbsolutePath) throws {
+        let result = path.path.withCString { pathPointer in
+            rmdir(pathPointer)
+        }
+        guard result == 0 else {
+            throw posixFileSystemError()
+        }
     }
 
     private func copyDirectory(source: String, destination: String) throws {
