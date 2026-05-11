@@ -41,6 +41,40 @@ public struct AgentJob: Equatable, Sendable {
     public var startedAt: Date?
     public var completedAt: Date?
     public var lastError: String?
+
+    public init(
+        id: String,
+        name: String,
+        status: AgentJobStatus,
+        instruction: String,
+        autoExport: Bool,
+        maxRuntimeSeconds: UInt64?,
+        outputSchemaJSON: JSONValue?,
+        inputHeaders: [String],
+        inputCSVPath: String,
+        outputCSVPath: String,
+        createdAt: Date,
+        updatedAt: Date,
+        startedAt: Date?,
+        completedAt: Date?,
+        lastError: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.instruction = instruction
+        self.autoExport = autoExport
+        self.maxRuntimeSeconds = maxRuntimeSeconds
+        self.outputSchemaJSON = outputSchemaJSON
+        self.inputHeaders = inputHeaders
+        self.inputCSVPath = inputCSVPath
+        self.outputCSVPath = outputCSVPath
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.lastError = lastError
+    }
 }
 
 public struct AgentJobItem: Equatable, Sendable {
@@ -103,6 +137,10 @@ public struct AgentJobProgress: Equatable, Sendable {
         self.running = running
         self.completed = completed
         self.failed = failed
+    }
+
+    public var totalItems: Int64 {
+        pending + running + completed + failed
     }
 }
 

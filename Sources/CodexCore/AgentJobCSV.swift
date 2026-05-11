@@ -191,6 +191,31 @@ public enum AgentJobCSV {
         }
     }
 
+    public static func prettyJSONString(_ value: JSONValue) -> String {
+        switch value {
+        case .null, .bool, .integer, .double, .string:
+            return compactJSONString(value)
+        case let .array(values):
+            if values.isEmpty {
+                return "[]"
+            }
+            let body = values
+                .map { indent(prettyJSONString($0), by: 2) }
+                .joined(separator: ",\n")
+            return "[\n\(body)\n]"
+        case let .object(values):
+            if values.isEmpty {
+                return "{}"
+            }
+            let body = values.keys.sorted().map { key in
+                let value = values[key]!
+                return "  \(encodedJSONString(key)): \(indentContinuation(prettyJSONString(value), by: 2))"
+            }
+            .joined(separator: ",\n")
+            return "{\n\(body)\n}"
+        }
+    }
+
     private static func parseRecords(_ content: String) throws -> [[String]] {
         var records: [[String]] = []
         var currentRecord: [String] = []
@@ -287,8 +312,41 @@ public enum AgentJobCSV {
     }
 
     private static func encodedJSONString(_ value: String) -> String {
-        let data = try? JSONEncoder().encode(value)
-        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        var encoded = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x22:
+                encoded += "\\\""
+            case 0x5C:
+                encoded += "\\\\"
+            case 0x08:
+                encoded += "\\b"
+            case 0x0C:
+                encoded += "\\f"
+            case 0x0A:
+                encoded += "\\n"
+            case 0x0D:
+                encoded += "\\r"
+            case 0x09:
+                encoded += "\\t"
+            case 0x00...0x1F:
+                encoded += String(format: "\\u%04X", scalar.value)
+            default:
+                encoded.unicodeScalars.append(scalar)
+            }
+        }
+        encoded += "\""
+        return encoded
+    }
+
+    private static func indent(_ value: String, by spaces: Int) -> String {
+        let prefix = String(repeating: " ", count: spaces)
+        return prefix + value.replacingOccurrences(of: "\n", with: "\n\(prefix)")
+    }
+
+    private static func indentContinuation(_ value: String, by spaces: Int) -> String {
+        let prefix = String(repeating: " ", count: spaces)
+        return value.replacingOccurrences(of: "\n", with: "\n\(prefix)")
     }
 
     private static func formatRFC3339(_ date: Date) -> String {

@@ -342,6 +342,8 @@ Source baseline inspected for this scaffold:
   - added Swift SQLite agent-job and job-item persistence, including Rust-matching status strings, creation schema, row-order listing with status/limit filters, job lifecycle updates, item transition guards, thread-scoped atomic result reporting, and progress counts. The CSV fanout tool handlers and result export workflow remain pending.
 - `codex-rs/core/src/tools/handlers/agent_jobs.rs` helper layer
   - added Swift CSV parsing, duplicate-header validation, row-to-job-item construction with `id_column` deduping, instruction-template rendering, default output path derivation, CSV escaping, and output CSV snapshot rendering for agent jobs. The actual subagent runner loop and tool-handler wiring remain pending.
+- `codex-rs/core/src/tools/handlers/agent_jobs.rs` runtime helper layer
+  - added Swift concurrency/runtime normalization, worker prompt rendering, spawn-result/failure-summary wire models, and `report_agent_job_result` result wire shape. The actual subagent runner loop, state-db session plumbing, stop/cancel propagation, and tool-handler registration remain pending.
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
