@@ -1,6 +1,6 @@
 import Foundation
 
-public final class ShellSnapshot {
+public final class ShellSnapshot: @unchecked Sendable {
     public static let directoryName = "shell_snapshots"
 
     static let snapshotTimeout: TimeInterval = 10

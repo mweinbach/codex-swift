@@ -610,6 +610,7 @@ public enum NonInteractiveExec {
             return await executeShellCommand(
                 toolName: "local_shell",
                 command: params.command,
+                sessionShell: shell,
                 workdir: params.workingDirectory,
                 timeoutMS: params.timeoutMS,
                 sandboxPermissions: .useDefault,
@@ -904,6 +905,7 @@ public enum NonInteractiveExec {
                 )
                 return await executeUnifiedExecCommand(
                     command: command,
+                    sessionShell: shell,
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
                     sandboxPermissions: params.sandboxPermissions,
@@ -923,6 +925,7 @@ public enum NonInteractiveExec {
                 return await executeShellCommand(
                     toolName: name,
                     command: command,
+                    sessionShell: shell,
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
@@ -940,6 +943,7 @@ public enum NonInteractiveExec {
                 return await executeShellCommand(
                     toolName: name,
                     command: params.command,
+                    sessionShell: shell,
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
@@ -1105,6 +1109,7 @@ public enum NonInteractiveExec {
     private static func executeShellCommand(
         toolName: String,
         command: [String],
+        sessionShell: Shell?,
         workdir: String?,
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
@@ -1166,6 +1171,16 @@ public enum NonInteractiveExec {
             break
         }
 
+        let command = sessionShell.map {
+            ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+                command: command,
+                sessionShell: $0,
+                cwd: commandCwd,
+                explicitEnvOverrides: [:],
+                environment: environment
+            )
+        } ?? command
+
         let output = await Task.detached(priority: .userInitiated) {
             runCommandSync(
                 command: command,
@@ -1185,6 +1200,7 @@ public enum NonInteractiveExec {
 
     private static func executeUnifiedExecCommand(
         command: [String],
+        sessionShell: Shell?,
         workdir: String?,
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
@@ -1208,6 +1224,15 @@ public enum NonInteractiveExec {
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        let command = sessionShell.map {
+            ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+                command: command,
+                sessionShell: $0,
+                cwd: commandCwd,
+                explicitEnvOverrides: [:],
+                environment: environment
+            )
+        } ?? command
         do {
             let output = try await unifiedExecSessions.start(
                 command: command,

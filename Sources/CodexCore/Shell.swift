@@ -31,15 +31,34 @@ public enum ShellType: String, Codable, CaseIterable, Equatable, Sendable {
 public struct Shell: Equatable, Codable, Sendable {
     public let shellType: ShellType
     public let shellPath: String
+    public let shellSnapshot: ShellSnapshot?
 
     private enum CodingKeys: String, CodingKey {
         case shellType = "shell_type"
         case shellPath = "shell_path"
     }
 
-    public init(shellType: ShellType, shellPath: String) {
+    public init(shellType: ShellType, shellPath: String, shellSnapshot: ShellSnapshot? = nil) {
         self.shellType = shellType
         self.shellPath = shellPath
+        self.shellSnapshot = shellSnapshot
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        shellType = try container.decode(ShellType.self, forKey: .shellType)
+        shellPath = try container.decode(String.self, forKey: .shellPath)
+        shellSnapshot = nil
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(shellType, forKey: .shellType)
+        try container.encode(shellPath, forKey: .shellPath)
+    }
+
+    public static func == (lhs: Shell, rhs: Shell) -> Bool {
+        lhs.shellType == rhs.shellType && lhs.shellPath == rhs.shellPath
     }
 
     public var name: String {

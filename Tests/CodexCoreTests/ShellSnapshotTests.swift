@@ -193,6 +193,197 @@ final class ShellSnapshotTests: XCTestCase {
         XCTAssertTrue(snapshot.contains("PATH"))
         XCTAssertTrue(snapshot.contains("setopts "))
     }
+
+    func testSnapshotCommandWrapperBootstrapsInUserShell() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(directory: directory, contents: "# Snapshot file\n")
+        let command = ["/bin/bash", "-lc", "echo hello"]
+
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        XCTAssertEqual(rewritten[0], "/bin/bash")
+        XCTAssertEqual(rewritten[1], "-c")
+        XCTAssertTrue(rewritten[2].contains("if . '"))
+        XCTAssertTrue(rewritten[2].contains("exec '/bin/bash' -c 'echo hello'"))
+    }
+
+    func testSnapshotCommandWrapperEscapesSingleQuotesAndTrailingArgs() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(directory: directory, contents: "# Snapshot file\n")
+        let command = ["/bin/bash", "-lc", "printf '%s %s' \"$0\" \"$1\"", "arg'0", "arg1"]
+
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        XCTAssertTrue(
+            rewritten[2].contains(
+                #"exec '/bin/bash' -c 'printf '"'"'%s %s'"'"' "$0" "$1"' 'arg'"'"'0' 'arg1'"#
+            )
+        )
+    }
+
+    func testSnapshotCommandWrapperSkipsWhenCwdDiffers() throws {
+        let directory = try temporaryDirectory()
+        let snapshotCwd = directory.appendingPathComponent("snapshot-cwd", isDirectory: true)
+        let commandCwd = directory.appendingPathComponent("command-cwd", isDirectory: true)
+        try FileManager.default.createDirectory(at: snapshotCwd, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: commandCwd, withIntermediateDirectories: true)
+        let shell = try shellWithSnapshot(directory: directory, cwd: snapshotCwd, contents: "# Snapshot file\n")
+        let command = ["/bin/bash", "-lc", "echo hello"]
+
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: commandCwd,
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        XCTAssertEqual(rewritten, command)
+    }
+
+    func testSnapshotCommandWrapperAcceptsDotAliasCwd() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(directory: directory, contents: "# Snapshot file\n")
+        let command = ["/bin/bash", "-lc", "echo hello"]
+
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory.appendingPathComponent("."),
+            explicitEnvOverrides: [:],
+            environment: [:]
+        )
+
+        XCTAssertNotEqual(rewritten, command)
+    }
+
+    func testSnapshotCommandWrapperRestoresExplicitOverridePrecedence() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport TEST_ENV_SNAPSHOT=global\nexport SNAPSHOT_ONLY=from_snapshot\n"
+        )
+        let command = [
+            "/bin/bash",
+            "-lc",
+            #"printf '%s|%s' "$TEST_ENV_SNAPSHOT" "${SNAPSHOT_ONLY-unset}""#
+        ]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: ["TEST_ENV_SNAPSHOT": "worktree"],
+            environment: ["TEST_ENV_SNAPSHOT": "worktree"]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null", "TEST_ENV_SNAPSHOT": "worktree"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "worktree|from_snapshot")
+    }
+
+    func testSnapshotCommandWrapperRestoresCodexThreadIDFromEnv() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport CODEX_THREAD_ID='parent-thread'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$CODEX_THREAD_ID""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: ["CODEX_THREAD_ID": "nested-thread"]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null", "CODEX_THREAD_ID": "nested-thread"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "nested-thread")
+    }
+
+    func testSnapshotCommandWrapperDoesNotEmbedOverrideValuesInArgv() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: "# Snapshot file\nexport OPENAI_API_KEY='snapshot-value'\n"
+        )
+        let command = ["/bin/bash", "-lc", #"printf '%s' "$OPENAI_API_KEY""#]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: ["OPENAI_API_KEY": "super-secret-value"],
+            environment: ["OPENAI_API_KEY": "super-secret-value"]
+        )
+
+        XCTAssertFalse(rewritten[2].contains("super-secret-value"))
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null", "OPENAI_API_KEY": "super-secret-value"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "super-secret-value")
+    }
+
+    func testSnapshotCommandWrapperRestoresLiveProxyEnvWhenSnapshotProxyActive() throws {
+        let directory = try temporaryDirectory()
+        let shell = try shellWithSnapshot(
+            directory: directory,
+            contents: """
+            # Snapshot file
+            export CODEX_NETWORK_PROXY_ACTIVE='1'
+            export PIP_PROXY='http://127.0.0.1:8080'
+            export HTTP_PROXY='http://127.0.0.1:8080'
+            """
+        )
+        let command = [
+            "/bin/bash",
+            "-lc",
+            """
+            if [ "${PIP_PROXY+x}" = x ]; then printf 'pip:%s\\n' "$PIP_PROXY"; else printf 'pip:unset\\n'; fi; printf 'http:%s\\n' "$HTTP_PROXY"; if [ "${CODEX_NETWORK_PROXY_ACTIVE+x}" = x ]; then printf 'active:%s' "$CODEX_NETWORK_PROXY_ACTIVE"; else printf 'active:unset'; fi
+            """
+        ]
+        let rewritten = ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
+            command: command,
+            sessionShell: shell,
+            cwd: directory,
+            explicitEnvOverrides: [:],
+            environment: ["HTTP_PROXY": "http://user.proxy:8080"]
+        )
+
+        let output = try run(
+            executable: rewritten[0],
+            arguments: Array(rewritten.dropFirst()),
+            environment: ["BASH_ENV": "/dev/null", "HTTP_PROXY": "http://user.proxy:8080"],
+            cwd: directory
+        )
+
+        XCTAssertEqual(output, "pip:unset\nhttp:http://user.proxy:8080\nactive:unset")
+    }
     #endif
 
     private func temporaryDirectory() throws -> URL {
@@ -213,6 +404,13 @@ final class ShellSnapshotTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = directory.appendingPathComponent("rollout-2025-01-01T00-00-00-\(sessionID).jsonl")
         try "".write(to: path, atomically: true, encoding: .utf8)
+    }
+
+    private func shellWithSnapshot(directory: URL, cwd: URL? = nil, contents: String) throws -> Shell {
+        let snapshotPath = directory.appendingPathComponent("snapshot-\(UUID().uuidString).sh")
+        try contents.write(to: snapshotPath, atomically: true, encoding: .utf8)
+        let snapshot = ShellSnapshot(path: snapshotPath, cwd: cwd ?? directory)
+        return Shell(shellType: .bash, shellPath: "/bin/bash", shellSnapshot: snapshot)
     }
 
     private func withSanitizedShellHome<T>(_ home: URL, _ body: () throws -> T) throws -> T {
