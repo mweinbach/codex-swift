@@ -1402,11 +1402,12 @@ private func runPluginCommand(_ request: CodexCLI.PluginCommandRequest) async th
             configuration: configuration
         )
         let marketplaceName = result["marketplaceName"] as? String ?? ""
+        let sourceDisplay = result["sourceDisplay"] as? String ?? source
         let installedRoot = result["installedRoot"] as? String ?? ""
         let alreadyAdded = result["alreadyAdded"] as? Bool ?? false
         let firstLine = alreadyAdded
-            ? "Marketplace `\(marketplaceName)` is already added from \(source)."
-            : "Added marketplace `\(marketplaceName)` from \(source)."
+            ? "Marketplace `\(marketplaceName)` is already added from \(sourceDisplay)."
+            : "Added marketplace `\(marketplaceName)` from \(sourceDisplay)."
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
             stdoutMessage: "\(firstLine)\nInstalled marketplace root: \(installedRoot)"

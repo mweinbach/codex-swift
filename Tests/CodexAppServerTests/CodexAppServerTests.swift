@@ -10389,6 +10389,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(duplicateResult["alreadyAdded"] as? Bool, true)
     }
 
+    func testMarketplaceAddCommandResultIncludesRustSourceDisplay() throws {
+        let temp = try TemporaryDirectory()
+        let gitFixture = try makeGitMarketplaceSourceAndRemote(named: "debug", marker: "git ref", in: temp.url)
+        let gitConfig = temp.url.appendingPathComponent("gitconfig", isDirectory: false)
+        try """
+        [url "\(URL(fileURLWithPath: gitFixture.remote.path).absoluteString)"]
+            insteadOf = https://github.com/openai/debug-marketplace.git
+        """.write(to: gitConfig, atomically: true, encoding: .utf8)
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                "GIT_CONFIG_GLOBAL": gitConfig.path,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
+        )
+
+        let result = try CodexAppServer.marketplaceAddCommandResult(
+            source: "openai/debug-marketplace#\(gitFixture.branch)",
+            refName: nil,
+            sparsePaths: [],
+            configuration: configuration
+        )
+
+        XCTAssertEqual(result["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(
+            result["sourceDisplay"] as? String,
+            "https://github.com/openai/debug-marketplace.git#\(gitFixture.branch)"
+        )
+        XCTAssertEqual(result["alreadyAdded"] as? Bool, false)
+    }
+
     func testMarketplaceAddRejectsConflictingLocalSourceForExistingName() throws {
         let temp = try TemporaryDirectory()
         let firstRoot = try makeLocalMarketplaceRoot(named: "debug", in: temp.url, suffix: "one")

@@ -7865,6 +7865,7 @@ public enum CodexAppServer {
         sparsePaths: [String],
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let parsed = try parseMarketplaceSource(source, explicitRef: refName)
         var params: [String: Any] = [
             "source": source,
             "sparsePaths": sparsePaths
@@ -7872,7 +7873,9 @@ public enum CodexAppServer {
         if let refName {
             params["refName"] = refName
         }
-        return try marketplaceAddResult(params: params, configuration: configuration)
+        var result = try marketplaceAddResult(params: params, configuration: configuration)
+        result["sourceDisplay"] = parsed.display
+        return result
     }
 
     private static func marketplaceAddGitResult(
@@ -16532,6 +16535,21 @@ public enum CodexAppServer {
         let localPath: URL?
         let gitURL: String?
         let refName: String?
+
+        var display: String {
+            switch kind {
+            case .git:
+                guard let gitURL else {
+                    return ""
+                }
+                if let refName {
+                    return "\(gitURL)#\(refName)"
+                }
+                return gitURL
+            case .local:
+                return localPath?.path ?? ""
+            }
+        }
     }
 
     private static func configuredGitMarketplaceNames(in stack: ConfigLayerStack) -> [String] {
