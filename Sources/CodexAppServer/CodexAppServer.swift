@@ -2939,9 +2939,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (threadID: String, op: Op) {
-        guard let rawCommand = stringParam(params?["command"]) else {
-            throw AppServerError.invalidRequest("missing command")
-        }
+        let rawCommand = try rustRequiredStringParam(params?["command"], field: "command")
         let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else {
             throw AppServerError.invalidRequest("command must not be empty")
@@ -2962,9 +2960,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (threadID: String, op: Op) {
-        guard let event = params?["event"] else {
-            throw AppServerError.invalidRequest("missing event")
-        }
+        let event = try rustRequiredJSONParam(params?["event"], field: "event")
         let decodedEvent: GuardianAssessmentEvent
         do {
             let data = try JSONSerialization.data(withJSONObject: event)
@@ -3232,9 +3228,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> String {
-        guard let rawThreadID = stringParam(params?["threadId"]) else {
-            throw AppServerError.invalidRequest("missing threadId")
-        }
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let threadID: ConversationId
         do {
             threadID = try ConversationId(string: rawThreadID)
@@ -16626,6 +16620,13 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
         }
         return string
+    }
+
+    private static func rustRequiredJSONParam(_ value: Any?, field: String) throws -> Any {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
+        }
+        return value
     }
 
     private static func rustOptionalStringParam(_ value: Any?) throws -> String? {

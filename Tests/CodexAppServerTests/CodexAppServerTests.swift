@@ -4524,6 +4524,44 @@ final class CodexAppServerTests: XCTestCase {
         let missingThreadError = try XCTUnwrap(missingThread["error"] as? [String: Any])
         XCTAssertEqual(missingThreadError["code"] as? Int, -32600)
         XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(threadID)")
+
+        let missingThreadID = try appServerResponse(
+            #"{"id":4,"method":"thread/compact/start","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingThreadIDError = try XCTUnwrap(missingThreadID["error"] as? [String: Any])
+        XCTAssertEqual(missingThreadIDError["code"] as? Int, -32600)
+        XCTAssertEqual(missingThreadIDError["message"] as? String, "missing field `threadId`")
+
+        let invalidThreadIDType = try appServerResponse(
+            #"{"id":5,"method":"thread/compact/start","params":{"threadId":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidThreadIDTypeError = try XCTUnwrap(invalidThreadIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidThreadIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidThreadIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let missingCommand = try appServerResponse(
+            #"{"id":6,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingCommandError = try XCTUnwrap(missingCommand["error"] as? [String: Any])
+        XCTAssertEqual(missingCommandError["code"] as? Int, -32600)
+        XCTAssertEqual(missingCommandError["message"] as? String, "missing field `command`")
+
+        let invalidCommandType = try appServerResponse(
+            #"{"id":7,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidCommandTypeError = try XCTUnwrap(invalidCommandType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCommandTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCommandTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
     }
 
     func testThreadApproveGuardianDeniedActionValidatesEventAndThread() throws {
@@ -4563,6 +4601,14 @@ final class CodexAppServerTests: XCTestCase {
         let missingThreadError = try XCTUnwrap(missingThread["error"] as? [String: Any])
         XCTAssertEqual(missingThreadError["code"] as? Int, -32600)
         XCTAssertEqual(missingThreadError["message"] as? String, "thread not found: \(missingThreadID)")
+
+        let missingEvent = try appServerResponse(
+            #"{"id":4,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+        let missingEventError = try XCTUnwrap(missingEvent["error"] as? [String: Any])
+        XCTAssertEqual(missingEventError["code"] as? Int, -32600)
+        XCTAssertEqual(missingEventError["message"] as? String, "missing field `event`")
     }
 
     func testThreadBackgroundTerminalsCleanRequiresExperimentalAPI() throws {
