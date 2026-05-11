@@ -13256,6 +13256,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(capturedPayloads.isEmpty)
     }
 
+    func testAccountLoginChatGPTBrowserTokenExchangeFailureEmitsCompletionFailure() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                authLoginTransport: { _ in AuthRefreshHTTPResponse(statusCode: 500, body: Data()) }
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let login = try decode(processor.processLine(Data(#"{"id":1,"method":"account/login/start","params":{"type":"chatgpt"}}"#.utf8)))
+        let loginResult = try XCTUnwrap(login["result"] as? [String: Any])
+        let loginID = try XCTUnwrap(loginResult["loginId"] as? String)
+        let authURL = try XCTUnwrap(loginResult["authUrl"] as? String)
+        let authComponents = try XCTUnwrap(URLComponents(string: authURL))
+        let authQuery = Dictionary(uniqueKeysWithValues: (authComponents.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let redirectURI = try XCTUnwrap(authQuery["redirect_uri"])
+        let state = try XCTUnwrap(authQuery["state"])
+        let callbackURL = try XCTUnwrap(URL(string: "\(redirectURI)?code=browser-code&state=\(state)"))
+        let (body, response) = try await URLSession.shared.data(from: callbackURL)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(
+            String(data: body, encoding: .utf8),
+            "Token exchange failed: token endpoint returned status 500 Internal Server Error"
+        )
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed[0]["method"] as? String, "account/login/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["loginId"] as? String, loginID)
+        XCTAssertEqual(completedParams["success"] as? Bool, false)
+        XCTAssertEqual(
+            completedParams["error"] as? String,
+            "Login server error: Token exchange failed: token endpoint returned status 500 Internal Server Error"
+        )
+        let capturedPayloads = await notificationCapture.payloadsData()
+        XCTAssertTrue(capturedPayloads.isEmpty)
+    }
+
     func testAccountLoginChatGPTBrowserCompletionNotifiesAndQueuesMcpRefresh() async throws {
         let temp = try TemporaryDirectory()
         try """

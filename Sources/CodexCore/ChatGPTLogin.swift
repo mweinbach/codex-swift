@@ -274,7 +274,13 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
                 return .text(statusCode: 400, reason: "Bad Request", body: "State mismatch")
             }
             guard let code = query["code"], !code.isEmpty else {
-                return .text(statusCode: 400, reason: "Bad Request", body: "Missing authorization code")
+                let message = "Missing authorization code. Sign-in could not be completed."
+                return .text(
+                    statusCode: 200,
+                    reason: "OK",
+                    body: message,
+                    completion: .failure(ChatGPTLoginError.requestFailed(message))
+                )
             }
 
             do {
@@ -316,10 +322,12 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
                         keyringStore: keyringStore
                     )
                 } catch {
+                    let message = "Sign-in completed but credentials could not be saved locally."
                     return .text(
-                        statusCode: 500,
-                        reason: "Internal Server Error",
-                        body: "Unable to persist auth file: \(String(describing: error))"
+                        statusCode: 200,
+                        reason: "OK",
+                        body: message,
+                        completion: .failure(ChatGPTLoginError.requestFailed(message))
                     )
                 }
 
@@ -333,10 +341,12 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
                     )
                 )
             } catch {
+                let message = "Token exchange failed: \(String(describing: error))"
                 return .text(
-                    statusCode: 500,
-                    reason: "Internal Server Error",
-                    body: "Token exchange failed: \(String(describing: error))"
+                    statusCode: 200,
+                    reason: "OK",
+                    body: message,
+                    completion: .failure(ChatGPTLoginError.requestFailed(message))
                 )
             }
 
