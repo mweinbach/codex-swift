@@ -338,6 +338,8 @@ Source baseline inspected for this scaffold:
   - current feature registry ordering, stages, defaults, legacy feature aliases, feature-toggle CLI override validation, and Rust dependency normalization for `enable_fanout -> multi_agent` plus `code_mode_only -> code_mode`
 - `codex-rs/core/src/tools/handlers/agent_jobs_spec.rs`
   - added Swift Responses tool specs for `spawn_agents_on_csv` and `report_agent_job_result`, preserving Rust names, descriptions, required fields, loose object schemas for `output_schema`/`result`, and explicit supported-tool exposure. The CSV fanout runtime handlers and worker-result persistence/export flow remain pending.
+- `codex-rs/state/src/model/agent_job.rs` and `codex-rs/state/src/runtime/agent_jobs.rs`
+  - added Swift SQLite agent-job and job-item persistence, including Rust-matching status strings, creation schema, row-order listing with status/limit filters, job lifecycle updates, item transition guards, thread-scoped atomic result reporting, and progress counts. The CSV fanout tool handlers and result export workflow remain pending.
 - `codex-rs/tui/src/additional_dirs.rs`
   - read-only sandbox warning for ignored `--add-dir` writable roots
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
