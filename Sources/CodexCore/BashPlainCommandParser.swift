@@ -22,14 +22,17 @@ public enum BashPlainCommandParser {
     public static func parseShellLcSingleCommandPrefix(_ command: [String]) -> [String]? {
         guard let (_, script) = extractBashCommand(command) else { return nil }
         guard let redirectRange = script.range(of: "<<") else { return nil }
-        guard !script[redirectRange.upperBound...].hasPrefix("<") else { return nil }
+        let redirectSuffix = script[redirectRange.upperBound...]
+        guard !redirectSuffix.hasPrefix("<") else { return nil }
+        let stripsLeadingTabs = redirectSuffix.hasPrefix("-")
 
         let prefix = String(script[..<redirectRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard let command = parseLiteralSingleCommandPrefix(prefix) else {
             return nil
         }
 
-        let remainder = String(script[redirectRange.upperBound...])
+        let bodyStart = stripsLeadingTabs ? script.index(after: redirectRange.upperBound) : redirectRange.upperBound
+        let remainder = String(script[bodyStart...])
         let redirectLine = remainder.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
         let delimiterToken = redirectLine.trimmingCharacters(in: .whitespaces)
         guard !delimiterToken.isEmpty,
@@ -48,7 +51,9 @@ public enum BashPlainCommandParser {
         guard !delimiter.isEmpty else { return nil }
 
         let lines = script.components(separatedBy: .newlines)
-        guard let delimiterIndex = lines.firstIndex(where: { $0 == delimiter }) else {
+        guard let delimiterIndex = lines.firstIndex(where: { line in
+            stripsLeadingTabs ? line.trimmingCharacters(in: CharacterSet(charactersIn: "\t")) == delimiter : line == delimiter
+        }) else {
             return nil
         }
         let trailingLines = lines.suffix(from: lines.index(after: delimiterIndex))

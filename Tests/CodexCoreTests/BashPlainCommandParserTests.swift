@@ -166,6 +166,14 @@ final class BashPlainCommandParserTests: XCTestCase {
             ]),
             ["python3"]
         )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+                "bash",
+                "-lc",
+                "python3 <<-PY\n\tprint('hello')\n\tPY",
+            ]),
+            ["python3"]
+        )
     }
 
     func testSingleCommandPrefixRejectsUnsafeHeredocShapes() {

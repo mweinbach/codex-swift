@@ -1047,6 +1047,7 @@ Source baseline inspected for this scaffold:
   - added Swift parsing for `command/exec.sandboxPolicy` v2 camel-case policy payloads and applied the per-request policy over the configured default, matching Rust's command exec override path; pinned `dangerFullAccess` overriding the configured read-only default, `readOnly.networkAccess` carrying through sandbox environment/network policy generation, invalid `externalSandbox.networkAccess` rejection, deprecated restricted-read rejection, and the Rust conflict rejection with `permissionProfile`.
 - `codex-rs/shell-command/src/bash.rs` heredoc command-prefix parsing
   - tightened Swift's `parseShellLcSingleCommandPrefix` to match Rust's literal word/number-only heredoc prefix contract, so quoted, escaped, arithmetic-expanded, or otherwise non-literal prefix words are no longer accepted for exec-policy prefix matching.
+  - matched Rust tree-sitter handling for tab-stripping `<<-` heredocs in Swift's single-command prefix parser, including tab-prefixed delimiter lines.
 - `codex-rs/core/src/command_canonicalization.rs` approval-cache command keys
   - added Swift command canonicalization for approval-cache matching, including Rust's plain `bash`/`zsh` inner-command normalization, stable shell-script keys for heredoc/complex scripts, stable PowerShell script keys, and unchanged non-shell argv behavior.
 - `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply
