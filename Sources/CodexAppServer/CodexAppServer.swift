@@ -5657,9 +5657,9 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
-        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
-        let pluginName = stringParam(params?["pluginName"]) ?? ""
+        let marketplacePath = try rustOptionalAbsolutePathParam(params?["marketplacePath"])
+        let remoteMarketplaceName = try rustOptionalStringParam(params?["remoteMarketplaceName"])
+        let pluginName = try rustRequiredStringParam(params?["pluginName"], field: "pluginName")
         switch (marketplacePath, remoteMarketplaceName) {
         case (.some, .some), (.none, .none):
             throw AppServerError.invalidRequest("plugin/read requires exactly one of marketplacePath or remoteMarketplaceName")
@@ -5682,9 +5682,12 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"]) ?? ""
-        let remotePluginID = stringParam(params?["remotePluginId"]) ?? ""
-        let skillName = stringParam(params?["skillName"]) ?? ""
+        let remoteMarketplaceName = try rustRequiredStringParam(
+            params?["remoteMarketplaceName"],
+            field: "remoteMarketplaceName"
+        )
+        let remotePluginID = try rustRequiredStringParam(params?["remotePluginId"], field: "remotePluginId")
+        let skillName = try rustRequiredStringParam(params?["skillName"], field: "skillName")
         let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
         guard runtimeConfig.features.isEnabled(.plugins) else {
             throw AppServerError.invalidRequest("remote plugin skill read is not enabled for marketplace \(remoteMarketplaceName)")
@@ -6297,9 +6300,9 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let marketplacePath = try optionalAbsolutePathParam(params?["marketplacePath"], name: "marketplacePath")
-        let remoteMarketplaceName = stringParam(params?["remoteMarketplaceName"])
-        let pluginName = stringParam(params?["pluginName"]) ?? ""
+        let marketplacePath = try rustOptionalAbsolutePathParam(params?["marketplacePath"])
+        let remoteMarketplaceName = try rustOptionalStringParam(params?["remoteMarketplaceName"])
+        let pluginName = try rustRequiredStringParam(params?["pluginName"], field: "pluginName")
         switch (marketplacePath, remoteMarketplaceName) {
         case (.some, .some), (.none, .none):
             throw AppServerError.invalidRequest("plugin/install requires exactly one of marketplacePath or remoteMarketplaceName")
@@ -15598,6 +15601,39 @@ public enum CodexAppServer {
             return nil
         }
         guard let path = stringParam(value) else {
+            return nil
+        }
+        guard path.hasPrefix("/") else {
+            throw AppServerError.invalidRequest("Invalid request: AbsolutePathBuf deserialized without a base path")
+        }
+        return path
+    }
+
+    private static func rustRequiredStringParam(_ value: Any?, field: String) throws -> String {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
+        }
+        guard !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: null, expected a string")
+        }
+        guard let string = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
+        }
+        return string
+    }
+
+    private static func rustOptionalStringParam(_ value: Any?) throws -> String? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let string = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
+        }
+        return string
+    }
+
+    private static func rustOptionalAbsolutePathParam(_ value: Any?) throws -> String? {
+        guard let path = try rustOptionalStringParam(value) else {
             return nil
         }
         guard path.hasPrefix("/") else {

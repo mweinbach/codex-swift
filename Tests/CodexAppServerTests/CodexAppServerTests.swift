@@ -6521,6 +6521,36 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path
 
+        let missingPluginName = try appServerResponse(
+            #"{"id":0,"method":"plugin/read","params":{"remoteMarketplaceName":"openai-curated"}}"#,
+            codexHome: temp.url
+        )
+        let missingPluginNameError = try XCTUnwrap(missingPluginName["error"] as? [String: Any])
+        XCTAssertEqual(missingPluginNameError["code"] as? Int, -32600)
+        XCTAssertEqual(missingPluginNameError["message"] as? String, "missing field `pluginName`")
+
+        let invalidPluginName = try appServerResponse(
+            #"{"id":0,"method":"plugin/read","params":{"remoteMarketplaceName":"openai-curated","pluginName":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidPluginNameError = try XCTUnwrap(invalidPluginName["error"] as? [String: Any])
+        XCTAssertEqual(invalidPluginNameError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidPluginNameError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidMarketplacePath = try appServerResponse(
+            #"{"id":0,"method":"plugin/read","params":{"marketplacePath":1,"pluginName":"gmail"}}"#,
+            codexHome: temp.url
+        )
+        let invalidMarketplacePathError = try XCTUnwrap(invalidMarketplacePath["error"] as? [String: Any])
+        XCTAssertEqual(invalidMarketplacePathError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidMarketplacePathError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let missingSource = try appServerResponse(
             #"{"id":1,"method":"plugin/read","params":{"pluginName":"gmail"}}"#,
             codexHome: temp.url
@@ -6858,6 +6888,25 @@ final class CodexAppServerTests: XCTestCase {
         }
         """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
         let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+
+        let missingRemoteMarketplace = try appServerResponse(
+            #"{"id":0,"method":"plugin/skill/read","params":{"remotePluginId":"\#(pluginID)","skillName":"plan-work"}}"#,
+            codexHome: temp.url
+        )
+        let missingRemoteMarketplaceError = try XCTUnwrap(missingRemoteMarketplace["error"] as? [String: Any])
+        XCTAssertEqual(missingRemoteMarketplaceError["code"] as? Int, -32600)
+        XCTAssertEqual(missingRemoteMarketplaceError["message"] as? String, "missing field `remoteMarketplaceName`")
+
+        let invalidSkillName = try appServerResponse(
+            #"{"id":0,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"chatgpt-global","remotePluginId":"\#(pluginID)","skillName":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidSkillNameError = try XCTUnwrap(invalidSkillName["error"] as? [String: Any])
+        XCTAssertEqual(invalidSkillNameError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidSkillNameError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
 
         let emptySkill = try appServerResponse(
             #"{"id":1,"method":"plugin/skill/read","params":{"remoteMarketplaceName":"chatgpt-global","remotePluginId":"\#(pluginID)","skillName":""}}"#,
@@ -7647,6 +7696,25 @@ final class CodexAppServerTests: XCTestCase {
     func testPluginInstallValidatesSourceAndReportsRemoteDisabled() throws {
         let temp = try TemporaryDirectory()
         let marketplace = temp.url.appendingPathComponent("marketplace.json").path
+
+        let missingPluginName = try appServerResponse(
+            #"{"id":0,"method":"plugin/install","params":{"remoteMarketplaceName":"openai-curated"}}"#,
+            codexHome: temp.url
+        )
+        let missingPluginNameError = try XCTUnwrap(missingPluginName["error"] as? [String: Any])
+        XCTAssertEqual(missingPluginNameError["code"] as? Int, -32600)
+        XCTAssertEqual(missingPluginNameError["message"] as? String, "missing field `pluginName`")
+
+        let invalidRemoteMarketplace = try appServerResponse(
+            #"{"id":0,"method":"plugin/install","params":{"remoteMarketplaceName":1,"pluginName":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let invalidRemoteMarketplaceError = try XCTUnwrap(invalidRemoteMarketplace["error"] as? [String: Any])
+        XCTAssertEqual(invalidRemoteMarketplaceError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidRemoteMarketplaceError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
 
         let missingSource = try appServerResponse(
             #"{"id":1,"method":"plugin/install","params":{"pluginName":"gmail"}}"#,
