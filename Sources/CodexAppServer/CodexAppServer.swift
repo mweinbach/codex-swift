@@ -14673,7 +14673,7 @@ public enum CodexAppServer {
             timeoutMs: disableTimeout ? nil : commandExecTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: disableOutputCap ? nil : commandExecOutputBytesCap(params?["outputBytesCap"]),
             size: size,
-            environmentOverrides: processEnvironmentOverrides(params?["env"]),
+            environmentOverrides: try processEnvironmentOverrides(params?["env"]),
             sandboxPolicy: sandboxPolicy,
             permissionProfile: permissionProfile
         )
@@ -15131,7 +15131,7 @@ public enum CodexAppServer {
             timeoutMs: processSpawnTimeoutMs(params?["timeoutMs"]),
             outputBytesCap: processOutputBytesCap(params?["outputBytesCap"]),
             size: size,
-            environmentOverrides: processEnvironmentOverrides(params?["env"])
+            environmentOverrides: try processEnvironmentOverrides(params?["env"])
         )
     }
 
@@ -15332,9 +15332,12 @@ public enum CodexAppServer {
         return max(intParam(value, defaultValue: 1_048_576), 0)
     }
 
-    private static func processEnvironmentOverrides(_ value: Any?) -> [String: String?] {
-        guard let object = value as? [String: Any] else {
+    private static func processEnvironmentOverrides(_ value: Any?) throws -> [String: String?] {
+        guard let value, !(value is NSNull) else {
             return [:]
+        }
+        guard let object = value as? [String: Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a map")
         }
         var overrides: [String: String?] = [:]
         for (key, value) in object {
@@ -15342,6 +15345,8 @@ public enum CodexAppServer {
                 overrides[key] = .some(nil)
             } else if let value = stringParam(value) {
                 overrides[key] = value
+            } else {
+                throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
             }
         }
         return overrides

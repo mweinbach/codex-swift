@@ -19293,6 +19293,28 @@ final class CodexAppServerTests: XCTestCase {
             #"Invalid request: invalid type: string "true", expected a boolean"#
         )
 
+        let invalidEnvType = try appServerResponse(
+            #"{"id":14,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","env":[]}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidEnvTypeError = try XCTUnwrap(invalidEnvType["error"] as? [String: Any])
+        XCTAssertEqual(invalidEnvTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidEnvTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected a map"
+        )
+
+        let invalidEnvValueType = try appServerResponse(
+            #"{"id":15,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","env":{"CODEX_BAD":1}}}"#,
+            codexHome: codexHome.url
+        )
+        let invalidEnvValueTypeError = try XCTUnwrap(invalidEnvValueType["error"] as? [String: Any])
+        XCTAssertEqual(invalidEnvValueTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidEnvValueTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
         let negativeOutputCap = try appServerResponse(
             #"{"id":8,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","outputBytesCap":-1}}"#,
             codexHome: codexHome.url
@@ -20163,6 +20185,30 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(
             invalidTtyBoolTypeError["message"] as? String,
             "Invalid request: invalid type: integer `1`, expected a boolean"
+        )
+
+        let invalidEnvType = try appServerResponse(
+            #"{"id":13,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","env":true}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidEnvTypeError = try XCTUnwrap(invalidEnvType["error"] as? [String: Any])
+        XCTAssertEqual(invalidEnvTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidEnvTypeError["message"] as? String,
+            "Invalid request: invalid type: boolean `true`, expected a map"
+        )
+
+        let invalidEnvValueType = try appServerResponse(
+            #"{"id":14,"method":"process/spawn","params":{"command":["echo"],"processHandle":"proc-1","cwd":"\#(temp.url.path)","env":{"CODEX_BAD":[]}}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let invalidEnvValueTypeError = try XCTUnwrap(invalidEnvValueType["error"] as? [String: Any])
+        XCTAssertEqual(invalidEnvValueTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidEnvValueTypeError["message"] as? String,
+            "Invalid request: invalid type: sequence, expected a string"
         )
     }
 
