@@ -1100,7 +1100,12 @@ final class CommandSurfaceCLITests: XCTestCase {
         ), dependencies: DebugCommandRuntime.Dependencies(
             findCodexHome: { URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true) },
             loadConfig: { _, _ in CodexRuntimeConfig(modelProvider: "openai") },
-            loadRawModelCatalog: { _, _ in expected }
+            loadRawModelCatalog: { _, _ in
+                // Keep this async path suspended at least once; Swift 6.2 XCTest can crash
+                // when this focused test completes entirely synchronously.
+                await Task.yield()
+                return expected
+            }
         ))
 
         XCTAssertEqual(result.exitCode, 0)
