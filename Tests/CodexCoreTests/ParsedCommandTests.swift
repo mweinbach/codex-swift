@@ -690,6 +690,24 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testNumericParserArgumentsRequireASCIIDigitsLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "head -n ٣ README.md"]), [
+            .unknown(cmd: "head -n ٣ README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n +٣ README.md"]), [
+            .unknown(cmd: "tail -n +٣ README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "sed -n '١,٢p' README.md"]), [
+            .unknown(cmd: "sed -n '١,٢p' README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | tail -c ٣"]), [
+            .unknown(cmd: "rg --files | tail -c ٣")
+        ])
+    }
+
     func testShellWrapperVariantsFromRustParser() {
         XCTAssertEqual(parseCommand(["bash", "-c", "rg --files | head -n 1"]), [
             .listFiles(cmd: "rg --files", path: nil)

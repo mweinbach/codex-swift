@@ -803,12 +803,9 @@ private func isValidSedNArg(_ argument: String?) -> Bool {
     let parts = core.split(separator: ",", omittingEmptySubsequences: false)
     switch parts.count {
     case 1:
-        return !parts[0].isEmpty && parts[0].allSatisfy(\.isNumber)
+        return isASCIINumeric(parts[0])
     case 2:
-        return !parts[0].isEmpty
-            && !parts[1].isEmpty
-            && parts[0].allSatisfy(\.isNumber)
-            && parts[1].allSatisfy(\.isNumber)
+        return isASCIINumeric(parts[0]) && isASCIINumeric(parts[1])
     default:
         return false
     }
@@ -906,7 +903,7 @@ private func isSmallFormattingCommand(_ tokens: [String]) -> Bool {
         case 2:
             return tokens[1].hasPrefix("-")
         case 3:
-            return ["-n", "-c"].contains(tokens[1]) && tokens[2].allSatisfy(\.isNumber)
+            return ["-n", "-c"].contains(tokens[1]) && isASCIINumeric(tokens[2])
         default:
             return false
         }
@@ -997,13 +994,13 @@ private func fileOperandForHead(_ tail: [String]) -> String? {
         return nil
     }
 
-    if tail[0] == "-n", tail.indices.contains(1), tail[1].allSatisfy(\.isNumber) {
+    if tail[0] == "-n", tail.indices.contains(1), isASCIINumeric(tail[1]) {
         return tail.dropFirst(2).first { !$0.hasPrefix("-") }
     }
 
     if tail[0].hasPrefix("-n") {
         let count = tail[0].dropFirst(2)
-        if !count.isEmpty, count.allSatisfy(\.isNumber) {
+        if isASCIINumeric(count) {
             return tail.dropFirst().first { !$0.hasPrefix("-") }
         }
     }
@@ -1040,7 +1037,11 @@ private func fileOperandForTail(_ tail: [String]) -> String? {
 
 private func isNumericOrPositiveOffset(_ value: String) -> Bool {
     let trimmed = value.hasPrefix("+") ? String(value.dropFirst()) : value
-    return !trimmed.isEmpty && trimmed.allSatisfy(\.isNumber)
+    return isASCIINumeric(trimmed)
+}
+
+private func isASCIINumeric<S: StringProtocol>(_ value: S) -> Bool {
+    !value.isEmpty && value.allSatisfy { $0 >= "0" && $0 <= "9" }
 }
 
 private func containsSedN(_ tokens: [String]) -> Bool {
