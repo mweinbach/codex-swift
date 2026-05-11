@@ -138,7 +138,7 @@ public enum DebugCommandRuntime {
                 )
             )
         }
-        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output + "\n")
     }
 
     public static func sendAppServerMessageV2(
@@ -345,7 +345,7 @@ public enum DebugCommandRuntime {
                 )
             )
         }
-        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output + "\n")
     }
 
     private static func makePromptInput(
@@ -503,7 +503,7 @@ public enum DebugCommandRuntime {
             : "No state db found at \(statePath.path)."
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
-            stdoutMessage: "\(stateMessage) Cleared memory directories under \(codexHome.path)."
+            stdoutMessage: "\(stateMessage) Cleared memory directories under \(codexHome.path).\n"
         )
     }
 

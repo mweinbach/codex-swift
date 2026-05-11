@@ -53,6 +53,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
         let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertTrue(output.hasSuffix("\n"))
         XCTAssertTrue(output.contains("\n  {"))
 
         let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
@@ -535,7 +536,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(
             result.stdoutMessage,
-            "Cleared memory state from \(statePath.path). Cleared memory directories under \(temp.url.path)."
+            "Cleared memory state from \(statePath.path). Cleared memory directories under \(temp.url.path).\n"
         )
         XCTAssertNil(result.stderrMessage)
         XCTAssertEqual(try sqliteCount(databaseURL: statePath, query: "SELECT COUNT(*) FROM stage1_outputs"), 0)
@@ -577,7 +578,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(
             result.stdoutMessage,
-            "No state db found at \(temp.url.appendingPathComponent("state_5.sqlite").path). Cleared memory directories under \(temp.url.path)."
+            "No state db found at \(temp.url.appendingPathComponent("state_5.sqlite").path). Cleared memory directories under \(temp.url.path).\n"
         )
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryRoot.path), [])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: memoryExtensionRoot.path), [])

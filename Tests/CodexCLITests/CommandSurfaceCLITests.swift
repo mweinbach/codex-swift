@@ -1093,6 +1093,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertNil(result.stderrMessage)
 
         let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertTrue(output.hasSuffix("\n"))
         let decoded = try JSONDecoder().decode(ModelsResponse.self, from: Data(output.utf8))
         XCTAssertEqual(decoded, try ModelsManager.bundledModelsResponse())
     }
@@ -1115,6 +1116,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
         let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertTrue(output.hasSuffix("\n"))
         XCTAssertEqual(try JSONDecoder().decode(ModelsResponse.self, from: Data(output.utf8)), expected)
     }
 
