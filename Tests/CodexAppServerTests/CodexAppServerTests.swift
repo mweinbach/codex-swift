@@ -9621,6 +9621,70 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(afterItems.first { $0["itemType"] as? String == "SESSIONS" })
     }
 
+    func testExternalAgentConfigImportSkipsAlreadyImportedSessionVersionsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let codexHome = temp.url.appendingPathComponent("codex-home", isDirectory: true)
+        let projectRoot = temp.url.appendingPathComponent("repo", isDirectory: true)
+        let home = temp.url.appendingPathComponent("home", isDirectory: true)
+        let sessionDir = home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects/repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let sessionPath = sessionDir.appendingPathComponent("session.jsonl", isDirectory: false)
+        let recentTimestamp = ISO8601DateFormatter().string(from: Date())
+        let records = [
+            #"{"type":"user","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":"first request"}}"#,
+            #"{"type":"assistant","cwd":"\#(projectRoot.path)","timestamp":"\#(recentTimestamp)","message":{"content":"first answer"}}"#,
+            #"{"type":"custom-title","customTitle":"Imported title"}"#
+        ].joined(separator: "\n")
+        try records.write(to: sessionPath, atomically: true, encoding: .utf8)
+        let config = CodexAppServerConfiguration(
+            codexHome: codexHome,
+            environment: ["HOME": home.path]
+        )
+        let processor = try initializedProcessor(configuration: config)
+
+        let detect = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"externalAgentConfig/detect","params":{"includeHome":true}}"#.utf8
+        )))
+        let items = try XCTUnwrap((detect["result"] as? [String: Any])?["items"] as? [[String: Any]])
+        let sessionsItem = try XCTUnwrap(items.first { $0["itemType"] as? String == "SESSIONS" })
+        let details = try XCTUnwrap(sessionsItem["details"] as? [String: Any])
+        let sessions = try XCTUnwrap(details["sessions"] as? [[String: Any]])
+        let detectedSessionPath = try XCTUnwrap(sessions.first?["path"] as? String)
+
+        func importMessages(id: Int) throws -> [[String: Any]] {
+            try decodeMessages(processor.processLine(Data(
+                #"{"id":\#(id),"method":"externalAgentConfig/import","params":{"migrationItems":[{"itemType":"SESSIONS","description":"Sessions","cwd":null,"details":{"sessions":[{"path":"\#(detectedSessionPath)","cwd":"\#(projectRoot.path)","title":"Imported title"}]}}]}}"#.utf8
+            )))
+        }
+
+        let firstImport = try importMessages(id: 2)
+        XCTAssertEqual(firstImport.count, 2)
+        XCTAssertEqual((firstImport[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(firstImport[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let secondImport = try importMessages(id: 3)
+        XCTAssertEqual(secondImport.count, 2)
+        XCTAssertEqual((secondImport[0]["result"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(secondImport[1]["method"] as? String, "externalAgentConfig/import/completed")
+
+        let list = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"thread/list","params":{}}"#.utf8
+        )))
+        let threads = try XCTUnwrap((list["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(threads.count, 1)
+        XCTAssertEqual(threads[0]["name"] as? String, "Imported title")
+        let ledgerData = try Data(
+            contentsOf: codexHome.appendingPathComponent("external_agent_session_imports.json", isDirectory: false)
+        )
+        let ledger = try XCTUnwrap(JSONSerialization.jsonObject(with: ledgerData) as? [String: Any])
+        let ledgerRecords = try XCTUnwrap(ledger["records"] as? [[String: Any]])
+        XCTAssertEqual(ledgerRecords.count, 1)
+    }
+
     func testExternalAgentConfigDetectConfigReportsRepoMigrationOnlyForMissingValues() throws {
         let codexHome = try TemporaryDirectory()
         let repo = try TemporaryDirectory()
