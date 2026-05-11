@@ -696,6 +696,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(forkedDynamicTools[0]["deferLoading"] as? Bool, true)
     }
 
+    func testThreadForkRestoresStateStoreDynamicToolsBeforeRolloutHistoryLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let rolloutTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "rollout_lookup",
+                description: "Rollout lookup tool",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: false
+            )
+        ]
+        let stateTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "state_lookup",
+                description: "State lookup tool",
+                inputSchema: .object(["type": .string("object")]),
+                deferLoading: true
+            )
+        ]
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-35-30",
+            timestamp: "2025-01-05T12:35:30Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            dynamicTools: rolloutTools
+        )
+        let sourcePath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: sourceID
+        ))
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let threadID = try ThreadId(string: sourceID)
+        try await upsertAppServerStateThread(
+            stateStore,
+            threadID: threadID,
+            rolloutPath: sourcePath,
+            codexHome: temp.url,
+            title: "Saved user message"
+        )
+        try await stateStore.persistDynamicTools(threadID: threadID, tools: stateTools)
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/fork","params":{"threadId":"\#(sourceID)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let forkPath = try XCTUnwrap(thread["path"] as? String)
+        let meta = try firstSessionMetaPayload(at: forkPath)
+        let forkedDynamicTools = try XCTUnwrap(meta["dynamic_tools"] as? [[String: Any]])
+        XCTAssertEqual(forkedDynamicTools.count, 1)
+        XCTAssertEqual(forkedDynamicTools[0]["namespace"] as? String, "codex_app")
+        XCTAssertEqual(forkedDynamicTools[0]["name"] as? String, "state_lookup")
+        XCTAssertEqual(forkedDynamicTools[0]["description"] as? String, "State lookup tool")
+        XCTAssertEqual(forkedDynamicTools[0]["deferLoading"] as? Bool, true)
+    }
+
     func testLegacyResumeConversationCarriesSourceDynamicToolsIntoNewSessionMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let dynamicTools = [

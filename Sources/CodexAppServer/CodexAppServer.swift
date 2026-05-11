@@ -1086,6 +1086,11 @@ public enum CodexAppServer {
             dynamicTools: dynamicTools.isEmpty ? nil : dynamicTools
         )
         try recorder.shutdown()
+        try updateStateStoreDynamicToolsIfConfigured(
+            rolloutPath: recorder.rolloutPath.path,
+            dynamicTools: dynamicTools,
+            configuration: configuration
+        )
         return AppServerStartedConversation(
             conversationID: conversationID,
             rolloutPath: recorder.rolloutPath,
@@ -1607,6 +1612,11 @@ public enum CodexAppServer {
             fallback: baseSandbox
         )
         let threadSource = threadSourceParam(params?["threadSource"])
+        let dynamicTools = try dynamicToolsForResumedOrForkedHistory(
+            sourceConversationID: sourceConversationID,
+            history: history,
+            configuration: configuration
+        )
         let conversationID = ConversationId()
         let recorder = try RolloutRecorder.create(
             codexHome: configuration.codexHome,
@@ -1622,7 +1632,7 @@ public enum CodexAppServer {
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider,
-            dynamicTools: history.dynamicTools
+            dynamicTools: dynamicTools
         )
         try recorder.recordItems(history.rolloutItems.filter { item in
             if case .sessionMeta = item {
@@ -1631,6 +1641,11 @@ public enum CodexAppServer {
             return true
         })
         try recorder.shutdown()
+        try updateStateStoreDynamicToolsIfConfigured(
+            rolloutPath: recorder.rolloutPath.path,
+            dynamicTools: dynamicTools ?? [],
+            configuration: configuration
+        )
 
         let item = ConversationItem(path: recorder.rolloutPath.path, head: [], createdAt: nil, updatedAt: nil)
         let excludeTurns = try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false)
@@ -1854,12 +1869,16 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let history: InitialHistory
+        let sourceConversationID: ConversationId?
         if let path = stringParam(params?["path"]) {
             do {
                 history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: path))
             } catch {
                 throw AppServerError.invalidRequest("failed to load rollout `\(path)`: \(error)")
             }
+            sourceConversationID = try? ConversationId(
+                string: RolloutSummary(path: path, defaultProvider: configuration.defaultModelProvider).id
+            )
         } else if let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"]) {
             let conversationID: ConversationId
             do {
@@ -1875,8 +1894,10 @@ public enum CodexAppServer {
                     "failed to load rollout `\(path)` for conversation \(conversationID): \(error)"
                 )
             }
+            sourceConversationID = conversationID
         } else if let rawHistory = params?["history"] as? [Any], !rawHistory.isEmpty {
             history = .forked([])
+            sourceConversationID = nil
         } else {
             throw AppServerError.invalidRequest("either path, conversation id or non empty history must be provided")
         }
@@ -1893,6 +1914,11 @@ public enum CodexAppServer {
             fileURLWithPath: stringParam(overrides?["cwd"]) ?? FileManager.default.currentDirectoryPath,
             isDirectory: true
         )
+        let dynamicTools = try dynamicToolsForResumedOrForkedHistory(
+            sourceConversationID: sourceConversationID,
+            history: history,
+            configuration: configuration
+        )
         let conversationID = ConversationId()
         let recorder = try RolloutRecorder.create(
             codexHome: configuration.codexHome,
@@ -1906,7 +1932,7 @@ public enum CodexAppServer {
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider,
-            dynamicTools: history.dynamicTools
+            dynamicTools: dynamicTools
         )
         try recorder.recordItems(history.rolloutItems.filter { item in
             if case .sessionMeta = item {
@@ -1915,6 +1941,11 @@ public enum CodexAppServer {
             return true
         })
         try recorder.shutdown()
+        try updateStateStoreDynamicToolsIfConfigured(
+            rolloutPath: recorder.rolloutPath.path,
+            dynamicTools: dynamicTools ?? [],
+            configuration: configuration
+        )
 
         let initialMessages = history.eventMessages ?? []
         return [
@@ -1923,6 +1954,41 @@ public enum CodexAppServer {
             "initialMessages": initialMessages.isEmpty ? NSNull() : try jsonObject(initialMessages),
             "rolloutPath": recorder.rolloutPath.path
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func dynamicToolsForResumedOrForkedHistory(
+        sourceConversationID: ConversationId?,
+        history: InitialHistory,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [DynamicToolSpec]? {
+        if let sourceConversationID,
+           let stateStore = configuration.stateStore,
+           let persistedTools = try runAsyncBlocking({
+               try await stateStore.getDynamicTools(threadID: ThreadId(uuid: sourceConversationID.uuid))
+           }) {
+            return persistedTools
+        }
+        return history.dynamicTools
+    }
+
+    private static func updateStateStoreDynamicToolsIfConfigured(
+        rolloutPath: String,
+        dynamicTools: [DynamicToolSpec],
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let stateStore = configuration.stateStore else {
+            return
+        }
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let metadata = try threadMetadata(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            archivedOnly: false
+        )
+        try runAsyncBlocking {
+            try await stateStore.upsertThread(metadata)
+            try await stateStore.persistDynamicTools(threadID: metadata.id, tools: dynamicTools)
+        }
     }
 
     fileprivate static func turnStartResult(
