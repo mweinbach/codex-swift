@@ -414,10 +414,7 @@ public enum DebugCommandRuntime {
     private static func environmentContextEnvironments(
         from selections: [TurnEnvironmentSelection],
         defaultShell: Shell
-    ) -> [EnvironmentContextEnvironment]? {
-        guard selections.count > 1 else {
-            return nil
-        }
+    ) -> [EnvironmentContextEnvironment] {
         return selections.map { selection in
             EnvironmentContextEnvironment(
                 id: selection.environmentID,

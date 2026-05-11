@@ -399,6 +399,63 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertFalse(environmentText.contains("\n  <shell>"))
     }
 
+    func testPromptInputRendersSingleConfiguredEnvironmentLikeRustSession() async throws {
+        let temp = try TemporaryDirectory()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                configuredEnvironments: [
+                    TurnEnvironmentSelection(environmentID: "local", cwd: "/repo/local")
+                ]
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, role, content, _) = decoded[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(role, "user")
+        guard case let .inputText(environmentText) = content.first else {
+            return XCTFail("expected environment text")
+        }
+        XCTAssertTrue(environmentText.contains("  <cwd>/repo/local</cwd>"))
+        XCTAssertTrue(environmentText.contains("  <shell>"))
+        XCTAssertTrue(environmentText.contains("  <current_date>2026-02-26</current_date>"))
+        XCTAssertFalse(environmentText.contains("<approval_policy>"))
+        XCTAssertFalse(environmentText.contains("<sandbox_mode>"))
+    }
+
+    func testPromptInputHonorsDisabledConfiguredEnvironmentDefault() async throws {
+        let temp = try TemporaryDirectory()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                configuredEnvironments: []
+            )
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, role, content, _) = decoded[1] else {
+            return XCTFail("expected contextual user message")
+        }
+        XCTAssertEqual(role, "user")
+        guard case let .inputText(environmentText) = content.first else {
+            return XCTFail("expected environment text")
+        }
+        XCTAssertTrue(environmentText.contains("<environment_context>"))
+        XCTAssertTrue(environmentText.contains("  <current_date>2026-02-26</current_date>"))
+        XCTAssertFalse(environmentText.contains("<cwd>"))
+        XCTAssertFalse(environmentText.contains("<shell>"))
+        XCTAssertFalse(environmentText.contains("<approval_policy>"))
+        XCTAssertFalse(environmentText.contains("<sandbox_mode>"))
+    }
+
     func testPromptInputOmitsAvailableSkillsWhenDisabled() async throws {
         let temp = try TemporaryDirectory()
         let skill = temp.url.appendingPathComponent("skills/debug-helper/SKILL.md", isDirectory: false)
