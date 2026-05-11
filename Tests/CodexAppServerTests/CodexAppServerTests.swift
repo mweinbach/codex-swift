@@ -1128,6 +1128,8 @@ final class CodexAppServerTests: XCTestCase {
         let command = #"printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"runtime hook context"}}'"#
         let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
         try """
+        approval_policy = "never"
+
         [hooks]
         managed_dir = "\(managedDir.url.path)"
 
@@ -1281,6 +1283,155 @@ final class CodexAppServerTests: XCTestCase {
             $0 == .eventMsg(.userMessage(UserMessageEvent(message: "Hello after session")))
         })
         XCTAssertLessThan(contextIndex, userIndex)
+    }
+
+    func testTurnStartRunsResumeSessionStartHooksLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let managedDir = try TemporaryDirectory()
+        let hookScript = temp.url.appendingPathComponent("session-resume-hook.sh", isDirectory: false)
+        let hookLog = temp.url.appendingPathComponent("session-resume-hook-input.json", isDirectory: false)
+        try """
+        #!/bin/sh
+        cat >> "$1"
+        printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"resume context"}}'
+        """.write(to: hookScript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookScript.path)
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [hooks]
+        managed_dir = "\(managedDir.url.path)"
+
+        [[hooks.SessionStart]]
+        matcher = "resume"
+
+        [[hooks.SessionStart.hooks]]
+        type = "command"
+        command = '''\(hookScript.path) \(hookLog.path)'''
+        statusMessage = "resuming session"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try #"approval_policy = "never""#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+        )
+        let createProcessor = try initializedProcessor(configuration: configuration)
+        let startMessages = try decodeMessages(createProcessor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-original","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let sourceThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let sourceThreadID = try XCTUnwrap(sourceThread["id"] as? String)
+
+        let resumeProcessor = try initializedProcessor(configuration: configuration)
+        let resumeMessages = try decodeMessages(resumeProcessor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(sourceThreadID)","model":"gpt-resumed"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let resumedThreadID = try XCTUnwrap(resumedThread["id"] as? String)
+        XCTAssertEqual(resumedThreadID, sourceThreadID)
+
+        let messages = try decodeMessages(resumeProcessor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(resumedThreadID)","input":[{"type":"text","text":"Hello resumed"}]}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.map { $0["method"] as? String }, [
+            nil,
+            "hook/started",
+            "hook/completed",
+            "turn/started",
+            "thread/status/changed"
+        ])
+        let startedParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual((startedParams["run"] as? [String: Any])?["eventName"] as? String, "sessionStart")
+        let completedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        let entries = try XCTUnwrap((completedParams["run"] as? [String: Any])?["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.first?["text"] as? String, "resume context")
+
+        let hookInput = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try String(contentsOf: hookLog, encoding: .utf8).utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(hookInput["hook_event_name"] as? String, "SessionStart")
+        XCTAssertEqual(hookInput["session_id"] as? String, resumedThreadID)
+        XCTAssertEqual(hookInput["source"] as? String, "resume")
+        XCTAssertEqual(hookInput["model"] as? String, "gpt-resumed")
+        XCTAssertEqual(hookInput["permission_mode"] as? String, "bypassPermissions")
+        XCTAssertNil(hookInput["turn_id"])
+    }
+
+    func testTurnStartRunsForkSessionStartHooksAsStartupLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let managedDir = try TemporaryDirectory()
+        let hookScript = temp.url.appendingPathComponent("session-fork-hook.sh", isDirectory: false)
+        let hookLog = temp.url.appendingPathComponent("session-fork-hook-input.json", isDirectory: false)
+        try """
+        #!/bin/sh
+        cat >> "$1"
+        printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"fork context"}}'
+        """.write(to: hookScript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookScript.path)
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        [hooks]
+        managed_dir = "\(managedDir.url.path)"
+
+        [[hooks.SessionStart]]
+        matcher = "startup"
+
+        [[hooks.SessionStart.hooks]]
+        type = "command"
+        command = '''\(hookScript.path) \(hookLog.path)'''
+        statusMessage = "forking session"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-source","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let sourceThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let sourceThreadID = try XCTUnwrap(sourceThread["id"] as? String)
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(sourceThreadID)","model":"gpt-forked","approvalPolicy":"never"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        let forkedThread = try XCTUnwrap(forkResult["thread"] as? [String: Any])
+        let forkedThreadID = try XCTUnwrap(forkedThread["id"] as? String)
+        XCTAssertNotEqual(forkedThreadID, sourceThreadID)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(forkedThreadID)","input":[{"type":"text","text":"Hello forked"}]}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.map { $0["method"] as? String }, [
+            nil,
+            "hook/started",
+            "hook/completed",
+            "turn/started",
+            "thread/status/changed"
+        ])
+        let completedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
+        let entries = try XCTUnwrap((completedParams["run"] as? [String: Any])?["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.first?["text"] as? String, "fork context")
+
+        let hookInput = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try String(contentsOf: hookLog, encoding: .utf8).utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(hookInput["hook_event_name"] as? String, "SessionStart")
+        XCTAssertEqual(hookInput["session_id"] as? String, forkedThreadID)
+        XCTAssertEqual(hookInput["source"] as? String, "startup")
+        XCTAssertEqual(hookInput["model"] as? String, "gpt-forked")
+        XCTAssertEqual(hookInput["permission_mode"] as? String, "bypassPermissions")
+        XCTAssertNil(hookInput["turn_id"])
     }
 
     func testTurnStartCwdOverrideUpdatesLatestTurnContextLikeRust() throws {

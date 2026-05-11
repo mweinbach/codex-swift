@@ -22145,6 +22145,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        pendingSessionStartSources[threadID] = .resume
                         rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                         subscribeCurrentConnection(toThreadID: threadID)
                         if let notification = CodexAppServer.threadGoalResumeSnapshotNotification(
@@ -22167,6 +22168,7 @@ final class CodexAppServerMessageProcessor {
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
+                            pendingSessionStartSources[threadID] = .startup
                             rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
