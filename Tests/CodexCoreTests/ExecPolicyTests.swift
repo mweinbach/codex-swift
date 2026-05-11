@@ -2209,46 +2209,18 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
-    func testParserEvaluatesRustStarlarkListOrderingMethods() throws {
-        let policy = try parsePolicy("""
+    func testParserRejectsUnsupportedRustStarlarkListOrderingMethods() throws {
+        XCTAssertThrowsError(try parsePolicy("""
         TOOLS = ["pnpm", "git", "node"]
         TOOLS.sort()
-        TOOLS.reverse()
+        prefix_rule(["git", "status"], "allow")
+        """))
 
+        XCTAssertThrowsError(try parsePolicy("""
         PATHS = ["/opt/homebrew/bin/git", "/usr/bin/git"]
-        PATHS.sort()
         PATHS.reverse()
-
-        for tool in TOOLS:
-            prefix_rule([tool, "check"], "allow", justification = "ordered " + tool)
-
         host_executable("git", PATHS)
-        """)
-
-        XCTAssertEqual(policy.rules(for: "pnpm"), [
-            PrefixRule(
-                pattern: PrefixPattern(first: "pnpm", rest: [.single("check")]),
-                decision: .allow,
-                justification: "ordered pnpm"
-            )
-        ])
-        XCTAssertEqual(policy.rules(for: "node"), [
-            PrefixRule(
-                pattern: PrefixPattern(first: "node", rest: [.single("check")]),
-                decision: .allow,
-                justification: "ordered node"
-            )
-        ])
-        XCTAssertEqual(policy.rules(for: "git"), [
-            PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("check")]),
-                decision: .allow,
-                justification: "ordered git"
-            )
-        ])
-        XCTAssertEqual(policy.hostExecutables(), [
-            "git": ["/usr/bin/git", "/opt/homebrew/bin/git"]
-        ])
+        """))
     }
 
     func testParserEvaluatesRustStarlarkListIndexMethod() throws {
@@ -3416,7 +3388,7 @@ final class ExecPolicyTests: XCTestCase {
         if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
             prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
 
-        if "append" in LIST_ATTRS and "reverse" in LIST_ATTRS and hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "keys"):
+        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and not hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
             network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
 
         if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
@@ -3431,7 +3403,7 @@ final class ExecPolicyTests: XCTestCase {
             )
         ])
         XCTAssertEqual(policy.networkRules(), [
-            NetworkRule(host: "list-9.github.com", protocol: .https, decision: .allow)
+            NetworkRule(host: "list-7.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
     }

@@ -1668,12 +1668,12 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["append", "extend", "insert", "clear", "pop", "remove", "sort", "reverse"].contains(methodName) else {
-            return false
-        }
         guard isStarlarkIdentifier(receiverText),
               case var .array(items) = constants[receiverText]
         else {
+            return false
+        }
+        guard ["append", "extend", "insert", "clear", "pop", "remove"].contains(methodName) else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
 
@@ -1744,18 +1744,6 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(trimmed)
             }
             items.remove(at: removalIndex)
-        case "sort":
-            guard rawArguments.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            items = try items.sorted { lhs, rhs in
-                try compareStarlarkValues(lhs, rhs, expression: trimmed) < 0
-            }
-        case "reverse":
-            guard rawArguments.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
-            }
-            items.reverse()
         default:
             return false
         }
@@ -5844,7 +5832,7 @@ public final class PolicyParser {
                 "upper"
             ]
         case .array:
-            names = ["append", "clear", "extend", "index", "insert", "pop", "remove", "reverse", "sort"]
+            names = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
         case .table:
             names = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
         default:
